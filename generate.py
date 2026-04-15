@@ -138,41 +138,42 @@ def fetch_hn_comments(story: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# SOURCE: Reddit
+# SOURCE: Reddit (via RSS — JSON API blocks GitHub Actions IPs)
 # ---------------------------------------------------------------------------
-REDDIT_HOT = "https://www.reddit.com/r/{}/hot.json?limit={}&raw_json=1"
-
-
-def fetch_reddit_json(url: str) -> dict:
-    """Reddit needs a specific User-Agent or returns 429/403."""
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "SessioHealthBot/1.0 (by /u/sessiohealth)",
-        "Accept": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=15, context=SSL_CTX) as r:
-        return json.loads(r.read())
+REDDIT_RSS = "https://www.reddit.com/r/{}/.rss?limit=25"
 
 
 def fetch_reddit(source_cfg: dict) -> list[dict]:
     subs = source_cfg.get("subreddits", [])
-    per_sub = source_cfg.get("fetch_count", 30) // max(len(subs), 1)
     stories = []
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
     for sub in subs:
         try:
-            data = fetch_reddit_json(REDDIT_HOT.format(sub, per_sub))
-            for post in data.get("data", {}).get("children", []):
-                d = post.get("data", {})
-                if d.get("stickied") or d.get("is_self") and not d.get("selftext"):
-                    continue
+            req = urllib.request.Request(REDDIT_RSS.format(sub), headers={
+                "User-Agent": "SessioHealthBot/1.0 (github.com/igortomko/dailynews)",
+                "Accept": "application/rss+xml, application/atom+xml, application/xml",
+            })
+            raw = urllib.request.urlopen(req, timeout=15, context=SSL_CTX).read()
+            root = ET.fromstring(raw)
+            entries = root.findall(".//atom:entry", ns)
+            for entry in entries[:10]:
+                title = entry.findtext("atom:title", "", ns) or ""
+                link_el = entry.find("atom:link", ns)
+                link = link_el.get("href", "") if link_el is not None else ""
+                # Content often has the actual URL
+                content = entry.findtext("atom:content", "", ns) or ""
+                # Extract external link from content if present
+                ext_match = re.search(r'href="(https?://(?!www\.reddit\.com)[^"]+)"', content)
+                ext_url = ext_match.group(1) if ext_match else link
                 stories.append({
-                    "title": d.get("title", ""),
-                    "url": d.get("url", ""),
-                    "score": d.get("score", 0),
-                    "comments": d.get("num_comments", 0),
-                    "comments_url": f"https://reddit.com{d.get('permalink', '')}",
+                    "title": title,
+                    "url": ext_url,
+                    "score": 0,
+                    "comments": 0,
+                    "comments_url": link,
                     "source": f"r/{sub}",
-                    "_og_image": d.get("thumbnail", "") if d.get("thumbnail", "").startswith("http") else "",
                 })
+            print(f"    r/{sub}: {len(entries)} entries")
         except Exception as e:
             print(f"  Reddit r/{sub} error: {e}", file=sys.stderr)
     return stories

@@ -103,14 +103,14 @@
       "type": "rss",
       "enabled": true,
       "feeds": [
-        {"url": "https://www.apa.org/news/press/releases.rss", "label": "APA Press"},
-        {"url": "https://psychcentral.com/feed", "label": "Psych Central"},
-        {"url": "https://www.psychiatrictimes.com/rss", "label": "Psychiatric Times"},
-        {"url": "https://www.psychologytoday.com/intl/blog/feed", "label": "Psychology Today Blog"},
-        {"url": "https://feeds.feedburner.com/AIinMentalHealth", "label": "AI in Mental Health"},
+        {"url": "https://www.psychologicalscience.org/feed", "label": "APS"},
+        {"url": "https://www.nimh.nih.gov/site-info/index-rss.atom", "label": "NIMH"},
+        {"url": "https://www.frontiersin.org/journals/neuroscience/rss", "label": "Frontiers Neuro"},
+        {"url": "https://www.sciencedaily.com/rss/mind_brain/psychology.xml", "label": "ScienceDaily Psych"},
+        {"url": "https://www.sciencedaily.com/rss/mind_brain/neuroscience.xml", "label": "ScienceDaily Neuro"},
         {"url": "https://www.nature.com/tp.rss", "label": "Translational Psychiatry"},
-        {"url": "https://bmcpsychiatry.biomedcentral.com/articles/most-recent/rss.xml", "label": "BMC Psychiatry"},
-        {"url": "https://www.frontiersin.org/journals/psychology/rss", "label": "Frontiers Psychology"}
+        {"url": "https://www.frontiersin.org/journals/psychology/rss", "label": "Frontiers Psychology"},
+        {"url": "https://positivepsychologynews.com/feed", "label": "Positive Psych News"}
       ],
       "label": "RSS Feeds"
     }
