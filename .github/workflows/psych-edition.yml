@@ -1,0 +1,86 @@
+name: Psych Edition
+
+on:
+  schedule:
+    # 7:30 AM BRT = 10:30 UTC (30 min after Morning Edition)
+    - cron: '30 10 * * *'
+  workflow_dispatch: # manual trigger
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate today's psych magazine
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai' }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL || 'gemini-2.5-flash' }}
+          CONFIG_PATH: config-psych.json
+          OUT_DIR: magazines
+          FILE_PREFIX: psych-
+        run: python generate.py
+
+      - name: Build index page
+        run: python build_index.py
+
+      - name: Commit & push new issue
+        run: |
+          git config user.name "Psych Edition Bot"
+          git config user.email "bot@psych-edition.local"
+          git add magazines/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          DATE=$(date -u -d '-3 hours' +%Y-%m-%d)
+          git commit -m "Psych Edition — $DATE"
+          git push
+
+      - name: Deploy to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: magazines/
+
+  deploy:
+    needs: generate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  notify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram notification
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          DATE=$(date -u -d '-3 hours' +%Y-%m-%d)
+          PAGE_URL="https://igortomko.github.io/dailynews/psych-${DATE}.html"
+
+          MESSAGE="🧠 *Psych Edition — ${DATE}*%0A%0AНовости для психотерапевтов.%0A%0A[Открыть выпуск](${PAGE_URL})"
+
+          curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="${MESSAGE}" \
+            -d parse_mode="Markdown" \
+            -d disable_web_page_preview="false"

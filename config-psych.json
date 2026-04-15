@@ -1,0 +1,217 @@
+{
+  "magazine_title": "Psych Edition",
+  "language": "ru",
+  "timezone_offset": -3,
+  "stories_count": 10,
+
+  "reader_context": "Журнал для практикующих психотерапевтов и клинических психологов. Фокус: доказательные подходы (CBT, DBT, ACT, EMDR, схема-терапия, психодинамика, IPT, нарративная терапия, экспозиционная терапия), AI-инструменты для клинической документации и транскрипции сессий, практика онлайн-терапии, бизнес частной практики, супервизия, burnout терапевтов, психофармакология, нейронауки, психоделическая терапия, кросс-культурная работа, работа с зависимостями, хроническая боль, пары и группы. Язык — русский.",
+
+  "interests": [
+    "psychotherapy", "psychotherapist", "psychologist", "therapist", "counselor",
+    "therapy outcome", "therapy research", "treatment efficacy", "evidence-based therapy",
+
+    "CBT", "cognitive behavioral therapy", "behavioral activation",
+    "DBT", "dialectical behavior therapy",
+    "ACT", "acceptance commitment therapy",
+    "EMDR", "eye movement desensitization",
+    "psychodynamic", "psychoanalytic", "transference", "countertransference",
+    "schema therapy", "early maladaptive schema",
+    "narrative therapy", "externalizing", "re-authoring",
+    "IPT", "interpersonal therapy",
+    "motivational interviewing", "change talk", "OARS",
+    "exposure therapy", "graded exposure", "ERP",
+    "process-based therapy", "transdiagnostic",
+    "integrative therapy", "case conceptualization", "case formulation",
+    "group therapy", "couples therapy", "family therapy", "EFT",
+    "mindfulness-based", "MBSR", "MBCT", "meditation research",
+    "IFS", "internal family systems", "somatic", "polyvagal",
+
+    "AI therapy", "AI clinical", "AI documentation", "AI transcription",
+    "therapy app", "digital therapy", "telehealth", "teletherapy", "online therapy",
+    "clinical notes", "session notes", "therapy notes", "SOAP notes", "progress notes",
+    "transcription", "speech to text", "voice AI",
+    "practice management", "EHR", "electronic health record",
+    "VR therapy", "virtual reality therapy",
+
+    "mental health", "depression", "anxiety", "PTSD", "trauma",
+    "OCD", "bipolar", "ADHD", "autism", "personality disorder", "BPD",
+    "eating disorder", "anorexia", "bulimia",
+    "addiction", "substance abuse", "harm reduction", "alcohol",
+    "chronic pain", "pain psychology",
+    "insomnia", "CBT-I", "sleep therapy",
+    "shame", "perfectionism", "procrastination", "loneliness",
+    "attachment theory", "attachment style",
+    "therapeutic alliance", "rupture", "repair", "resistance",
+    "termination", "therapy ending",
+
+    "burnout", "compassion fatigue", "vicarious trauma", "therapist wellbeing",
+    "clinical supervision", "supervision model",
+    "therapy practice", "private practice", "therapy business",
+    "therapy marketing", "client acquisition",
+    "cross-cultural therapy", "multicultural", "expat therapy",
+    "child therapy", "adolescent therapy", "play therapy",
+
+    "neuroscience", "neuroplasticity", "brain imaging", "fMRI", "default mode network",
+    "psychopharmacology", "SSRI", "antidepressant", "medication",
+    "ketamine therapy", "psilocybin therapy", "psychedelic therapy", "MDMA therapy",
+    "microbiome mental health", "gut-brain", "interoception",
+
+    "APA", "WHO mental health", "DSM", "ICD",
+    "therapy ethics", "dual relationship", "confidentiality", "informed consent",
+    "microaggression", "cultural humility"
+  ],
+
+  "direct_relevance_keywords": [
+    "therapist", "therapy", "psycho", "clinical note", "session note",
+    "AI therapy", "AI clinical", "clinical documentation", "transcription therapy",
+    "CBT", "DBT", "EMDR", "ACT", "schema therapy",
+    "psilocybin", "psychedelic", "ketamine therapy",
+    "burnout therapist", "supervision", "telehealth", "teletherapy",
+    "practice management", "private practice",
+    "couples therapy", "group therapy",
+    "therapeutic alliance", "rupture repair"
+  ],
+
+  "sources": [
+    {
+      "type": "hackernews",
+      "enabled": true,
+      "fetch_count": 90,
+      "label": "Hacker News"
+    },
+    {
+      "type": "reddit",
+      "enabled": true,
+      "subreddits": [
+        "psychotherapy",
+        "therapists",
+        "TalkTherapy",
+        "Psychiatry",
+        "psychoanalysis",
+        "CBT",
+        "EMDR",
+        "AcademicPsychology",
+        "neuroscience",
+        "PsychedelicTherapy",
+        "mentalhealth",
+        "socialwork"
+      ],
+      "fetch_count": 80,
+      "label": "Reddit"
+    },
+    {
+      "type": "rss",
+      "enabled": true,
+      "feeds": [
+        {"url": "https://www.apa.org/news/press/releases.rss", "label": "APA Press"},
+        {"url": "https://psychcentral.com/feed", "label": "Psych Central"},
+        {"url": "https://www.psychiatrictimes.com/rss", "label": "Psychiatric Times"},
+        {"url": "https://www.psychologytoday.com/intl/blog/feed", "label": "Psychology Today Blog"},
+        {"url": "https://feeds.feedburner.com/AIinMentalHealth", "label": "AI in Mental Health"},
+        {"url": "https://www.nature.com/tp.rss", "label": "Translational Psychiatry"},
+        {"url": "https://bmcpsychiatry.biomedcentral.com/articles/most-recent/rss.xml", "label": "BMC Psychiatry"},
+        {"url": "https://www.frontiersin.org/journals/psychology/rss", "label": "Frontiers Psychology"}
+      ],
+      "label": "RSS Feeds"
+    }
+  ],
+
+  "theme_sets": {
+    "default": {
+      "cover_bg": "linear-gradient(170deg, #0A0A1A 0%, #1A1A2E 50%, #0D1B2A 100%)",
+      "cover_glow": "rgba(100, 180, 220, 0.08)",
+      "spreads": [
+        {"bg": "#F5F2EB", "text": "#1A1A1A", "accent": "#3A7CA5", "muted": "#6B7B8B", "layout": "hero"},
+        {"bg": "#0D1B2A", "text": "#F0F0F0", "accent": "#7EC8E3", "muted": "#6B8B9B", "layout": "midnight"},
+        {"bg": "#E8E0D8", "text": "#2A1E18", "accent": "#5A8FA8", "muted": "#7A8B8B", "layout": "rose-stamp"},
+        {"bg": "#0A1418", "text": "#7EC8E3", "accent": "#A0DEFF", "muted": "#2A5A6A", "layout": "terminal"},
+        {"bg": "#FAFAF5", "text": "#222222", "accent": "#3A6B8C", "muted": "#777788", "layout": "academic"},
+        {"bg": "#1A1A2E", "text": "#FFFFFF", "accent": "#7EC8E3", "muted": "#8899AA", "layout": "big-stat"},
+        {"bg": "#F0E8DD", "text": "#2A1E18", "accent": "#8BA888", "muted": "#7A8B7A", "layout": "warm-sand"},
+        {"bg": "#1A0A2E", "text": "#F0E6FF", "accent": "#B388FF", "muted": "#7B68AE", "layout": "deep-purple"},
+        {"bg": "#EDE8E0", "text": "#1A1A1A", "accent": "#4A7C6F", "muted": "#666666", "layout": "newsprint"},
+        {"bg": "#111111", "text": "#FFFFFF", "accent": "#7EC8E3", "muted": "#888888", "layout": "closer"}
+      ]
+    },
+    "sage": {
+      "cover_bg": "linear-gradient(170deg, #0A1A10 0%, #1A2E1E 50%, #0D2A18 100%)",
+      "cover_glow": "rgba(120, 180, 120, 0.08)",
+      "spreads": [
+        {"bg": "#F0F5EC", "text": "#1A2A1A", "accent": "#5A8B5A", "muted": "#6B8B6B", "layout": "hero"},
+        {"bg": "#0A1A10", "text": "#E0F0E0", "accent": "#7CB87C", "muted": "#4A7A4A", "layout": "midnight"},
+        {"bg": "#E0EBDA", "text": "#1A2A1A", "accent": "#5A8B5A", "muted": "#6B8B6B", "layout": "rose-stamp"},
+        {"bg": "#060F08", "text": "#7CB87C", "accent": "#A0D0A0", "muted": "#2A5B2A", "layout": "terminal"},
+        {"bg": "#F5F8F0", "text": "#1A2A1A", "accent": "#4A7A4A", "muted": "#6B8B6B", "layout": "academic"},
+        {"bg": "#0A1A10", "text": "#FFFFFF", "accent": "#7CB87C", "muted": "#4A7A4A", "layout": "big-stat"},
+        {"bg": "#E5EBDA", "text": "#1A2A1A", "accent": "#8BA888", "muted": "#6B8B6B", "layout": "warm-sand"},
+        {"bg": "#0A2E18", "text": "#D0F0D8", "accent": "#A0D0A0", "muted": "#4A7B5A", "layout": "deep-purple"},
+        {"bg": "#E8EDE0", "text": "#1A2A1A", "accent": "#4A7A4A", "muted": "#6B8B6B", "layout": "newsprint"},
+        {"bg": "#0A1A10", "text": "#FFFFFF", "accent": "#7CB87C", "muted": "#4A7A4A", "layout": "closer"}
+      ]
+    },
+    "lavender": {
+      "cover_bg": "linear-gradient(170deg, #1A0A20 0%, #2A1A35 50%, #180A28 100%)",
+      "cover_glow": "rgba(180, 140, 220, 0.1)",
+      "spreads": [
+        {"bg": "#F5F0FA", "text": "#2A1A35", "accent": "#8860B0", "muted": "#8A7A9A", "layout": "hero"},
+        {"bg": "#1A0A20", "text": "#E8D8F5", "accent": "#B48CCE", "muted": "#6A5A7A", "layout": "midnight"},
+        {"bg": "#E8D8F0", "text": "#2A1A35", "accent": "#8860B0", "muted": "#8A7A9A", "layout": "rose-stamp"},
+        {"bg": "#0F0818", "text": "#B48CCE", "accent": "#D0A8E8", "muted": "#4A3A5A", "layout": "terminal"},
+        {"bg": "#FAF5FF", "text": "#2A1A35", "accent": "#7050A0", "muted": "#8A7A9A", "layout": "academic"},
+        {"bg": "#1A0A20", "text": "#FFFFFF", "accent": "#B48CCE", "muted": "#6A5A7A", "layout": "big-stat"},
+        {"bg": "#E0D0EA", "text": "#2A1A35", "accent": "#9A70C0", "muted": "#8A7A9A", "layout": "warm-sand"},
+        {"bg": "#2A1A35", "text": "#E8D0F8", "accent": "#D0A8E8", "muted": "#6A5A7A", "layout": "deep-purple"},
+        {"bg": "#F0EAF5", "text": "#2A1A35", "accent": "#7050A0", "muted": "#8A7A9A", "layout": "newsprint"},
+        {"bg": "#0F0818", "text": "#FFFFFF", "accent": "#B48CCE", "muted": "#6A5A7A", "layout": "closer"}
+      ]
+    },
+    "warm-clay": {
+      "cover_bg": "linear-gradient(170deg, #1A1008 0%, #2E1E10 50%, #1A1408 100%)",
+      "cover_glow": "rgba(200, 140, 80, 0.1)",
+      "spreads": [
+        {"bg": "#F8F0E5", "text": "#2A1E10", "accent": "#C08050", "muted": "#8B7A60", "layout": "hero"},
+        {"bg": "#1A1008", "text": "#F0E4D0", "accent": "#D8A070", "muted": "#8B7A60", "layout": "midnight"},
+        {"bg": "#EAD8C4", "text": "#2A1E10", "accent": "#B07040", "muted": "#8B7A60", "layout": "rose-stamp"},
+        {"bg": "#0F0A04", "text": "#D8A070", "accent": "#F0C090", "muted": "#5A4020", "layout": "terminal"},
+        {"bg": "#FAF5EE", "text": "#2A1E10", "accent": "#A06030", "muted": "#8B7A60", "layout": "academic"},
+        {"bg": "#1A1008", "text": "#FFFFFF", "accent": "#D8A070", "muted": "#8B7A60", "layout": "big-stat"},
+        {"bg": "#E5D4C0", "text": "#2A1E10", "accent": "#C89060", "muted": "#8B7A60", "layout": "warm-sand"},
+        {"bg": "#2E1E10", "text": "#F0DCC4", "accent": "#F0C090", "muted": "#7B6040", "layout": "deep-purple"},
+        {"bg": "#F0E8DA", "text": "#2A1E10", "accent": "#A06030", "muted": "#8B7A60", "layout": "newsprint"},
+        {"bg": "#0F0A04", "text": "#FFFFFF", "accent": "#D8A070", "muted": "#8B7A60", "layout": "closer"}
+      ]
+    },
+    "midnight-blue": {
+      "cover_bg": "linear-gradient(170deg, #0A0A20 0%, #141430 50%, #0A1028 100%)",
+      "cover_glow": "rgba(80, 120, 200, 0.08)",
+      "spreads": [
+        {"bg": "#EEF0F8", "text": "#1A1A30", "accent": "#4060B0", "muted": "#6A7A9A", "layout": "hero"},
+        {"bg": "#0A0A20", "text": "#D8E0F5", "accent": "#6080D0", "muted": "#4A5A8A", "layout": "midnight"},
+        {"bg": "#D8E0F0", "text": "#1A1A30", "accent": "#4060B0", "muted": "#6A7A9A", "layout": "rose-stamp"},
+        {"bg": "#060810", "text": "#6080D0", "accent": "#80A0F0", "muted": "#2A3A6A", "layout": "terminal"},
+        {"bg": "#F5F5FA", "text": "#1A1A30", "accent": "#3050A0", "muted": "#6A7A9A", "layout": "academic"},
+        {"bg": "#0A0A20", "text": "#FFFFFF", "accent": "#6080D0", "muted": "#4A5A8A", "layout": "big-stat"},
+        {"bg": "#D0D8EA", "text": "#1A1A30", "accent": "#5070C0", "muted": "#6A7A9A", "layout": "warm-sand"},
+        {"bg": "#141430", "text": "#D0D8F5", "accent": "#80A0F0", "muted": "#4A5A8A", "layout": "deep-purple"},
+        {"bg": "#E8ECF5", "text": "#1A1A30", "accent": "#3050A0", "muted": "#6A7A9A", "layout": "newsprint"},
+        {"bg": "#060810", "text": "#FFFFFF", "accent": "#6080D0", "muted": "#4A5A8A", "layout": "closer"}
+      ]
+    },
+    "rose-quartz": {
+      "cover_bg": "linear-gradient(170deg, #1A0A10 0%, #2A1420 50%, #1A0E18 100%)",
+      "cover_glow": "rgba(200, 120, 160, 0.1)",
+      "spreads": [
+        {"bg": "#FAF0F4", "text": "#2A1420", "accent": "#C07090", "muted": "#9A7A8A", "layout": "hero"},
+        {"bg": "#1A0A10", "text": "#F5E0EA", "accent": "#E090B0", "muted": "#7A5A6A", "layout": "midnight"},
+        {"bg": "#F0D8E4", "text": "#2A1420", "accent": "#B06080", "muted": "#9A7A8A", "layout": "rose-stamp"},
+        {"bg": "#0F0608", "text": "#E090B0", "accent": "#F0B0D0", "muted": "#5A2A3A", "layout": "terminal"},
+        {"bg": "#FFF5F8", "text": "#2A1420", "accent": "#A05070", "muted": "#9A7A8A", "layout": "academic"},
+        {"bg": "#1A0A10", "text": "#FFFFFF", "accent": "#E090B0", "muted": "#7A5A6A", "layout": "big-stat"},
+        {"bg": "#EAD0DC", "text": "#2A1420", "accent": "#D08098", "muted": "#9A7A8A", "layout": "warm-sand"},
+        {"bg": "#2A1420", "text": "#F5D8E8", "accent": "#F0B0D0", "muted": "#7A5A6A", "layout": "deep-purple"},
+        {"bg": "#F5EAF0", "text": "#2A1420", "accent": "#A05070", "muted": "#9A7A9A", "layout": "newsprint"},
+        {"bg": "#0F0608", "text": "#FFFFFF", "accent": "#E090B0", "muted": "#7A5A6A", "layout": "closer"}
+      ]
+    }
+  }
+}

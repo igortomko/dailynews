@@ -26,6 +26,7 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as _f:
 TZ = timezone(timedelta(hours=CFG.get("timezone_offset", -3)))
 TODAY = datetime.now(TZ).strftime("%Y-%m-%d")
 OUT_DIR = os.environ.get("OUT_DIR", "magazines")
+FILE_PREFIX = os.environ.get("FILE_PREFIX", "")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gemini-2.5-flash")
@@ -879,7 +880,8 @@ def render_magazine(stories: list[dict], date: str, theme: dict) -> str:
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    print(f"[{TODAY}] Morning Edition")
+    title = CFG.get("magazine_title", "Morning Edition")
+    print(f"[{TODAY}] {title}")
 
     stories = fetch_all_sources()
     if not stories:
@@ -899,12 +901,12 @@ def main():
     html = render_magazine(top, TODAY, theme)
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    path = os.path.join(OUT_DIR, f"{TODAY}.html")
+    path = os.path.join(OUT_DIR, f"{FILE_PREFIX}{TODAY}.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  Saved to {path}")
 
-    latest = os.path.join(OUT_DIR, "latest.html")
+    latest = os.path.join(OUT_DIR, f"{FILE_PREFIX}latest.html")
     with open(latest, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  Saved to {latest}")
