@@ -250,12 +250,27 @@ def fetch_all_sources() -> list[dict]:
 # ---------------------------------------------------------------------------
 # Scoring & curation
 # ---------------------------------------------------------------------------
+def _build_keyword_patterns() -> list[tuple[str, re.Pattern]]:
+    """Pre-compile keyword patterns with word boundaries for short terms."""
+    patterns = []
+    for kw in CFG.get("interests", []):
+        kw_lower = kw.lower()
+        if len(kw) <= 5 and kw.isupper():
+            # Short acronyms: require word boundary to avoid "ACT" matching "practice"
+            patterns.append((kw, re.compile(r'\b' + re.escape(kw_lower) + r'\b', re.IGNORECASE)))
+        else:
+            patterns.append((kw, re.compile(re.escape(kw_lower), re.IGNORECASE)))
+    return patterns
+
+_KW_PATTERNS = _build_keyword_patterns()
+
+
 def score_story(story: dict) -> tuple[int, float]:
     """Returns (keyword_hits, total_score). Stories with 0 hits are irrelevant."""
-    text = f"{story.get('title', '')} {story.get('url', '')}".lower()
+    text = f"{story.get('title', '')} {story.get('url', '')}"
     kw_hits = 0
-    for kw in CFG.get("interests", []):
-        if kw.lower() in text:
+    for _kw, pat in _KW_PATTERNS:
+        if pat.search(text):
             kw_hits += 1
 
     score = kw_hits * 60 + story.get("score", 0) * 0.2 + min(story.get("comments", 0), 200) * 0.1
@@ -264,7 +279,14 @@ def score_story(story: dict) -> tuple[int, float]:
 
 def applies_to_me(title: str) -> bool:
     t = title.lower()
-    return any(k in t for k in CFG.get("direct_relevance_keywords", []))
+    for k in CFG.get("direct_relevance_keywords", []):
+        kl = k.lower()
+        if len(k) <= 5 and k.isupper():
+            if re.search(r'\b' + re.escape(kl) + r'\b', t, re.IGNORECASE):
+                return True
+        elif kl in t:
+            return True
+    return False
 
 
 def curate(stories: list[dict], n: int = 10) -> list[dict]:
