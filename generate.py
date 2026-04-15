@@ -279,13 +279,7 @@ def curate(stories: list[dict], n: int = 10) -> list[dict]:
     print(f"  Relevant stories (≥1 keyword): {len(relevant)} / {len(stories)}")
 
     if len(relevant) < n:
-        # Fallback: fill remaining slots with highest-scored generic stories
-        generic = sorted(
-            [s for s in stories if s["_kw_hits"] == 0],
-            key=lambda s: s["_score"],
-            reverse=True,
-        )
-        relevant.extend(generic[: n - len(relevant)])
+        print(f"  Only {len(relevant)} relevant stories (need {n}), skipping irrelevant filler")
 
     scored = sorted(relevant, key=lambda s: s["_score"], reverse=True)
     top = scored[:n]
