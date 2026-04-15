@@ -83,7 +83,6 @@
       "type": "reddit",
       "enabled": true,
       "subreddits": [
-        "psychotherapy",
         "therapists",
         "TalkTherapy",
         "Psychiatry",
@@ -93,8 +92,7 @@
         "PsychedelicTherapy",
         "mentalhealth",
         "socialwork",
-        "counseling",
-        "behavioralhealth"
+        "counseling"
       ],
       "fetch_count": 100,
       "label": "Reddit"
