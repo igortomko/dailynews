@@ -76,7 +76,7 @@ jobs:
           DATE=$(date -u -d '-3 hours' +%Y-%m-%d)
           PAGE_URL="https://igortomko.github.io/dailynews/psych-${DATE}.html"
 
-          MESSAGE="🧠 *Psych Edition — ${DATE}*%0A%0AНовости для психотерапевтов.%0A%0A[Открыть выпуск](${PAGE_URL})"
+          MESSAGE="🧠 *Sessio.health Magazine — ${DATE}*%0A%0AНовости для психотерапевтов.%0A%0A[Открыть выпуск](${PAGE_URL})"
 
           curl -s -X POST \
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \

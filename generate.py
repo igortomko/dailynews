@@ -140,7 +140,17 @@ def fetch_hn_comments(story: dict) -> str:
 # ---------------------------------------------------------------------------
 # SOURCE: Reddit
 # ---------------------------------------------------------------------------
-REDDIT_HOT = "https://www.reddit.com/r/{}/hot.json?limit={}"
+REDDIT_HOT = "https://www.reddit.com/r/{}/hot.json?limit={}&raw_json=1"
+
+
+def fetch_reddit_json(url: str) -> dict:
+    """Reddit needs a specific User-Agent or returns 429/403."""
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "SessioHealthBot/1.0 (by /u/sessiohealth)",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=15, context=SSL_CTX) as r:
+        return json.loads(r.read())
 
 
 def fetch_reddit(source_cfg: dict) -> list[dict]:
@@ -149,7 +159,7 @@ def fetch_reddit(source_cfg: dict) -> list[dict]:
     stories = []
     for sub in subs:
         try:
-            data = fetch_json(REDDIT_HOT.format(sub, per_sub))
+            data = fetch_reddit_json(REDDIT_HOT.format(sub, per_sub))
             for post in data.get("data", {}).get("children", []):
                 d = post.get("data", {})
                 if d.get("stickied") or d.get("is_self") and not d.get("selftext"):
@@ -239,16 +249,16 @@ def fetch_all_sources() -> list[dict]:
 # ---------------------------------------------------------------------------
 # Scoring & curation
 # ---------------------------------------------------------------------------
-def score_story(story: dict) -> float:
+def score_story(story: dict) -> tuple[int, float]:
+    """Returns (keyword_hits, total_score). Stories with 0 hits are irrelevant."""
     text = f"{story.get('title', '')} {story.get('url', '')}".lower()
-    score = story.get("score", 0) * 0.3
-
+    kw_hits = 0
     for kw in CFG.get("interests", []):
         if kw.lower() in text:
-            score += 40
+            kw_hits += 1
 
-    score += min(story.get("comments", 0), 200) * 0.15
-    return score
+    score = kw_hits * 60 + story.get("score", 0) * 0.2 + min(story.get("comments", 0), 200) * 0.1
+    return kw_hits, score
 
 
 def applies_to_me(title: str) -> bool:
@@ -257,7 +267,26 @@ def applies_to_me(title: str) -> bool:
 
 
 def curate(stories: list[dict], n: int = 10) -> list[dict]:
-    scored = sorted(stories, key=score_story, reverse=True)
+    # Score all stories
+    for s in stories:
+        kw_hits, total = score_story(s)
+        s["_kw_hits"] = kw_hits
+        s["_score"] = total
+
+    # Only keep stories with at least 1 keyword match
+    relevant = [s for s in stories if s["_kw_hits"] > 0]
+    print(f"  Relevant stories (≥1 keyword): {len(relevant)} / {len(stories)}")
+
+    if len(relevant) < n:
+        # Fallback: fill remaining slots with highest-scored generic stories
+        generic = sorted(
+            [s for s in stories if s["_kw_hits"] == 0],
+            key=lambda s: s["_score"],
+            reverse=True,
+        )
+        relevant.extend(generic[: n - len(relevant)])
+
+    scored = sorted(relevant, key=lambda s: s["_score"], reverse=True)
     top = scored[:n]
     for s in top:
         s["_applies"] = applies_to_me(s.get("title", ""))

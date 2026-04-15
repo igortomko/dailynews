@@ -1,5 +1,5 @@
 {
-  "magazine_title": "Psych Edition",
+  "magazine_title": "Sessio.health Magazine",
   "language": "ru",
   "timezone_offset": -3,
   "stories_count": 10,
@@ -87,16 +87,16 @@
         "therapists",
         "TalkTherapy",
         "Psychiatry",
-        "psychoanalysis",
-        "CBT",
-        "EMDR",
+        "psychology",
         "AcademicPsychology",
         "neuroscience",
         "PsychedelicTherapy",
         "mentalhealth",
-        "socialwork"
+        "socialwork",
+        "counseling",
+        "behavioralhealth"
       ],
-      "fetch_count": 80,
+      "fetch_count": 100,
       "label": "Reddit"
     },
     {
