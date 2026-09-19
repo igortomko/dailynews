@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { CrownIcon } from "lucide-react";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { cheapestFor, maxDigestOf, topicsWord, FEATURES, type FeatureId, type Plan } from "@/lib/plans";
+import {
+  maxDigestOf, topicsWord, FEATURES, PLAN_IDS, PLANS,
+  type FeatureId, type Plan, type PlanId,
+} from "@/lib/plans";
 
 /**
  * Корона и окно с предложением.
@@ -15,26 +18,88 @@ import { cheapestFor, maxDigestOf, topicsWord, FEATURES, type FeatureId, type Pl
  * Корона ставится там же, где стоит предел, и по тому же правилу
  * (`FEATURES[id].has`): корона над работающей кнопкой и работающая кнопка
  * без короны одинаково незаметны на глаз и одинаково врут.
- *
- * Окно объясняет, что даёт тариф, и ведёт в «Подписку», где стоит оплата.
- * Закрыть его можно, ничего не выбрав: пейволл, из которого нет выхода
- * кроме покупки, читается как ловушка, а не как предложение.
  */
+
+/**
+ * Ссылки на оплату приходят с сервера: их собирает `checkoutUrl` из
+ * переменных окружения, а клиент до них не достаёт. Контекст, а не пропсы:
+ * окно открывается из меню, из формы интересов и из доставки — четыре
+ * уровня прокидывания ради двух строк.
+ */
+const CheckoutContext = createContext<Partial<Record<PlanId, string>>>({});
+
+export function PaywallProvider({
+  checkout, children,
+}: {
+  checkout: Partial<Record<PlanId, string>>;
+  children: ReactNode;
+}) {
+  return <CheckoutContext.Provider value={checkout}>{children}</CheckoutContext.Provider>;
+}
+
+function Offer({
+  plan, feature, href, recommended,
+}: {
+  plan: Plan;
+  feature: FeatureId;
+  href?: string;
+  recommended: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-lg border p-3",
+        recommended ? "border-foreground/30 bg-foreground/[0.03]" : "border-border",
+      )}
+    >
+      <div className="flex min-w-0 flex-col">
+        <span className="text-sm font-medium">{plan.label}</span>
+        <span className="text-xs text-muted-foreground">
+          {plan.maxSources} источников · {plan.maxTopics} {topicsWord(plan.maxTopics)} · до{" "}
+          {maxDigestOf(plan)} новостей
+        </span>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <span className="text-base font-medium tabular-nums">
+          ${plan.price}
+          <span className="text-xs font-normal text-muted-foreground">/мес</span>
+        </span>
+        <Button
+          size="sm"
+          variant={recommended ? "default" : "outline"}
+          // Без настроенной оплаты ведём в «Подписку»: кнопка, ведущая
+          // в никуда, обещает больше, чем продукт умеет.
+          render={<a href={href ?? "/settings/subscription"} />}
+        >
+          Выбрать
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function PaywallDialog({
   feature, plan, open, onOpenChange,
 }: {
   feature: FeatureId;
-  /** Текущий тариф читателя — чтобы показать, с чего он переходит. */
+  /** Текущий тариф читателя — чтобы не предлагать то, что уже есть. */
   plan: Plan;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const needed = cheapestFor(feature);
+  const checkout = useContext(CheckoutContext);
   const { title, what } = FEATURES[feature];
+
+  // Все тарифы, где возможность есть и которые дороже текущего. Показывать
+  // один самый дешёвый значит терять место, где читатель мог выбрать Pro:
+  // он пришёл сюда за возможностью, а решает про тариф целиком.
+  const offers = PLAN_IDS.map((id) => PLANS[id]).filter(
+    (candidate) => FEATURES[feature].has(candidate) && candidate.price > plan.price,
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CrownIcon className="size-4 text-amber-500" aria-hidden />
@@ -43,31 +108,26 @@ export function PaywallDialog({
           <DialogDescription>{what}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-3 text-sm">
-          <div className="flex items-baseline justify-between gap-3 rounded-lg border p-3">
-            <div className="flex flex-col">
-              <span className="font-medium">{needed.label}</span>
-              <span className="text-xs text-muted-foreground">
-                {needed.maxSources} источников · {needed.maxTopics} {topicsWord(needed.maxTopics)} ·
-                до {maxDigestOf(needed)} новостей
-              </span>
-            </div>
-            <span className="shrink-0 text-lg font-medium tabular-nums">
-              ${needed.price}
-              <span className="text-xs font-normal text-muted-foreground">/мес</span>
-            </span>
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            Сейчас у тебя «{plan.label}». Полное сравнение тарифов — в разделе «Подписка».
-          </p>
+        <div className="flex flex-col gap-2">
+          {offers.map((offer, index) => (
+            <Offer
+              key={offer.id}
+              plan={offer}
+              feature={feature}
+              href={checkout[offer.id]}
+              // Выделен самый дешёвый из подходящих: он и есть ответ
+              // на вопрос «сколько это стоит».
+              recommended={index === 0}
+            />
+          ))}
         </div>
+
+        <p className="text-xs text-muted-foreground">
+          Сейчас у тебя «{plan.label}». Полное сравнение — в разделе «Подписка».
+        </p>
 
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" size="sm" />}>Не сейчас</DialogClose>
-          <Button size="sm" render={<a href="/settings/subscription" />}>
-            Перейти на «{needed.label}»
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -76,7 +136,7 @@ export function PaywallDialog({
 
 /**
  * Готовая пара «корона + окно» для случаев, когда закрытое место — это
- * отдельный значок рядом с названием, а не целая кнопка.
+ * значок рядом с подписью, а не целая кнопка.
  */
 export function PaywallCrown({
   feature, plan, className,
@@ -86,13 +146,12 @@ export function PaywallCrown({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const needed = cheapestFor(feature);
 
   return (
     <>
       <button
         type="button"
-        aria-label={`${FEATURES[feature].title} — на тарифе «${needed.label}»`}
+        aria-label={`${FEATURES[feature].title} — на платном тарифе`}
         onClick={(event) => {
           // Корона живёт внутри ссылок и кнопок: без остановки всплытия
           // клик по ней заодно уводит на страницу, которую она закрывает.
