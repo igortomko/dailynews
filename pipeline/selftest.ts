@@ -423,6 +423,31 @@ for (const section of GATED) {
   );
 }
 
+// Предел в форме обязан считать то же, что опрашивает прогон. Иначе после
+// понижения тарифа запрещённый вид занимает места живых источников:
+// прогон их не опрашивает, а добавить разрешённый уже нельзя.
+import { topicsWord } from "../src/lib/plans";
+
+const afterDowngrade = [
+  source(1, "x"), source(2, "x"), source(3, "x"),
+  source(4, "rss"), source(5, "rss"),
+];
+assert.equal(
+  sourcesForPlan(afterDowngrade, PLANS.free).length,
+  2,
+  "прогон на бесплатном опрашивает только разрешённые виды",
+);
+assert.equal(
+  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
+  2,
+  "и предел в форме обязан считать по тому же правилу",
+);
+
+assert.equal(topicsWord(1), "интерес", "единственное число");
+assert.equal(topicsWord(2), "интереса", "два-четыре");
+assert.equal(topicsWord(5), "интересов", "пять и больше");
+assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
+
 // Перечень в миграции и перечень в коде расходятся молча: база примет
 // значение, которого код не знает, и planOf молча отдаст бесплатный тариф.
 const planSql = readFileSync("db/migrations/0019_plan.sql", "utf8");
@@ -430,4 +455,4 @@ for (const id of PLAN_IDS) {
   assert.ok(planSql.includes(`'${id}'`), `тариф ${id} должен быть разрешён миграцией`);
 }
 
-console.log("Самопроверка пройдена: 107 утверждений");
+console.log("Самопроверка пройдена: 113 утверждений");

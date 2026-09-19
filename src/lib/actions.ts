@@ -12,7 +12,10 @@ import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import type { Profile, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
-import { allows, cheapestWith, maxDigestOf, planOf, PLAN_IDS, PLANS, type Gated } from "./plans";
+import {
+  allows, cheapestWith, maxDigestOf, planOf, topicsWord, PLAN_IDS, PLANS,
+  type Gated, type Plan,
+} from "./plans";
 import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "./voice";
 import { toSlug } from "./slug";
 
@@ -70,11 +73,15 @@ export type ChipInput = { slug: string; label: string; hint: string; count: numb
  * Закрытый раздел проверяется и в действии, а не только на странице:
  * действие вызывается по своему адресу, мимо страницы с заглушкой.
  */
-async function denyBySection(section: Gated): Promise<{ error: string } | null> {
+async function currentPlan(): Promise<Plan> {
   const [{ plan: planId }] = await sql<{ plan: string }[]>`
     select plan from dailynews.profile where id = 1
   `;
-  const plan = planOf(planId);
+  return planOf(planId);
+}
+
+async function denyBySection(section: Gated): Promise<{ error: string } | null> {
+  const plan = await currentPlan();
   if (allows(plan, section)) return null;
   return { error: `Раздел доступен на тарифе «${cheapestWith(section).label}»` };
 }
@@ -118,15 +125,12 @@ export async function saveInterests(formData: FormData) {
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
-  const [{ plan: planId }] = await sql<{ plan: string }[]>`
-    select plan from dailynews.profile where id = 1
-  `;
-  const plan = planOf(planId);
+  const plan = await currentPlan();
   if (chips.length > plan.maxTopics) {
     return {
-      error: `Тариф «${plan.label}» держит ${plan.maxTopics} ${
-        plan.maxTopics === 1 ? "интерес" : plan.maxTopics < 5 ? "интереса" : "интересов"
-      }, а выбрано ${chips.length}`,
+      error:
+        `Тариф «${plan.label}» держит ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
+        `а выбрано ${chips.length}`,
     };
   }
 
@@ -264,10 +268,7 @@ export async function setSourceActive(id: number, active: boolean) {
  * на бесплатном тарифе одним переключателем.
  */
 async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
-  const [{ plan: planId }] = await sql<{ plan: string }[]>`
-    select plan from dailynews.profile where id = 1
-  `;
-  const plan = planOf(planId);
+  const plan = await currentPlan();
 
   if (!plan.kinds.includes(kind)) {
     const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
@@ -278,8 +279,15 @@ async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | n
     };
   }
 
+  // Считаем только то, что прогон и правда опрашивает: sourcesForPlan
+  // отсекает запрещённый вид до предела по числу. Иначе после понижения
+  // тарифа три оставшихся включёнными ленты X занимали бы места живых
+  // источников — и добавить разрешённый было бы нельзя, пока не выключишь
+  // те, которые всё равно никто не опрашивает.
   const [{ n }] = await sql<{ n: number }[]>`
-    select count(*)::int as n from dailynews.sources where active
+    select count(*)::int as n
+      from dailynews.sources
+     where active and kind = any(${plan.kinds})
   `;
   if (n >= plan.maxSources) {
     return { error: `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — выключи лишний` };

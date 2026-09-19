@@ -94,6 +94,16 @@ export const maxDigestOf = (plan: Plan) => plan.digestSizes[plan.digestSizes.len
 
 export const allows = (plan: Plan, section: Gated) => plan.sections.includes(section);
 
+/** «2 интереса», «5 интересов» — форма нужна и в отказе, и в заглушке. */
+export function topicsWord(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 14) return "интересов";
+  const ones = n % 10;
+  if (ones === 1) return "интерес";
+  if (ones >= 2 && ones <= 4) return "интереса";
+  return "интересов";
+}
+
 /** Самый дешёвый тариф, который открывает раздел. Для подписи в заглушке. */
 export const cheapestWith = (section: Gated): Plan =>
   PLAN_IDS.map((id) => PLANS[id]).find((plan) => allows(plan, section)) ?? PLANS.pro;

@@ -1,7 +1,7 @@
 import { LockIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { cheapestWith, type Gated, type Plan } from "@/lib/plans";
+import { cheapestWith, topicsWord, type Gated, type Plan } from "@/lib/plans";
 
 /**
  * Заглушка вместо закрытого раздела.
@@ -37,8 +37,7 @@ export function PlanGate({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">
-          Сейчас у тебя «{plan.label}»: {plan.maxTopics}{" "}
-          {plan.maxTopics === 1 ? "интерес" : plan.maxTopics < 5 ? "интереса" : "интересов"},{" "}
+          Сейчас у тебя «{plan.label}»: {plan.maxTopics} {topicsWord(plan.maxTopics)},{" "}
           {plan.maxSources} источников, до {plan.digestSizes[plan.digestSizes.length - 1]} новостей
           в выпуске. На «{needed.label}» — {needed.maxTopics} и {needed.maxSources}, ${needed.price}{" "}
           в месяц.
