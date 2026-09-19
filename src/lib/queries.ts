@@ -62,6 +62,12 @@ export async function getFeed(): Promise<FeedItem[]> {
      -- Каст обязателен: у нетипизированного параметра Postgres выбирает
      -- date - date -> integer вместо date - integer -> date.
      where d.day > current_date - ${FEED_DAYS}::int
+       -- Скрытое рукой не возвращается: иначе палец вниз означал бы
+       -- «скрыть до перезагрузки страницы».
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.item_id = i.id and r.event = 'down'
+       )
      order by d.day desc, sc.total desc
   `;
 

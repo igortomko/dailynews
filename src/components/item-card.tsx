@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ThumbsUpIcon, ThumbsDownIcon, UndoIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
@@ -45,6 +46,7 @@ function siteOf(url: string): string | null {
 export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
+  const [vote, setVote] = useState<"up" | "down" | null>(null);
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
@@ -102,6 +104,22 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
   const horizon = item.axes?.horizon?.choice ? HORIZON[item.axes.horizon.choice] : undefined;
   const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
 
+  if (vote === "down") {
+    return (
+      <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
+        <span className="truncate">Скрыто: {title}</span>
+        <button
+          type="button"
+          onClick={() => setVote(null)}
+          className="flex shrink-0 cursor-pointer items-center gap-1 hover:text-foreground"
+        >
+          <UndoIcon className="size-3.5" />
+          Вернуть
+        </button>
+      </article>
+    );
+  }
+
   return (
     <article
       ref={article}
@@ -135,6 +153,35 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
             {kind ? <Badge variant="secondary">{kind}</Badge> : null}
             {horizon ? <Badge variant="secondary">{horizon}</Badge> : null}
             {clickbait ? <Badge variant="destructive">кликбейт</Badge> : null}
+
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                aria-label="Больше такого"
+                aria-pressed={vote === "up"}
+                onClick={() => {
+                  setVote(vote === "up" ? null : "up");
+                  if (vote !== "up") report({ item_id: item.id, event: "up" });
+                }}
+                className={cn(
+                  "flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                  vote === "up" ? "text-foreground" : "text-muted-foreground/50",
+                )}
+              >
+                <ThumbsUpIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Скрыть и меньше такого"
+                onClick={() => {
+                  setVote("down");
+                  report({ item_id: item.id, event: "down" });
+                }}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ThumbsDownIcon className="size-3.5" />
+              </button>
+            </div>
           </div>
 
           {/* Иерархию держит размер, а не жирность: у Google News заголовки

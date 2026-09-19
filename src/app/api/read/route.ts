@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { sql } from "@/lib/db";
 import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 
-const EVENTS = new Set(["seen", "opened", "dwell", "outbound", "dismissed"]);
+const EVENTS = new Set(["seen", "opened", "dwell", "outbound", "dismissed", "up", "down"]);
 
 /**
  * Единственный сигнал калибровки. Пишется из браузера, а не из Telegram:
