@@ -154,6 +154,9 @@ assert.equal(
   0,
   "обычный текст с цифрами трогать нельзя",
 );
+assert.equal(checkLexicon("агент работал 27 минут").length, 1, "единица словом должна ловиться");
+assert.equal(checkLexicon("петли на 5 и 10 км за 27 мин").length, 0, "сокращённые единицы трогать нельзя");
+assert.equal(checkLexicon("10-километровые петли").length, 1, "прилагательное от единицы должно ловиться");
 
 assert.ok(
   repeatsHeadline(
@@ -185,4 +188,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 38 утверждений");
+console.log("Самопроверка пройдена: 41 утверждение");
