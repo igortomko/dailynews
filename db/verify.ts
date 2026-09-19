@@ -172,6 +172,15 @@ async function main() {
     const clash = await readers.ensureReader(BIG_TELEGRAM_ID + 1, "vera");
     assert.equal(clash.kindle_sender, `vera-${clash.id}`, "занятый адрес получает номер читателя");
     await sql`delete from dailynews.readers where id = ${clash.id}`;
+    // Адрес отправителя выдаётся и тому, кто вписал читалку раньше, чем
+    // написал боту: иначе выпуск не уходит при сохранённом адресе и без
+    // единой ошибки — отказ, неотличимый от «Amazon пока не доставил».
+    await sql`update dailynews.readers set kindle_sender = null where owner`;
+    await readers.freezeKindleSender(owner.id, null);
+    const [withSender] = await sql<{ kindle_sender: string | null }[]>`
+      select kindle_sender from dailynews.readers where owner
+    `;
+    assert.ok(withSender.kindle_sender, "обратный адрес должен выдаваться и без username");
     console.log(`  читатели: владелец и @${again.username}, адреса Kindle не сталкиваются`);
 
     // --- вставка потока ------------------------------------------------------
