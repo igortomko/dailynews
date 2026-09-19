@@ -53,12 +53,16 @@ export function FeedTabs({
           {right}
         </div>
         <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
-          <TabsList className="mx-auto h-auto w-max justify-start gap-1 rounded-none border-0 bg-transparent p-0 px-4">
+          {/* Штатный вариант line: подчёркивание в два пикселя через ::after.
+              Самодельные рамки здесь не годились — состояние называется
+              data-active, и перекрытия по data-[state=active] не совпадали,
+              отчего под активной вкладкой оставалась плашка. */}
+          <TabsList variant="line" className="mx-auto h-auto w-max justify-start p-0 px-4">
             {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.slug}
                 value={tab.slug}
-                className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-2 pb-2.5 text-[0.8125rem] whitespace-nowrap text-muted-foreground shadow-none data-[selected]:border-foreground data-[selected]:font-medium data-[selected]:text-foreground data-[state=active]:border-foreground data-[state=active]:font-medium data-[state=active]:text-foreground"
+                className="px-2 pb-2.5 text-[0.8125rem] whitespace-nowrap text-muted-foreground data-active:font-medium data-active:text-foreground"
               >
                 {tab.label}
                 <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>
