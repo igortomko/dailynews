@@ -712,7 +712,17 @@ assert.equal(first("https://www.reddit.com/r/LocalLLaMA/")?.url, "LocalLLaMA", "
 assert.equal(first("https://news.ycombinator.com/")?.url, "topstories", "Hacker News по умолчанию");
 assert.equal(first("https://news.ycombinator.com/newest")?.url, "newstories", "другой листинг HN");
 assert.equal(first("https://x.com/karpathy")?.url, "from:karpathy", "аккаунт X превращается в запрос");
-assert.equal(first("from:karpathy OR from:sama")?.kind, "x", "текст без точки — это запрос X");
+assert.equal(first("from:karpathy OR from:sama")?.kind, "x", "текст с операторами — это запрос X");
+assert.equal(first("from:karpathy")?.kind, "x", "один оператор без пробелов — тоже запрос");
+// Собачка есть и у Telegram, и у X, но платный из двух только X: угадать
+// в его пользу значит взять деньги за догадку. Живой случай: @eugene_rid
+// уходил в платную выдачу X и возвращался оттуда отказом об оплате.
+assert.equal(first("@eugene_rid")?.kind, "telegram", "@имя — это канал Telegram, а не запрос X");
+assert.equal(first("@eugene_rid")?.url, "eugene_rid", "собачка в имя канала не входит");
+// Одинокое слово запросом не является, и слать его в платную выдачу,
+// чтобы получить оттуда пустоту, незачем.
+assert.ok(refusal("LocalLLaMA"), "слово без ссылки и операторов — отказ, а не платный запрос");
+assert.ok(refusal("@ab"), "слишком короткое имя каналом быть не может");
 assert.ok(refusal("https://x.com/home"), "служебный путь X не аккаунт");
 assert.equal(first("https://t.me/durov")?.url, "durov", "канал Telegram — имя, а не адрес");
 assert.equal(first("https://t.me/s/durov")?.url, "durov", "ссылка на веб-просмотр даёт тот же канал");
@@ -969,4 +979,4 @@ assert.equal(
   "подтверждение держит экран настроек даже без адреса",
 );
 
-console.log("Самопроверка пройдена: 243 утверждений");
+console.log("Самопроверка пройдена: 248 утверждений");
