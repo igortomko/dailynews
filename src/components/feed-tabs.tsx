@@ -28,15 +28,21 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
         : items.filter((item) => item.topic_slug === slug);
 
   return (
-    <Tabs defaultValue="all" className="flex flex-col gap-4">
-      <TabsList className="w-full justify-start overflow-x-auto">
-        {tabs.map((tab) => (
-          <TabsTrigger key={tab.slug} value={tab.slug}>
-            {tab.label}
-            <span className="ml-1.5 text-xs text-muted-foreground">{tab.count}</span>
-          </TabsTrigger>
-        ))}
-      </TabsList>
+    <Tabs defaultValue="all" className="flex flex-col gap-4 overflow-x-hidden">
+      {/* Полоса вкладок выходит за колонку текста и скроллится: семь тем
+          по-русски в 768 пикселей не помещаются, а перенос второй строкой
+          уводит последние темы на середину экрана. Края растушёваны, иначе
+          обрезанная вкладка читается как поломка, а не как «есть ещё». */}
+      <div className="-mx-4 [mask-image:linear-gradient(to_right,transparent,black_1rem,black_calc(100%-1rem),transparent)]">
+        <TabsList className="w-max justify-start px-4 text-[0.8125rem]">
+          {tabs.map((tab) => (
+            <TabsTrigger key={tab.slug} value={tab.slug} className="whitespace-nowrap">
+              {tab.label}
+              <span className="ml-1.5 text-muted-foreground">{tab.count}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
 
       {tabs.map((tab) => {
         const list = forTab(tab.slug);
