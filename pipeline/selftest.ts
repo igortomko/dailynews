@@ -38,6 +38,8 @@ import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
+import { parseFeed } from "./fetch";
+import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
 import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -1478,5 +1480,82 @@ assert.equal(parseUpdate(privateStart("а что ты умеешь?")).kind, "he
 assert.ok(!looksLikeSource("uranium OR SMR min_faves:100"), "запрос X в чате не читается как источник");
 assert.ok(!looksLikeSource("/help"), "команда не источник");
 assert.ok(!looksLikeSource(""), "пустая строка не источник");
+
+// --- YouTube: ролик приезжает с содержанием, а не одним заголовком ------------
+// Описание ролика лежит в media:group/media:description: своего <description>
+// в Atom у YouTube нет вовсе, и без этой ветки канал приезжал одними
+// заголовками — Jev оценивал по заголовку, дайджест писал по нему же,
+// а выглядело это как обычный материал.
+const ytFeed = parseFeed(readFileSync("pipeline/fixtures/youtube-feed.xml", "utf8"));
+assert.equal(ytFeed.title, "Veritasium", "название канала читается");
+assert.ok(ytFeed.items.length >= 2, "записи фида разобраны");
+assert.ok(
+  ytFeed.items.every((item) => item.excerpt.length > 0),
+  "у каждой записи есть описание: пустой excerpt — это ролик без содержания",
+);
+assert.ok(
+  ytFeed.items.some((item) => item.excerpt.includes("Smith Chart")),
+  "описание берётся из media:description, а не из заголовка",
+);
+assert.ok(
+  ytFeed.items.every((item) => videoIdOf(item.url) !== null),
+  "адрес каждой записи опознаётся как ролик",
+);
+
+// Номер ролика приходит тремя формами, и короткий метраж — отдельная:
+// /shorts/<id> приезжает тем же фидом, что и обычные ролики.
+assert.equal(videoIdOf("https://www.youtube.com/watch?v=O3a99HNskNk"), "O3a99HNskNk", "watch?v=");
+assert.equal(videoIdOf("https://youtu.be/O3a99HNskNk?t=42"), "O3a99HNskNk", "короткая ссылка");
+assert.equal(videoIdOf("https://www.youtube.com/shorts/O3a99HNskNk"), "O3a99HNskNk", "короткий метраж");
+assert.equal(videoIdOf("https://www.youtube.com/@veritasium"), null, "канал роликом не является");
+assert.equal(videoIdOf("https://example.com/watch?v=O3a99HNskNk"), null, "чужой хост — не YouTube");
+assert.equal(videoIdOf("не адрес"), null, "строка без адреса");
+
+// Разбор ответа timedtext идёт по сохранённому куску настоящего ответа:
+// это чужая разметка, и сломается она молча.
+const timed = parseTimedText(readFileSync("pipeline/fixtures/youtube-timedtext.xml", "utf8"));
+assert.ok(timed.startsWith("This is the scariest chart in electrical"), "реплики склеены по порядку");
+assert.ok(timed.length > 400, "расшифровка не обрывается на первой реплике");
+assert.ok(!timed.includes("&amp;"), "двойные сущности разворачиваются до текста");
+assert.ok(!timed.includes("<text"), "разметка не доезжает до текста");
+assert.equal(
+  parseTimedText('<transcript><text start="0" dur="1">[Music] hello [Applause] world</text></transcript>'),
+  "hello world",
+  "пометки звукорежиссёра выбрасываются: в конспекте от них ничего, а в счёте они есть",
+);
+assert.equal(parseTimedText("<transcript></transcript>"), "", "ролик без реплик — пустая расшифровка");
+
+// Дорожка выбирается по звуку ролика. У канала с переводами они лежат
+// в одном списке с оригиналом, и «первая человеческая» давала арабские
+// субтитры английской лекции: конспект выходил арабским, и ни одной
+// ошибки при этом не было.
+assert.equal(
+  pickTrack({
+    captionTracks: [{ baseUrl: "ar", languageCode: "ar" }, { baseUrl: "en", languageCode: "en" }],
+    audioTracks: [{ defaultCaptionTrackIndex: 1 }],
+    defaultAudioTrackIndex: 0,
+  })?.baseUrl,
+  "en",
+  "дорожка основного звука важнее первой в списке",
+);
+assert.equal(
+  pickTrack({ captionTracks: [{ baseUrl: "a", kind: "asr" }, { baseUrl: "b" }] })?.baseUrl,
+  "b",
+  "без пометки — написанная человеком важнее машинной",
+);
+assert.equal(
+  pickTrack({ captionTracks: [{ baseUrl: "a", kind: "asr" }], audioTracks: [{}] })?.baseUrl,
+  "a",
+  "машинная, когда другой нет",
+);
+assert.equal(pickTrack({}), null, "дорожек нет — читать нечего");
+
+// Пересказ для читалки идёт в items.body, который читает тот же разбор,
+// что и полный текст статьи из фида, — а он ждёт HTML. Markdown как есть
+// потерялся бы в defuddle, и отправка пошла бы качать страницу ролика,
+// где текста нет вовсе.
+const html = articleHtml("## Раздел\n\nАбзац с числом 42.");
+assert.ok(html.includes("<h2>") && html.includes("<p>"), "разметка пересказа превращается в HTML");
+assert.equal(articleHtml(""), "", "пустой пересказ остаётся пустым, а не <article></article>");
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

@@ -14,6 +14,7 @@ import { askResume, notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
 import { askFinished } from "../src/lib/telegram";
 import { enrichImages } from "./og";
+import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoIdOf } from "./youtube";
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
@@ -78,6 +79,78 @@ export async function collect(sources: Source[]): Promise<number[]> {
   }
 
   return inserted;
+}
+
+/**
+ * Расшифровать ролики среди новых материалов.
+ *
+ * Стоит рядом со сбором и до оценки нарочно: Jev оценивает материал
+ * по заголовку и тексту, и ролик без расшифровки приходил к нему одной
+ * строкой описания. Один вызов модели на ролик, `reader_id = null` —
+ * содержание ролика общее, как и оценка; второй читатель того же канала
+ * не платит за него заново.
+ *
+ * Отказ доступа прекращает весь шаг: «нас приняли за робота» — свойство
+ * адреса, а не ролика, и сорок одинаковых отказов подряд ничего не добавят.
+ */
+async function transcribeVideos(itemIds: number[]): Promise<{ done: number; cost: number }> {
+  if (itemIds.length === 0) return { done: 0, cost: 0 };
+
+  const rows = await sql<{ id: number; url: string; title: string; label: string }[]>`
+    select i.id, i.url, i.title, s.label
+      from dailynews.items i
+      join dailynews.sources s on s.id = i.source_id
+     where i.id = any(${itemIds}::bigint[]) and i.dup_of is null
+     order by i.id
+  `;
+  const videos = rows.flatMap((row) => {
+    const videoId = videoIdOf(row.url);
+    return videoId ? [{ ...row, videoId }] : [];
+  });
+  if (videos.length === 0) return { done: 0, cost: 0 };
+
+  const take = videos.slice(0, MAX_VIDEOS_PER_RUN);
+  if (videos.length > take.length) {
+    log(`   роликов ${videos.length}, расшифруем ${take.length} — остальные в следующий прогон`);
+  }
+
+  let done = 0;
+  let cost = 0;
+  let noCaptions = 0;
+  for (const video of take) {
+    try {
+      const transcript = await fetchTranscript(video.videoId);
+      if (!transcript) {
+        noCaptions++;
+        continue;
+      }
+      const writeup = await describeVideo(video.title, video.label, transcript.text, transcript.lang);
+      await sql`
+        update dailynews.items
+           set excerpt = ${writeup.summary}, body = ${articleHtml(writeup.article) || null}
+         where id = ${video.id}
+      `;
+      await recordCall({
+        readerId: null, stage: "video", model: writeup.model,
+        tokensIn: writeup.usage.input, tokensOut: writeup.usage.output,
+        costUsd: llmCost(writeup.usage),
+      });
+      cost += llmCost(writeup.usage);
+      done++;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Отказ доступа виден по статусу проигрывателя: он один на все ролики.
+      if (/LOGIN_REQUIRED|AGE_VERIFICATION|player HTTP 4/.test(message)) {
+        log(`   YouTube не отдаёт субтитры (${message}). Ролики остаются с описанием из фида.`);
+        if (!process.env.YT_PROXY) log("   YT_PROXY не задан — с датацентрового адреса субтитров не будет.");
+        break;
+      }
+      log(`   ролик «${video.title.slice(0, 40)}»: ${message}`);
+    }
+  }
+
+  if (noCaptions > 0) log(`   без субтитров: ${noCaptions}`);
+  return { done, cost };
 }
 
 /**
@@ -458,6 +531,11 @@ async function main() {
   log(`1. Сбор: ${sources.length} источников`);
   const collected = await collect(sources);
   log(`   новых материалов: ${collected.length}`);
+
+  const videos = await transcribeVideos(collected);
+  if (videos.done > 0) {
+    log(`   расшифровано роликов: ${videos.done} (${videos.cost.toFixed(3)} $)`);
+  }
 
   log("2. Дедуп");
   // Берём всё окно, а не результат вставки: если прогон упал между

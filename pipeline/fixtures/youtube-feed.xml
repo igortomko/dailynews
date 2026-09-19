@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=UCHnyfMqiRRG1u-2MsSQLbXA"/>
+ <id>yt:channel:HnyfMqiRRG1u-2MsSQLbXA</id>
+ <yt:channelId>HnyfMqiRRG1u-2MsSQLbXA</yt:channelId>
+ <title>Veritasium</title>
+ <link rel="alternate" href="https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA"/>
+ <author>
+  <name>Veritasium</name>
+  <uri>https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA</uri>
+ </author>
+ <published>2010-07-21T07:18:02+00:00</published>
+ <entry>
+  <id>yt:video:hPoJWjJ9Ao8</id>
+  <yt:videoId>hPoJWjJ9Ao8</yt:videoId>
+  <yt:channelId>UCHnyfMqiRRG1u-2MsSQLbXA</yt:channelId>
+  <title>Heating A Ball Just By Squeezing It</title>
+  <link rel="alternate" href="https://www.youtube.com/shorts/hPoJWjJ9Ao8"/>
+  <author>
+   <name>Veritasium</name>
+   <uri>https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA</uri>
+  </author>
+  <published>2026-09-18T13:00:00+00:00</published>
+  <updated>2026-09-19T15:43:08+00:00</updated>
+  <media:group>
+   <media:title>Heating A Ball Just By Squeezing It</media:title>
+   <media:content url="https://www.youtube.com/v/hPoJWjJ9Ao8?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:thumbnail url="https://i1.ytimg.com/vi/hPoJWjJ9Ao8/hqdefault.jpg" width="480" height="360"/>
+   <media:description>How Jupiter heats its moon, just be stretching and squeezing it.</media:description>
+   <media:community>
+    <media:starRating count="8937" average="5.00" min="1" max="5"/>
+    <media:statistics views="238263"/>
+   </media:community>
+  </media:group>
+ </entry><entry>
+  <id>yt:video:O3a99HNskNk</id>
+  <yt:videoId>O3a99HNskNk</yt:videoId>
+  <yt:channelId>UCHnyfMqiRRG1u-2MsSQLbXA</yt:channelId>
+  <title>The Scariest Chart In Engineering</title>
+  <link rel="alternate" href="https://www.youtube.com/shorts/O3a99HNskNk"/>
+  <author>
+   <name>Veritasium</name>
+   <uri>https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA</uri>
+  </author>
+  <published>2026-09-10T13:00:12+00:00</published>
+  <updated>2026-09-15T22:29:44+00:00</updated>
+  <media:group>
+   <media:title>The Scariest Chart In Engineering</media:title>
+   <media:content url="https://www.youtube.com/v/O3a99HNskNk?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:thumbnail url="https://i4.ytimg.com/vi/O3a99HNskNk/hqdefault.jpg" width="480" height="360"/>
+   <media:description>Why is the Smith Chart one of the scariest charts in electrical engineering?
+
+We printed the largest one in the world to explain how it works and why it's so terrifying (to engineers at least).</media:description>
+   <media:community>
+    <media:starRating count="38434" average="5.00" min="1" max="5"/>
+    <media:statistics views="1395727"/>
+   </media:community>
+  </media:group>
+ </entry></feed>

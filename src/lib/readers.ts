@@ -147,7 +147,7 @@ export async function spentToday(readerId: number): Promise<number> {
 
 export type CallRecord = {
   readerId: number | null;
-  stage: "score" | "digest" | "summary" | "translate" | "translation-quality";
+  stage: "score" | "digest" | "summary" | "translate" | "translation-quality" | "video";
   model: string;
   tokensIn: number;
   tokensOut?: number;
