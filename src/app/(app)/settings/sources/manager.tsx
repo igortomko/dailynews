@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { TrashIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { TrashIcon, PlusIcon } from "lucide-react";
 import { addSource, deleteSource, discoverSource, setSourceActive } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,19 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
 import type { Found } from "../../../../../pipeline/discover";
+
+/**
+ * Один ли это источник, если снять оформление адреса. Нужно ровно затем,
+ * чтобы не показывать «вставлено: @имя» рядом с «имя»: разрешённый адрес
+ * стоит видеть, когда он и правда другой — youtube.com/@канал превращается
+ * в feeds/videos.xml?channel_id=…, — а не когда отличается собачкой.
+ */
+function sameSource(input: string, resolved: string): boolean {
+  const bare = (value: string) =>
+    value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "")
+      .replace(/^@/, "").replace(/\/+$/, "");
+  return bare(input) === bare(resolved) || bare(input).endsWith(`/${bare(resolved)}`);
+}
 
 /**
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
@@ -87,68 +100,27 @@ export function SourcesManager({
 
       {editable ? (
       <Card>
-        <CardHeader>
-          <CardTitle>Добавить источник</CardTitle>
-          <CardDescription>
-            Вставь ссылку — тип, адрес фида и название определятся сами. Сохраняется только то,
-            что ответило хотя бы одной записью.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            <Field data-invalid={error ? true : undefined}>
-              <FieldLabel htmlFor="input">Ссылка</FieldLabel>
-              <div className="flex gap-2">
-                <Input
-                  id="input"
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      parse();
-                    }
-                  }}
-                  placeholder="https://www.youtube.com/@канал"
-                  aria-invalid={error ? true : undefined}
-                />
-                <Button type="button" onClick={parse} disabled={pending || !input.trim()}>
-                  <SearchIcon data-icon="inline-start" />
-                  Разобрать
-                </Button>
-              </div>
-              <FieldDescription>
-                {error ??
-                  "YouTube, GitHub, Substack, arXiv, Hacker News, аккаунт X, канал Telegram, " +
-                    "любой блог. Адрес отправителя — рассылка из выделенного ящика. " +
-                    "Без ссылки — поисковый запрос X."}
-              </FieldDescription>
-              {error ? null : (
-                <FieldDescription>
-                  Telegram — только публичные каналы с открытым веб-просмотром: закрытые
-                  не читает ни бот, ни веб-страница. Почта — только выделенный ящик
-                  из IMAP_URL, и только на чтение.
-                </FieldDescription>
-              )}
-            </Field>
-
-            {found && !plan.kinds.includes(found.kind) ? (
-              <Alert>
-                <AlertTitle>Тариф «{plan.label}» не берёт источники вида {found.kind}</AlertTitle>
-                <AlertDescription>
-                  Ссылка разобралась: {found.label}. Чтобы её добавить, нужен тариф,
-                  который этот вид опрашивает.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {found && plan.kinds.includes(found.kind) ? (
+        {found && plan.kinds.includes(found.kind) ? (
+          <>
+            {/*
+              Разобранный источник занимает место формы, а не приписывается
+              под ней: решение здесь одно — тот ли это источник, — и держать
+              рядом поле ввода значит предлагать два решения сразу.
+            */}
+            <CardHeader>
+              <CardTitle>{found.label}</CardTitle>
+              <CardDescription>
+                {found.via} · свежих {found.fresh} из {found.entries}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <form
                 action={(formData) =>
                   startTransition(async () => {
                     const result = await addSource(formData);
                     if (result?.error) {
                       setError(result.error);
+                      setFound(null);
                       return;
                     }
                     setError(null);
@@ -166,21 +138,22 @@ export function SourcesManager({
                   <div className="flex flex-col gap-1.5 rounded-md border p-3 text-sm">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline">{found.kind}</Badge>
-                      <span className="text-muted-foreground">{found.via}</span>
-                      <Badge variant="secondary">
-                        свежих {found.fresh} из {found.entries}
-                      </Badge>
+                      <span className="truncate text-muted-foreground">{found.url}</span>
                     </div>
-                    <span className="text-muted-foreground truncate">{found.url}</span>
-                    {found.input_url !== found.url ? (
-                      <span className="text-muted-foreground truncate text-xs">
+                    {/*
+                      Вставленная ссылка показывается, только если она и правда
+                      другая: youtube.com/@канал превращается в feeds/videos.xml,
+                      и это стоит увидеть, а «@имя» против «имя» — шум.
+                    */}
+                    {sameSource(found.input_url, found.url) ? null : (
+                      <span className="truncate text-xs text-muted-foreground">
                         вставлено: {found.input_url}
                       </span>
-                    ) : null}
+                    )}
                     <span className="truncate">{found.sample}</span>
                     {found.fresh === 0 ? (
                       <span className="text-muted-foreground text-xs">
-                        Записи есть, но ни одной за окно свежести — фид, похоже, заброшен.
+                        Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
                       </span>
                     ) : null}
                   </div>
@@ -188,18 +161,82 @@ export function SourcesManager({
                   <Field>
                     <FieldLabel htmlFor="label">Название</FieldLabel>
                     <Input id="label" name="label" defaultValue={found.label} key={found.url} />
-                    <FieldDescription>Взято из фида, можно переписать.</FieldDescription>
+                    <FieldDescription>Взято из источника, можно переписать.</FieldDescription>
                   </Field>
 
-                  <Button type="submit" disabled={pending} className="self-start">
-                    <PlusIcon data-icon="inline-start" />
-                    Добавить
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button type="submit" disabled={pending}>
+                      <PlusIcon data-icon="inline-start" />
+                      Добавить
+                    </Button>
+                    {/*
+                      Выход обязателен: без него разобранная не та ссылка
+                      запирает карточку до перезагрузки страницы.
+                    */}
+                    <Button type="button" variant="ghost" onClick={() => setFound(null)}>
+                      Другая ссылка
+                    </Button>
+                  </div>
                 </FieldGroup>
               </form>
-            ) : null}
-          </FieldGroup>
-        </CardContent>
+            </CardContent>
+          </>
+        ) : (
+          <>
+            <CardHeader>
+              <CardTitle>Добавить источник</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FieldGroup>
+                <Field data-invalid={error ? true : undefined}>
+                  <div className="flex gap-2">
+                    <Input
+                      id="input"
+                      // Подписи над полем нет, а имя у него быть обязано:
+                      // плейсхолдер исчезает при вводе и экранному диктору
+                      // именем не служит.
+                      aria-label="Ссылка на источник"
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          parse();
+                        }
+                      }}
+                      placeholder="https://www.youtube.com/@канал"
+                      aria-invalid={error ? true : undefined}
+                    />
+                    {/*
+                      Кнопка называет то, зачем сюда пришли. «Разобрать»
+                      описывало внутренний шаг и ничего не обещало: человек
+                      не знает, доведёт ли оно до добавления.
+                    */}
+                    <Button type="button" onClick={parse} disabled={pending || !input.trim()}>
+                      <PlusIcon data-icon="inline-start" />
+                      {pending ? "Проверяю…" : "Добавить"}
+                    </Button>
+                  </div>
+                  <FieldDescription>
+                    {error ??
+                      "Поддерживается: новостные сайты, блоги, YouTube, GitHub, " +
+                        "открытый Telegram-канал и т. д."}
+                  </FieldDescription>
+                </Field>
+
+                {found && !plan.kinds.includes(found.kind) ? (
+                  <Alert>
+                    <AlertTitle>Тариф «{plan.label}» не берёт источники вида {found.kind}</AlertTitle>
+                    <AlertDescription>
+                      Ссылка разобралась: {found.label}. Чтобы её добавить, нужен тариф,
+                      который этот вид опрашивает.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+              </FieldGroup>
+            </CardContent>
+          </>
+        )}
       </Card>
       ) : null}
 

@@ -79,7 +79,26 @@ export function planFor(input: string): Plan {
   if (!url) {
     const query = input.trim();
     if (!query) return { refuse: "Пустая строка" };
-    // Не ссылка и не похоже на адрес — остаётся поисковый запрос X.
+
+    // @имя — это канал Telegram. Собачка есть и у X, но платный из двух
+    // только X: угадать в его пользу значит взять деньги за догадку.
+    // Аккаунт X вставляют ссылкой x.com/имя или запросом from:имя.
+    const handle = query.match(/^@([A-Za-z][A-Za-z0-9_]{3,31})$/);
+    if (handle) {
+      return {
+        candidates: [{ kind: "telegram", url: handle[1], via: `публичный канал @${handle[1]}` }],
+        probePage: false,
+      };
+    }
+
+    // Запрос X — это пробелы или операторы вида from:, min_faves:.
+    // Одинокое слово запросом не является, и отправлять его в платную
+    // выдачу, чтобы получить оттуда пустоту, незачем.
+    if (!/\s/.test(query) && !/(^|\s)[a-z_]+:/i.test(query)) {
+      return {
+        refuse: "Не похоже ни на ссылку, ни на запрос. Канал Telegram — @имя, аккаунт X — x.com/имя",
+      };
+    }
     return { candidates: [{ kind: "x", url: query, via: "поисковый запрос X" }], probePage: false };
   }
 

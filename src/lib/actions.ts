@@ -11,7 +11,7 @@ import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import { freezeKindleSender, getReaderTopics, recordCall, spentToday } from "./readers";
+import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
@@ -228,33 +228,90 @@ export async function clearLlmKey() {
  * одобрение отправителя в настройках Amazon, а до тех пор выпуски молча
  * не доходят.
  */
-export async function saveKindle(formData: FormData) {
+/**
+ * Переключатель выпуска на экране «настроено». Только он, без адреса.
+ *
+ * Общее действие «сохранить всё, что на форме» здесь было бы ловушкой:
+ * адрес на этом экране — строка, а не поле, в FormData он не приходит,
+ * и прочитанный как пустой обнулил бы доставку при нажатии «Сохранить».
+ */
+export async function saveKindleDigest(formData: FormData) {
   const readerId = await currentReaderId();
-  const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
-  if (address && !/^[^@\s]+@kindle\.com$/.test(address)) {
-    return { error: "Адрес должен заканчиваться на @kindle.com" };
-  }
-
   // Флажок приходит только когда включён: выключенный checkbox формы
   // не отправляется вовсе, и `null` здесь значит «выключен», а не «не трогали».
   const digest = formData.get("kindle_digest") !== null;
 
   await sql`
     update dailynews.readers
-       set kindle_address = ${address || null},
-           kindle_digest = ${digest},
-           updated_at = now()
+       set kindle_digest = ${digest}, updated_at = now()
      where id = ${readerId}
   `;
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
 
-  // Обратный адрес выдаётся здесь же, если его ещё нет: иначе читатель,
-  // вписавший адрес читалки до первого /start, остался бы без отправителя,
-  // и выпуск не уходил бы — при сохранённом адресе и без единой ошибки.
-  if (address) {
-    const reader = await currentReader();
-    if (!reader.kindle_sender) await freezeKindleSender(reader.id, reader.username);
+/**
+ * Первый шаг настройки Kindle: куда слать. Отдельно от переключателя, потому
+ * что на этом шаге его на экране ещё нет: общее действие прочитало бы
+ * отсутствие флажка как «выключен» и погасило бы отправку тому,
+ * кто проходит настройку заново.
+ */
+export async function saveKindleAddress(formData: FormData) {
+  const readerId = await currentReaderId();
+  const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
+  if (!address) return { error: "Впиши адрес читалки" };
+  if (!/^[^@\s]+@kindle\.com$/.test(address)) {
+    return { error: "Адрес должен заканчиваться на @kindle.com" };
   }
 
+  await sql`
+    update dailynews.readers
+       set kindle_address = ${address}, updated_at = now()
+     where id = ${readerId}
+  `;
+  const reader = await getReader(readerId);
+  if (reader) await freezeKindleSender(readerId, reader.telegram_id);
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Второй шаг: читатель подтверждает, что добавил наш адрес в одобренные.
+ * Проверить это снаружи нечем — Amazon молчит и про успех, и про отказ,
+ * а неодобренное письмо просто исчезает. Поэтому шаг закрывает человек.
+ *
+ * С этого момента обратный адрес заморожен: в Amazon записан именно он.
+ */
+export async function approveKindleSender() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set kindle_approved = true, updated_at = now()
+     where id = ${readerId} and kindle_address is not null
+  `;
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Пройти настройку заново — с первого шага.
+ *
+ * Снимается и подтверждение, и адрес читалки. Оставить адрес значило бы,
+ * что шаг настройки считается по-разному на экране и в базе: клиент показал
+ * бы первый шаг, а перезагрузка страницы вернула бы на второй, потому что
+ * адрес на месте. Разъехавшиеся состояния здесь — это ровно та тихая ошибка,
+ * которую потом ищут глазами.
+ *
+ * Вместе с подтверждением размораживается обратный адрес: смысл сброса
+ * в том, чтобы одобрить в Amazon заново, а значит и отправителя можно менять.
+ */
+export async function resetKindleSetup() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set kindle_approved = false, kindle_address = null, updated_at = now()
+     where id = ${readerId}
+  `;
   revalidatePath("/settings/delivery");
   return { ok: true as const };
 }

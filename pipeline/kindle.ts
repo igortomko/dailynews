@@ -188,11 +188,21 @@ export async function sendArticleToKindle(options: {
  * и у неё есть проверка в npm test, который не ходит ни в базу, ни в сеть.
  */
 export function articleBlocker(
-  reader: { kindle_address: string | null; kindle_sender: string | null; daily_cap_usd: number },
+  reader: {
+    kindle_address: string | null;
+    kindle_sender: string | null;
+    kindle_approved: boolean;
+    daily_cap_usd: number;
+  },
   spent: number,
 ): string {
   if (!reader.kindle_address) return "адрес читалки не задан в настройках";
   if (!reader.kindle_sender) return "обратный адрес не выдан — напиши, это наша поломка";
+  // Пока отправитель не одобрен у Amazon, письмо уходит и исчезает: код
+  // E014, уведомление владельцу читалки, тишина в нашу сторону. Отказать
+  // здесь дешевле, чем потратить минуту и цент на книгу, которую Amazon
+  // выбросит, — и честнее, чем показать «отправлено».
+  if (!reader.kindle_approved) return "отправитель ещё не одобрен у Amazon — доделай настройку";
   // Потолок проверяется до вызовов, а не после: узнать о перерасходе
   // постфактум можно и из счёта.
   if (spent >= reader.daily_cap_usd) {

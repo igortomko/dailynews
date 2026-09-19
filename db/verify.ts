@@ -166,12 +166,19 @@ async function main() {
       again.kindle_sender, second.kindle_sender,
       "обратный адрес заморожен: его смена означает повторное одобрение в Amazon",
     );
-    assert.equal(second.kindle_sender, "vera", "локальная часть берётся из username");
-    // Занятое имя не должно доставаться второму: счётчик Amazon считается
-    // по отправителю, и общий адрес отвалился бы разом у обоих.
-    const clash = await readers.ensureReader(BIG_TELEGRAM_ID + 1, "vera");
-    assert.equal(clash.kindle_sender, `vera-${clash.id}`, "занятый адрес получает номер читателя");
-    await sql`delete from dailynews.readers where id = ${clash.id}`;
+    // Локальная часть — telegram_id, а не username: username читатель меняет
+    // в Telegram когда захочет, а адрес после одобрения в Amazon заморожен
+    // навсегда. Разъехавшись, они дали бы адрес, который ничего не значит.
+    assert.equal(
+      second.kindle_sender, String(BIG_TELEGRAM_ID),
+      "локальная часть берётся из telegram_id",
+    );
+    // Двум читателям один адрес достаться не может: telegram_id уникален,
+    // а счётчик Amazon считается по отправителю — общий адрес отвалился бы
+    // разом у обоих.
+    const other = await readers.ensureReader(BIG_TELEGRAM_ID + 1, "vera");
+    assert.notEqual(other.kindle_sender, second.kindle_sender, "у соседа свой адрес");
+    await sql`delete from dailynews.readers where id = ${other.id}`;
     // Адрес отправителя выдаётся и тому, кто вписал читалку раньше, чем
     // написал боту: иначе выпуск не уходит при сохранённом адресе и без
     // единой ошибки — отказ, неотличимый от «Amazon пока не доставил».
@@ -180,7 +187,18 @@ async function main() {
     const [withSender] = await sql<{ kindle_sender: string | null }[]>`
       select kindle_sender from dailynews.readers where owner
     `;
-    assert.ok(withSender.kindle_sender, "обратный адрес должен выдаваться и без username");
+    assert.ok(withSender.kindle_sender, "обратный адрес должен выдаваться и без Telegram");
+
+    // Одобренный адрес не меняется ничем: в Amazon записан именно он,
+    // и смена означала бы, что письма исчезают без единой ошибки.
+    await sql`update dailynews.readers set kindle_approved = true where owner`;
+    const frozen = withSender.kindle_sender;
+    await readers.freezeKindleSender(owner.id, BIG_TELEGRAM_ID + 500);
+    const [after] = await sql<{ kindle_sender: string | null }[]>`
+      select kindle_sender from dailynews.readers where owner
+    `;
+    assert.equal(after.kindle_sender, frozen, "после одобрения адрес заморожен");
+    await sql`update dailynews.readers set kindle_approved = false where owner`;
     console.log(`  читатели: владелец и @${again.username}, адреса Kindle не сталкиваются`);
 
     // --- вставка потока ------------------------------------------------------

@@ -15,6 +15,7 @@ import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget"
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
+import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
@@ -711,7 +712,17 @@ assert.equal(first("https://www.reddit.com/r/LocalLLaMA/")?.url, "LocalLLaMA", "
 assert.equal(first("https://news.ycombinator.com/")?.url, "topstories", "Hacker News по умолчанию");
 assert.equal(first("https://news.ycombinator.com/newest")?.url, "newstories", "другой листинг HN");
 assert.equal(first("https://x.com/karpathy")?.url, "from:karpathy", "аккаунт X превращается в запрос");
-assert.equal(first("from:karpathy OR from:sama")?.kind, "x", "текст без точки — это запрос X");
+assert.equal(first("from:karpathy OR from:sama")?.kind, "x", "текст с операторами — это запрос X");
+assert.equal(first("from:karpathy")?.kind, "x", "один оператор без пробелов — тоже запрос");
+// Собачка есть и у Telegram, и у X, но платный из двух только X: угадать
+// в его пользу значит взять деньги за догадку. Живой случай: @eugene_rid
+// уходил в платную выдачу X и возвращался оттуда отказом об оплате.
+assert.equal(first("@eugene_rid")?.kind, "telegram", "@имя — это канал Telegram, а не запрос X");
+assert.equal(first("@eugene_rid")?.url, "eugene_rid", "собачка в имя канала не входит");
+// Одинокое слово запросом не является, и слать его в платную выдачу,
+// чтобы получить оттуда пустоту, незачем.
+assert.ok(refusal("LocalLLaMA"), "слово без ссылки и операторов — отказ, а не платный запрос");
+assert.ok(refusal("@ab"), "слишком короткое имя каналом быть не может");
 assert.ok(refusal("https://x.com/home"), "служебный путь X не аккаунт");
 assert.equal(first("https://t.me/durov")?.url, "durov", "канал Telegram — имя, а не адрес");
 assert.equal(first("https://t.me/s/durov")?.url, "durov", "ссылка на веб-просмотр даёт тот же канал");
@@ -946,6 +957,38 @@ assert.equal(
   "ссылка на аккаунт X — тоже X",
 );
 
+// Порядок шагов настройки Kindle. Перепутанные условия дали бы экран,
+// на котором просят одобрить отправителя, которого ещё не выдали.
+assert.equal(
+  kindleSetupStep({ kindle_address: null, kindle_approved: false }), "address",
+  "адреса нет — первый шаг",
+);
+assert.equal(
+  kindleSetupStep({ kindle_address: "a@kindle.com", kindle_approved: false }), "sender",
+  "адрес есть, отправитель не одобрен — второй шаг",
+);
+assert.equal(
+  kindleSetupStep({ kindle_address: "a@kindle.com", kindle_approved: true }), "done",
+  "одобрено — обычные настройки",
+);
+// Подтверждение весомее адреса: стёртое поле в настройках выключает отправку,
+// но не отправляет читателя проходить настройку заново. Сброс снимает и то,
+// и другое — иначе экран и база считали бы шаг по-разному.
+assert.equal(
+  kindleSetupStep({ kindle_address: null, kindle_approved: true }), "done",
+  "подтверждение держит экран настроек даже без адреса",
+);
+
+// Имя обратного адреса. Telegram-id, а не username: username читатель меняет
+// когда захочет, а адрес после одобрения в Amazon заморожен навсегда.
+assert.equal(kindleSenderName(1, "52308619"), "52308619", "адрес собирается из Telegram-id");
+assert.equal(kindleSenderName(1, 52308619), "52308619", "число из драйвера и строка дают одно имя");
+assert.equal(kindleSenderName(7, null), "reader7", "без привязанного Telegram — номер читателя");
+// Пустая строка и мусор — не id. Приняв их за имя, мы бы выдали адрес
+// вида `@kindle.tomko.io`, и письма исчезали бы молча.
+assert.equal(kindleSenderName(7, ""), "reader7", "пустая строка именем не становится");
+assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем не становится");
+
 // --- отправка статьи на читалку ------------------------------------------------
 import { splitBlocks, chunkBlocks, chunkProblem, alreadyIn } from "./translate";
 import { samplePairs } from "./translation-quality";
@@ -981,9 +1024,10 @@ assert.ok(pairs.every((pair) => !pair.from.startsWith("##")), "заголовк�
 assert.equal(samplePairs([], []).length, 0, "пустая статья не ломает выборку");
 
 // Три причины отказа, и каждая выключает по своей.
-const base = { id: 1, daily_cap_usd: 1, kindle_address: "a@kindle.com", kindle_sender: "igor" } as Reader;
+const base = { id: 1, daily_cap_usd: 1, kindle_address: "a@kindle.com", kindle_sender: "52308619", kindle_approved: true } as Reader;
 assert.ok(articleBlocker({ ...base, kindle_address: null }, 0).includes("адрес читалки"), "без адреса читалки отправки нет");
 assert.ok(articleBlocker({ ...base, kindle_sender: null }, 0).includes("обратный адрес"), "без обратного адреса отправки нет");
+assert.ok(articleBlocker({ ...base, kindle_approved: false }, 0).includes("Amazon"), "неодобренный отправитель останавливает отправку: письмо исчезло бы молча");
 assert.ok(articleBlocker(base, 1).includes("потолок"), "исчерпанный потолок останавливает отправку");
 assert.equal(articleBlocker(base, 0.5), "", "настроенная отправка не блокируется");
 
@@ -1005,4 +1049,4 @@ assert.ok(!alreadyIn("Совет директоров одобрил сделк�
 assert.ok(!alreadyIn("", "русском"), "пустой текст не делит на ноль");
 assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержку swap на узлах.", "русском"), "латинские термины внутри русского не сбивают счёт");
 
-console.log("Самопроверка пройдена: 263 утверждения");
+console.log("Самопроверка пройдена: 271 утверждений");
