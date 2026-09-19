@@ -939,6 +939,19 @@ async function main() {
     assert.equal(await waiting(), 1, "ролик без отметки ждёт расшифровки");
     await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
     assert.equal(await waiting(), 0, "с отметкой за ним больше не ходят");
+    // Оценка живёт вместе с текстом: расшифровка его меняет, и решение
+    // о материале нельзя принимать по прежнему. Ролик, расшифрованный
+    // не в тот же прогон, что собран, оценён по описанию из фида —
+    // у торгового канала это реклама индикаторов, скор 8 из ста.
+    await sql`
+      insert into dailynews.scores (item_id, total, confidence, axes, model)
+      values (${video.id}, 8.4, 0.5, ${sql.json({ kind: "прежняя" })}, 'проба')
+    `;
+    await sql`delete from dailynews.scores where item_id = ${video.id}`;
+    const [left] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.scores where item_id = ${video.id}
+    `;
+    assert.equal(left.n, 0, "снятая оценка не мешает переоценить ролик по конспекту");
     console.log("  расшифровка: неудачная попытка повторяется, удачная — нет");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
