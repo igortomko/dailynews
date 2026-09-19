@@ -76,7 +76,9 @@ ${block}
       response_format: { type: "json_object" },
       messages: [{ role: "user", content: prompt }],
     }),
-    signal: AbortSignal.timeout(180_000),
+    // Рассуждающие модели тратят на дайджест по несколько минут; потолок
+    // должен быть выше их худшего случая, иначе прогон падает молча.
+    signal: AbortSignal.timeout(600_000),
   });
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
 
@@ -88,13 +90,26 @@ ${block}
 
   const parsed = JSON.parse(match[0]) as { intro?: string; items?: Written[] };
   const known = new Map(survivors.map((s) => [s.id, s]));
-  const written = (parsed.items ?? []).filter((item) => known.has(item.id));
 
-  // Модель могла пропустить материал — он всё равно должен попасть в дайджест.
-  for (const survivor of survivors) {
-    if (!written.some((w) => w.id === survivor.id)) {
-      written.push({ id: survivor.id, title_ru: survivor.title, summary: survivor.excerpt.slice(0, 300) });
-    }
+  // id приводим к числу: модель возвращает их то числом, то строкой, и при
+  // строгом сравнении не совпадает ни один — тогда весь дайджест молча
+  // заполняется подстановкой и выглядит как успешный.
+  const written = (parsed.items ?? [])
+    .map((item) => ({ ...item, id: Number(item.id) }))
+    .filter((item) => known.has(item.id));
+
+  const missing = survivors.filter((s) => !written.some((w) => w.id === s.id));
+  for (const survivor of missing) {
+    written.push({ id: survivor.id, title_ru: survivor.title, summary: survivor.excerpt.slice(0, 300) });
+  }
+
+  // Подстановка обязана быть заметной. Заголовок на языке источника вместо
+  // перевода выглядит как работающий дайджест, и разница видна только глазами.
+  if (missing.length > 0) {
+    console.error(
+      `  ! модель вернула ${written.length - missing.length} из ${survivors.length}; ` +
+      `${missing.length} осталось без перевода (finish_reason: ${payload.choices?.[0]?.finish_reason})`,
+    );
   }
 
   return { intro: parsed.intro ?? "", items: written };

@@ -1,13 +1,22 @@
 import Link from "next/link";
+import { MoreHorizontalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { logout } from "@/lib/actions";
 
 /**
- * Оболочка только для страниц за входом. На /login её быть не должно:
- * меню, которым нельзя пользоваться, — это обещание, которого интерфейс
- * не выполняет.
+ * Настройками пользуются раз в неделю, лентой — каждый день. Четыре ссылки
+ * поперёк экрана отнимали место у первого заголовка, поэтому они убраны
+ * под одну кнопку.
  */
-const NAV = [
+const MENU = [
   { href: "/", label: "Лента" },
   { href: "/interests", label: "Интересы" },
   { href: "/sources", label: "Источники" },
@@ -17,25 +26,36 @@ const NAV = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <header className="border-b">
-        <nav className="mx-auto flex max-w-3xl flex-wrap items-center gap-4 px-4 py-3">
-          {NAV.map((entry) => (
-            <Link
-              key={entry.href}
-              href={entry.href}
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {entry.label}
-            </Link>
-          ))}
-          <form action={logout} className="ml-auto">
-            <Button variant="ghost" size="sm" type="submit">
-              Выйти
-            </Button>
-          </form>
-        </nav>
+      <header className="mx-auto flex max-w-3xl items-center justify-end px-4 pt-3">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="ghost" size="icon-sm" aria-label="Меню" />
+            }
+          >
+            <MoreHorizontalIcon />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              {MENU.map((entry) => (
+                <DropdownMenuItem key={entry.href} render={<Link href={entry.href} />}>
+                  {entry.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                render={<button type="submit" form="logout-form" className="w-full" />}
+              >
+                Выйти
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <form action={logout} id="logout-form" className="hidden" />
       </header>
-      <main className="mx-auto max-w-3xl px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-3xl px-4 pb-10 pt-2">{children}</main>
     </>
   );
 }

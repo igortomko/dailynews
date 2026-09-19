@@ -16,6 +16,7 @@
     "env:set": "tsx scripts/env-set.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
     "@base-ui/react": "^1.8.0",
     "@typesafe-ai/sdk": "^0.6.0",
     "class-variance-authority": "^0.7.1",

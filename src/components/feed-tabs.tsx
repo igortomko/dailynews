@@ -41,7 +41,7 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
       {tabs.map((tab) => {
         const list = forTab(tab.slug);
         return (
-          <TabsContent key={tab.slug} value={tab.slug} className="flex flex-col gap-3">
+          <TabsContent key={tab.slug} value={tab.slug} className="flex flex-col">
             {list.length === 0 ? (
               <Empty>
                 <EmptyHeader>
@@ -52,7 +52,9 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
                 </EmptyHeader>
               </Empty>
             ) : (
-              list.map((item) => <ItemCard key={`${item.day}-${item.id}`} item={item} />)
+              list.map((item) => (
+                <ItemCard key={`${item.day}-${item.id}`} item={item} showTopic={tab.slug === "all"} />
+              ))
             )}
           </TabsContent>
         );

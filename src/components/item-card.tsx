@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ExternalLinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { relativeTime } from "@/lib/relative-time";
 import type { FeedItem } from "@/lib/queries";
 
-/** Ниже этого порога раскрытие карточки — промах, а не чтение. */
+/** Ниже этого порога материал попался на глаза, но прочитан не был. */
+const SEEN_MS = 1500;
 const DWELL_FLOOR_MS = 4000;
 
 function report(body: { item_id: number; event: string; dwell_ms?: number }, beacon = false) {
@@ -20,27 +18,51 @@ function report(body: { item_id: number; event: string; dwell_ms?: number }, bea
   void fetch("/api/read", { method: "POST", body: json, keepalive: true });
 }
 
-const KIND_LABEL: Record<string, string> = {
-  fact: "факт",
-  forecast: "прогноз",
+/**
+ * Только те пометки, что меняют решение читать: материал окажется тоньше,
+ * чем обещает заголовок. «Факт», «анонс» и «прогноз» читателю ничего не
+ * говорят заранее — их незачем выносить в строку.
+ */
+const WARNINGS: Record<string, string> = {
   opinion: "мнение",
-  announcement: "анонс",
   reprint: "перепечатка",
 };
 
-const HORIZON_LABEL: Record<string, string> = {
-  years: "годы",
-  months: "месяцы",
-  noise: "шум дня",
-};
-
-export function ItemCard({ item }: { item: FeedItem }) {
+export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boolean }) {
   const [open, setOpen] = useState(false);
+  const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
+  const reportedSeen = useRef(false);
 
-  // Время на карточке отправляется при закрытии и при уходе со страницы:
-  // без второго случая теряются ровно те материалы, которые дочитали
-  // и сразу закрыли вкладку.
+  // Знаменатель калибровки: что действительно дошло до экрана. Без него
+  // доля открытий считается от показанного в дайджесте, а это другое число.
+  useEffect(() => {
+    const node = article.current;
+    if (!node || reportedSeen.current) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !reportedSeen.current) {
+          timer = setTimeout(() => {
+            reportedSeen.current = true;
+            report({ item_id: item.id, event: "seen" });
+            observer.disconnect();
+          }, SEEN_MS);
+        } else if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+      },
+      { threshold: 0.6 },
+    );
+    observer.observe(node);
+    return () => {
+      if (timer) clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [item.id]);
+
   useEffect(() => {
     if (!open) return;
     openedAt.current = Date.now();
@@ -50,11 +72,8 @@ export function ItemCard({ item }: { item: FeedItem }) {
       if (openedAt.current === null) return;
       const dwell = Date.now() - openedAt.current;
       openedAt.current = null;
-      if (dwell >= DWELL_FLOOR_MS) {
-        report({ item_id: item.id, event: "dwell", dwell_ms: dwell }, true);
-      }
+      if (dwell >= DWELL_FLOOR_MS) report({ item_id: item.id, event: "dwell", dwell_ms: dwell }, true);
     };
-
     window.addEventListener("pagehide", flush);
     return () => {
       flush();
@@ -63,66 +82,69 @@ export function ItemCard({ item }: { item: FeedItem }) {
   }, [open, item.id]);
 
   const title = item.title_ru || item.title;
-  const clickbait = item.axes?.clickbait?.noul ?? 0;
+  const kind = item.axes?.kind?.choice;
+  const warning = kind ? WARNINGS[kind] : undefined;
+  const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
 
   return (
-    <Card className={cn("transition-colors", item.read_count > 0 && "opacity-60")}>
-      <CardHeader>
-        <CardTitle
-          className="cursor-pointer text-balance"
-          onClick={() => setOpen((value) => !value)}
+    <article
+      ref={article}
+      className={cn(
+        "border-b py-4 last:border-0",
+        item.read_count > 0 && "opacity-55",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground/70">{item.source_label}</span>
+        <span aria-hidden>·</span>
+        <span>{relativeTime(item.day)}</span>
+        {showTopic && item.topic_label ? (
+          <>
+            <span aria-hidden>·</span>
+            <span>{item.topic_label}</span>
+          </>
+        ) : null}
+        {warning ? (
+          <>
+            <span aria-hidden>·</span>
+            <span>{warning}</span>
+          </>
+        ) : null}
+        {clickbait ? (
+          <>
+            <span aria-hidden>·</span>
+            <span className="text-destructive">кликбейт</span>
+          </>
+        ) : null}
+      </div>
+
+      {/* Заголовок — единственный сильный элемент строки и сам же ссылка:
+          отдельная кнопка «Источник» повторялась бы под каждым материалом. */}
+      <h3 className="mt-1 text-pretty text-[1.0625rem] font-medium leading-snug">
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="decoration-muted-foreground/40 underline-offset-4 hover:underline"
+          onClick={() => report({ item_id: item.id, event: "outbound" })}
         >
           {title}
-        </CardTitle>
-        <CardDescription className="flex flex-wrap items-center gap-2">
-          <span>{item.source_label}</span>
-          <span aria-hidden>·</span>
-          <span>{item.day}</span>
-          {item.topic_label ? <Badge variant="secondary">{item.topic_label}</Badge> : null}
-          <Badge variant="outline">{KIND_LABEL[item.axes?.kind?.choice] ?? "—"}</Badge>
-          <Badge variant="outline">{HORIZON_LABEL[item.axes?.horizon?.choice] ?? "—"}</Badge>
-          {clickbait > 0.6 ? <Badge variant="destructive">кликбейт</Badge> : null}
-        </CardDescription>
-      </CardHeader>
+        </a>
+      </h3>
 
-      {open ? (
-        <CardContent className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">{item.summary || "Саммари не записано."}</p>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4">
-            <Axis name="скор" value={item.total.toFixed(0)} />
-            <Axis name="уверенность" value={`${Math.round(item.confidence * 100)}%`} />
-            <Axis name="новизна" value={`${item.axes?.novelty?.score?.toFixed(1) ?? "—"} / 2`} />
-            <Axis name="конкретика" value={`${item.axes?.specifics?.score?.toFixed(1) ?? "—"} / 2`} />
-          </dl>
-        </CardContent>
+      {item.summary ? (
+        <p
+          onClick={() => setOpen((value) => !value)}
+          className={cn(
+            "mt-1.5 max-w-[62ch] cursor-pointer text-pretty text-sm leading-relaxed text-muted-foreground",
+            !open && "line-clamp-2",
+          )}
+        >
+          {item.summary}
+        </p>
       ) : null}
 
-      <CardFooter>
-        <Button
-          variant="outline"
-          size="sm"
-          render={
-            <a
-              href={item.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={() => report({ item_id: item.id, event: "outbound" })}
-            />
-          }
-        >
-          <ExternalLinkIcon data-icon="inline-start" />
-          Источник
-        </Button>
-      </CardFooter>
-    </Card>
+    </article>
   );
 }
 
-function Axis({ name, value }: { name: string; value: string }) {
-  return (
-    <div className="flex flex-col">
-      <dt>{name}</dt>
-      <dd className="font-medium text-foreground">{value}</dd>
-    </div>
-  );
-}
