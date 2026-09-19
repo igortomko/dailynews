@@ -10,7 +10,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import { maxDigestOf, type Plan } from "@/lib/plans";
+import { maxDigestOf, PLANS, type Plan } from "@/lib/plans";
+import { usePaywall, PaywallCrown } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { topUpDigest, type ChipInput } from "@/lib/actions";
@@ -85,6 +86,15 @@ export function TopicChips({
   const [selected, setSelected] = useState<number | null>(null);
 
   const full = chips.length >= plan.maxTopics;
+  // Предел — не повод молчать: кнопка остаётся нажимаемой и объясняет,
+  // что за ней. Погашенная кнопка сообщает только «нельзя».
+  const topicsPaywall = usePaywall("topics", plan);
+  const digestPaywall = usePaywall("digest", plan);
+
+  /** Размеры показываем все, какие есть в продукте: за чужими — корона. */
+  const sizes = Array.from(
+    new Set([...plan.digestSizes, ...PLANS.pro.digestSizes, total]),
+  ).sort((a, b) => a - b);
 
   const add = (label: string) => {
     const trimmed = label.trim();
@@ -136,7 +146,12 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        <FieldLabel htmlFor="digest_size">Количество новостей</FieldLabel>
+        <FieldLabel htmlFor="digest_size" className="flex items-center gap-1.5">
+          Количество новостей
+          {maxDigestOf(plan) < maxDigestOf(PLANS.pro) ? (
+            <PaywallCrown feature="digest" plan={plan} />
+          ) : null}
+        </FieldLabel>
         {/* Пять значений видны сразу: за списком они прячутся по одному,
             и «сколько читать» превращается в два действия вместо одного.
             Шаг в двадцать — заметная разница, «37» такой разницы не несёт.
@@ -144,15 +159,36 @@ export function TopicChips({
             вариантом, пока его не сменили. */}
         <ToggleGroup
           value={[String(total)]}
-          onValueChange={(value: string[]) => value[0] && setTotal(Number(value[0]))}
+          onValueChange={(value: string[]) => {
+            const size = Number(value[0]);
+            if (!value[0]) return;
+            // Выбор размера не с этого тарифа не гасится молча: молчаливый
+            // отказ читается как поломка переключателя.
+            if (size > maxDigestOf(plan)) {
+              digestPaywall.open();
+              return;
+            }
+            setTotal(size);
+          }}
           variant="outline"
         >
-          {(plan.digestSizes.includes(total) ? plan.digestSizes : [total, ...plan.digestSizes]).map((size) => (
-            <ToggleGroupItem key={size} value={String(size)}>
-              {size}
-            </ToggleGroupItem>
-          ))}
+          {sizes.map((size) => {
+            const beyond = size > maxDigestOf(plan);
+            return (
+              // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
+              // читателю, почему она погасла, становится нечем.
+              <ToggleGroupItem
+                key={size}
+                value={String(size)}
+                aria-disabled={beyond || undefined}
+                className={beyond ? "text-muted-foreground/50" : undefined}
+              >
+                {size}
+              </ToggleGroupItem>
+            );
+          })}
         </ToggleGroup>
+        {digestPaywall.dialog}
         <input type="hidden" name="digest_size" value={total} />
       </Field>
 
@@ -331,11 +367,16 @@ export function TopicChips({
               }
             }}
           />
-          <Button type="button" variant="outline" disabled={full} onClick={() => add(draft)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => (full ? topicsPaywall.open() : add(draft))}
+          >
             <PlusIcon data-icon="inline-start" />
             Добавить
           </Button>
         </div>
+        {topicsPaywall.dialog}
         <FieldDescription>
           {full
             ? `Тариф «${plan.label}» держит ${plan.maxTopics} — освободи место, убрав интерес`

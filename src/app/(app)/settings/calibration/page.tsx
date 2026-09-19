@@ -1,7 +1,5 @@
 import { getCalibration, getSummaryQuality } from "@/lib/queries";
 import { currentReader } from "@/lib/session";
-import { allows, planOf } from "@/lib/plans";
-import { PlanGate } from "@/components/plan-gate";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -28,20 +26,6 @@ function Row({ label, shown, opened, rate }: { label: string; shown: number; ope
 
 export default async function CalibrationPage() {
   const reader = await currentReader();
-  const plan = planOf(reader.plan);
-  // Тяжёлые запросы статистики не должны выполняться ради страницы,
-  // которую тариф всё равно не покажет.
-  if (!allows(plan, "calibration")) {
-    return (
-      <PlanGate
-        section="calibration"
-        plan={plan}
-        title="Калибровка"
-        what="Растёт ли доля прочитанного с ростом скора и как меняется качество описаний по дням."
-      />
-    );
-  }
-
   const [{ byScore, byConfidence, byAxis, totals }, quality] = await Promise.all([
     getCalibration(reader.id),
     getSummaryQuality(reader.id),

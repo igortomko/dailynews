@@ -2,37 +2,117 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { TrashIcon, PlusIcon, ExternalLinkIcon } from "lucide-react";
-import { addSource, deleteSource, discoverSource, setSourceActive } from "@/lib/actions";
+import { TrashIcon, PlusIcon, ExternalLinkIcon, GlobeIcon } from "lucide-react";
+import { addSource, deleteSource, discoverSource, restoreSource } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogMedia,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
+import { PaywallCrown } from "@/components/paywall";
 import type { Found } from "../../../../../pipeline/discover";
+
+/**
+ * Значок источника: Telegram своим знаком, остальные — своим favicon.
+ *
+ * Favicon берётся с домена самого источника, а не через чужой сервис вроде
+ * s2/favicons: иначе список того, что читает человек, уезжает третьей стороне
+ * просто ради картинок.
+ */
+function faviconOf(kind: Source["kind"], url: string): string | null {
+  const host =
+    kind === "hackernews" ? "news.ycombinator.com"
+    : kind === "x" ? "x.com"
+    : kind === "reddit" ? "www.reddit.com"
+    : kind === "email" ? url.split("@")[1]
+    : (() => {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return null;
+        }
+      })();
+  return host ? `https://${host}/favicon.ico` : null;
+}
+
+function TelegramIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+    </svg>
+  );
+}
+
+/**
+ * Значок с запасным вариантом: favicon лежит по /favicon.ico далеко не
+ * у всех, и битая картинка вместо значка хуже отсутствия значка.
+ */
+function SourceIcon({
+  kind,
+  url,
+  className = "size-4",
+}: { kind: Source["kind"]; url: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (kind === "telegram") return <TelegramIcon className={className} />;
+  const src = faviconOf(kind, url);
+  if (!src || failed) return <GlobeIcon className={`${className} text-muted-foreground`} />;
+  return (
+    // Ленивая загрузка не украшение: значок — это запрос к чужому домену,
+    // по одному на строку. На семнадцати источниках это семнадцать
+    // рукопожатий TLS при каждом показе страницы, от 0,1 до 1,3 секунды
+    // каждое, и три из них впустую — favicon.ico есть не у всех. С lazy
+    // грузятся только те строки, до которых долистали.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      width={16}
+      height={16}
+      className={`${className} shrink-0 rounded-sm`}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/**
+ * Перечисление, которое не растёт бесконечно.
+ *
+ * Тревога со склеенными именами полусотни источников — это абзац, который
+ * не читают, то есть тревога, переставшая работать. Первые три называются,
+ * остальные считаются: список рядом всё равно сортирован сломанным вверх.
+ */
+function listOf(names: string[], limit = 3): string {
+  if (names.length <= limit) return names.join(", ");
+  return `${names.slice(0, limit).join(", ")} и ещё ${names.length - limit}`;
+}
+
+/**
+ * Со скольких дней тишины источник считается сломанным.
+ *
+ * Тревога, которая горит на нормальном состоянии, перестаёт что-либо значить:
+ * день-другой без свежего — обычное дело у любого блога, и красная метка
+ * на нём приучает её не замечать.
+ */
+const SILENT_DAYS = 5;
 
 /**
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
  * не значит: важно, сколько из них дошло до выпусков и не перепечатки ли это.
  */
 function yieldOf(source: SourceHealth): string {
+  // Прогон его ещё не видел: ни удачи, ни ошибки. Написать такому «за 30 дней
+  // ни одного материала» — той же фразой, что и заброшенному, — значит
+  // сообщить, что он бесполезен, через минуту после того, как его завели.
+  if (!source.last_ok_at && !source.last_error) return "добавлен — первый сбор в ближайшем прогоне";
   if (source.items === 0) return "за 30 дней — ни одного материала";
   const parts = [`за 30 дней: ${source.items} → ${source.in_digest} в выпусках`];
   if (source.mean_score !== null) parts.push(`скор ${source.mean_score}`);
@@ -40,85 +120,6 @@ function yieldOf(source: SourceHealth): string {
     parts.push(`дублей ${Math.round((source.duplicates / source.items) * 100)}%`);
   }
   return parts.join(" · ");
-}
-
-/**
- * Удаление источника с подтверждением.
- *
- * Спрашивать перед каждым действием — дурной тон, но у этого нет отката:
- * items ссылается на sources с on delete cascade, и вместе со строкой
- * каталога уходит весь собранный из неё поток, а за ним оценки и места
- * в прошлых выпусках. Вернуть это нечем — прогон соберёт заново только то,
- * что сейчас лежит в фиде. Корзина стоит в ряду с переключателем, который
- * стоит ровно ничего, и промах между ними на семь пикселей.
- *
- * Отдельным компонентом, а не через AlertDialogTrigger внутри строки:
- * у диалога своё состояние, и держать его открытым на весь список значит
- * помнить, какая строка его открыла.
- */
-function DeleteSource({ source }: { source: SourceHealth }) {
-  const [open, setOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
-
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Удалить ${source.label}`}
-              onClick={() => setOpen(true)}
-              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            />
-          }
-        >
-          <TrashIcon />
-        </TooltipTrigger>
-        <TooltipContent>Удалить источник и всё, что он дал</TooltipContent>
-      </Tooltip>
-
-      <AlertDialog open={open} onOpenChange={setOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogMedia className="bg-destructive/10 text-destructive">
-              <TrashIcon />
-            </AlertDialogMedia>
-            <AlertDialogTitle>Удалить «{source.label}»?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Вместе с источником уйдут все собранные из него материалы
-              {source.items > 0 ? ` — за тридцать дней их ${source.items} — ` : ", "}
-              их оценки и места в прошлых выпусках. Отката нет. Чтобы источник
-              просто перестал опрашиваться, хватит переключателя слева.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={pending}
-              onClick={() =>
-                startTransition(async () => {
-                  // Диалог закрывает сам AlertDialogAction. Отказ ловим:
-                  // молча закрывшийся диалог читается как «удалено»,
-                  // а строка остаётся на месте.
-                  try {
-                    await deleteSource(source.id);
-                    toast.success(`«${source.label}» удалён`);
-                  } catch {
-                    toast.error(`Не удалось удалить «${source.label}»`);
-                  }
-                })
-              }
-            >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
 }
 
 /**
@@ -137,10 +138,34 @@ export function SourcesManager({
   const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const dead = sources.filter((source) => source.active && source.last_error);
+  const dead = sources.filter((source) => source.last_error);
   const silent = sources.filter(
-    (source) => source.active && !source.last_error && (source.silent_days ?? 0) >= 1,
+    (source) => !source.last_error && (source.silent_days ?? 0) >= SILENT_DAYS,
   );
+
+  /**
+   * Убрать источник — с отменой прямо в сообщении.
+   *
+   * Отмена возможна только потому, что удаление перестало удалять: раньше
+   * каскад уносил материалы, чтения и записи в прошлых выпусках, и «отменить»
+   * означало бы вернуть пустую строку вместо источника с историей — отказ,
+   * выглядящий как успех.
+   */
+  const remove = (id: number) =>
+    startTransition(async () => {
+      const result = await deleteSource(id);
+      if (result?.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`${result.label} убран из ленты`, {
+        duration: 10_000,
+        action: {
+          label: "Отменить",
+          onClick: () => startTransition(() => void restoreSource(id)),
+        },
+      });
+    });
 
   const parse = () =>
     startTransition(async () => {
@@ -160,7 +185,12 @@ export function SourcesManager({
         <Alert variant="destructive">
           <AlertTitle>Источники с ошибкой: {dead.length}</AlertTitle>
           <AlertDescription>
-            {dead.map((source) => `${source.label}: ${source.last_error}`).join(" · ")}
+            {/*
+              Список обрезан: при полусотне сломанных источников склейка
+              через точку превращала тревогу в абзац, который не читают.
+              Остальные видны в списке — он теперь сортирован сломанным вверх.
+            */}
+            {listOf(dead.map((source) => `${source.label}: ${source.last_error}`))}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -169,9 +199,9 @@ export function SourcesManager({
         <Alert>
           <AlertTitle>Отвечают, но молчат: {silent.length}</AlertTitle>
           <AlertDescription>
-            {silent.map((source) => `${source.label} (${source.silent_days} дн.)`).join(", ")} —
-            источник жив и отвечает, но за окно свежести не дал ни одного материала.
-            День-другой — обычное дело; неделя означает, что фид заброшен.
+            {listOf(silent.map((source) => `${source.label} (${source.silent_days} дн.)`))} —
+            источник жив и отвечает, но {SILENT_DAYS} дней подряд не даёт ни одного свежего
+            материала. Обычно это значит, что его забросили.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -191,7 +221,9 @@ export function SourcesManager({
                 setError(null);
                 setFound(null);
                 setInput("");
-                toast.success("Источник добавлен");
+                toast.success(
+                  result?.created ? "Источник добавлен" : "Этот источник уже был в списке",
+                );
               })
             }
           >
@@ -202,22 +234,53 @@ export function SourcesManager({
               показывало то же самое второй раз.
             */}
             <CardHeader>
-              <Input
-                name="label"
-                defaultValue={found.label}
-                key={found.url}
-                aria-label="Название источника"
-                className="font-heading h-auto border-transparent bg-transparent px-2 py-1 text-lg leading-snug font-medium hover:border-input"
-              />
-              <CardDescription className="flex flex-wrap items-center gap-2 px-2">
-                <Badge variant="outline">{found.kind}</Badge>
-                <span>{found.via} · свежих {found.fresh} из {found.entries}</span>
-              </CardDescription>
+              {/*
+                Значок стоит перед названием, как в любом списке: он отвечает
+                на «что это», а название — на «что именно», и в обратном
+                порядке читать приходится дважды.
+              */}
+              <div className="flex items-start gap-2.5">
+                <SourceIcon kind={found.kind} url={found.url} className="mt-2.5 size-5" />
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <Input
+                    name="label"
+                    defaultValue={found.label}
+                    key={found.url}
+                    aria-label="Название источника"
+                    className="font-heading h-auto border-transparent bg-transparent px-2 py-1 text-2xl leading-tight font-semibold hover:border-input"
+                  />
+                  <CardDescription className="px-2">
+                    {found.via} · свежих {found.fresh} из {found.entries}
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent className="flex flex-col gap-5">
               <input type="hidden" name="kind" value={found.kind} />
               <input type="hidden" name="url" value={found.url} />
               <input type="hidden" name="input_url" value={found.input_url} />
+
+              {/*
+                Доказательство, что источник живой, стоит над кнопками:
+                на него смотрят, чтобы решить, жать ли «Добавить», а после
+                кнопок его уже никто не читает.
+              */}
+              <div className="flex flex-col gap-1">
+                <a
+                  href={found.sample_url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm"
+                >
+                  <ExternalLinkIcon className="size-3.5 shrink-0" />
+                  <span className="truncate">последняя запись: {found.sample}</span>
+                </a>
+                {found.fresh === 0 ? (
+                  <span className="text-muted-foreground text-xs">
+                    Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
+                  </span>
+                ) : null}
+              </div>
 
               <div className="flex items-center gap-2">
                 <Button type="submit" disabled={pending}>
@@ -232,27 +295,6 @@ export function SourcesManager({
                   Отмена
                 </Button>
               </div>
-
-              {/*
-                Доказательство, что источник живой, — одной строкой и внизу.
-                Само по себе «Это прекрасно))))» читается как непонятно что:
-                строка подписана и открывается, чтобы убедиться можно было
-                самому, а не поверить на слово.
-              */}
-              <a
-                href={found.sample_url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs"
-              >
-                <ExternalLinkIcon className="size-3.5 shrink-0" />
-                <span className="truncate">последняя запись: {found.sample}</span>
-              </a>
-              {found.fresh === 0 ? (
-                <span className="text-muted-foreground -mt-2 text-xs">
-                  Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
-                </span>
-              ) : null}
             </CardContent>
           </form>
         ) : (
@@ -300,10 +342,13 @@ export function SourcesManager({
 
                 {found && !plan.kinds.includes(found.kind) ? (
                   <Alert>
-                    <AlertTitle>Тариф «{plan.label}» не берёт источники вида {found.kind}</AlertTitle>
+                    <AlertTitle className="flex items-center gap-1.5">
+                      Посты из X — на платном тарифе
+                      <PaywallCrown feature="x" plan={plan} />
+                    </AlertTitle>
                     <AlertDescription>
-                      Ссылка разобралась: {found.label}. Чтобы её добавить, нужен тариф,
-                      который этот вид опрашивает.
+                      Ссылка разобралась: {found.label}. Твиты попадают в выпуск наравне
+                      с новостями сайтов, но X берёт за доступ отдельно.
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -318,44 +363,87 @@ export function SourcesManager({
         <CardHeader>
           <CardTitle>Источники</CardTitle>
           <CardDescription>
-            {sources.filter((s) => s.active).length} включено из {sources.length} · тариф
-            «{plan.label}» опрашивает {plan.maxSources}
+            {sources.length} опрашивается · предел тарифа «{plan.label}» — {plan.maxSources}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
+          {sources.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>Пока ни одного источника</EmptyTitle>
+                <EmptyDescription>
+                  {editable
+                    ? "Вставь ссылку выше — на блог, канал, репозиторий. Пока источников нет, выпуск собирать не из чего."
+                    : "Каталог наполняет владелец ленты."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : null}
           {sources.map((source, index) => (
             <div key={source.id}>
               {index > 0 ? <Separator className="my-1" /> : null}
               <div className="flex items-center gap-3 py-1.5">
-                <Switch
-                  checked={source.active}
-                  disabled={!editable}
-                  onCheckedChange={(checked: boolean) =>
-                    startTransition(async () => {
-                      const result = await setSourceActive(source.id, checked);
-                      if (result && "error" in result) toast.error(result.error);
-                    })
-                  }
-                />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{source.label}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {source.url}
-                    {source.input_url && source.input_url !== source.url
-                      ? ` ← ${source.input_url}`
-                      : ""}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
+                {/*
+                  Переключателя нет: источник либо есть, либо его удалили.
+                  Третье состояние требовало решения на каждой строке, а решений
+                  здесь ровно два — завести и убрать.
+                */}
+                {/*
+                  Значок держится строки названия, а не середины блока:
+                  под названием ещё две служебные строки, и по центру всего
+                  блока он оказывается напротив адреса, к которому отношения
+                  не имеет.
+                */}
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <SourceIcon kind={source.kind} url={source.url} className="mt-0.5 size-4" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{source.label}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {source.url}
+                      {source.input_url && source.input_url !== source.url
+                        ? ` ← ${source.input_url}`
+                        : ""}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
+                  </div>
                 </div>
-                <Badge variant="outline">{source.kind}</Badge>
                 {source.last_error ? (
                   <Badge variant="destructive" title={source.last_error}>ошибка</Badge>
-                ) : (source.silent_days ?? 0) >= 1 ? (
+                ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
                   <Badge variant="destructive">молчит {source.silent_days} дн.</Badge>
                 ) : source.last_count !== null ? (
-                  <Badge variant="secondary">{source.last_count}</Badge>
+                  // Одно число без подписи — загадка: рядом уже стоит отдача
+                  // за тридцать дней, и какое из двух что значит, неоткуда
+                  // узнать, кроме как навести.
+                  <Badge
+                    variant="secondary"
+                    title={`Столько свежих материалов дал последний прогон (${source.last_count})`}
+                  >
+                    {source.last_count}
+                  </Badge>
                 ) : null}
-                {editable ? <DeleteSource source={source} /> : null}
+                {editable ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Убрать ${source.label} из ленты`}
+                          onClick={() => startTransition(() => remove(source.id))}
+                          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        />
+                      }
+                    >
+                      <TrashIcon />
+                    </TooltipTrigger>
+                    {/* Своя подсказка вместо title: браузерная выезжает через
+                        секунду с лишним и рисуется системным шрифтом. */}
+                    <TooltipContent>
+                      Убрать из ленты — материалы и статистика останутся, действие можно отменить
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
               </div>
             </div>
           ))}

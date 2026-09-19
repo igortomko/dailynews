@@ -9,6 +9,8 @@ import {
   saveKindleAddress,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
+import { PaywallCrown, usePaywall } from "@/components/paywall";
+import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { kindleSetupStep, type KindleStep } from "@/lib/kindle-setup";
@@ -80,7 +82,10 @@ export function DeliveryForm({
   kindleDigest,
   kindleApproved,
   sender,
+  plan,
 }: {
+  /** Тариф читателя: на бесплатном раздел виден целиком, но не работает. */
+  plan: Plan;
   connected: boolean;
   username: string | null;
   kindleAddress: string;
@@ -89,6 +94,11 @@ export function DeliveryForm({
   sender: string | null;
 }) {
   const [pending, startTransition] = useTransition();
+  // Раздел показывается целиком и на закрытом тарифе: погашенные поля
+  // объясняют, что именно даёт переход, — заглушка вместо экрана не
+  // объясняет ничего. Нажатие на любое из них открывает окно.
+  const locked = !FEATURES.delivery.has(plan);
+  const kindlePaywall = usePaywall("delivery", plan);
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -139,7 +149,10 @@ export function DeliveryForm({
         {/* border-b карточка предусматривает сама: он добавляет шапке нижний
             отступ и проводит линию во всю ширину, а не по ширине текста. */}
         <CardHeader className="border-b">
-          <CardTitle>Kindle</CardTitle>
+          <CardTitle className="flex items-center gap-1.5">
+            Kindle
+            {locked ? <PaywallCrown feature="delivery" plan={plan} /> : null}
+          </CardTitle>
           <CardDescription>
             {step === "done"
               ? "Выпуск уходит книгой на читалку."
@@ -174,7 +187,7 @@ export function DeliveryForm({
                   />
                   <FieldDescription>{error ?? "Заканчивается на @kindle.com."}</FieldDescription>
                 </Field>
-                <Button type="submit" disabled={pending} className="self-start">
+                <Button type="submit" disabled={pending || locked} className="self-start">
                   Дальше
                 </Button>
               </FieldGroup>
@@ -207,12 +220,12 @@ export function DeliveryForm({
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  disabled={pending}
+                  disabled={pending || locked}
                   onClick={() => run(approveKindleSender(), "Настроено", () => setStep("done"))}
                 >
                   Добавил, готово
                 </Button>
-                <Button type="button" variant="ghost" disabled={pending}
+                <Button type="button" variant="ghost" disabled={pending || locked}
                         onClick={() => setStep("address")}>
                   Назад
                 </Button>
@@ -239,7 +252,7 @@ export function DeliveryForm({
                 </div>
 
                 <Field orientation="horizontal">
-                  <Switch id="kindle_digest" name="kindle_digest" defaultChecked={kindleDigest} />
+                  <Switch id="kindle_digest" name="kindle_digest" defaultChecked={kindleDigest} disabled={locked} />
                   <FieldLabel htmlFor="kindle_digest" className="font-normal">
                     Присылать выпуск на читалку
                     <FieldDescription>
@@ -249,7 +262,7 @@ export function DeliveryForm({
                 </Field>
 
                 <div className="flex flex-wrap items-center gap-4">
-                  <Button type="submit" disabled={pending}>Сохранить</Button>
+                  <Button type="submit" disabled={pending || locked}>Сохранить</Button>
                   {/* Красный по наведению: сброс стирает адрес читалки
                       и снимает отметку об одобрении отправителя — до конца
                       повторной настройки выпуски не доходят вовсе. */}
@@ -258,7 +271,7 @@ export function DeliveryForm({
                       render={
                         <button
                           type="button"
-                          disabled={pending}
+                          disabled={pending || locked}
                           onClick={() =>
                             run(resetKindleSetup(), "Настройка сброшена", () => setStep("address"))
                           }

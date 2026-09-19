@@ -17,17 +17,17 @@ import {
 } from "@/components/ui/select";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  LANGUAGES,
-  DEFAULT_COMPLEXITY,
-  DEFAULT_STYLE,
-  STYLES,
-  complexityAt,
-  styleOf,
-} from "@/lib/voice";
+import { LANGUAGES, DEFAULT_COMPLEXITY, DEFAULT_STYLE, STYLES, complexityAt, styleOf, SOURCE_LANGUAGE } from "@/lib/voice";
 import type { Reader } from "@/lib/types";
+import { FEATURES, type Plan } from "@/lib/plans";
+import { PaywallCrown, usePaywall } from "@/components/paywall";
 
-export function PersonalizationForm({ profile }: { profile: Reader }) {
+export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
+  // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
+  // источника. Селект показывается целиком и погашенным, а не прячется:
+  // по нему видно, что именно даёт переход.
+  const translates = FEATURES.language.has(plan);
+  const languagePaywall = usePaywall("language", plan);
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const form = useRef<HTMLFormElement>(null);
@@ -93,20 +93,27 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
                 сами: две трёхсотпиксельные колонки на телефоне нечитаемы. */}
             <div className="grid gap-5 @md/field-group:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor="language">Язык</FieldLabel>
+                <FieldLabel htmlFor="language" className="flex items-center gap-1.5">
+                  Язык
+                  {translates ? null : <PaywallCrown feature="language" plan={plan} />}
+                </FieldLabel>
                 {/* Список из пятнадцати, а колонка осталась свободным текстом:
                     миграция 0014 убрала список из трёх ровно потому, что его
                     выбирал автор формы. Сохранённое значение вне списка
                     остаётся выбранным, а не подменяется первым пунктом. */}
                 <Select
-                  value={language}
+                  value={translates ? language : SOURCE_LANGUAGE}
                   onValueChange={(value: string | null) => {
                     if (!value) return;
+                    if (!translates) {
+                      languagePaywall.open();
+                      return;
+                    }
                     setLanguage(value);
                     schedule();
                   }}
                 >
-                  <SelectTrigger id="language" className="w-full">
+                  <SelectTrigger id="language" className="w-full" disabled={!translates}>
                     <SelectValue>{language}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -117,8 +124,17 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <input type="hidden" name="language" value={language} />
-                <FieldDescription>Источники остаются на своих языках.</FieldDescription>
+                <input
+                  type="hidden"
+                  name="language"
+                  value={translates ? language : SOURCE_LANGUAGE}
+                />
+                {languagePaywall.dialog}
+                <FieldDescription>
+                  {translates
+                    ? "Источники остаются на своих языках."
+                    : "Выпуск приходит на языке источника — перевод есть на «Plus» и «Pro»."}
+                </FieldDescription>
               </Field>
 
               {/* Ползунок и селект меняются мимо события формы: базовый компонент

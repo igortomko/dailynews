@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { logout } from "@/lib/actions";
 import { currentReader } from "@/lib/session";
-import { planOf } from "@/lib/plans";
+
+import { checkoutUrl, effectivePlan } from "@/lib/lemon";
+import { PLAN_IDS } from "@/lib/plans";
+import { PaywallProvider } from "@/components/paywall";
 import { SettingsNav } from "./nav";
 
 /**
@@ -14,9 +17,15 @@ import { SettingsNav } from "./nav";
  * а не прятаться под кнопку, как в ленте.
  */
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
-  const plan = planOf((await currentReader()).plan);
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
+  // Ссылки на оплату собираются здесь: их строит сервер из переменных
+  // окружения, а окно с предложением живёт в клиентских компонентах.
+  const checkout = Object.fromEntries(
+    PLAN_IDS.map((id) => [id, checkoutUrl(id, reader.id)]).filter(([, url]) => url),
+  ) as Record<string, string>;
   return (
-    <>
+    <PaywallProvider checkout={checkout}>
       <PageHeader
         left={
           <div className="flex items-center gap-2">
@@ -52,7 +61,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
         }
       />
 
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-4 py-6 sm:flex-row sm:gap-10">
+      <div className="mx-auto flex max-w-page flex-col gap-8 px-4 py-6 sm:flex-row sm:gap-10">
       {/* Колонка разделов прибита к экрану: в источниках список на два
           экрана, и «Выйти» с ним уезжало вниз страницы — на месте оставалась
           пустая колонка. Высота считается от окна за вычетом шапки (3rem)
@@ -60,7 +69,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
           документа. На узком экране разделы идут лентой поверху, и прибивать
           там нечего. */}
       <aside className="flex shrink-0 flex-col gap-1 sm:sticky sm:top-[4.5rem] sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start">
-        <SettingsNav open={plan.sections} />
+        <SettingsNav plan={plan} />
         <form action={logout} className="mt-4 hidden sm:mt-auto sm:block">
           <Button variant="ghost" size="sm" type="submit" className="w-full justify-start px-2">
             Выйти
@@ -69,6 +78,6 @@ export default async function SettingsLayout({ children }: { children: React.Rea
       </aside>
         <div className="min-w-0 flex-1">{children}</div>
       </div>
-    </>
+    </PaywallProvider>
   );
 }

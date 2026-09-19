@@ -6,19 +6,22 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
-import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
+import { discover, planFor, type Found } from "../../pipeline/discover";
+import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
 import { llmCost, jevCost } from "../../pipeline/cost";
-import type { Reader, Source } from "./types";
+import type { Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, kindDenial, maxDigestOf, planOf, sourcesForPlan, topicsWord,
-  PLAN_IDS, PLANS, type Gated,
+  allows, cheapestWith, FEATURES, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
+  type Gated,
 } from "./plans";
+import { effectivePlan } from "./lemon";
+import { SOURCE_LANGUAGE } from "./voice";
 import { getSources } from "./queries";
 import { toSlug } from "./slug";
 
@@ -59,18 +62,20 @@ export type ChipInput = { slug: string; label: string; hint: string; count: numb
  * действие вызывается по своему адресу, мимо страницы с заглушкой.
  */
 async function denyBySection(section: Gated): Promise<{ error: string } | null> {
-  const plan = planOf((await currentReader()).plan);
+  const plan = effectivePlan(await currentReader());
   if (allows(plan, section)) return null;
   return { error: `Раздел доступен на тарифе «${cheapestWith(section).label}»` };
 }
 
 export async function savePersonalization(formData: FormData) {
   const readerId = await currentReaderId();
-  const denied = await denyBySection("personalization");
-  if (denied) return denied;
 
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
-  const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
+  const asked_language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
+  // Перевод — платная возможность, и проверяется она здесь, а не только
+  // в форме: поле отправляется по своему адресу мимо погашенного селекта.
+  const plan = effectivePlan(await currentReader());
+  const language = FEATURES.language.has(plan) ? asked_language : SOURCE_LANGUAGE;
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
   // Ползунок шлёт строку, а нечисло превратилось бы в NaN и уронило запрос
   // ограничением, а не подсказкой. Держим в границах колонки здесь же.
@@ -105,7 +110,7 @@ export async function saveInterests(formData: FormData) {
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
-  const plan = planOf((await currentReader()).plan);
+  const plan = effectivePlan(await currentReader());
   if (chips.length > plan.maxTopics) {
     return {
       error:
@@ -198,6 +203,9 @@ export async function saveInterests(formData: FormData) {
  * и прочитанный как пустой обнулил бы доставку при нажатии «Сохранить».
  */
 export async function saveKindleDigest(formData: FormData) {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   // Флажок приходит только когда включён: выключенный checkbox формы
   // не отправляется вовсе, и `null` здесь значит «выключен», а не «не трогали».
@@ -219,6 +227,9 @@ export async function saveKindleDigest(formData: FormData) {
  * кто проходит настройку заново.
  */
 export async function saveKindleAddress(formData: FormData) {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
   if (!address) return { error: "Впиши адрес читалки" };
@@ -245,6 +256,9 @@ export async function saveKindleAddress(formData: FormData) {
  * С этого момента обратный адрес заморожен: в Amazon записан именно он.
  */
 export async function approveKindleSender() {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   await sql`
     update dailynews.readers
@@ -268,6 +282,9 @@ export async function approveKindleSender() {
  * в том, чтобы одобрить в Amazon заново, а значит и отправителя можно менять.
  */
 export async function resetKindleSetup() {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   await sql`
     update dailynews.readers
@@ -311,7 +328,7 @@ export async function discoverSource(input: string): Promise<
   // это отказ по тарифу, а не догадка.
   const planned = planFor(raw);
   if (!("refuse" in planned)) {
-    const plan = planOf((await currentReader()).plan);
+    const plan = effectivePlan(await currentReader());
     const denials = planned.candidates.map((candidate) => kindDenial(plan, candidate.kind));
     if (denials.every(Boolean)) return { ok: false, error: denials[0]! };
   }
@@ -323,7 +340,6 @@ export async function discoverSource(input: string): Promise<
   }
 }
 
-const KNOWN_KINDS = new Set<Source["kind"]>(["rss", "hackernews", "reddit", "x", "telegram", "email"]);
 
 /**
  * Сохраняется только то, что действительно ответило, и перепроверяется ровно
@@ -337,74 +353,55 @@ export async function addSource(formData: FormData) {
   const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
   const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
-  if (!KNOWN_KINDS.has(kind)) return { error: "Сначала разбери ссылку" };
+  if (!isKnownKind(kind)) return { error: "Сначала разбери ссылку" };
   if (!url) return { error: "Пустой адрес" };
 
   // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
   // чем сходить за фидом и отказать после.
-  const denied = await denyBySource(kind);
-  if (denied) return denied;
+  const denied = await denyForKind(await currentReader(), kind);
+  if (denied) return { error: denied };
 
   const probe = await probeOne(kind, url, inputUrl);
   if (!probe.ok) return { error: `Источник больше не отвечает: ${probe.error}` };
 
   const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
-  await sql`
-    insert into dailynews.sources (kind, label, url, input_url)
-    values (${kind}, ${label}, ${url}, ${inputUrl})
-    on conflict (kind, url) do update
-      set active = true, label = excluded.label, input_url = excluded.input_url
-  `;
+  const { created } = await saveSource(kind, url, inputUrl, label);
   revalidatePath("/settings/sources");
-  return { ok: true as const, label };
+  return { ok: true as const, label, created };
 }
 
-export async function setSourceActive(id: number, active: boolean) {
-  await requireOwner();
-  if (active) {
-    const [source] = await sql<{ kind: Source["kind"] }[]>`
-      select kind from dailynews.sources where id = ${id}
-    `;
-    const denied = source ? await denyBySource(source.kind) : null;
-    if (denied) return denied;
-  }
-  await sql`update dailynews.sources set active = ${active} where id = ${id}`;
-  revalidatePath("/settings/sources");
-  return { ok: true as const };
-}
+
 
 /**
- * Общая проверка для добавления и включения: одна и та же пара пределов,
- * и разойтись им нельзя — включение в обход добавления открывало бы X
- * на бесплатном тарифе одним переключателем.
+ * Убрать источник из ленты.
+ *
+ * Не delete: items.source_id стоит на on delete cascade, и настоящее удаление
+ * уносило собранные материалы, их оценки, их чтения и их записи в уже
+ * отправленных выпусках. Отменить такое нечем — строку источника вернуть
+ * легко, сто семьдесят шесть чтений уже нет. Поэтому источник помечается
+ * и исчезает отовсюду, а история остаётся.
+ *
+ * active не трогается: отмена обязана вернуть то, что было, а не включить
+ * источник, который до удаления был выключен.
  */
-async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
-  const plan = planOf((await currentReader()).plan);
-
-  const byKind = kindDenial(plan, kind);
-  if (byKind) return { error: byKind };
-
-  // Считаем только то, что прогон и правда опрашивает: sourcesForPlan
-  // отсекает запрещённый вид до предела по числу. Иначе после понижения
-  // тарифа оставшиеся включёнными ленты X занимают места живых источников —
-  // добавить разрешённый нельзя, пока не выключишь те, которые всё равно
-  // никто не опрашивает.
-  const [{ n }] = await sql<{ n: number }[]>`
-    select count(*)::int as n
-      from dailynews.sources
-     where active and kind = any(${plan.kinds})
-  `;
-  if (n >= plan.maxSources) {
-    return { error: `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — выключи лишний` };
-  }
-  return null;
-}
-
 export async function deleteSource(id: number) {
   await requireOwner();
-  await sql`delete from dailynews.sources where id = ${id}`;
+  const [row] = await sql<{ label: string }[]>`
+    update dailynews.sources set deleted_at = now()
+     where id = ${id} and deleted_at is null
+     returning label
+  `;
   revalidatePath("/settings/sources");
+  return row ? { ok: true as const, label: row.label } : { error: "Источник уже убран" };
+}
+
+/** Отмена: возвращает источник ровно в то состояние, в каком он был. */
+export async function restoreSource(id: number) {
+  await requireOwner();
+  await sql`update dailynews.sources set deleted_at = null where id = ${id}`;
+  revalidatePath("/settings/sources");
+  return { ok: true as const };
 }
 
 /**
@@ -434,7 +431,7 @@ export async function topUpDigest() {
   // Через догрузку предел тарифа обходится так же, как через ползунок:
   // digest_size мог остаться от прежнего тарифа, а платит за письмо
   // описаний владелец ключа. Потолок один и тот же, что и в прогоне.
-  const target = Math.min(reader.digest_size, maxDigestOf(planOf(reader.plan)));
+  const target = Math.min(reader.digest_size, maxDigestOf(effectivePlan(reader)));
   const missing = target - digest.taken;
   if (missing <= 0) return { ok: true as const, added: 0 };
 
@@ -450,7 +447,7 @@ export async function topUpDigest() {
   const topics = await getReaderTopics(reader.id);
   // Источники тарифа те же, что в ночном прогоне: кнопка не должна
   // приносить то, чего прогон не принёс бы.
-  const mySources = sourcesForPlan(await getSources(), planOf(reader.plan)).map((s) => s.id);
+  const mySources = sourcesForPlan(await getSources(), effectivePlan(reader)).map((s) => s.id);
   const survivors = await selectSurvivors(
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );

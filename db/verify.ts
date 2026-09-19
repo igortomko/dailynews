@@ -99,14 +99,21 @@ async function main() {
     const topics = await readers.catalogTopics();
     const sources = await queries.getSources();
     assert.ok(topics.length >= 6, `тем ${topics.length}, ожидалось не меньше 6`);
-    assert.ok(sources.length >= 20, `источников ${sources.length}`);
-    // Reddit заведён, но выключен: заявку на Data API можно подать позже,
-    // а на источники ссылаются уже собранные материалы.
-    const reddit = sources.filter((s) => s.kind === "reddit");
-    assert.ok(reddit.length > 0, "источники Reddit должны остаться в каталоге");
-    assert.ok(reddit.every((s) => !s.active), "источники Reddit должны быть выключены");
-    assert.ok(sources.some((s) => s.kind === "x" && s.active), "источники X должны быть включены");
-    console.log(`  темы: ${topics.length}, источники: ${sources.length}`);
+    assert.ok(sources.length > 0, `источников ${sources.length}`);
+    // Состояний у источника два: заведён или убран. Reddit и X 0006 выключала,
+    // 0031 убрала — включить их было нечем, прогон их не читал, а в списке
+    // они выглядели живыми.
+    assert.ok(
+      !sources.some((s) => s.kind === "reddit" || s.kind === "x"),
+      "выключенные виды убраны из каталога, а не лежат в нём третьим состоянием",
+    );
+    assert.ok(sources.every((s) => s.active), "у неубранных active всегда true — колонка больше ничего не значит");
+    // Убраны, но не уничтожены: строки на месте, и материалы, которые на них
+    // ссылаются, тоже.
+    const [{ removed }] = await sql<{ removed: number }[]>`
+      select count(*)::int as removed from dailynews.sources where deleted_at is not null`;
+    assert.ok(removed > 0, "убранные источники остаются в базе вместе со своей историей");
+    console.log(`  темы: ${topics.length}, источники: ${sources.length}, убрано ${removed}`);
 
     // --- перенос читателя из profile ------------------------------------------
     // Строка profile была живой: контекст, веса, пройденный онбординг.
@@ -423,6 +430,110 @@ async function main() {
       "дни тишины считаются от отметки",
     );
     console.log(`  отдача источника: ${used.items} → ${used.in_digest} в дайджесте, скор ${used.mean_score}`);
+
+    // --- порядок списка: сломанное сверху --------------------------------------
+    // В каталоге из тридцати строк источник с ошибкой, лежащий в середине,
+    // не будет найден никогда. Порядок задаёт запрос, поэтому проверяется он.
+    const broken = health.find((row) => row.id !== source.id && row.id !== empty.id)!;
+    await sql`update dailynews.sources set last_error = 'HTTP 500' where id = ${broken.id}`;
+    // Отметку тишины снимаем: она стоит в порядке выше отдачи, и с ней
+    // сравнение по числу материалов ничего не проверяет.
+    await sql`update dailynews.sources set silent_since = null where id = ${empty.id}`;
+    const ordered = await queries.getSourceHealth();
+    assert.equal(ordered[0].id, broken.id, "источник с ошибкой должен быть первым");
+    assert.ok(
+      ordered.findIndex((row) => row.id === source.id) <
+        ordered.findIndex((row) => row.id === empty.id),
+      "при прочих равных давший материалы стоит выше пустого",
+    );
+    // Убранный исчезает из списка совсем — ни хвостом, ни как-либо ещё:
+    // третьего состояния у источника больше нет.
+    await sql`update dailynews.sources set deleted_at = now() where id = ${broken.id}`;
+    assert.ok(
+      !(await queries.getSourceHealth()).some((row) => row.id === broken.id),
+      "убранный источник не остаётся в списке даже с ошибкой",
+    );
+    await sql`update dailynews.sources set last_error = null, deleted_at = null where id = ${broken.id}`;
+
+    // --- «добавлен» против «уже был» -------------------------------------------
+    // xmax = 0 у настоящей вставки и ненулевой у обновления по конфликту.
+    // Приём неочевидный: сломается — интерфейс начнёт врать, что источник
+    // добавлен, когда он лишь обновлён.
+    const insertTwice = async () => {
+      const [row] = await sql<{ created: boolean }[]>`
+        insert into dailynews.sources (kind, label, url, input_url)
+        values ('rss', 'проба', 'https://twice.example.com/feed', null)
+        on conflict (kind, url) do update
+          set active = true, label = excluded.label, input_url = excluded.input_url
+        returning (xmax = 0) as created
+      `;
+      return row.created;
+    };
+    assert.equal(await insertTwice(), true, "первая вставка — новый источник");
+    assert.equal(await insertTwice(), false, "вторая — обновление, а не добавление");
+    await sql`delete from dailynews.sources where url = 'https://twice.example.com/feed'`;
+    console.log("  список: сломанное сверху, убранное не показывается, повтор отличим от вставки");
+
+    // --- убрать можно, потерять нельзя -----------------------------------------
+    // Удаление перестало удалять: каскад уносил материалы, чтения и записи
+    // в прошлых выпусках, и отменить это было нечем. Проверяется главное:
+    // источник исчезает отовсюду, история остаётся, отмена возвращает как было.
+    const before = (await queries.getSourceHealth()).length;
+    const itemsBefore = (await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n;
+    assert.ok(itemsBefore > 0, "у источника должны быть материалы, иначе проверка ничего не значит");
+
+    await sql`update dailynews.sources set deleted_at = now() where id = ${source.id}`;
+
+    assert.equal(
+      (await queries.getSourceHealth()).length, before - 1,
+      "убранный источник исчезает из списка",
+    );
+    assert.ok(
+      !(await queries.getSources()).some((row) => row.id === source.id),
+      "и из каталога, по которому считается предел тарифа",
+    );
+    const polled = await sql<{ id: number }[]>`
+      select id from dailynews.sources where active and deleted_at is null`;
+    assert.ok(!polled.some((row) => row.id === source.id), "и из того, что опрашивает прогон");
+    assert.equal(
+      (await sql<{ n: number }[]>`
+        select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n,
+      itemsBefore,
+      "материалы остаются на месте: в этом весь смысл мягкого удаления",
+    );
+
+    await sql`update dailynews.sources set deleted_at = null where id = ${source.id}`;
+    assert.equal(
+      (await queries.getSourceHealth()).length, before,
+      "отмена возвращает источник в список",
+    );
+    console.log(`  убрать и вернуть: ${itemsBefore} материалов пережили удаление`);
+
+    // --- ссылка, присланная боту -----------------------------------------------
+    // Вебхук открыт всему интернету, а разбор ссылки ходит в сеть: чужой
+    // не должен уметь даже заставить нас сходить по своему адресу. Обе
+    // проверки обязаны срабатывать до единого запроса наружу — здесь это
+    // и видно, потому что сети в проверке нет вовсе.
+    const { addByLink } = await import("../src/lib/sources");
+    const stranger = await readers.ensureReader(BIG_TELEGRAM_ID + 7, "chuzhoy");
+    const refused = await addByLink(stranger, "https://example.com/feed");
+    assert.equal(refused.ok, false, "посторонний не заводит источники");
+    assert.match(
+      (refused as { error: string }).error, /владелец/,
+      "и ему это сказано, а не сделано молча",
+    );
+
+    // Владелец берётся из базы, а не заводится по telegram_id: у перенесённой
+    // из profile строки его нет, и ensureReader завёл бы вместо неё нового
+    // читателя — тогда проверка меряла бы не то, что думает.
+    const [ownerNow] = await sql<(typeof owner)[]>`select * from dailynews.readers where owner`;
+    assert.ok(ownerNow?.owner, "владелец должен найтись");
+    const paid = await addByLink({ ...ownerNow, plan: "free" }, "from:karpathy OR from:sama");
+    assert.equal(paid.ok, false, "X на бесплатном тарифе не заводится");
+    assert.match((paid as { error: string }).error, /Pro/, "отказ называет тариф, который его открывает");
+    await sql`delete from dailynews.readers where id = ${stranger.id}`;
+    console.log("  ссылка боту: посторонний и платный вид отсекаются до запроса наружу");
 
     // --- новые виды источников ------------------------------------------------
     // Ограничение переименовано намеренно: переопределение под прежним именем

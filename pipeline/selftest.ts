@@ -5,20 +5,48 @@
  *
  *   npx tsx pipeline/selftest.ts
  */
-import assert from "node:assert/strict";
+import assertStrict from "node:assert/strict";
+
+/**
+ * Утверждения считает сам файл, а не человек в конце.
+ *
+ * Число в последней строке вели руками, и оно разъезжалось с правдой каждый
+ * раз, когда две ветки правили тесты одновременно: считать по тексту нельзя —
+ * часть утверждений живёт в циклах и срабатывает по нескольку раз. Разъехалось
+ * уже трижды, и каждый раз выглядело как «тестов стало меньше».
+ */
+let checks = 0;
+const count = <T>(fn: T): T =>
+  ((...args: unknown[]) => {
+    checks++;
+    return (fn as (...a: unknown[]) => unknown)(...args);
+  }) as T;
+const assert: typeof assertStrict = new Proxy(assertStrict, {
+  apply: (target, thisArg, args) => {
+    checks++;
+    return Reflect.apply(target as (...a: unknown[]) => unknown, thisArg, args);
+  },
+  get: (target, prop, receiver) => {
+    const value = Reflect.get(target, prop, receiver);
+    return typeof value === "function" ? count(value) : value;
+  },
+}) as typeof assertStrict;
+import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
-import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
-import { checkSecret, parseUpdate } from "../src/lib/telegram";
+import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
+import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -517,12 +545,101 @@ process.env.LLM_INPUT_PRICE = "дорого";
 assert.equal(llmCost(million), 0.3, "нечисло откатывается к цене по умолчанию");
 delete process.env.LLM_INPUT_PRICE;
 
+// --- адрес ведёт наружу, а не внутрь --------------------------------------------
+// Машина общая: рядом в той же сети чужие контейнеры. Без этой проверки форма
+// добавления источника — сканер внутренней сети, где «HTTP 401» на внутреннем
+// адресе уже ответ.
+import { isInternal } from "./fetch";
+for (const inside of [
+  "127.0.0.1", "10.1.2.3", "192.168.0.1", "172.16.0.1", "172.31.255.255",
+  "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "ff02::1",
+  // Служебные и зарезервированные: фида за ними нет ни одного.
+  "198.18.0.1", "240.0.0.1", "192.0.2.1", "255.255.255.255", "2001:db8::1",
+  // Тот же адрес в записи v4-внутри-v6, в обоих видах: проверка по префиксам
+  // ловила точечный и пропускала шестнадцатеричный.
+  "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:a9fe:a9fe", "::ffff:c0a8:1",
+  "не адрес вовсе",
+]) {
+  assert.ok(isInternal(inside), `${inside} — внутренний адрес`);
+}
+for (const outside of ["8.8.8.8", "1.1.1.1", "172.32.0.1", "192.169.0.1", "2606:4700::1111"]) {
+  assert.ok(!isInternal(outside), `${outside} — внешний адрес, его запрещать нельзя`);
+}
+
+// Перенаправление проверяется заново: публичный хост умеет увести внутрь.
+const outbound = readFileSync("pipeline/fetch.ts", "utf8") + readFileSync("pipeline/og.ts", "utf8");
+assert.ok(
+  /redirect: "manual"/.test(outbound),
+  "запрос наружу не должен ходить по перенаправлениям сам — каждое проверяется",
+);
+assert.ok(
+  !/redirect: "follow"/.test(outbound),
+  "ни один внешний запрос не должен следовать перенаправлениям без проверки адреса",
+);
+
+
+// --- выборка для петли качества ----------------------------------------------
+// Петля меряет наш промпт, а не выпуск конкретного читателя. Сотня описаний
+// у каждого — один и тот же ответ, оплаченный столько раз, сколько читателей:
+// её вход дороже входа самого дайджеста, 3170 токенов на описание против 527.
+{
+  const items = Array.from({ length: 100 }, (_, i) => i);
+  const sample = qualitySample(items);
+  assert.equal(sample.length, QUALITY_SAMPLE, "из сотни берём дюжину");
+  assert.deepEqual(qualitySample([1, 2, 3]), [1, 2, 3], "короткий выпуск идёт целиком");
+
+  // Равномерно, а не первые N: описания приходят в порядке отбора, и первая
+  // дюжина — всегда лучшие материалы дня. Ряд по ним поехал бы вверх
+  // и перестал сравниваться с днями, когда выпуск был короче.
+  assert.ok(sample.includes(0) && sample.some((n) => n > 80), "выборка покрывает весь выпуск");
+  assert.ok(
+    new Set(sample).size === sample.length,
+    "один и тот же материал не попадает в выборку дважды",
+  );
+}
+
+// --- порядок блоков в промпте дайджеста ---------------------------------------
+// Провайдер кэширует совпадающий начальный кусок запроса и берёт за него
+// в пятьдесят раз меньше. Персональная строка в начале рвала кэш всем сразу:
+// одинаковые правила оплачивались заново у каждого читателя. Проверка
+// механическая, зато ловит ровно тот регресс, который иначе виден только
+// в счёте через месяц.
+{
+  const source = readFileSync("pipeline/digest.ts", "utf8");
+  const at = (needle: string) => {
+    const index = source.indexOf(needle);
+    assert.ok(index > 0, `в промпте должен быть кусок ${needle}`);
+    return index;
+  };
+  assert.ok(
+    at("Язык выпуска:") < at("${voiceRules(voice)}"),
+    "язык общее манеры: у читателей с одним языком префикс длиннее",
+  );
+  assert.ok(
+    at("${voiceRules(voice)}") < at("Читатель: ${readerContext}"),
+    "контекст читателя — самое персональное, и стоит последним",
+  );
+  assert.ok(
+    at("Читатель: ${readerContext}") < at("Материалы:"),
+    "материалы идут после всех правил",
+  );
+}
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
 // просто отдаются всем. Один раз так и было.
 import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
+
+// Вебхук за проверкой сессии отвечает редиректом на логин, а отправитель
+// читает 307 как успех и не повторяет доставку. Платёж при этом проходит,
+// а тариф не выдаётся — отказ, который виден только по жалобе.
+const middleware = readFileSync("src/middleware.ts", "utf8");
+for (const hook of ["/api/telegram", "/api/lemon"]) {
+  assert.ok(middleware.includes(`"${hook}"`), `${hook} должен быть открыт в middleware`);
+  assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
+}
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
 
@@ -545,25 +662,29 @@ assert.ok(
   "размер выпуска должен расти с тарифом",
 );
 
-const source = (id: number, kind: Source["kind"], active = true) =>
-  ({ id, kind, active, label: `s${id}`, url: `https://e/${id}`, config: {},
+// Состояний у источника два: он заведён или убран. Выключенных не бывает —
+// переключатель убран из интерфейса, а вместе с ним и третье состояние,
+// из которого не было выхода: включить такой источник стало нечем, прогон
+// его не читал, а в списке он выглядел живым. Убранные сюда не доходят:
+// их отсекает запрос, который отдаёт каталог.
+const source = (id: number, kind: Source["kind"]) =>
+  ({ id, kind, active: true, label: `s${id}`, url: `https://e/${id}`, config: {},
      last_ok_at: null, last_count: null, last_error: null } as unknown as Source);
 
 const catalogue = [
   source(3, "x"), source(1, "rss"), source(2, "hackernews"),
-  source(4, "rss", false), source(5, "rss"), source(6, "rss"),
+  source(4, "rss"), source(5, "rss"), source(6, "rss"),
   source(7, "rss"), source(8, "rss"), source(9, "rss"),
 ];
 
 const onPlus = sourcesForPlan(catalogue, PLANS.plus);
 assert.ok(!onPlus.some((s) => s.kind === "x"), "прогон на Plus не должен опрашивать X");
-assert.ok(!onPlus.some((s) => s.id === 4), "выключенный источник не опрашивается");
 
 const onFree = sourcesForPlan(catalogue, PLANS.free);
 assert.equal(onFree.length, PLANS.free.maxSources, "бесплатный тариф режет до своего предела");
 assert.deepEqual(
   onFree.map((s) => s.id),
-  [1, 2, 5, 6, 7],
+  [1, 2, 4, 5, 6],
   "остаются заведённые раньше, иначе набор пляшет от прогона к прогону",
 );
 assert.ok(
@@ -583,31 +704,119 @@ assert.equal(
   "прогон на бесплатном опрашивает только разрешённые виды",
 );
 assert.equal(
-  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
+  afterDowngrade.filter((s) => PLANS.free.kinds.includes(s.kind)).length,
   2,
   "и предел в форме обязан считать по тому же правилу",
 );
 
-import { GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
+import {
+  FEATURES, GATED, allows, cheapestWith, topicsWord, type FeatureId, type Plan,
+} from "../src/lib/plans";
 
 assert.equal(topicsWord(1), "интерес", "единственное число");
 assert.equal(topicsWord(2), "интереса", "два-четыре");
 assert.equal(topicsWord(5), "интересов", "пять и больше");
 assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
+assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
+// Качество отбора — это качество сервиса, а не платная добавка: читатель
+// на бесплатном пробует именно его. Поэтому калибровки нет среди разделов,
+// которые тариф может закрыть, а из меню она убрана как наше слово,
+// а не читателя — страница осталась по своему адресу.
 assert.ok(
-  !allows(PLANS.free, "personalization") && !allows(PLANS.free, "calibration"),
-  "бесплатный тариф не открывает платных разделов",
+  !(GATED as readonly string[]).includes("calibration"),
+  "калибровка не должна закрываться тарифом",
 );
-// Подписка открыта всем: закрыть её тарифом значит показать кнопку
-// «подписаться» только тем, кто уже подписан.
-for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
-  assert.ok(allows(plan, "subscription"), `подписка видна на тарифе ${plan.id}`);
-}
 assert.ok(
-  allows(PLANS.plus, "personalization") && allows(PLANS.pro, "personalization"),
+  !readFileSync("src/app/(app)/settings/nav.tsx", "utf8").includes("/settings/calibration"),
+  "и не должна стоять в списке разделов",
+);
+assert.ok(
+  existsSync("src/app/(app)/settings/calibration/page.tsx"),
+  "но страница остаётся: ряд чисел нужен для правок отбора",
+);
+
+// Ручка границы стоит в зазоре между кусками, а не в доле от всей ширины:
+// куски выложены флексом с зазором, и доля от полной ширины промахивается
+// тем сильнее, чем правее граница — на последних ручка уезжала на соседний
+// сегмент и выглядела его ручкой.
+{
+  const counts = [15, 12, 7, 3, 3];   // 40 новостей, пять тем
+  const gaps = BAR_GAP * (counts.length - 1);
+
+  assert.equal(
+    handleLeft(counts, 0),
+    `calc((100% - ${gaps}px) * 0.375 + ${BAR_GAP / 2}px)`,
+    "первая граница: доля от цветной части плюс половина зазора",
+  );
+  assert.equal(
+    handleLeft(counts, 1),
+    `calc((100% - ${gaps}px) * 0.675 + ${BAR_GAP * 1.5}px)`,
+    "вторая граница уже прошла один зазор целиком",
+  );
+  // Последняя граница обязана попасть в последний зазор, а не за полосу.
+  assert.equal(
+    handleLeft(counts, counts.length - 2),
+    `calc((100% - ${gaps}px) * 0.925 + ${BAR_GAP * 3.5}px)`,
+    "у правого края ручка остаётся в своём зазоре",
+  );
+  assert.ok(handleLeft([1], 0).includes("100% - 0px"), "на одной теме зазоров нет");
+}
+
+// Окно с предложением показывает все тарифы, где возможность есть и которые
+// дороже текущего: один самый дешёвый теряет место, где читатель выбрал бы Pro.
+const offersFor = (feature: FeatureId, current: Plan) =>
+  PLAN_IDS.map((id) => PLANS[id]).filter((p) => FEATURES[feature].has(p) && p.price > current.price);
+
+assert.deepEqual(
+  offersFor("language", PLANS.free).map((p) => p.id),
+  ["plus", "pro"],
+  "за переводом с бесплатного предлагаются оба платных тарифа",
+);
+assert.deepEqual(
+  offersFor("delivery", PLANS.free).map((p) => p.id),
+  ["pro"],
+  "читалка есть только на Pro — предлагать Plus было бы враньём",
+);
+assert.deepEqual(
+  offersFor("delivery", PLANS.plus).map((p) => p.id),
+  ["pro"],
+  "с Plus за читалкой остаётся один тариф — его и предлагаем",
+);
+// Окно вообще не открывается тому, у кого возможность уже есть: корона
+// рисуется по тому же FEATURES.has, и предлагать ему нечего.
+assert.ok(FEATURES.language.has(PLANS.plus), "у Plus перевод уже есть, короны не будет");
+
+// Перевод платный, а язык источника — законное значение, а не пустота:
+// оно уходит в промпт и означает «оставь как в источнике».
+assert.ok(!FEATURES.language.has(PLANS.free), "на бесплатном перевода нет");
+assert.ok(FEATURES.language.has(PLANS.plus), "перевод есть с Plus");
+assert.ok(LANGUAGES.includes(SOURCE_LANGUAGE), "язык источника — вариант списка, а не особый случай");
+
+// Читалка — Pro: это чужой лимит у Amazon и счёт у Resend.
+assert.ok(!FEATURES.delivery.has(PLANS.plus), "на Plus читалки нет");
+assert.ok(FEATURES.delivery.has(PLANS.pro), "читалка — признак Pro");
+// Подписка открыта всем и тарифом не закрывается вовсе: закрыть её значит
+// показать кнопку «подписаться» только тем, кто уже подписан. Поэтому её
+// и нет среди разделов, которые тариф может закрыть.
+assert.ok(
+  !(GATED as readonly string[]).includes("subscription"),
+  "раздел подписки не должен закрываться тарифом",
+);
+assert.ok(
+  allows(PLANS.plus, "language") && allows(PLANS.pro, "language"),
   "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
 );
+// Персонализация не стоит ни одного лишнего токена, поэтому тарифом
+// не закрывается вовсе: держать её за деньгами значит ухудшать бесплатный
+// выпуск без причины.
+assert.ok(
+  !(GATED as readonly string[]).includes("personalization"),
+  "язык и подача не должны закрываться тарифом",
+);
+for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
+  assert.ok(FEATURES.personalization.has(plan), `язык и подача доступны на ${plan.id}`);
+}
 for (const section of GATED) {
   // Заглушка зовёт cheapestWith и печатает его подпись: раздел, которого
   // нет ни в одном тарифе, показал бы «на тарифе Pro» и никогда не открылся.
@@ -634,7 +843,10 @@ for (const file of ["0019_plan", "0020_readers"]) {
 // отдельной статьи, поэтому выключенный выпуск не требует стереть адрес —
 // и не должен молча уходить при выключенном переключателе.
 {
-  const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
+  const full = {
+    kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true,
+    plan: "pro", subscription_status: "active", plan_ends_at: null,
+  };
   const ok = kindleDigestVerdict(full);
   assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
   assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
@@ -652,6 +864,18 @@ for (const file of ["0019_plan", "0020_readers"]) {
     kindleDigestVerdict({ ...full, kindle_sender: null }),
     { send: false, reason: "no-sender" },
     "вписанный адрес без обратного — сбой, о нём сообщают в лог",
+  );
+  // Переключатель мог остаться включённым с прежнего тарифа, а письмо —
+  // это чужой лимит у Amazon и счёт у Resend.
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, plan: "plus" }),
+    { send: false, reason: "plan" },
+    "на тарифе без читалки выпуск книгой не уходит",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, subscription_status: "expired", plan_ends_at: null }),
+    { send: false, reason: "plan" },
+    "истёкшая подписка перестаёт слать на читалку в ту же секунду",
   );
 }
 
@@ -1055,4 +1279,95 @@ assert.ok(!alreadyIn("Совет директоров одобрил сделк�
 assert.ok(!alreadyIn("", "русском"), "пустой текст не делит на ноль");
 assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержку swap на узлах.", "русском"), "латинские термины внутри русского не сбивают счёт");
 
-console.log("Самопроверка пройдена: 278 утверждений");
+
+// --- подписка Lemon Squeezy --------------------------------------------------
+// Тариф выдаётся только подписанным событием с их стороны, а действует он,
+// пока оплачен. Обе ошибки молчаливы: лишний платный выпуск и снятый раньше
+// срока тариф одинаково не видны в логе.
+process.env.LEMON_VARIANT_PLUS = "111";
+process.env.LEMON_BUY_PLUS = "https://shop.lemonsqueezy.com/buy/aaa";
+process.env.LEMON_VARIANT_PRO = "222";
+process.env.LEMON_BUY_PRO = "https://shop.lemonsqueezy.com/buy/bbb";
+process.env.LEMON_WEBHOOK_SECRET = "s3cret";
+
+const paid = (over: Record<string, unknown> = {}) =>
+  ({ id: 1, plan: "pro", subscription_status: "active", plan_ends_at: null,
+     plan_renews_at: null, subscription_id: "sub_1", portal_url: null, ...over }) as never;
+
+const DAY = 86_400_000;
+assert.equal(effectivePlan(paid()).id, "pro", "активная подписка даёт купленный тариф");
+assert.equal(
+  effectivePlan(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() + DAY).toISOString() })).id,
+  "pro",
+  "отменённая подписка работает до конца оплаченного периода",
+);
+assert.equal(
+  effectivePlan(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() - DAY).toISOString() })).id,
+  "free",
+  "после конца оплаченного периода тариф гаснет сразу, а не к ночному прогону",
+);
+assert.equal(
+  effectivePlan(paid({ subscription_status: "expired", plan_ends_at: null })).id,
+  "free",
+  "истёкшая подписка не даёт платного выпуска",
+);
+assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
+assert.ok(endingAt(paid({ plan_ends_at: new Date(Date.now() + DAY).toISOString() })), "дата конца видна интерфейсу");
+assert.equal(endingAt(paid()), null, "у активной подписки конца нет");
+
+const signedBody = JSON.stringify({ hello: "world" });
+const goodSignature = createHmac("sha256", "s3cret").update(signedBody).digest("hex");
+assert.ok(signatureValid(signedBody, goodSignature), "своя подпись принимается");
+assert.ok(!signatureValid(signedBody, goodSignature.replace(/.$/, "0")), "чужая подпись отвергается");
+assert.ok(!signatureValid(signedBody, null), "без подписи — отказ");
+assert.ok(!signatureValid(signedBody, "не-шестнадцатеричное"), "мусор вместо подписи не роняет разбор");
+
+const lemonEvent = (over: Record<string, unknown> = {}) => ({
+  meta: { event_name: "subscription_updated", custom_data: { reader_id: 7 } },
+  data: { id: "sub_9", attributes: { variant_id: 222, status: "active", renews_at: "2026-11-01T00:00:00Z", ends_at: null } },
+  ...over,
+});
+
+const applied = readEvent(lemonEvent() as never);
+assert.ok(applied.ok && applied.readerId === 7 && applied.update.plan === "pro", "вариант превращается в тариф");
+assert.ok(!readEvent(lemonEvent({ meta: { event_name: "order_created" } }) as never).ok, "не про подписку — мимо");
+assert.ok(
+  !readEvent(lemonEvent({ meta: { event_name: "subscription_created", custom_data: {} } }) as never).ok,
+  "без номера читателя платёж некому засчитать",
+);
+assert.ok(
+  !readEvent({ ...lemonEvent(), data: { id: "x", attributes: { variant_id: 999, status: "active" } } } as never).ok,
+  "чужой вариант не выдаёт тариф",
+);
+const expiredEvent = readEvent({
+  ...lemonEvent(),
+  data: { id: "sub_9", attributes: { variant_id: 222, status: "expired" } },
+} as never);
+assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкшая подписка сбрасывает тариф");
+
+assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
+assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
+
+// --- ссылка, присланная боту --------------------------------------------------
+// Прислать ссылку боту — тот же жест, что вставить её в форму. Отвечать
+// на него подсказкой «напиши /start» значит делать вид, что не понял.
+assert.equal(parseUpdate(privateStart("https://t.me/durov")).kind, "link", "ссылка заводит источник");
+assert.equal(parseUpdate(privateStart("@eugene_rid")).kind, "link", "@имя — тоже ссылка");
+assert.equal(parseUpdate(privateStart("simonwillison.net")).kind, "link", "голый домен — тоже");
+assert.equal(
+  (parseUpdate(privateStart(" https://example.com/feed ")) as { text: string }).text,
+  "https://example.com/feed",
+  "пробелы по краям снимаются до разбора",
+);
+// Разговор остаётся разговором, а команда — командой: и то и другое не должно
+// уходить в сеть за фидом.
+assert.equal(parseUpdate(privateStart("привет")).kind, "help", "слово без точки — не ссылка");
+assert.equal(parseUpdate(privateStart("/start")).kind, "start", "команда остаётся командой");
+assert.equal(parseUpdate(privateStart("а что ты умеешь?")).kind, "help", "фраза с пробелами — не ссылка");
+// Поисковый запрос X в переписке неотличим от фразы, и гадать в его пользу
+// нельзя: он платный.
+assert.ok(!looksLikeSource("uranium OR SMR min_faves:100"), "запрос X в чате не читается как источник");
+assert.ok(!looksLikeSource("/help"), "команда не источник");
+assert.ok(!looksLikeSource(""), "пустая строка не источник");
+
+console.log(`Самопроверка пройдена: ${checks} утверждений`);

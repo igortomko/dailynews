@@ -29,7 +29,7 @@ export default async function FeedPage({
 
   if (days.length === 0) {
     return (
-      <Empty className="mx-auto max-w-3xl">
+      <Empty className="mx-auto max-w-page">
         <EmptyHeader>
           <EmptyTitle>Ещё ни одного выпуска</EmptyTitle>
           <EmptyDescription>

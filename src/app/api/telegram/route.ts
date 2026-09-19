@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import { issueLoginToken } from "@/lib/auth";
-import { answerCallback, checkSecret, loginLink, parseUpdate, sendMessage, SECRET_HEADER } from "@/lib/telegram";
+import { answerCallback, checkSecret, escapeHtml, loginLink, parseUpdate, sendMessage, SECRET_HEADER } from "@/lib/telegram";
 import { ensureReader, recordFinished } from "@/lib/readers";
+import { addByLink } from "@/lib/sources";
 
 /**
  * Вебхук бота. Поллинг здесь невозможен: отдельный постоянный процесс
@@ -30,6 +31,39 @@ export async function POST(request: NextRequest) {
   try {
     if (command.kind === "help") {
       await sendMessage(command.chatId, "Напиши /start — пришлю ссылку на ленту.");
+      return NextResponse.json({ ok: true });
+    }
+
+    /**
+     * Присланная ссылка заводит источник.
+     *
+     * Разбор ходит в сеть и занимает секунды, а Telegram на медленный ответ
+     * повторяет апдейт — и одна ссылка превращается в несколько добавлений
+     * и несколько сообщений. Поэтому отвечаем сразу, а работу доделываем
+     * после ответа.
+     */
+    if (command.kind === "link") {
+      const { telegramId, chatId, text } = command;
+      after(async () => {
+        try {
+          const reader = await ensureReader(telegramId, null);
+          const result = await addByLink(reader, text);
+          await sendMessage(
+            chatId,
+            result.ok
+              ? [
+                  result.created ? "Добавил в ленту:" : "Этот источник уже был в ленте:",
+                  `<b>${escapeHtml(result.found.label)}</b>`,
+                  `${escapeHtml(result.found.via)} · свежих ${result.found.fresh} из ${result.found.entries}`,
+                ].join("\n")
+              : `Не получилось: ${escapeHtml(result.error)}`,
+          );
+        } catch (error) {
+          console.error(`telegram link: ${(error as Error).message}`);
+          await sendMessage(chatId, "Не получилось разобрать ссылку — попробуй ещё раз.").catch(() => {});
+        }
+      });
+      await sendMessage(chatId, "Проверяю ссылку…");
       return NextResponse.json({ ok: true });
     }
 

@@ -34,6 +34,8 @@ export type Source = {
   last_error: string | null;
   /** С какого момента источник отвечает и не даёт ни одной свежей записи. */
   silent_since: string | null;
+  /** Убран из ленты. История остаётся, отмена возвращает как было. */
+  deleted_at: string | null;
 };
 
 /** Сырой материал до скоринга. */
@@ -131,5 +133,14 @@ export type Reader = {
    *  Персонален, как и всё остальное здесь: у каждого читателя свой. */
   plan: string;
   daily_cap_usd: number;
+  /** Подписка Lemon Squeezy. Пусто — читатель никогда не платил. */
+  subscription_id: string | null;
+  /** Их статус: active, on_trial, paused, past_due, cancelled, expired. */
+  subscription_status: string | null;
+  plan_renews_at: string | null;
+  /** Докуда работает отменённая подписка. Оплаченный месяц дочитывается. */
+  plan_ends_at: string | null;
+  /** Их страница управления: смена карты, отмена, возобновление. */
+  portal_url: string | null;
   onboarded_at: string | null;
 };

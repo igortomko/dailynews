@@ -269,18 +269,33 @@ export type Found = {
 
 export type Discovery = { ok: true; found: Found } | { ok: false; error: string };
 
-const probe = (candidate: Candidate): Source => ({
+/**
+ * Чем проба отличается от прогона.
+ *
+ * Окно шире: проба отвечает на «отвечает ли этот источник вообще», а не
+ * «свежо ли у него сегодня». У X окно по умолчанию трое суток, и аккаунт,
+ * молчавший четыре дня, получал «записей в нём нет» и не добавлялся —
+ * отказ, неотличимый от несуществующего адреса. Свежесть считается отдельно
+ * и уже окном прогона.
+ *
+ * Объём, наоборот, уже: Hacker News по умолчанию читает девяносто историй
+ * по одной, то есть проверка одной ссылки стоила девяноста обращений к API.
+ */
+const PROBE_CONFIG = { max_age_days: 30, count: 12, limit: 25, max_pages: 1 };
+
+const probe = (candidate: Candidate, config: Record<string, unknown> = {}): Source => ({
   id: 0,
   kind: candidate.kind,
   label: candidate.url,
   url: candidate.url,
-  config: {},
+  config,
   active: true,
   input_url: null,
   last_ok_at: null,
   last_count: null,
   last_error: null,
   silent_since: null,
+  deleted_at: null,
 });
 
 function labelFor(doc: FeedDoc | null, candidate: Candidate): string {
@@ -310,7 +325,7 @@ async function tryCandidates(
     tried.push(candidate.url);
     try {
       // Тем же фетчером, которым ходит прогон: у X, HN, Reddit и Telegram свой.
-      const doc: FeedDoc = await fetchDoc(probe(candidate));
+      const doc: FeedDoc = await fetchDoc(probe(candidate, PROBE_CONFIG));
       const items = doc.items;
       if (items.length === 0) {
         // Название фида в отказе отличает «адрес неверный» от «адрес верный,

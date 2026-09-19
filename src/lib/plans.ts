@@ -16,10 +16,15 @@ export const PLAN_IDS = ["free", "plus", "pro"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 /**
- * Разделы настроек, которые тариф может закрыть. Лента, интересы
- * и источники не закрываются никогда: без них продукта нет.
+ * Разделы настроек, которые тариф может закрыть.
+ *
+ * Список короткий намеренно. Закрывать имеет смысл то, что стоит денег:
+ * лишний источник и лишняя сотня описаний — это счёт за модель. Язык,
+ * сложность и манера не стоят ничего: тот же вызов, другой промпт, —
+ * и держать их за тарифом значит ухудшать бесплатный выпуск без причины,
+ * ради ощущения, что платное что-то даёт.
  */
-export const GATED = ["personalization", "calibration", "subscription"] as const;
+export const GATED = ["delivery", "language"] as const;
 export type Gated = (typeof GATED)[number];
 
 export type Plan = {
@@ -55,29 +60,29 @@ export const PLANS: Record<PlanId, Plan> = {
     // На бесплатном остаётся то, без чего ленты не будет: интересы
     // и источники. Манера письма и разбор статистики — уже выбор,
     // за который платят.
-    sections: ["subscription"],
+    sections: [],
   },
   plus: {
     id: "plus",
     label: "Plus",
     price: 1.99,
-    maxSources: 15,
+    maxSources: 40,
     maxTopics: 5,
     digestSizes: [20, 40],
     kinds: FREE_KINDS,
-    sections: ["personalization", "calibration", "subscription"],
+    sections: ["language"],
   },
   pro: {
     id: "pro",
     label: "Pro",
     price: 4.99,
-    maxSources: 40,
+    maxSources: 100,
     maxTopics: 10,
     digestSizes: [20, 40, 60, 80, 100],
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
-    sections: ["personalization", "calibration", "subscription"],
+    sections: ["delivery", "language"],
   },
 };
 
@@ -124,6 +129,67 @@ export const cheapestWith = (section: Gated): Plan =>
   PLAN_IDS.map((id) => PLANS[id]).find((plan) => allows(plan, section)) ?? PLANS.pro;
 
 /**
+ * Что именно закрыто тарифом — описано данными, а не разложено по экранам.
+ *
+ * `has` — та же проверка, по которой возможность работает. Корона, текст
+ * окна и настоящий предел обязаны опираться на одно правило: корона над
+ * работающей кнопкой и работающая кнопка без короны — одинаково стыдно,
+ * и оба случая на глаз незаметны.
+ */
+export type FeatureId =
+  | "personalization" | "delivery" | "language" | "x" | "topics" | "digest" | "sources";
+
+export type Feature = {
+  title: string;
+  /** Одна фраза: что читатель получит. Без «улучшенный» и «расширенный». */
+  what: string;
+  has: (plan: Plan) => boolean;
+};
+
+export const FEATURES: Record<FeatureId, Feature> = {
+  personalization: {
+    title: "Язык и подача",
+    what: "На каком языке приходит выпуск и как он написан: попроще или как специалисту, суховато или живее. Есть на любом тарифе.",
+    // Доступна всем: промпт от неё не дорожает ни на токен.
+    has: () => true,
+  },
+  language: {
+    title: "Перевод на свой язык",
+    what: "Выпуск приходит на выбранном языке. На бесплатном заголовки и описания остаются на языке источника.",
+    has: (plan) => allows(plan, "language"),
+  },
+  delivery: {
+    title: "Выпуск на читалку",
+    what: "Выпуск приходит книгой на Kindle — читать с электронных чернил, без телефона.",
+    has: (plan) => allows(plan, "delivery"),
+  },
+  x: {
+    title: "Посты из X",
+    what: "Твиты попадают в выпуск наравне с новостями сайтов. X берёт за доступ отдельно, поэтому только на Pro.",
+    has: (plan) => plan.kinds.includes("x"),
+  },
+  topics: {
+    title: "Темы",
+    what: "О чём тебе интересно читать — например, ИИ или дизайн. Выпуск делится между темами, чтобы одна не заняла всё.",
+    has: (plan) => plan.maxTopics > PLANS.free.maxTopics,
+  },
+  digest: {
+    title: "Новостей в выпуске",
+    what: "Сколько новостей приходит за раз. Десять — прочитать за кофе, сто — растянуть на день.",
+    has: (plan) => maxDigestOf(plan) > maxDigestOf(PLANS.free),
+  },
+  sources: {
+    title: "Источников",
+    what: "Сайты, блоги и каналы, за которыми лента следит каждый день. Чем их больше, тем шире выбор для выпуска.",
+    has: (plan) => plan.maxSources > PLANS.free.maxSources,
+  },
+};
+
+/** Самый дешёвый тариф, на котором возможность есть. */
+export const cheapestFor = (id: FeatureId): Plan =>
+  PLAN_IDS.map((planId) => PLANS[planId]).find((plan) => FEATURES[id].has(plan)) ?? PLANS.pro;
+
+/**
  * Кого опрашивать в этом прогоне.
  *
  * Порядок — по id: при понижении тарифа остаются те, что заведены раньше,
@@ -133,7 +199,7 @@ export const cheapestWith = (section: Gated): Plan =>
  */
 export function sourcesForPlan(sources: Source[], plan: Plan): Source[] {
   return sources
-    .filter((source) => source.active && plan.kinds.includes(source.kind))
+    .filter((source) => plan.kinds.includes(source.kind))
     .sort((a, b) => a.id - b.id)
     .slice(0, plan.maxSources);
 }

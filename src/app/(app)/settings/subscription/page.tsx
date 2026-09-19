@@ -1,7 +1,6 @@
 import { currentReader } from "@/lib/session";
-import { planOf } from "@/lib/plans";
+import { effectivePlan } from "@/lib/lemon";
 import { PlanTable } from "@/components/plan-table";
-import { SubscriptionForm } from "./form";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +14,11 @@ export const dynamic = "force-dynamic";
  */
 export default async function SubscriptionPage() {
   const reader = await currentReader();
-
+  // Действующий, а не купленный: отменённая подписка ещё работает,
+  // истёкшая — уже нет, и страница обязана показывать то же, что и предел.
   return (
     <div className="flex flex-col gap-6">
-      <PlanTable current={planOf(reader.plan)} />
-      <SubscriptionForm />
+      <PlanTable reader={reader} current={effectivePlan(reader)} />
     </div>
   );
 }
