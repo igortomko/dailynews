@@ -178,14 +178,16 @@ async function main() {
     insert into dailynews.digests (day, intro, item_ids, stats)
     values (
       ${day}, ${digest.intro}, ${order},
-      ${JSON.stringify({
+      ${sql.json({
         collected: collected.length,
         duplicates,
         scored: scored.length,
         jev_input_tokens: usage.input,
         jev_cost_usd: Number(jevCost.toFixed(5)),
         seconds: Math.round((Date.now() - started) / 1000),
-      })}
+        // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
+        // строку, и stats->>'jev_cost_usd' молча возвращает null.
+      } as unknown as Parameters<typeof sql.json>[0])}
     )
     on conflict (day) do update
       set intro = excluded.intro, item_ids = excluded.item_ids, stats = excluded.stats

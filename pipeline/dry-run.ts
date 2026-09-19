@@ -7,7 +7,7 @@
  * Отвечает на вопрос, который нельзя проверить локальными тестами:
  * живы ли источники из каталога и сколько они дают на самом деле.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
@@ -20,15 +20,11 @@ async function main() {
   process.env.DAILYNEWS_DRY_RUN = "1";
 
   const db = await PGlite.create({ extensions: { pg_trgm } });
-  await db.exec(`
-    create schema if not exists extensions;
-    create extension if not exists pg_trgm with schema extensions;
-    create schema if not exists dailynews;
-    create table if not exists dailynews.migrations (
-      name text primary key, applied_at timestamptz not null default now()
-    );
-  `);
-  for (const file of ["0002_tables.sql", "0003_seed.sql"]) {
+  // Схема extensions и роль products_reader на Supabase уже есть.
+  await db.exec(`create schema if not exists extensions; create role products_reader;`);
+  // Из каталога, а не списком: перечисленные вручную миграции расходятся
+  // с папкой, и новые источники молча не доезжают до прогона.
+  for (const file of readdirSync("db/migrations").filter((f) => f.endsWith(".sql")).sort()) {
     await db.exec(readFileSync(`db/migrations/${file}`, "utf8"));
   }
 

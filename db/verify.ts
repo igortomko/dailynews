@@ -42,10 +42,13 @@ async function main() {
   // Повторный прогон не должен ни падать, ни задваивать каталог:
   // миграции написаны идемпотентными, и это единственное, что доказуемо.
   await db.exec(sqlText);
+  // Считаем не фиксированное число, а что повтор не задвоил: количество
+  // источников растёт с каждой миграцией, и зашитое число устареет молча.
   const [{ count }] = (await db.query<{ count: number }>(
     "select count(*)::int as count from dailynews.sources",
   )).rows;
-  assert.equal(count, 27, `после повторного прогона источников ${count}, ожидалось 27`);
+  const seeded = (sqlText.match(/^\s*\('(rss|reddit|hackernews|x)'/gm) ?? []).length;
+  assert.equal(count, seeded, `источников ${count}, в миграциях ${seeded} — повтор задвоил`);
   console.log("  повторный прогон не задваивает");
 
   const [role] = (await db.query<{ search_path: string; limit: number }>(
@@ -86,7 +89,12 @@ async function main() {
     const sources = await queries.getSources();
     assert.ok(topics.length >= 6, `тем ${topics.length}, ожидалось не меньше 6`);
     assert.ok(sources.length >= 20, `источников ${sources.length}`);
-    assert.ok(sources.some((s) => s.kind === "x") === false, "источников X в seed быть не должно");
+    // Reddit заведён, но выключен: заявку на Data API можно подать позже,
+    // а на источники ссылаются уже собранные материалы.
+    const reddit = sources.filter((s) => s.kind === "reddit");
+    assert.ok(reddit.length > 0, "источники Reddit должны остаться в каталоге");
+    assert.ok(reddit.every((s) => !s.active), "источники Reddit должны быть выключены");
+    assert.ok(sources.some((s) => s.kind === "x" && s.active), "источники X должны быть включены");
     console.log(`  темы: ${topics.length}, источники: ${sources.length}`);
 
     const profile = await queries.getProfile();
@@ -169,6 +177,10 @@ async function main() {
         from dailynews.scores limit 1
     `;
     assert.equal(stored.shape, "object", "axes должны лежать объектом, а не jsonb-строкой");
+    const [digestShape] = await sql<{ shape: string }[]>`
+      select jsonb_typeof(stats) as shape from dailynews.digests limit 1
+    `;
+    assert.equal(digestShape.shape, "object", "stats должны лежать объектом, а не jsonb-строкой");
     assert.ok(stored.kind, "axes->'kind'->>'choice' не должен быть null");
     assert.equal(feed[0].axes.kind.choice, "fact", "axes должны разобраться из jsonb");
     assert.equal(feed[0].read_count, 0);

@@ -316,12 +316,15 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
       if (!tweet?.text) continue;
       const handle = tweet.author?.userName ? `@${tweet.author.userName}` : "";
       const published = new Date(tweet.createdAt);
+      // Текст приходит с неразвёрнутыми HTML-сущностями (&amp;, &gt;).
+      // В заголовке дайджеста они видны читателю как есть.
+      const text = stripHtml(tweet.text);
       items.push({
         // Первая строка поста работает заголовком: у твита его нет,
         // а Jev и дайджест ждут заголовок отдельно от текста.
-        title: `${handle ? `${handle}: ` : ""}${tweet.text.split("\n")[0].slice(0, 200)}`,
+        title: `${handle ? `${handle}: ` : ""}${text.slice(0, 200)}`,
         url: tweet.url || `https://x.com/i/status/${tweet.id}`,
-        excerpt: tweet.text.slice(0, 1200),
+        excerpt: text.slice(0, 1200),
         points: tweet.likeCount ?? null,
         comments: tweet.retweetCount ?? null,
         published_at: Number.isNaN(published.getTime()) ? null : published,
@@ -346,8 +349,13 @@ export async function fetchSource(source: Source): Promise<RawItem[]> {
   return FETCHERS[source.kind](source);
 }
 
-/** Пауза между запросами к одному и тому же хосту. Reddit отдаёт 429 без неё. */
-const SAME_HOST_DELAY_MS = 1500;
+/**
+ * Пауза между запросами к одному и тому же хосту, по видам источников.
+ * Значения измерены, а не выбраны: twitterapi.io отдаёт 429 при паузе
+ * в полторы секунды и отвечает 200 при восьми.
+ */
+const HOST_DELAY_MS: Record<string, number> = { x: 8000 };
+const DEFAULT_HOST_DELAY_MS = 1500;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -404,7 +412,7 @@ export async function fetchAllSources(
     [...byHost.values()].map(async (group) => {
       const results: SourceResult[] = [];
       for (const [index, source] of group.entries()) {
-        if (index > 0) await sleep(SAME_HOST_DELAY_MS);
+        if (index > 0) await sleep(HOST_DELAY_MS[source.kind] ?? DEFAULT_HOST_DELAY_MS);
         let result: SourceResult;
         try {
           result = { source, ok: true, items: freshest(await fetchSource(source), source) };
