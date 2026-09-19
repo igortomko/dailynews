@@ -10,8 +10,9 @@ import { selectSurvivors } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import type { Profile } from "./types";
-import { MAX_DIGEST, MIN_PER_TOPIC, normalize } from "./topic-budget";
+import type { Profile, Source } from "./types";
+import { MIN_PER_TOPIC, normalize } from "./topic-budget";
+import { allows, cheapestWith, maxDigestOf, planOf, PLAN_IDS, PLANS, type Gated } from "./plans";
 import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "./voice";
 import { toSlug } from "./slug";
 
@@ -65,7 +66,23 @@ export type ChipInput = { slug: string; label: string; hint: string; count: numb
  * Персонализация и интересы — две формы, поэтому два действия. Одна функция
  * с ветками «пришло ли поле» молча очищала бы то, чего в форме нет.
  */
+/**
+ * Закрытый раздел проверяется и в действии, а не только на странице:
+ * действие вызывается по своему адресу, мимо страницы с заглушкой.
+ */
+async function denyBySection(section: Gated): Promise<{ error: string } | null> {
+  const [{ plan: planId }] = await sql<{ plan: string }[]>`
+    select plan from dailynews.profile where id = 1
+  `;
+  const plan = planOf(planId);
+  if (allows(plan, section)) return null;
+  return { error: `Раздел доступен на тарифе «${cheapestWith(section).label}»` };
+}
+
 export async function savePersonalization(formData: FormData) {
+  const denied = await denyBySection("personalization");
+  if (denied) return denied;
+
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
   const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
@@ -99,6 +116,20 @@ export async function saveInterests(formData: FormData) {
   const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
   if (chips.length === 0) return { error: "Добавь хотя бы один интерес" };
 
+  // Предел проверяется на сервере, а не только в форме: форму рисует
+  // браузер, а платит за лишние темы владелец ключа.
+  const [{ plan: planId }] = await sql<{ plan: string }[]>`
+    select plan from dailynews.profile where id = 1
+  `;
+  const plan = planOf(planId);
+  if (chips.length > plan.maxTopics) {
+    return {
+      error: `Тариф «${plan.label}» держит ${plan.maxTopics} ${
+        plan.maxTopics === 1 ? "интерес" : plan.maxTopics < 5 ? "интереса" : "интересов"
+      }, а выбрано ${chips.length}`,
+    };
+  }
+
   const slugs = chips.map((chip) => chip.slug || toSlug(chip.label));
   // Разные названия дают один slug: «ИИ-инфра» и «ИИ инфра» после
   // транслитерации совпадают, on conflict схлопывает их в одну строку,
@@ -107,7 +138,10 @@ export async function saveInterests(formData: FormData) {
   if (new Set(slugs).size !== slugs.length) {
     return { error: "Два интереса совпадают после упрощения названия — переименуй один" };
   }
-  const digestSize = Math.min(MAX_DIGEST, Math.max(3, Math.round(Number(formData.get("digest_size"))) || 12));
+  const digestSize = Math.min(
+    maxDigestOf(plan),
+    Math.max(3, Math.round(Number(formData.get("digest_size"))) || plan.digestSizes[0]),
+  );
   // Приводим ещё раз на сервере: из формы приходит то, что нарисовал
   // браузер, а сумма целей — это и есть обещание размера дайджеста.
   const counts = normalize(
@@ -149,6 +183,9 @@ export async function saveInterests(formData: FormData) {
 }
 
 export async function saveLlm(formData: FormData) {
+  const denied = await denyBySection("subscription");
+  if (denied) return denied;
+
   const provider = String(formData.get("base_url") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
   const apiKey = String(formData.get("api_key") ?? "").trim();
@@ -176,6 +213,9 @@ export async function saveLlm(formData: FormData) {
 }
 
 export async function clearLlmKey() {
+  const denied = await denyBySection("subscription");
+  if (denied) return denied;
+
   await sql`update dailynews.profile set llm = llm - 'api_key' where id = 1`;
   revalidatePath("/settings/subscription");
 }
@@ -185,6 +225,9 @@ export async function addSource(formData: FormData) {
   const url = String(formData.get("url") ?? "").trim();
   const label = String(formData.get("label") ?? "").trim() || url;
   if (!url) return { error: "Пустой адрес" };
+
+  const denied = await denyBySource(kind);
+  if (denied) return denied;
 
   // Источник проверяется живым запросом до сохранения: каталог из
   // непроверенных адресов превращается в пустую вкладку через неделю.
@@ -203,8 +246,45 @@ export async function addSource(formData: FormData) {
 }
 
 export async function setSourceActive(id: number, active: boolean) {
+  if (active) {
+    const [source] = await sql<{ kind: Source["kind"] }[]>`
+      select kind from dailynews.sources where id = ${id}
+    `;
+    const denied = source ? await denyBySource(source.kind) : null;
+    if (denied) return denied;
+  }
   await sql`update dailynews.sources set active = ${active} where id = ${id}`;
   revalidatePath("/settings/sources");
+  return { ok: true as const };
+}
+
+/**
+ * Общая проверка для добавления и включения: одна и та же пара пределов,
+ * и разойтись им нельзя — включение в обход добавления открывало бы X
+ * на бесплатном тарифе одним переключателем.
+ */
+async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
+  const [{ plan: planId }] = await sql<{ plan: string }[]>`
+    select plan from dailynews.profile where id = 1
+  `;
+  const plan = planOf(planId);
+
+  if (!plan.kinds.includes(kind)) {
+    const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
+    return {
+      error: where.length
+        ? `Источники ${kind} есть только на тарифе «${where.join("», «")}»`
+        : `Источники ${kind} недоступны`,
+    };
+  }
+
+  const [{ n }] = await sql<{ n: number }[]>`
+    select count(*)::int as n from dailynews.sources where active
+  `;
+  if (n >= plan.maxSources) {
+    return { error: `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — выключи лишний` };
+  }
+  return null;
 }
 
 export async function deleteSource(id: number) {
@@ -232,7 +312,11 @@ export async function topUpDigest() {
   `;
   if (!digest) return { error: "Ни одного выпуска ещё нет — дождись прогона" };
 
-  const missing = profile.digest_size - digest.item_ids.length;
+  // Через догрузку предел тарифа обходится так же, как через ползунок:
+  // digest_size мог остаться от прежнего тарифа, а платит за письмо
+  // описаний владелец ключа. Потолок один и тот же, что и в прогоне.
+  const target = Math.min(profile.digest_size, maxDigestOf(planOf(profile.plan)));
+  const missing = target - digest.item_ids.length;
   if (missing <= 0) return { ok: true as const, added: 0 };
 
   // selectSurvivors сам исключает всё, что уже попало в любой выпуск,

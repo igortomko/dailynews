@@ -3,6 +3,8 @@ import { ArrowLeftIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/lib/actions";
+import { getProfile } from "@/lib/queries";
+import { planOf } from "@/lib/plans";
 import { SettingsNav } from "./nav";
 
 /**
@@ -10,7 +12,8 @@ import { SettingsNav } from "./nav";
  * («поменять источники»), поэтому список разделов должен быть виден целиком,
  * а не прятаться под кнопку, как в ленте.
  */
-export default function SettingsLayout({ children }: { children: React.ReactNode }) {
+export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
+  const plan = planOf((await getProfile()).plan);
   return (
     <>
       <PageHeader
@@ -48,7 +51,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           документа. На узком экране разделы идут лентой поверху, и прибивать
           там нечего. */}
       <aside className="flex shrink-0 flex-col gap-1 sm:sticky sm:top-[4.5rem] sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start">
-        <SettingsNav />
+        <SettingsNav open={plan.sections} />
         <form action={logout} className="mt-4 hidden sm:mt-auto sm:block">
           <Button variant="ghost" size="sm" type="submit" className="w-full justify-start px-2">
             Выйти

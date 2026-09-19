@@ -1,5 +1,13 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+/**
+ * Единственная страница настроек без своих данных — и единственная, которую
+ * сборка пыталась отрендерить заранее. Раскладка настроек с тех пор читает
+ * тариф из базы, а базы при сборке образа нет: пререндер падал, и падала
+ * вся сборка. Раскладка общая, значит и режим у страниц под ней общий.
+ */
+export const dynamic = "force-dynamic";
+
 export default function AboutPage() {
   return (
     <div className="flex flex-col gap-6">

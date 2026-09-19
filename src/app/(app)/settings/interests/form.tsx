@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { CheckIcon } from "lucide-react";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
+import type { Plan } from "@/lib/plans";
 import { FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -11,10 +12,12 @@ export function InterestsForm({
   chips,
   total,
   inToday,
+  plan,
 }: {
   chips: ChipInput[];
   total: number;
   inToday: number;
+  plan: Plan;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +64,13 @@ export function InterestsForm({
       <CardContent>
         <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
           <FieldGroup>
-            <TopicChips initial={chips} initialTotal={total} inToday={inToday} onChange={schedule} />
+            <TopicChips
+              initial={chips}
+              initialTotal={total}
+              inToday={inToday}
+              plan={plan}
+              onChange={schedule}
+            />
             {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
           </FieldGroup>
         </form>
