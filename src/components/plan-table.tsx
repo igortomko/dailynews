@@ -31,7 +31,6 @@ const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = 
   { feature: "digest", value: (plan) => `до ${maxDigestOf(plan)}` },
   { feature: "x", value: (plan) => plan.kinds.includes("x") },
   { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
-  { feature: "calibration", value: (plan) => FEATURES.calibration.has(plan) },
 ];
 
 function Value({ value }: { value: string | boolean }) {
