@@ -42,7 +42,7 @@ export async function denyForKind(
   const [{ n }] = await sql<{ n: number }[]>`
     select count(*)::int as n
       from dailynews.sources
-     where active and deleted_at is null and kind = any(${plan.kinds})
+     where deleted_at is null and kind = any(${plan.kinds})
   `;
   return n >= plan.maxSources
     ? `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — убери лишний`

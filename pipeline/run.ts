@@ -66,7 +66,7 @@ export async function collect(sources: Source[]): Promise<number[]> {
   const silent = await sql<{ label: string; days: number }[]>`
     select label, (current_date - silent_since::date)::int as days
       from dailynews.sources
-     where active and silent_since is not null
+     where deleted_at is null and silent_since is not null
      order by silent_since
   `;
   if (silent.length > 0) {
@@ -378,7 +378,7 @@ async function main() {
 
   const readers = await allReaders();
   const topics = await topicsInUse();
-  const all = await sql<Source[]>`select * from dailynews.sources where active and deleted_at is null order by id`;
+  const all = await sql<Source[]>`select * from dailynews.sources where deleted_at is null order by id`;
 
   // Тариф решает не только форма настроек: понижение оставляет лишние
   // источники включёнными в каталоге, и опрашивать их всё равно нельзя —

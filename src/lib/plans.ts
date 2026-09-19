@@ -199,7 +199,7 @@ export const cheapestFor = (id: FeatureId): Plan =>
  */
 export function sourcesForPlan(sources: Source[], plan: Plan): Source[] {
   return sources
-    .filter((source) => source.active && plan.kinds.includes(source.kind))
+    .filter((source) => plan.kinds.includes(source.kind))
     .sort((a, b) => a.id - b.id)
     .slice(0, plan.maxSources);
 }
