@@ -491,6 +491,31 @@ async function main() {
     );
     console.log(`  убрать и вернуть: ${itemsBefore} материалов пережили удаление`);
 
+    // --- ссылка, присланная боту -----------------------------------------------
+    // Вебхук открыт всему интернету, а разбор ссылки ходит в сеть: чужой
+    // не должен уметь даже заставить нас сходить по своему адресу. Обе
+    // проверки обязаны срабатывать до единого запроса наружу — здесь это
+    // и видно, потому что сети в проверке нет вовсе.
+    const { addByLink } = await import("../src/lib/sources");
+    const stranger = await readers.ensureReader(BIG_TELEGRAM_ID + 7, "chuzhoy");
+    const refused = await addByLink(stranger, "https://example.com/feed");
+    assert.equal(refused.ok, false, "посторонний не заводит источники");
+    assert.match(
+      (refused as { error: string }).error, /владелец/,
+      "и ему это сказано, а не сделано молча",
+    );
+
+    // Владелец берётся из базы, а не заводится по telegram_id: у перенесённой
+    // из profile строки его нет, и ensureReader завёл бы вместо неё нового
+    // читателя — тогда проверка меряла бы не то, что думает.
+    const [ownerNow] = await sql<(typeof owner)[]>`select * from dailynews.readers where owner`;
+    assert.ok(ownerNow?.owner, "владелец должен найтись");
+    const paid = await addByLink({ ...ownerNow, plan: "free" }, "from:karpathy OR from:sama");
+    assert.equal(paid.ok, false, "X на бесплатном тарифе не заводится");
+    assert.match((paid as { error: string }).error, /Pro/, "отказ называет тариф, который его открывает");
+    await sql`delete from dailynews.readers where id = ${stranger.id}`;
+    console.log("  ссылка боту: посторонний и платный вид отсекаются до запроса наружу");
+
     // --- новые виды источников ------------------------------------------------
     // Ограничение переименовано намеренно: переопределение под прежним именем
     // проверка формы схемы не видит, и 0018 уже проскочил так молча.

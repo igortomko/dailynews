@@ -5,7 +5,32 @@
  *
  *   npx tsx pipeline/selftest.ts
  */
-import assert from "node:assert/strict";
+import assertStrict from "node:assert/strict";
+
+/**
+ * Утверждения считает сам файл, а не человек в конце.
+ *
+ * Число в последней строке вели руками, и оно разъезжалось с правдой каждый
+ * раз, когда две ветки правили тесты одновременно: считать по тексту нельзя —
+ * часть утверждений живёт в циклах и срабатывает по нескольку раз. Разъехалось
+ * уже трижды, и каждый раз выглядело как «тестов стало меньше».
+ */
+let checks = 0;
+const count = <T>(fn: T): T =>
+  ((...args: unknown[]) => {
+    checks++;
+    return (fn as (...a: unknown[]) => unknown)(...args);
+  }) as T;
+const assert: typeof assertStrict = new Proxy(assertStrict, {
+  apply: (target, thisArg, args) => {
+    checks++;
+    return Reflect.apply(target as (...a: unknown[]) => unknown, thisArg, args);
+  },
+  get: (target, prop, receiver) => {
+    const value = Reflect.get(target, prop, receiver);
+    return typeof value === "function" ? count(value) : value;
+  },
+}) as typeof assertStrict;
 import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -14,7 +39,7 @@ import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
-import { checkSecret, parseUpdate } from "../src/lib/telegram";
+import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
@@ -1243,4 +1268,27 @@ assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкш�
 assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
 assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
 
-console.log("Самопроверка пройдена: 347 утверждений");
+// --- ссылка, присланная боту --------------------------------------------------
+// Прислать ссылку боту — тот же жест, что вставить её в форму. Отвечать
+// на него подсказкой «напиши /start» значит делать вид, что не понял.
+assert.equal(parseUpdate(privateStart("https://t.me/durov")).kind, "link", "ссылка заводит источник");
+assert.equal(parseUpdate(privateStart("@eugene_rid")).kind, "link", "@имя — тоже ссылка");
+assert.equal(parseUpdate(privateStart("simonwillison.net")).kind, "link", "голый домен — тоже");
+assert.equal(
+  (parseUpdate(privateStart(" https://example.com/feed ")) as { text: string }).text,
+  "https://example.com/feed",
+  "пробелы по краям снимаются до разбора",
+);
+// Разговор остаётся разговором, а команда — командой: и то и другое не должно
+// уходить в сеть за фидом.
+assert.equal(parseUpdate(privateStart("привет")).kind, "help", "слово без точки — не ссылка");
+assert.equal(parseUpdate(privateStart("/start")).kind, "start", "команда остаётся командой");
+assert.equal(parseUpdate(privateStart("а что ты умеешь?")).kind, "help", "фраза с пробелами — не ссылка");
+// Поисковый запрос X в переписке неотличим от фразы, и гадать в его пользу
+// нельзя: он платный.
+assert.ok(!looksLikeSource("uranium OR SMR min_faves:100"), "запрос X в чате не читается как источник");
+assert.ok(!looksLikeSource("/help"), "команда не источник");
+assert.ok(!looksLikeSource(""), "пустая строка не источник");
+
+console.log(`Самопроверка пройдена: ${checks} утверждений`);
+console.log(`Самопроверка пройдена: ${checks} утверждений`);
