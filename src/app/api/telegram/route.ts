@@ -1,5 +1,5 @@
 import { NextResponse, after, type NextRequest } from "next/server";
-import { issueLoginToken } from "@/lib/auth";
+import { appOrigin, issueLoginToken } from "@/lib/auth";
 import {
   answerCallback, askSubscribe, channelHandle, checkSecret, checkSubscription, escapeHtml,
   fetchBio, loginLink, parseUpdate, sendMessage, SECRET_HEADER,
@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
 
     // Свой адрес, а не выдуманный: ссылка с чужого домена уводит читателя
     // на чужой сайт, и выглядит это как обычная ссылка бота.
-    const appUrl = process.env.APP_URL?.trim() || request.nextUrl.origin;
+    const appUrl = appOrigin(request.nextUrl.origin);
     const link = loginLink(appUrl, await issueLoginToken(reader.id));
 
     await sendMessage(

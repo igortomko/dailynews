@@ -32,6 +32,7 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
   },
 }) as typeof assertStrict;
 import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import { appOrigin } from "../src/lib/auth";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -1518,6 +1519,32 @@ assert.equal(form(12), "материалов");
 assert.equal(form(21), "материал");
 assert.equal(form(22), "материала");
 assert.equal(form(0), "материалов");
+
+// --- адрес, на который приземляет ссылка входа --------------------------------
+// В standalone-сборке за обратным прокси nextUrl.origin — это адрес
+// прослушивания контейнера. Ссылка из бота приземлялась на
+// https://0.0.0.0:3000: кука ставилась, переход выполнялся, страница
+// не открывалась — и по ней понять, что сломалось, было нельзя.
+{
+  const before = process.env.APP_URL;
+  process.env.APP_URL = "https://news.tomko.io";
+  assert.equal(
+    appOrigin("https://0.0.0.0:3000"), "https://news.tomko.io",
+    "адрес берётся из APP_URL, а не из того, на что смотрит контейнер",
+  );
+  process.env.APP_URL = "  ";
+  assert.equal(
+    appOrigin("https://0.0.0.0:3000"), "https://0.0.0.0:3000",
+    "пробелы — это «не задано», а не адрес из пробелов",
+  );
+  delete process.env.APP_URL;
+  assert.equal(
+    appOrigin("http://localhost:3000"), "http://localhost:3000",
+    "без переменной остаётся адрес запроса: в разработке он и есть правильный",
+  );
+  if (before === undefined) delete process.env.APP_URL;
+  else process.env.APP_URL = before;
+}
 
 // --- гейт по подписке на канал ------------------------------------------------
 // Живого канала в проверке нет, а на владельце все четыре ветки неразличимы:
