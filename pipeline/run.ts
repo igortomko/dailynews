@@ -93,14 +93,19 @@ export async function collect(sources: Source[]): Promise<number[]> {
  * Отказ доступа прекращает весь шаг: «нас приняли за робота» — свойство
  * адреса, а не ролика, и сорок одинаковых отказов подряд ничего не добавят.
  */
-export async function transcribeVideos(itemIds: number[]): Promise<{ done: number; cost: number }> {
-  if (itemIds.length === 0) return { done: 0, cost: 0 };
-
+export async function transcribeVideos(): Promise<{ done: number; cost: number }> {
+  // Берём всё окно, а не то, что вставил этот прогон: первая попытка
+  // могла не удаться — провайдер ответил 401, YouTube отказал, — и ролик
+  // остался бы с описанием из фида навсегда, потому что новым он больше
+  // никогда не будет. Отметка о попытке и есть то, что отличает
+  // «уже ходили» от «ещё нет».
   const rows = await sql<{ id: number; url: string; title: string; label: string }[]>`
     select i.id, i.url, i.title, s.label
       from dailynews.items i
       join dailynews.sources s on s.id = i.source_id
-     where i.id = any(${itemIds}::bigint[]) and i.dup_of is null
+     where i.dup_of is null
+       and i.transcribed_at is null
+       and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
      order by i.id
   `;
   const videos = rows.flatMap((row) => {
@@ -121,13 +126,17 @@ export async function transcribeVideos(itemIds: number[]): Promise<{ done: numbe
     try {
       const transcript = await fetchTranscript(video.videoId);
       if (!transcript) {
+        // Субтитров у ролика нет вовсе — это ответ, а не сбой: отмечаем,
+        // иначе он опрашивался бы каждую ночь до конца окна свежести.
+        await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
         noCaptions++;
         continue;
       }
       const writeup = await describeVideo(video.title, video.label, transcript.text, transcript.lang);
       await sql`
         update dailynews.items
-           set excerpt = ${writeup.summary}, body = ${articleHtml(writeup.article) || null}
+           set excerpt = ${writeup.summary}, body = ${articleHtml(writeup.article) || null},
+               transcribed_at = now()
          where id = ${video.id}
       `;
       await recordCall({
@@ -517,7 +526,7 @@ async function main() {
   const collected = await collect(sources);
   log(`   новых материалов: ${collected.length}`);
 
-  const videos = await transcribeVideos(collected);
+  const videos = await transcribeVideos();
   if (videos.done > 0) {
     log(`   расшифровано роликов: ${videos.done} (${videos.cost.toFixed(3)} $)`);
   }
