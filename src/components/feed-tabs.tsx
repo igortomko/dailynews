@@ -154,7 +154,7 @@ export function FeedTabs({
                глазу не нужно удерживать, на какой он строке. Только на мыши —
                на тапе :hover залипает, и лента осталась бы приглушённой вся,
                кроме последней тронутой карточки. */
-            className="flex flex-col [@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-40"
+            className="flex flex-col [@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-25"
           >
             {list.length === 0 ? (
               <Empty>

@@ -148,5 +148,11 @@ export type Reader = {
   sleep_asked_at: string | null;
   /** Читатель попросил вернуть ленту с этого числа: отпуск, а не уход. */
   resume_at: string | null;
+  /** Описание из профиля Telegram. Только для порядка стартовых интересов. */
+  bio: string | null;
+  /** Стартовые интересы по убыванию близости к bio. Пусто — обычный порядок. */
+  suggested_topics: string[];
+  /** Когда прошёл проверку подписки на канал. Пусто — ещё не проходил. */
+  channel_checked_at: string | null;
   onboarded_at: string | null;
 };

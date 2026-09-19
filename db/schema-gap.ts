@@ -109,9 +109,26 @@ export function promised(dir = "db/migrations") {
 export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]> {
   const { tables, columns, constraints } = promised(dir);
 
-  const liveTables = await sql<{ table_name: string }[]>`
+  /**
+   * Пустой ответ здесь означает не «схемы нет», а «прочитать не вышло»:
+   * сверка тогда объявляет недостающим весь список разом, и это читается
+   * как «ни одна миграция не применена» — развёртывание встаёт с ложной
+   * причиной, и искать её идут не туда.
+   *
+   * Повтор, а не сразу отказ: PGlite за сокетом (db/verify.ts) время
+   * от времени отдаёт на этот запрос ноль строк вместо схемы — не ошибку,
+   * а пустой набор. На живом Postgres повтор ничего не меняет, а здесь
+   * превращает красную проверку через раз в проверку, которой можно верить.
+   * Пусто дважды — это уже ответ, и он называется вслух.
+   */
+  const readTables = () => sql<{ table_name: string }[]>`
     select table_name from information_schema.tables where table_schema = 'dailynews'
   `;
+  let liveTables = await readTables();
+  if (liveTables.length === 0) liveTables = await readTables();
+  if (liveTables.length === 0) {
+    throw new Error("живая схема dailynews прочиталась пустой — сверять не с чем");
+  }
   const hasTable = new Set(liveTables.map((row) => row.table_name));
 
   const live = await sql<{ table_name: string; column_name: string }[]>`
