@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getProfile } from "@/lib/queries";
+import { currentReader } from "@/lib/session";
 import { allows, planOf } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,6 @@ export const dynamic = "force-dynamic";
  * ожидал настройки: отказ на месте входа читается как «настроек нет».
  */
 export default async function SettingsIndex() {
-  const plan = planOf((await getProfile()).plan);
+  const plan = planOf((await currentReader()).plan);
   redirect(allows(plan, "personalization") ? "/settings/personalization" : "/settings/interests");
 }

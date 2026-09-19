@@ -10,10 +10,16 @@ const EVENTS = new Set(["seen", "opened", "dwell", "outbound", "dismissed", "up"
  * завышена ровно на ту долю, которую читатель проматывает.
  *
  * score_snap и conf_snap — снимок на момент чтения: веса потом изменятся,
- * а сравнивать надо с тем, что было показано.
+ * а сравнивать надо с тем, что было показано. Скор берётся из выпуска
+ * этого читателя: у того же материала у соседа он другой.
+ *
+ * Запись идёт select-ом из собственного выпуска, а не значениями из тела
+ * запроса. Поэтому событие о чужом материале не запишется вовсе: чужие
+ * события чтения ломают калибровку тише, чем что угодно другое.
  */
 export async function POST(request: NextRequest) {
-  if (!(await verifySession(request.cookies.get(SESSION_COOKIE)?.value))) {
+  const readerId = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!readerId) {
     return NextResponse.json({ error: "нет сессии" }, { status: 401 });
   }
 
@@ -33,10 +39,14 @@ export async function POST(request: NextRequest) {
   const dwell = Number.isFinite(payload.dwell_ms) ? Math.min(3_600_000, Math.max(0, Number(payload.dwell_ms))) : null;
 
   await sql`
-    insert into dailynews.reads (item_id, event, dwell_ms, score_snap, conf_snap)
-    select ${itemId}, ${event}, ${dwell}, sc.total, sc.confidence
-      from dailynews.scores sc
-     where sc.item_id = ${itemId}
+    insert into dailynews.reads (reader_id, item_id, event, dwell_ms, score_snap, conf_snap)
+    select ${readerId}, ${itemId}, ${event}, ${dwell}, di.total, sc.confidence
+      from dailynews.digest_items di
+      join dailynews.digests d on d.id = di.digest_id
+      join dailynews.scores sc on sc.item_id = di.item_id
+     where di.item_id = ${itemId} and d.reader_id = ${readerId}
+     order by d.day desc
+     limit 1
   `;
   return NextResponse.json({ ok: true });
 }

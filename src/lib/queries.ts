@@ -1,7 +1,15 @@
 import "server-only";
 import { sql } from "./db";
-import type { Axes, Profile, Source, Topic } from "./types";
+import type { Axes, Source } from "./types";
 
+/**
+ * Запросы ленты. У каждого первым аргументом идёт читатель, и это не
+ * формальность: запрос без reader_id в общей базе отдаёт чужой выпуск —
+ * вовремя, без ошибок и совершенно не тот.
+ *
+ * Обязательный параметр, а не «текущий читатель» внутри: забыть передать
+ * его нельзя, компилятор не даст. Внутри бы забылось однажды и молча.
+ */
 export type FeedItem = {
   id: number;
   url: string;
@@ -19,48 +27,41 @@ export type FeedItem = {
   read_count: number;
 };
 
-export async function getProfile(): Promise<Profile> {
-  const [profile] = await sql<Profile[]>`select * from dailynews.profile where id = 1`;
-  return profile;
-}
-
-export async function getTopics(): Promise<Topic[]> {
-  return sql<Topic[]>`select * from dailynews.topics where active order by position, id`;
-}
-
-export async function getAllTopics(): Promise<Topic[]> {
-  return sql<Topic[]>`select * from dailynews.topics order by position, id`;
-}
-
 export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`select * from dailynews.sources order by kind, label`;
 }
 
-/**
- * Лента: только то, что дошло до дайджеста. Весь остальной поток остаётся
- * в items — он нужен калибровке и дедупу, но показывать его незачем,
- * иначе отбор теряет смысл.
- */
-/** Дни, за которые есть дайджест, от свежего к старому. */
-export async function getDigestDays(): Promise<string[]> {
+/** Дни, за которые у этого читателя есть выпуск, от свежего к старому. */
+export async function getDigestDays(readerId: number): Promise<string[]> {
   const rows = await sql<{ day: string }[]>`
-    select day::text as day from dailynews.digests order by day desc limit 90
+    select day::text as day from dailynews.digests
+     where reader_id = ${readerId}
+     order by day desc limit 90
   `;
   return rows.map((row) => row.day);
 }
 
-export async function getFeed(day: string): Promise<FeedItem[]> {
+/**
+ * Лента: только то, что дошло до дайджеста этого читателя. Весь остальной
+ * поток остаётся в items — он нужен калибровке и дедупу, но показывать его
+ * незачем, иначе отбор теряет смысл.
+ *
+ * Заголовок и описание берутся из digest_items, а не из items: они написаны
+ * языком, сложностью и манерой этого читателя.
+ */
+export async function getFeed(readerId: number, day: string): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
-    select i.id, i.url, i.title, i.title_ru, i.summary, i.image_url,
+    select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
            s.label as source_label,
            t.slug as topic_slug, t.label as topic_label,
-           sc.total, sc.confidence, sc.axes,
+           di.total, sc.confidence, sc.axes,
            d.day::text as day,
            (select count(*)::int from dailynews.reads r
-             where r.item_id = i.id and r.event in ('opened', 'outbound')) as read_count
+             where r.item_id = i.id and r.reader_id = ${readerId}
+               and r.event in ('opened', 'outbound')) as read_count
       from dailynews.digests d
-      cross join lateral unnest(d.item_ids) with ordinality as u(item_id, ord)
-      join dailynews.items i on i.id = u.item_id
+      join dailynews.digest_items di on di.digest_id = d.id
+      join dailynews.items i on i.id = di.item_id
       join dailynews.scores sc on sc.item_id = i.id
       join dailynews.sources s on s.id = i.source_id
  left join dailynews.topics t on t.id = sc.topic_id
@@ -68,14 +69,15 @@ export async function getFeed(day: string): Promise<FeedItem[]> {
      -- date - date -> integer вместо date - integer -> date.
      -- Один день, а не окно: лента листается датами, и смешивать выпуски
      -- значит показывать вчерашнее как сегодняшнее.
-     where d.day = ${day}::date
+     where d.reader_id = ${readerId}
+       and d.day = ${day}::date
        -- Скрытое рукой не возвращается: иначе палец вниз означал бы
        -- «скрыть до перезагрузки страницы».
        and not exists (
          select 1 from dailynews.reads r
-          where r.item_id = i.id and r.event = 'down'
+          where r.item_id = i.id and r.reader_id = ${readerId} and r.event = 'down'
        )
-     order by d.day desc, sc.total desc
+     order by di.total desc
   `;
 
   // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт
@@ -101,18 +103,18 @@ export type SummaryQualityRow = {
  * правка промпта либо двигает его, либо нет, и на глаз это не видно —
  * двенадцать описаний в день всегда читаются нормально.
  */
-export async function getSummaryQuality(): Promise<SummaryQualityRow[]> {
+export async function getSummaryQuality(readerId: number): Promise<SummaryQualityRow[]> {
   return sql<SummaryQualityRow[]>`
     select d.day::text as day,
            count(*)::int as items,
-           round(avg(i.summary_score)::numeric, 1)::float as mean,
-           count(*) filter (where (i.summary_axes->'repeats_headline'->>'noul')::float > 0.5)::int as repeats,
-           count(*) filter (where (i.summary_axes->'reader_relevance'->>'noul')::float > 0.5)::int as relevant,
-           count(*) filter (where (i.summary_axes->'evaluative'->>'noul')::float > 0.5)::int as evaluative
+           round(avg(di.summary_score)::numeric, 1)::float as mean,
+           count(*) filter (where (di.summary_axes->'repeats_headline'->>'noul')::float > 0.5)::int as repeats,
+           count(*) filter (where (di.summary_axes->'reader_relevance'->>'noul')::float > 0.5)::int as relevant,
+           count(*) filter (where (di.summary_axes->'evaluative'->>'noul')::float > 0.5)::int as evaluative
       from dailynews.digests d
-      cross join lateral unnest(d.item_ids) as u(item_id)
-      join dailynews.items i on i.id = u.item_id
-     where i.summary_score is not null
+      join dailynews.digest_items di on di.digest_id = d.id
+     where d.reader_id = ${readerId}
+       and di.summary_score is not null
      group by d.day
      order by d.day desc
      limit 21
@@ -130,23 +132,28 @@ export type CalibrationRow = {
  * Калибровка: сравнение того, что система считала важным, с тем, что
  * действительно открывали. Высокий скор без открытий означает, что ось
  * подобрана неверно, а не что читатель ленивый.
+ *
+ * Скор берётся из digest_items — снимок на момент отбора его весами.
+ * Взять текущий было бы сравнением с числом, которого читатель не видел.
  */
-export async function getCalibration(): Promise<{
+export async function getCalibration(readerId: number): Promise<{
   byScore: CalibrationRow[];
   byConfidence: CalibrationRow[];
   byAxis: { axis: string; value: string; shown: number; opened: number; open_rate: number }[];
   totals: { shown: number; opened: number; days: number };
 }> {
   const shown = sql`
-    select i.id, sc.total, sc.confidence, sc.axes,
+    select i.id, di.total, sc.confidence, sc.axes,
            exists (
              select 1 from dailynews.reads r
-              where r.item_id = i.id and r.event in ('opened', 'outbound')
+              where r.item_id = i.id and r.reader_id = ${readerId}
+                and r.event in ('opened', 'outbound')
            ) as was_opened
       from dailynews.digests d
-      cross join lateral unnest(d.item_ids) as u(item_id)
-      join dailynews.items i on i.id = u.item_id
+      join dailynews.digest_items di on di.digest_id = d.id
+      join dailynews.items i on i.id = di.item_id
       join dailynews.scores sc on sc.item_id = i.id
+     where d.reader_id = ${readerId}
   `;
 
   const byScore = await sql<CalibrationRow[]>`
@@ -195,7 +202,7 @@ export async function getCalibration(): Promise<{
     with shown as (${shown})
     select count(*)::int as shown,
            count(*) filter (where was_opened)::int as opened,
-           (select count(*)::int from dailynews.digests) as days
+           (select count(*)::int from dailynews.digests where reader_id = ${readerId}) as days
       from shown
   `;
 

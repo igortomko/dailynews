@@ -14,6 +14,7 @@
     "migrate": "tsx --env-file=.env db/migrate.ts",
     "dry-run": "tsx --env-file=.env pipeline/dry-run.ts",
     "ping": "tsx --env-file=.env db/ping.ts",
+    "bot:webhook": "tsx --env-file=.env scripts/set-webhook.ts",
     "env:set": "tsx scripts/env-set.ts",
     "replay": "tsx --env-file=.env pipeline/prompt-replay.ts"
   },
@@ -50,5 +51,5 @@
     "tsx": "^4.23.13",
     "typescript": "^5"
   },
-  "description": "Персональная новостная лента: сбор → Jev-скоринг → дайджест в Telegram"
+  "description": "Многопользовательская новостная лента: сбор → Jev-скоринг → дайджест в Telegram и Kindle"
 }

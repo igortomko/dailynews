@@ -25,9 +25,9 @@ import {
   complexityAt,
   styleOf,
 } from "@/lib/voice";
-import type { Profile } from "@/lib/types";
+import type { Reader } from "@/lib/types";
 
-export function PersonalizationForm({ profile }: { profile: Profile }) {
+export function PersonalizationForm({ profile }: { profile: Reader }) {
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const form = useRef<HTMLFormElement>(null);

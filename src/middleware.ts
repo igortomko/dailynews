@@ -12,7 +12,9 @@ import { SESSION_COOKIE, verifySession } from "@/lib/auth";
  */
 // /api/version открыт намеренно: он нужен развёртыванию до входа
 // и не отдаёт ничего, кроме хеша коммита.
-const PUBLIC = ["/login", "/auth", "/api/version", "/_next", "/favicon.ico"];
+// /api/telegram открыт намеренно: его аутентифицирует секрет вебхука,
+// а куки у Telegram нет и быть не может.
+const PUBLIC = ["/login", "/auth", "/api/version", "/api/telegram", "/_next", "/favicon.ico"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

@@ -59,18 +59,19 @@ async function main() {
     // спрятан в имени роли — на глаз они не сверяются. Накатить миграции
     // в соседний проект общего аккаунта — ошибка, которую никто не заметит:
     // команды пройдут, журнал наполнится, а приложение останется без колонок.
-    const [here] = await sql<{ mark: string }[]>`
-      select md5(coalesce(reader_context, '') || digest_size::text) as mark
-        from dailynews.profile where id = 1
+    // Отпечаток снимается с sources, а не с profile: profile увезена
+    // в 0020, и проверка по ней отбивала бы собственную базу как чужую.
+    // Каталог источников есть с 0002, переживает все миграции и виден
+    // обеим ролям — а проверке надо работать и до накатывания.
+    const fingerprint = (db: typeof sql) => db<{ mark: string }[]>`
+      select md5(count(*)::text || coalesce(max(url), '')) as mark from dailynews.sources
     `;
-    const [there] = await owner<{ mark: string }[]>`
-      select md5(coalesce(reader_context, '') || digest_size::text) as mark
-        from dailynews.profile where id = 1
-    `;
+    const [here] = await fingerprint(sql);
+    const [there] = await fingerprint(owner as unknown as typeof sql);
     if (!here || !there || here.mark !== there.mark) {
       console.error(
         "\n! SUPABASE_DB_URL ведёт не в ту базу, с которой работает приложение.\n" +
-        "  Профили в них разные, значит это разные проекты Supabase.\n" +
+        "  Каталоги источников в них разные, значит это разные проекты Supabase.\n" +
         "  Возьми строку из того же проекта, что и DATABASE_URL.",
       );
       process.exit(1);
@@ -86,6 +87,14 @@ async function main() {
       return;
     }
     console.log(`В журнале ${known.size} из ${files.length}, к разбору ${pending.length}.`);
+
+    // Запись без файла — миграция из чужой ветки, уже стоящая в базе.
+    // Молчать о ней нельзя: её изменений нет ни в одной проверке, а номер
+    // она занимает. Так нашлась 0019_plan с колонкой profile.plan.
+    const foreign = [...known].filter((name) => !files.includes(`${name}.sql`));
+    if (foreign.length > 0) {
+      console.log(`В журнале есть записи без файлов: ${foreign.join(", ")}`);
+    }
 
     // Какой файл за какой разрыв отвечает: если разрывов у файла нет,
     // его обещания в базе уже выполнены.
@@ -149,10 +158,10 @@ async function diagnose() {
   const checks = await owner<{ conname: string; def: string }[]>`
     select conname, pg_get_constraintdef(oid) as def
       from pg_constraint
-     where conrelid = 'dailynews.profile'::regclass and contype = 'c'
+     where conrelid = 'dailynews.readers'::regclass and contype = 'c'
      order by conname
   `;
-  console.log("\nограничения profile:");
+  console.log("\nограничения readers:");
   for (const row of checks) console.log(`  ${row.conname}: ${row.def}`);
 
   const journal = await owner<{ name: string; applied_at: Date }[]>`
@@ -173,8 +182,11 @@ if (process.argv.includes("--check")) {
     process.exit(1);
   });
 } else if (process.argv.includes("--list")) {
-  const { columns, constraints } = promised();
-  console.log(`колонок обещано: ${columns.length}, ограничений: ${constraints.length}`);
+  const { tables, columns, constraints } = promised();
+  console.log(
+    `таблиц обещано: ${tables.length}, колонок: ${columns.length}, ` +
+    `ограничений: ${constraints.length}`,
+  );
   console.log(`файлов в папке: ${readdirSync("db/migrations").filter((f) => f.endsWith(".sql")).length}`);
 } else {
   main().catch(async (error) => {
