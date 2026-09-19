@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ThumbsUpIcon, ThumbsDownIcon, UndoIcon, BookOpenIcon, CheckIcon } from "lucide-react";
+import {
+  ThumbsUpIcon,
+  ThumbsDownIcon,
+  UndoIcon,
+  BookOpenIcon,
+  CheckIcon,
+  EllipsisIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -13,13 +20,33 @@ import type { FeedItem } from "@/lib/queries";
 const SEEN_MS = 1500;
 const DWELL_FLOOR_MS = 4000;
 
-function report(body: { item_id: number; event: string; dwell_ms?: number }, beacon = false) {
+/**
+ * Событие калибровки.
+ *
+ * Отказ здесь не видит никто: запрос уходил через `void fetch` без единого
+ * `catch`, и на моргнувшей сети событие просто исчезало. Калибровка потом
+ * показывает отбор хуже, чем он есть, и объяснить это нечем — данных
+ * о потере нет. Одна повторная попытка и строка в консоль: тост тут не
+ * к месту, это не проблема читателя, но и молчать нельзя.
+ */
+function report(
+  body: { item_id: number; event: string; dwell_ms?: number; undo?: true },
+  beacon = false,
+) {
   const json = JSON.stringify(body);
+  // sendBeacon отдаёт false, когда очередь браузера переполнена, — тогда
+  // обычный запрос. Раньше этот ответ не проверялся, и событие ухода
+  // со страницы терялось ровно там, где повторить его уже нечем.
   if (beacon && typeof navigator.sendBeacon === "function") {
-    navigator.sendBeacon("/api/read", new Blob([json], { type: "application/json" }));
-    return;
+    if (navigator.sendBeacon("/api/read", new Blob([json], { type: "application/json" }))) return;
   }
-  void fetch("/api/read", { method: "POST", body: json, keepalive: true });
+  const send = () =>
+    fetch("/api/read", { method: "POST", body: json, keepalive: true }).then((res) => {
+      if (!res.ok) throw new Error(`ответ ${res.status}`);
+    });
+  void send()
+    .catch(() => new Promise((resolve) => setTimeout(resolve, 1500)).then(send))
+    .catch((error) => console.warn(`событие «${body.event}» не доехало:`, error));
 }
 
 const KIND: Record<string, string> = {
@@ -35,6 +62,19 @@ const HORIZON: Record<string, string> = {
   months: "месяцы",
   noise: "шум дня",
 };
+
+/**
+ * Полная дата для подсказки. «4д» отвечает на «давно ли», но не на «какого
+ * числа» — а это разные вопросы, и второй возникает ровно тогда, когда
+ * материал обсуждают с кем-то ещё.
+ */
+const EXACT = new Intl.DateTimeFormat("ru", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 /** Домен издания: источник ведёт на издание, заголовок — на сам материал. */
 function siteOf(url: string): string | null {
@@ -54,6 +94,8 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
   // перезагрузки оно теряется — повторный тап ловит 409 от частичного
   // индекса и честно об этом говорит.
   const [kindle, setKindle] = useState<"idle" | "sending" | "sent">("idle");
+  // Раскрыт ли ряд действий. Нужен только там, где нет наведения.
+  const [actions, setActions] = useState(false);
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
@@ -138,7 +180,15 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
         <span className="truncate">Скрыто: {title}</span>
         <button
           type="button"
-          onClick={() => setVote(null)}
+          onClick={() => {
+            // Отмена снимает событие, а не только прячет плашку. Лента
+            // исключает материал по наличию события down: оставь его
+            // на месте — и «Вернуть» возвращало бы материал ровно
+            // до перезагрузки страницы, после которой он исчезал навсегда.
+            // Кнопка обещала обратимость, которой не было.
+            report({ item_id: item.id, event: "down", undo: true });
+            setVote(null);
+          }}
           className="flex shrink-0 cursor-pointer items-center gap-1 hover:text-foreground"
         >
           <UndoIcon className="size-3.5" />
@@ -185,27 +235,61 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
               не дёргалась при наведении, — и «кликбейт» за этим местом
               висел в пустоте, оторванный от того, к чему относится. */}
           {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
-          <span className="truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-            {[
-              relativeTime(item.published_at),
-              showTopic ? item.topic_label : null,
-              kind,
-              horizon,
-            ]
-              .filter(Boolean)
-              .join(", ")}
+          {/* min-w-0 обязателен: truncate обрезает только то, чему разрешили
+              сузиться, а гибкий элемент по умолчанию не уже своего
+              содержимого. Строка в одну линию держала ширину всей карточки,
+              и на телефоне лента уезжала за край экрана — заголовок и текст
+              обрезались справа, а докрутить до них было нельзя. */}
+          <span className="min-w-0 truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <time
+                    dateTime={new Date(item.published_at).toISOString()}
+                    // Часовой пояс сервера и читателя разные, и точная дата
+                    // на них расходится. Значение читателя верное,
+                    // предупреждение о несовпадении — шум.
+                    suppressHydrationWarning
+                    className="cursor-default"
+                  />
+                }
+              >
+                {relativeTime(item.published_at)}
+              </TooltipTrigger>
+              <TooltipContent>{EXACT.format(new Date(item.published_at))}</TooltipContent>
+            </Tooltip>
+            {[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).length > 0
+              ? `, ${[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).join(", ")}`
+              : ""}
           </span>
         </span>
 
         {/* Оценка тоже по наведению: нужна раз на десяток материалов,
             а в покое спорит с заголовком. Поднятый палец виден всегда,
-            иначе выставленная оценка исчезает вместе с курсором. */}
+            иначе выставленная оценка исчезает вместе с курсором.
+
+            На тапе наведения нет, и ряд висел раскрытым в каждой карточке:
+            три иконки на узком экране, где и заголовку тесно. Там он прячется
+            за одну кнопку — те же действия, но по своей воле, а не в каждой
+            строке ленты. */}
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            aria-label={actions ? "Скрыть действия" : "Действия с материалом"}
+            aria-expanded={actions}
+            onClick={() => setActions((open) => !open)}
+            className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 [@media(hover:none)]:flex"
+          >
+            <EllipsisIcon className="size-4" />
+          </button>
         <div
           className={cn(
-            "ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",
+            "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",
             "group-hover:opacity-100 group-focus-within:opacity-100",
-            "[@media(hover:none)]:opacity-100",
             vote === "up" && "opacity-100",
+            actions || vote === "up"
+              ? "[@media(hover:none)]:opacity-100"
+              : "[@media(hover:none)]:hidden",
           )}
         >
           {/* Иконка без подписи опознаётся только по догадке. Подпись
@@ -217,8 +301,12 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                 <button
                   type="button"
                   aria-label="Отправить на Kindle"
-                  disabled={kindle !== "idle"}
-                  onClick={sendToKindle}
+                  // aria-disabled, а не disabled: браузер снимает фокус
+                  // с выключенной кнопки, и с клавиатуры место в списке
+                  // теряется ровно в момент нажатия. Заодно остаётся
+                  // подсказка — на disabled она не показывается никогда.
+                  aria-disabled={kindle !== "idle"}
+                  onClick={kindle === "idle" ? sendToKindle : undefined}
                   className={cn(
                     "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
                     kindle === "idle"
@@ -284,6 +372,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
             <TooltipContent>Скрыть и меньше такого</TooltipContent>
           </Tooltip>
         </div>
+        </div>
       </div>
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
@@ -299,7 +388,10 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
           <h3
             className={cn(
               "mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]",
-              item.read_count > 0 && "text-foreground/55",
+              // Прочитанный заголовок приглушается, но остаётся читаемым:
+              // на 55% он давал около 3,5:1 — формально хватает для крупного
+              // кегля, на солнце и на плохом экране уже нет.
+              item.read_count > 0 && "text-foreground/70",
             )}
           >
             <a
@@ -319,7 +411,10 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
               // 16 пикселей, а не 15: описание — единственный сплошной текст
               // в карточке, и на нём экономить кегль незачем. Строка держится
               // в 68 знаков — дальше глаз промахивается мимо начала следующей.
-              className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground/80"
+              // Цвет текста — полный, а не 80%: описание здесь и есть
+              // материал, всё остальное в карточке к нему подпись.
+              // Приглушённый основной текст читается как черновик.
+              className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
             >
               {item.summary}
             </p>

@@ -487,6 +487,10 @@ export function SourcesManager({
                   её иногда хочется у любого.
                 */}
                 {source.last_error ? (
+                  // Своя подсказка вместо title — та же, что у всех иконок
+                  // в приложении. Текст ошибки продублирован в предупреждении
+                  // наверху страницы, поэтому наведение здесь — короткий путь,
+                  // а не единственный.
                   <Tooltip>
                     <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>ошибка</TooltipTrigger>
                     <TooltipContent>{source.last_error}</TooltipContent>
@@ -501,8 +505,20 @@ export function SourcesManager({
                     </TooltipContent>
                   </Tooltip>
                 ) : source.last_count !== null ? (
+                  // Одно число без подписи — загадка: рядом уже стоит отдача
+                  // за тридцать дней, и какое из двух что значит, неоткуда
+                  // узнать, кроме как навести. Подпись нужна и диктору:
+                  // подсказка достаётся курсору, а он её не видит.
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="secondary" className="cursor-help" />}>
+                    <TooltipTrigger
+                      render={
+                        <Badge
+                          variant="secondary"
+                          className="cursor-help"
+                          aria-label={`Последний прогон дал ${source.last_count} свежих материалов`}
+                        />
+                      }
+                    >
                       {source.last_count}
                     </TooltipTrigger>
                     <TooltipContent>

@@ -125,7 +125,10 @@ export function TopicBudgetBar({
             // название пустое и неуникальное, и React путает сегменты.
             key={index}
             type="button"
-            title={`${labels[index]} — ${counts[index]} из ${total}`}
+            // Браузерной подсказки здесь нет намеренно: подпись над полосой
+            // говорит то же самое сразу и на своём месте, а title выезжал бы
+            // поверх полосы через секунду — ровно там, где в этот момент
+            // тянут границу.
             aria-label={`${labels[index]}, ${counts[index]} из ${total}`}
             aria-pressed={active === index}
             onClick={() => setActive(active === index ? null : index)}

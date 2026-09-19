@@ -113,7 +113,13 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     schedule();
                   }}
                 >
-                  <SelectTrigger id="language" className="w-full" disabled={!translates}>
+                  {/* Не disabled: выключенный селект не ловит нажатие, и окно
+                      с предложением тарифа, которое открывает onValueChange,
+                      не открывалось никогда — ветка была мёртвой. Корона
+                      у подписи говорит, что раздел платный, а выбор языка
+                      показывает, за что именно платить. Значение при этом
+                      не меняется: окно открывается вместо него. */}
+                  <SelectTrigger id="language" className="w-full">
                     <SelectValue>{language}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>

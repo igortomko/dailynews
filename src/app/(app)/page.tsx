@@ -50,9 +50,14 @@ export default async function FeedPage({
     <FeedTabs
       topics={topics}
       items={items}
-      left={<DateNav day={day} days={days} />}
+      // key на элементах, уезжающих в проп: шапка ленты ставит left и right
+      // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
+      // теряет пометку «детей ровно столько, сколько написано». React считает
+      // пару списком и просит ключ — в консоли это выглядит как настоящая
+      // ошибка в ленте и прячет собой те, что ошибки и есть.
+      left={<DateNav key="date" day={day} days={days} />}
       right={
-        <Tooltip>
+        <Tooltip key="settings">
           <TooltipTrigger
             render={
               <Button

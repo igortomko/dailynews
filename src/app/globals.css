@@ -126,6 +126,26 @@
 }
 
 @layer base {
+  /*
+    «Поменьше движения» — не вкус, а настройка здоровья: у части людей
+    анимация вызывает головокружение и тошноту. Правило одно на всё
+    приложение, потому что иначе его придётся помнить в каждом новом
+    компоненте — а забытое оно молчит: у того, кто эту настройку поставил,
+    интерфейс просто продолжает ездить.
+    Не ноль, а 0.01мс: обработчики transitionend и animationend должны
+    сработать, иначе состояние, которое их ждёт, зависает навсегда.
+  */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
   * {
     @apply border-border outline-ring/50;
   }

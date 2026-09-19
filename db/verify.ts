@@ -355,6 +355,19 @@ async function main() {
              (${owner.id}, ${ids[0]}, 'outbound', 120, 0.8),
              (${second.id}, ${ids[3]}, 'opened', 60, 0.8)
     `;
+    // Граница «досюда дочитал» держится на этом поле: материал, попадавшийся
+    // на глаза, отмечен, остальные нет. Если запрос начнёт отдавать true всем
+    // подряд, граница уедет в начало ленты и будет врать молча.
+    const seenFlags = (await queries.getFeed(owner.id, today)).map((item) => item.seen);
+    assert.deepEqual(seenFlags, [false, false], "до события seen ни один материал не отмечен");
+    await sql`
+      insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+      values (${owner.id}, ${ids[0]}, 'seen', 120, 0.8)
+    `;
+    const withSeen = await queries.getFeed(owner.id, today);
+    assert.equal(withSeen[0].seen, true, "показанный материал должен быть отмечен");
+    assert.equal(withSeen[1].seen, false, "чужой строке события seen взяться неоткуда");
+
     const afterRead = await queries.getFeed(owner.id, today);
     assert.equal(afterRead[0].read_count, 2, "счётчик чтений должен вырасти");
 
