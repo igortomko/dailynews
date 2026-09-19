@@ -1,0 +1,25 @@
+name: yt-probe
+on:
+  push:
+    branches: [claude/youtube-channel-video-summary-8fe29c]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: warp + youtube captions
+        run: |
+          docker run -d --name warp --memory=300m --cap-add NET_ADMIN --device /dev/net/tun -p 127.0.0.1:1080:1080 caomingjun/warp
+          for i in $(seq 1 12); do sleep 5; if curl -s --max-time 8 --socks5-hostname 127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace | grep -q "warp=on"; then echo "warp поднялся за $((i*5))с"; break; fi; done
+          curl -s --socks5-hostname 127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace | grep -E "^(ip|warp|loc)="
+          curl -s --max-time 30 --socks5-hostname 127.0.0.1:1080 "https://www.youtube.com/youtubei/v1/player" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)" \
+            -d '{"videoId":"O3a99HNskNk","context":{"client":{"clientName":"IOS","clientVersion":"20.03.02","hl":"en","gl":"US"}}}' -o p.json -w "player HTTP %{http_code}\n"
+          python3 -c "
+          import json
+          d=json.load(open('p.json'))
+          st=d.get('playabilityStatus',{}); tr=d.get('captions',{}).get('playerCaptionsTracklistRenderer',{}).get('captionTracks',[])
+          print('ИТОГ status:',st.get('status'),st.get('reason'),'| треков:',len(tr))
+          open('u.txt','w').write(tr[0]['baseUrl'] if tr else '')
+          "
+          U=$(cat u.txt); if [ -n "$U" ]; then curl -s --max-time 30 --socks5-hostname 127.0.0.1:1080 -A "com.google.ios.youtube/20.03.02" "$U" -o c.xml -w "субтитры HTTP %{http_code} %{size_download}b\n"; head -c 150 c.xml; fi
