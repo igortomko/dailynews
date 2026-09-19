@@ -61,7 +61,7 @@ export default async function FeedPage({
       right={
         // Тема и настройки — одна пара: и то и другое про то, как выглядит
         // и работает лента, а не про сам выпуск.
-        <div key="actions" className="flex items-center gap-0.5">
+        <div key="actions" className="flex items-center gap-2">
         <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
         <Tooltip>
           <TooltipTrigger

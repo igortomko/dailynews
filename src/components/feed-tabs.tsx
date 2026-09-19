@@ -143,7 +143,7 @@ export function FeedTabs({
         до обрезанного было нельзя, горизонтальной прокрутки нет.
       */}
       <div className="mx-auto w-full max-w-page px-4 py-4 sm:py-6">
-        <div className="rounded-xl border bg-card px-4 sm:px-6">
+        <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
       {tabs.map((tab) => {
         const list = forTab(tab.slug);
         return (
