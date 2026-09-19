@@ -11,12 +11,22 @@ import postgres from "postgres";
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL не задан");
 
+const host = (() => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+})();
+const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+
 export const sql = postgres(url, {
   // Транзакционный пулер не поддерживает prepared statements.
   prepare: false,
   // Сертификат подписан собственным CA Supabase: строгая проверка падает
   // на рукопожатии. Соединение остаётся зашифрованным.
-  ssl: { rejectUnauthorized: false },
+  // Локальный Postgres (разработка, db/verify.ts) TLS не слушает вовсе.
+  ssl: isLocal ? false : { rejectUnauthorized: false },
   // У роли connection limit 10 и она общая с пайплайном.
   max: Number(process.env.DB_POOL_MAX ?? 3),
   idle_timeout: 20,

@@ -44,7 +44,7 @@ export async function getSources(): Promise<Source[]> {
  * иначе отбор теряет смысл.
  */
 export async function getFeed(): Promise<FeedItem[]> {
-  return sql<FeedItem[]>`
+  const rows = await sql<FeedItem[]>`
     select i.id, i.url, i.title, i.title_ru, i.summary,
            s.label as source_label,
            t.slug as topic_slug, t.label as topic_label,
@@ -58,9 +58,19 @@ export async function getFeed(): Promise<FeedItem[]> {
       join dailynews.scores sc on sc.item_id = i.id
       join dailynews.sources s on s.id = i.source_id
  left join dailynews.topics t on t.id = sc.topic_id
-     where d.day > current_date - ${FEED_DAYS}
+     -- Каст обязателен: у нетипизированного параметра Postgres выбирает
+     -- date - date -> integer вместо date - integer -> date.
+     where d.day > current_date - ${FEED_DAYS}::int
      order by d.day desc, sc.total desc
   `;
+
+  // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт
+  // ожидаемый OID колонки. Если axes придёт строкой, карточка молча
+  // покажет прочерк вместо каждого бейджа — отказ, который не заметен.
+  return rows.map((row) => ({
+    ...row,
+    axes: typeof row.axes === "string" ? JSON.parse(row.axes) : row.axes,
+  }));
 }
 
 export type CalibrationRow = {
