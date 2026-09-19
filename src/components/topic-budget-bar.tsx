@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { colorAt, moveBoundary } from "@/lib/topic-budget";
+import { colorAt, handleLeft, moveBoundary } from "@/lib/topic-budget";
 import { cn } from "@/lib/utils";
 
 /**
@@ -162,7 +162,7 @@ export function TopicBudgetBar({
               if (event.key === "ArrowRight") { event.preventDefault(); nudge(boundary, 1); }
               if (event.key === "Escape") setActive(null);
             }}
-            style={{ left: `${(upTo(boundary) / total) * 100}%` }}
+            style={{ left: handleLeft(counts, boundary) }}
             // Белая, а не тёмная: тёмная ручка на цветной полосе читается
             // как ещё один кусок, только чёрный.
             className="absolute top-1/2 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-col-resize rounded-full border border-foreground/15 bg-background shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"

@@ -38,7 +38,7 @@ import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
-import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
@@ -683,6 +683,33 @@ assert.ok(
   "но страница остаётся: ряд чисел нужен для правок отбора",
 );
 
+// Ручка границы стоит в зазоре между кусками, а не в доле от всей ширины:
+// куски выложены флексом с зазором, и доля от полной ширины промахивается
+// тем сильнее, чем правее граница — на последних ручка уезжала на соседний
+// сегмент и выглядела его ручкой.
+{
+  const counts = [15, 12, 7, 3, 3];   // 40 новостей, пять тем
+  const gaps = BAR_GAP * (counts.length - 1);
+
+  assert.equal(
+    handleLeft(counts, 0),
+    `calc((100% - ${gaps}px) * 0.375 + ${BAR_GAP / 2}px)`,
+    "первая граница: доля от цветной части плюс половина зазора",
+  );
+  assert.equal(
+    handleLeft(counts, 1),
+    `calc((100% - ${gaps}px) * 0.675 + ${BAR_GAP * 1.5}px)`,
+    "вторая граница уже прошла один зазор целиком",
+  );
+  // Последняя граница обязана попасть в последний зазор, а не за полосу.
+  assert.equal(
+    handleLeft(counts, counts.length - 2),
+    `calc((100% - ${gaps}px) * 0.925 + ${BAR_GAP * 3.5}px)`,
+    "у правого края ручка остаётся в своём зазоре",
+  );
+  assert.ok(handleLeft([1], 0).includes("100% - 0px"), "на одной теме зазоров нет");
+}
+
 // Окно с предложением показывает все тарифы, где возможность есть и которые
 // дороже текущего: один самый дешёвый теряет место, где читатель выбрал бы Pro.
 const offersFor = (feature: FeatureId, current: Plan) =>
@@ -1290,5 +1317,4 @@ assert.ok(!looksLikeSource("uranium OR SMR min_faves:100"), "запрос X в �
 assert.ok(!looksLikeSource("/help"), "команда не источник");
 assert.ok(!looksLikeSource(""), "пустая строка не источник");
 
-console.log(`Самопроверка пройдена: ${checks} утверждений`);
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
