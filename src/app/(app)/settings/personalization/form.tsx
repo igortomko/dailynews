@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { savePersonalization } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
@@ -69,9 +70,15 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {first ? "Настрой ленту" : "Персонализация"}
+          {/* Зелёный только у «сохранено»: это единственное состояние,
+              которое сообщает, что всё в порядке. «Сохраняю…» ничего
+              не обещает и красится как обычная подпись. */}
           <span
             aria-live="polite"
-            className="flex items-center gap-1 text-xs font-normal text-muted-foreground"
+            className={cn(
+              "flex items-center gap-1 text-xs font-normal",
+              saved && !pending ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+            )}
           >
             {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
           </span>
@@ -113,7 +120,13 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     schedule();
                   }}
                 >
-                  <SelectTrigger id="language" className="w-full" disabled={!translates}>
+                  {/* Не disabled: выключенный селект не ловит нажатие, и окно
+                      с предложением тарифа, которое открывает onValueChange,
+                      не открывалось никогда — ветка была мёртвой. Корона
+                      у подписи говорит, что раздел платный, а выбор языка
+                      показывает, за что именно платить. Значение при этом
+                      не меняется: окно открывается вместо него. */}
+                  <SelectTrigger id="language" className="w-full">
                     <SelectValue>{language}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>

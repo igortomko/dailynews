@@ -61,6 +61,14 @@ export const paymentsConfigured = () => Object.keys(variants()).length > 0;
  * гасить по расписанию, а оно здесь ходит раз в сутки.
  */
 export function effectivePlan(reader: Reader, now = new Date()): Plan {
+  // У владельца действует то, что стоит в колонке: подписки он у себя
+  // самого не покупает, и проверять её статус не по чему. Так у него
+  // и стояло «pro» — и гасло каждой проверкой на подписку, которой нет.
+  // Выдать ему Pro прямо здесь было бы короче, но тогда он не может
+  // посмотреть на продукт глазами бесплатного читателя, а проверка
+  // «платный источник просит Pro» меряет владельца и потому мертва.
+  if (reader.owner) return planOf(reader.plan);
+
   const bought = planOf(reader.plan);
   if (bought.id === "free") return bought;
 

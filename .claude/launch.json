@@ -15,22 +15,9 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": [
         "next",
-        "dev",
-        "--port",
-        "3100"
+        "dev"
       ],
-      "port": 3100
-    },
-    {
-      "name": "dailynews-blogger",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": [
-        "next",
-        "dev",
-        "--port",
-        "3105"
-      ],
-      "port": 3105
+      "autoPort": true
     }
   ]
 }

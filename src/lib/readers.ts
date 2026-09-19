@@ -1,5 +1,5 @@
 import { sql } from "./db";
-import type { Reader, ReaderChannel, ReaderTopic, Topic, VoiceCardRow } from "./types";
+import type { Reader, ReaderChannel, ReaderTopic, Source, Topic, VoiceCardRow } from "./types";
 import { kindleSenderName } from "./kindle-setup";
 
 /**
@@ -29,6 +29,7 @@ const COLUMNS = sql`
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
   paused_at, sleep_asked_at, resume_at,
+  bio, suggested_topics, channel_checked_at::text as channel_checked_at,
   voice_card, voice_built_at, voice_sample
 `;
 
@@ -165,6 +166,7 @@ export type CallRecord = {
   readerId: number | null;
   stage:
     | "score" | "digest" | "summary" | "translate" | "translation-quality"
+    | "video" | "interests"
     // Карточка автора и пост — такие же оплаченные вызовы, и потолок
     // читателя считается по той же таблице.
     | "voice" | "post" | "post-quality";
@@ -173,6 +175,47 @@ export type CallRecord = {
   tokensOut?: number;
   costUsd: number;
 };
+
+/**
+ * Статьи, про которые ещё не спросили. Отдельной функцией, чтобы запрос
+ * проверялся на настоящем Postgres (`npm run verify:db`): прошлая его
+ * версия спрашивала несуществующую колонку и падала каждую ночь, а прогон
+ * при этом отчитывался успехом.
+ */
+export async function pendingKindleAsks(readerId: number) {
+  // Заголовок берётся из выпуска этого читателя, а не из общей items:
+  // колонки items.title_ru не существует с тех пор, как тексты дайджеста
+  // стали персональными, и запрос падал каждую ночь строкой в логе —
+  // «дочитал?» не спрашивалось ни разу, а прогон при этом отчитывался
+  // успехом. Своего заголовка в выпуске нет (статью отправили не из него) —
+  // остаётся исходный.
+  const pending = await sql<{ item_id: number; title: string }[]>`
+    select ks.item_id,
+           coalesce(
+             (select di.title
+                from dailynews.digest_items di
+                join dailynews.digests d on d.id = di.digest_id
+               where d.reader_id = ks.reader_id and di.item_id = ks.item_id
+               order by d.day desc
+               limit 1),
+             i.title
+           ) as title
+      from dailynews.kindle_sends ks
+      join dailynews.items i on i.id = ks.item_id
+     where ks.reader_id = ${readerId}
+       and ks.status = 'sent'
+       and ks.at < now() - interval '12 hours'
+       and ks.at > now() - interval '7 days'
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.reader_id = ks.reader_id and r.item_id = ks.item_id
+            and r.event in ('finished', 'unfinished')
+       )
+     order by ks.at
+     limit 3
+  `;
+  return pending;
+}
 
 /** Строка на каждый вызов модели. Без неё потолок нечем проверять,
  *  а перерасход виден только в счёте в конце месяца. */
@@ -319,6 +362,34 @@ export async function deleteChannel(readerId: number, network: string): Promise<
 }
 
 /**
+ * Описание из Telegram и порядок стартовых интересов под него.
+ *
+ * Пишется один раз при заведении, пока читатель подписывается на канал.
+ * Считать это при открытии первого экрана значило бы показать ему спиннер
+ * ровно там, где он решает, стоит ли продолжать.
+ */
+export async function saveSuggestions(
+  readerId: number,
+  bio: string | null,
+  slugs: string[],
+): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set bio = ${bio}, suggested_topics = ${slugs}, updated_at = now()
+     where id = ${readerId}
+  `;
+}
+
+/** Проверку подписки на канал прошёл. Гейт стоит на входе и только там. */
+export async function markChannelChecked(readerId: number): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set channel_checked_at = now(), updated_at = now()
+     where id = ${readerId} and channel_checked_at is null
+  `;
+}
+
+/**
  * Карточка автора кладётся объектом, а не строкой: `JSON.stringify` в jsonb
  * сохраняет строку, и `voice_card->'voice'` становится null молча (урок 0005).
  * Драйвер сам сериализует объект правильно, если не трогать его руками.
@@ -338,5 +409,58 @@ export async function saveVoiceSample(readerId: number, sample: string): Promise
     update dailynews.readers
        set voice_sample = ${sample}, updated_at = now()
      where id = ${readerId}
+  `;
+}
+
+/**
+ * Источники этого читателя.
+ *
+ * Каталог общий, выбор личный. До reader_sources «источники тарифа»
+ * означали первые N строк каталога по id — один и тот же набор у всех,
+ * и у второго читателя выпуск собирался из чужих источников: вовремя,
+ * без ошибок и не из того, что он выбирал.
+ *
+ * Порядок по id: при понижении тарифа остаются заведённые раньше,
+ * и набор не пляшет от прогона к прогону.
+ */
+export async function readerSources(readerId: number): Promise<Source[]> {
+  return sql<Source[]>`
+    select s.* from dailynews.sources s
+      join dailynews.reader_sources rs on rs.source_id = s.id
+     where rs.reader_id = ${readerId} and s.deleted_at is null
+     order by s.id
+  `;
+}
+
+/** Сколько источников у читателя сейчас: предел тарифа считается по ним. */
+export async function countReaderSources(readerId: number): Promise<number> {
+  const [row] = await sql<{ n: number }[]>`
+    select count(*)::int as n
+      from dailynews.reader_sources rs
+      join dailynews.sources s on s.id = rs.source_id
+     where rs.reader_id = ${readerId} and s.deleted_at is null
+  `;
+  return row?.n ?? 0;
+}
+
+/** Взять источник в свою ленту. Повторное добавление — не ошибка. */
+export async function addReaderSource(readerId: number, sourceId: number): Promise<void> {
+  await sql`
+    insert into dailynews.reader_sources (reader_id, source_id)
+    values (${readerId}, ${sourceId})
+    on conflict (reader_id, source_id) do nothing
+  `;
+}
+
+/**
+ * Убрать источник из своей ленты.
+ *
+ * Строка связки, а не sources.deleted_at: каталог общий, и удаление
+ * источника у себя не должно уносить его у соседа вместе с его историей.
+ */
+export async function removeReaderSource(readerId: number, sourceId: number): Promise<void> {
+  await sql`
+    delete from dailynews.reader_sources
+     where reader_id = ${readerId} and source_id = ${sourceId}
   `;
 }

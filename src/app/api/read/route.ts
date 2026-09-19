@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "нет сессии" }, { status: 401 });
   }
 
-  let payload: { item_id?: number; event?: string; dwell_ms?: number };
+  let payload: { item_id?: number; event?: string; dwell_ms?: number; undo?: unknown };
   try {
     payload = JSON.parse(await request.text());
   } catch {
@@ -43,6 +43,25 @@ export async function POST(request: NextRequest) {
        set paused_at = null, sleep_asked_at = null
      where id = ${readerId} and paused_at is not null
   `;
+
+  // Отмена «меньше такого» удаляет событие, а не пишет второе поверх.
+  // Лента прячет материал по самому наличию строки down: пока она лежит
+  // в reads, «Вернуть» возвращает карточку до первой перезагрузки, после
+  // которой материал исчезает навсегда. Отказ выглядел как успех — кнопка
+  // на месте, нажимается, карточка возвращается.
+  //
+  // Удаляется только собственная строка собственного читателя, и только
+  // down: отменять показ или переход незачем, а возможность стирать любое
+  // событие означала бы, что калибровку можно подчистить запросом.
+  //
+  // Стоит после снятия паузы: отмена — это тоже «читатель вернулся».
+  if (event === "down" && payload.undo === true) {
+    await sql`
+      delete from dailynews.reads
+       where reader_id = ${readerId} and item_id = ${itemId} and event = 'down'
+    `;
+    return NextResponse.json({ ok: true });
+  }
 
   const dwell = Number.isFinite(payload.dwell_ms) ? Math.min(3_600_000, Math.max(0, Number(payload.dwell_ms))) : null;
 

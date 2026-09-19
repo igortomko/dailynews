@@ -8,6 +8,7 @@ import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -21,7 +22,8 @@ export default async function FeedPage({
 }) {
   // Чья это лента, решает подписанная кука и ничто другое.
   const reader = await currentReader();
-  if (!reader.onboarded_at) redirect("/settings/personalization");
+  // Первый заход идёт своим путём: интересы, источники, первый выпуск.
+  if (!reader.onboarded_at) redirect("/welcome");
 
   const [{ day: requested }, days, topics, channels] = await Promise.all([
     searchParams,
@@ -59,8 +61,17 @@ export default async function FeedPage({
       items={items}
       plan={plan}
       networks={networks}
-      left={<DateNav day={day} days={days} />}
+      // key на элементах, уезжающих в проп: шапка ленты ставит left и right
+      // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
+      // теряет пометку «детей ровно столько, сколько написано». React считает
+      // пару списком и просит ключ — в консоли это выглядит как настоящая
+      // ошибка в ленте и прячет собой те, что ошибки и есть.
+      left={<DateNav key="date" day={day} days={days} />}
       right={
+        // Тема и настройки — одна пара: и то и другое про то, как выглядит
+        // и работает лента, а не про сам выпуск.
+        <div key="actions" className="flex items-center gap-0.5">
+        <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
         <Tooltip>
           <TooltipTrigger
             render={
@@ -78,6 +89,7 @@ export default async function FeedPage({
           </TooltipTrigger>
           <TooltipContent>Настройки: интересы, источники, доставка</TooltipContent>
         </Tooltip>
+        </div>
       }
     />
   );

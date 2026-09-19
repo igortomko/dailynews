@@ -1,7 +1,7 @@
 import { getDigestDays, getFeed } from "@/lib/queries";
 import { getReaderTopics } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
-import { planOf } from "@/lib/plans";
+
 import { effectivePlan } from "@/lib/lemon";
 import { InterestsForm } from "./form";
 

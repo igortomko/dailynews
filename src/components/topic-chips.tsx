@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -82,6 +82,9 @@ export function TopicChips({
     });
 
   const [draft, setDraft] = useState("");
+  // Куда вернуть фокус, когда убранный чип унесёт его с собой.
+  const box = useRef<HTMLDivElement>(null);
+  const draftInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
 
@@ -112,6 +115,16 @@ export function TopicChips({
     const next = chips.filter((_, i) => i !== index);
     setChips(withCounts(next, normalize(next.map((chip) => chip.count), total)));
     setSelected(null);
+
+    // Кнопка, по которой только что нажали, исчезает вместе с чипом,
+    // и фокус уходит в body: с клавиатуры это потеря места — дальше Tab
+    // начинает обход страницы заново. Принимаем его крестик соседа,
+    // а когда убрали последний — поле ввода нового интереса.
+    requestAnimationFrame(() => {
+      const buttons = box.current?.querySelectorAll<HTMLButtonElement>("[data-chip-remove]") ?? [];
+      const landing = buttons[Math.min(index, buttons.length - 1)];
+      (landing ?? draftInput.current)?.focus();
+    });
   };
 
   const patch = (index: number, fields: Partial<ChipInput>) =>
@@ -142,7 +155,7 @@ export function TopicChips({
   };
 
   return (
-    <FieldGroup>
+    <FieldGroup ref={box}>
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
@@ -272,6 +285,7 @@ export function TopicChips({
                     render={
                       <button
                         type="button"
+                        data-chip-remove
                         aria-label={`Убрать ${chip.label}`}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -356,6 +370,7 @@ export function TopicChips({
         <div className="flex gap-2">
           <Input
             id="chip-draft"
+            ref={draftInput}
             value={draft}
             aria-label="Новый интерес"
             placeholder="Например: энергетика и уран"

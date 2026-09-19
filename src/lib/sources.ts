@@ -3,6 +3,7 @@ import { sql } from "./db";
 import { kindDenial } from "./plans";
 import { effectivePlan } from "./lemon";
 import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
+import { addReaderSource } from "./readers";
 import type { Reader, Source } from "./types";
 
 /**
@@ -25,10 +26,14 @@ export const isKnownKind = (kind: string): kind is Source["kind"] =>
 /**
  * Почему этот источник тарифу не положен, или null, если положен.
  *
- * Считается только то, что прогон и правда опрашивает: запрещённый вид
- * отсекается до предела по числу. Иначе после понижения тарифа оставшиеся
- * ленты X занимают места живых источников — добавить разрешённый нельзя,
- * пока не выключишь те, которые всё равно никто не опрашивает.
+ * Считается набор этого читателя, а не каталог: каталог общий, и чужие
+ * источники не занимают его мест. До reader_sources считалось по каталогу —
+ * и пятый по счёту источник, заведённый кем угодно, закрывал добавление
+ * всем бесплатным читателям сразу.
+ *
+ * Запрещённый вид отсекается до предела по числу. Иначе после понижения
+ * тарифа оставшиеся ленты X занимают места живых источников: добавить
+ * разрешённый нельзя, пока не уберёшь те, которые всё равно не опрашиваются.
  */
 export async function denyForKind(
   reader: Reader,
@@ -41,8 +46,9 @@ export async function denyForKind(
 
   const [{ n }] = await sql<{ n: number }[]>`
     select count(*)::int as n
-      from dailynews.sources
-     where deleted_at is null and kind = any(${plan.kinds})
+      from dailynews.reader_sources rs
+      join dailynews.sources s on s.id = rs.source_id
+     where rs.reader_id = ${reader.id} and s.deleted_at is null and s.kind = any(${plan.kinds})
   `;
   return n >= plan.maxSources
     ? `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — убери лишний`
@@ -57,22 +63,26 @@ export async function denyForKind(
  * в списке, то есть ровно в том случае, когда важно знать правду.
  */
 export async function saveSource(
+  readerId: number,
   kind: Source["kind"],
   url: string,
   inputUrl: string,
   label: string,
-): Promise<{ created: boolean }> {
-  const [row] = await sql<{ created: boolean }[]>`
+): Promise<{ created: boolean; id: number }> {
+  const [row] = await sql<{ created: boolean; id: number }[]>`
     insert into dailynews.sources (kind, label, url, input_url)
     values (${kind}, ${label}, ${url}, ${inputUrl})
     on conflict (kind, url) do update
-      set active = true, label = excluded.label, input_url = excluded.input_url,
+      set active = true, input_url = excluded.input_url,
           -- Убранный источник, добавленный заново, возвращается вместе
           -- со своей историей, а не заводится пустым двойником.
           deleted_at = null
-    returning (xmax = 0) as created
+    returning (xmax = 0) as created, id::int as id
   `;
-  return { created: row?.created ?? true };
+  // Название чужого источника не переписываем: каталог общий, и вставивший
+  // ту же ссылку второй читатель менял бы подпись в ленте первого.
+  await addReaderSource(readerId, row.id);
+  return { created: row?.created ?? true, id: row.id };
 }
 
 export type AddOutcome =
@@ -87,11 +97,6 @@ export type AddOutcome =
  * а что получилось — сообщается после.
  */
 export async function addByLink(reader: Reader, input: string): Promise<AddOutcome> {
-  // Каталог общий на всех читателей, поэтому правит его владелец. Проверка
-  // стоит первой: у постороннего не должно получаться даже заставить нас
-  // сходить по его ссылке.
-  if (!reader.owner) return { ok: false, error: "Источники заводит владелец ленты" };
-
   const raw = input.trim().slice(0, 500);
   if (!raw) return { ok: false, error: "Пустая строка" };
 
@@ -114,6 +119,7 @@ export async function addByLink(reader: Reader, input: string): Promise<AddOutco
   if (denied) return { ok: false, error: denied };
 
   const { created } = await saveSource(
+    reader.id,
     found.found.kind,
     found.found.url,
     found.found.input_url,

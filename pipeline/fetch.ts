@@ -233,9 +233,15 @@ export function parseFeed(xml: string): FeedDoc {
     const full = firstString(node["content:encoded"]) || firstString(node.content);
     const body = full && full.length > 600 ? full.slice(0, 400_000) : undefined;
 
+    // media:description — описание ролика у YouTube: своего <description>
+    // в его Atom нет вовсе, и без этой ветки канал приезжал одними
+    // заголовками. Оценка и дайджест писались по заголовку, а выглядело
+    // это как обычный материал.
+    const media = node["media:group"] as Record<string, unknown> | undefined;
     const excerpt = stripHtml(
       firstString(node.description) ||
         firstString(node.summary) ||
+        firstString(media?.["media:description"]) ||
         full,
     ).slice(0, 1200);
 

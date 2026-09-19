@@ -32,19 +32,25 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
   },
 }) as typeof assertStrict;
 import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import { appOrigin } from "../src/lib/auth";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
+import { parseFeed } from "./fetch";
+import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
 import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
-import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
+import {
+  channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
+} from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
+import { plural } from "../src/lib/plural";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -52,6 +58,7 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf }
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
+import { STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { countOf, explain, parseTelegram } from "./fetch";
@@ -1439,6 +1446,25 @@ assert.equal(
   "истёкшая подписка не даёт платного выпуска",
 );
 assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
+
+// Владелец не покупает подписку у себя самого, и проверять её статус
+// не по чему: у него действует то, что стоит в колонке. Так там и стояло
+// «pro» — и гасло проверкой на подписку, которой нет.
+assert.equal(
+  effectivePlan(paid({ plan: "pro", owner: true, subscription_status: null, plan_ends_at: null })).id,
+  "pro",
+  "у владельца работает купленное без подписки",
+);
+assert.equal(
+  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  "free",
+  "и бесплатный тоже: иначе владелец не увидит продукт глазами бесплатного читателя",
+);
+assert.equal(
+  effectivePlan(paid({ plan: "pro", owner: false, subscription_status: null, plan_ends_at: null })).id,
+  "free",
+  "остальным тариф по-прежнему даёт только подписка",
+);
 assert.ok(endingAt(paid({ plan_ends_at: new Date(Date.now() + DAY).toISOString() })), "дата конца видна интерфейсу");
 assert.equal(endingAt(paid()), null, "у активной подписки конца нет");
 
@@ -1676,5 +1702,279 @@ assert.equal(countOf("49.3K"), 49_300, "сокращение тысяч разв
 assert.equal(countOf("1.74M"), 1_740_000, "сокращение миллионов разворачивается");
 assert.equal(countOf("812"), 812, "число без сокращения читается как есть");
 assert.equal(countOf(undefined), null, "нет просмотров — null, а не ноль");
+
+// --- число и слово рядом -------------------------------------------------------
+// «1 материалов» — не опечатка, а признак числа, подставленного в готовую
+// строку. Читается как машинный текст, и виден он только на единице.
+const form = (n: number) => plural(n, "материал", "материала", "материалов");
+assert.equal(form(1), "материал");
+assert.equal(form(2), "материала");
+assert.equal(form(5), "материалов");
+// Одиннадцать — не «одиннадцать материал»: второй десяток ведёт себя иначе.
+assert.equal(form(11), "материалов");
+assert.equal(form(12), "материалов");
+assert.equal(form(21), "материал");
+assert.equal(form(22), "материала");
+assert.equal(form(0), "материалов");
+
+// --- адрес, на который приземляет ссылка входа --------------------------------
+// В standalone-сборке за обратным прокси nextUrl.origin — это адрес
+// прослушивания контейнера. Ссылка из бота приземлялась на
+// https://0.0.0.0:3000: кука ставилась, переход выполнялся, страница
+// не открывалась — и по ней понять, что сломалось, было нельзя.
+{
+  const before = process.env.APP_URL;
+  process.env.APP_URL = "https://news.tomko.io";
+  assert.equal(
+    appOrigin("https://0.0.0.0:3000"), "https://news.tomko.io",
+    "адрес берётся из APP_URL, а не из того, на что смотрит контейнер",
+  );
+  process.env.APP_URL = "  ";
+  assert.equal(
+    appOrigin("https://0.0.0.0:3000"), "https://0.0.0.0:3000",
+    "пробелы — это «не задано», а не адрес из пробелов",
+  );
+  delete process.env.APP_URL;
+  assert.equal(
+    appOrigin("http://localhost:3000"), "http://localhost:3000",
+    "без переменной остаётся адрес запроса: в разработке он и есть правильный",
+  );
+  if (before === undefined) delete process.env.APP_URL;
+  else process.env.APP_URL = before;
+}
+
+// --- гейт по подписке на канал ------------------------------------------------
+// Живого канала в проверке нет, а на владельце все четыре ветки неразличимы:
+// он в своём канале создатель, и «не подписан» у него не получить никак.
+assert.equal(verdictOf({ status: "creator" }), "yes", "создатель канала подписан");
+assert.equal(verdictOf({ status: "administrator" }), "yes", "админ подписан");
+assert.equal(verdictOf({ status: "member" }), "yes", "участник подписан");
+assert.equal(
+  verdictOf({ status: "restricted", is_member: true }), "yes",
+  "ограниченный участник всё ещё в канале",
+);
+assert.equal(
+  verdictOf({ status: "restricted", is_member: false }), "no",
+  "ограниченный и не участник — не в канале",
+);
+assert.equal(verdictOf({ status: "left" }), "no", "ушедший не подписан");
+assert.equal(verdictOf({ status: "kicked" }), "no", "выгнанный не подписан");
+// Telegram заводит новые статусы, и гадать в пользу входа нельзя: гейт
+// открылся бы от незнакомого слова, и заметить это было бы нечем.
+assert.equal(verdictOf({ status: "супер" }), "no", "незнакомый статус читается как «нет»");
+assert.equal(verdictOf(null), "no", "пустой ответ — не подписка");
+
+// В переменную окружения рано или поздно вставят то, что скопировали
+// из адресной строки.
+const handleFor = (value: string | undefined) => {
+  const before = process.env.TELEGRAM_CHANNEL;
+  if (value === undefined) delete process.env.TELEGRAM_CHANNEL;
+  else process.env.TELEGRAM_CHANNEL = value;
+  const result = channelHandle();
+  if (before === undefined) delete process.env.TELEGRAM_CHANNEL;
+  else process.env.TELEGRAM_CHANNEL = before;
+  return result;
+};
+assert.equal(handleFor("@lenta"), "@lenta", "@имя остаётся @именем");
+assert.equal(handleFor("lenta"), "@lenta", "голое имя получает собачку");
+assert.equal(handleFor("https://t.me/lenta"), "@lenta", "ссылка сводится к имени");
+assert.equal(handleFor("https://t.me/lenta/"), "@lenta", "хвостовой слэш не уезжает в имя");
+// Протокол необязателен: из адресной строки копируют и «t.me/имя».
+// С обязательным https:// такая строка превращалась в «@t.me/имя»,
+// getChatMember отвечал 400, и гейт застревал на «не смог проверить».
+assert.equal(handleFor("t.me/lenta"), "@lenta", "t.me без протокола — тоже ссылка");
+assert.equal(handleFor("telegram.me/lenta"), "@lenta", "второй домен Telegram тоже");
+assert.equal(handleFor("@lenta_bot"), "@lenta_bot", "подчёркивание в имени остаётся");
+// Не задано — гейта нет. Здесь переменная не секрет, а настройка роста:
+// первый деплой без неё закрыл бы вход всем новым читателям разом.
+assert.equal(handleFor(undefined), null, "без переменной гейта нет");
+assert.equal(handleFor("  "), null, "пробелы — тоже «не задано»");
+
+const subscribedPress = {
+  callback_query: {
+    id: "cb1",
+    data: `${SUBSCRIBED_PREFIX}:1`,
+    from: { id: 4242, is_bot: false, username: "igor" },
+    message: { chat: { id: 777 } },
+  },
+};
+assert.deepEqual(
+  parseUpdate(subscribedPress),
+  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", callbackId: "cb1" },
+  "нажатие «Я подписался» разбирается, а не проваливается в ignore",
+);
+
+// --- стартовый каталог интересов ----------------------------------------------
+// Файл правят руками, и опечатка в related — это кнопка, которой нет:
+// список соседей молча укорачивается, и заметить это на экране нечем.
+{
+  const slugs = new Set(STARTER_TOPICS.map((topic) => topic.slug));
+  assert.equal(slugs.size, STARTER_TOPICS.length, "слаги стартовых интересов не повторяются");
+  for (const topic of STARTER_TOPICS) {
+    assert.ok(topic.hint.length > 10, `у «${topic.label}» должна быть подсказка: она уходит в вопрос Jev`);
+    assert.ok(topic.feeds.length > 0, `у «${topic.label}» должен быть хоть один источник`);
+    assert.ok(topic.related.length > 0, `у «${topic.label}» должны быть соседи`);
+    for (const related of topic.related) {
+      assert.ok(slugs.has(related), `сосед «${related}» у «${topic.label}» не существует`);
+      assert.notEqual(related, topic.slug, "тема не может быть соседом самой себе");
+    }
+    for (const feed of topic.feeds) {
+      assert.ok(feed.label.length > 0, "у источника должно быть название");
+      assert.ok(
+        feed.kind !== "rss" || feed.url.startsWith("https://"),
+        `фид «${feed.label}» должен быть полным адресом`,
+      );
+    }
+  }
+}
+
+// Порядок предложений. Соседи выбранного идут первыми, само выбранное
+// исчезает: предлагать взять взятое — это кнопка, которая ничего не делает.
+{
+  const order = suggestOrder(["ai-infra"]);
+  assert.ok(!order.includes("ai-infra"), "выбранное уходит со сцены");
+  assert.deepEqual(
+    order.slice(0, 4), starterBySlug.get("ai-infra")!.related,
+    "соседи выбранного идут первыми и в своём порядке",
+  );
+  // Последний выбор ближе к пальцу, чем первый: он и отвечает на «а что
+  // ещё такого же».
+  const two = suggestOrder(["ai-infra", "cinema"]);
+  assert.equal(two[0], starterBySlug.get("cinema")!.related[0], "соседи последнего выбора первее");
+  // Ранжирование по описанию из Telegram — второй очередью: оно про человека
+  // вообще, а соседи — про то, что он только что нажал.
+  const ranked = suggestOrder(["ai-infra"], ["music", "выдуманное"]);
+  assert.ok(
+    ranked.indexOf("music") > ranked.indexOf(starterBySlug.get("ai-infra")!.related[0]),
+    "ранжирование не обгоняет соседей",
+  );
+  assert.ok(!ranked.includes("выдуманное"), "слаг не из каталога отбрасывается");
+  assert.equal(
+    new Set(ranked).size, ranked.length,
+    "ни один интерес не показывается дважды",
+  );
+  assert.equal(
+    suggestOrder([]).length, STARTER_TOPICS.length,
+    "без выбора показывается весь набор",
+  );
+}
+
+// --- тариф и бюджет тем -------------------------------------------------------
+// Предел интересов и размер выпуска — два числа одного тарифа, и разъехавшись,
+// они дают тему с нулевой целью: ограничение reader_topics.weight > 0 уронит
+// сохранение там, где читатель всего лишь выбрал интересы.
+for (const id of PLAN_IDS) {
+  const p = PLANS[id];
+  const counts = normalize(Array.from({ length: p.maxTopics }, () => 1), p.digestSizes[0]);
+  assert.equal(counts.length, p.maxTopics, `цели считаются на все темы тарифа «${p.label}»`);
+  assert.ok(
+    counts.every((count) => count >= 1),
+    `на тарифе «${p.label}» ни одна тема не остаётся с нулём`,
+  );
+}
+
+// --- YouTube: ролик приезжает с содержанием, а не одним заголовком ------------
+// Описание ролика лежит в media:group/media:description: своего <description>
+// в Atom у YouTube нет вовсе, и без этой ветки канал приезжал одними
+// заголовками — Jev оценивал по заголовку, дайджест писал по нему же,
+// а выглядело это как обычный материал.
+const ytFeed = parseFeed(readFileSync("pipeline/fixtures/youtube-feed.xml", "utf8"));
+assert.equal(ytFeed.title, "Veritasium", "название канала читается");
+assert.ok(ytFeed.items.length >= 2, "записи фида разобраны");
+assert.ok(
+  ytFeed.items.every((item) => item.excerpt.length > 0),
+  "у каждой записи есть описание: пустой excerpt — это ролик без содержания",
+);
+assert.ok(
+  ytFeed.items.some((item) => item.excerpt.includes("Smith Chart")),
+  "описание берётся из media:description, а не из заголовка",
+);
+assert.ok(
+  ytFeed.items.every((item) => videoIdOf(item.url) !== null),
+  "адрес каждой записи опознаётся как ролик",
+);
+
+// Номер ролика приходит тремя формами, и короткий метраж — отдельная:
+// /shorts/<id> приезжает тем же фидом, что и обычные ролики.
+assert.equal(videoIdOf("https://www.youtube.com/watch?v=O3a99HNskNk"), "O3a99HNskNk", "watch?v=");
+assert.equal(videoIdOf("https://youtu.be/O3a99HNskNk?t=42"), "O3a99HNskNk", "короткая ссылка");
+assert.equal(videoIdOf("https://www.youtube.com/shorts/O3a99HNskNk"), "O3a99HNskNk", "короткий метраж");
+assert.equal(videoIdOf("https://www.youtube.com/@veritasium"), null, "канал роликом не является");
+assert.equal(videoIdOf("https://example.com/watch?v=O3a99HNskNk"), null, "чужой хост — не YouTube");
+assert.equal(videoIdOf("не адрес"), null, "строка без адреса");
+
+// Разбор ответа timedtext идёт по сохранённому куску настоящего ответа:
+// это чужая разметка, и сломается она молча.
+const timed = parseTimedText(readFileSync("pipeline/fixtures/youtube-timedtext.xml", "utf8"));
+assert.ok(timed.startsWith("This is the scariest chart in electrical"), "реплики склеены по порядку");
+assert.ok(timed.length > 400, "расшифровка не обрывается на первой реплике");
+assert.ok(!timed.includes("&amp;"), "двойные сущности разворачиваются до текста");
+assert.ok(!timed.includes("<text"), "разметка не доезжает до текста");
+assert.equal(
+  parseTimedText('<transcript><text start="0" dur="1">[Music] hello [Applause] world</text></transcript>'),
+  "hello world",
+  "пометки звукорежиссёра выбрасываются: в конспекте от них ничего, а в счёте они есть",
+);
+assert.equal(parseTimedText("<transcript></transcript>"), "", "ролик без реплик — пустая расшифровка");
+
+// Дорожка выбирается по звуку ролика. У канала с переводами они лежат
+// в одном списке с оригиналом, и «первая человеческая» давала арабские
+// субтитры английской лекции: конспект выходил арабским, и ни одной
+// ошибки при этом не было.
+assert.equal(
+  pickTrack({
+    captionTracks: [{ baseUrl: "ar", languageCode: "ar" }, { baseUrl: "en", languageCode: "en" }],
+    audioTracks: [{ defaultCaptionTrackIndex: 1 }],
+    defaultAudioTrackIndex: 0,
+  })?.baseUrl,
+  "en",
+  "дорожка основного звука важнее первой в списке",
+);
+assert.equal(
+  pickTrack({ captionTracks: [{ baseUrl: "a", kind: "asr" }, { baseUrl: "b" }] })?.baseUrl,
+  "b",
+  "без пометки — написанная человеком важнее машинной",
+);
+assert.equal(
+  pickTrack({ captionTracks: [{ baseUrl: "a", kind: "asr" }], audioTracks: [{}] })?.baseUrl,
+  "a",
+  "машинная, когда другой нет",
+);
+assert.equal(pickTrack({}), null, "дорожек нет — читать нечего");
+
+// Пересказ для читалки идёт в items.body, который читает тот же разбор,
+// что и полный текст статьи из фида, — а он ждёт HTML. Markdown как есть
+// потерялся бы в defuddle, и отправка пошла бы качать страницу ролика,
+// где текста нет вовсе.
+const html = articleHtml("## Раздел\n\nАбзац с числом 42.");
+assert.ok(html.includes("<h2>") && html.includes("<p>"), "разметка пересказа превращается в HTML");
+assert.equal(articleHtml(""), "", "пустой пересказ остаётся пустым, а не <article></article>");
+
+// --- шапка ленты: key на элементах, уезжающих пропом -------------------------
+// FeedTabs ставит left и right соседями в одном родителе. Элемент, приехавший
+// в клиентский компонент полезной нагрузкой сервера, теряет пометку «детей
+// ровно столько, сколько написано»: React считает пару списком и просит ключ.
+// В консоли это выглядит настоящей ошибкой ленты и прячет собой те, что ошибки
+// и есть, — а увидеть его можно только глазами, предупреждение живёт лишь
+// в dev-сборке React. Поэтому проверка тут текстовая: она ловит не причину,
+// а её след в исходнике — ровно тот, который теряется при перекладке шапки.
+const feedSource = readFileSync("src/app/(app)/page.tsx", "utf8");
+const feedPage = feedSource.slice(feedSource.indexOf("<FeedTabs"));
+// Переименовали компонент — проверка обязана упасть, а не замолчать на пустом
+// срезе: тест, ничего не нашедший, зелёный ровно так же, как тест успешный.
+assert.ok(feedPage.startsWith("<FeedTabs"), "ленту рисует FeedTabs");
+for (const prop of ["left", "right"]) {
+  const at = feedPage.indexOf(`${prop}={`);
+  assert.ok(at >= 0, `${prop} должен передаваться в FeedTabs`);
+  const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
+  assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
+}
+// А требование key держится на том, что они соседи. Разведут по разным
+// родителям — проверка выше станет суеверием, и упасть она должна здесь.
+assert.match(
+  readFileSync("src/components/feed-tabs.tsx", "utf8"),
+  /\{left\}\s*\{right\}/,
+  "left и right стоят соседями — иначе key им не нужен",
+);
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
