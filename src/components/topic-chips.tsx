@@ -123,10 +123,7 @@ export function TopicChips({
             counts={chips.map((chip) => chip.count)}
             onChange={setCounts}
           />
-          <FieldDescription>
-            Тяни границы, чтобы отдать теме больше или меньше. Это цель, а не обещание:
-            не хватит материалов по теме — место уйдёт следующему по оценке.
-          </FieldDescription>
+          <FieldDescription>Тяни границы, чтобы отдать теме больше или меньше.</FieldDescription>
         </Field>
       ) : null}
 
