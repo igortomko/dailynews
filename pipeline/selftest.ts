@@ -557,6 +557,15 @@ assert.ok(
 // просто отдаются всем. Один раз так и было.
 import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
+
+// Вебхук за проверкой сессии отвечает редиректом на логин, а отправитель
+// читает 307 как успех и не повторяет доставку. Платёж при этом проходит,
+// а тариф не выдаётся — отказ, который виден только по жалобе.
+const middleware = readFileSync("src/middleware.ts", "utf8");
+for (const hook of ["/api/telegram", "/api/lemon"]) {
+  assert.ok(middleware.includes(`"${hook}"`), `${hook} должен быть открыт в middleware`);
+  assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
+}
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
 
@@ -1160,4 +1169,4 @@ assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкш�
 assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
 assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
 
-console.log("Самопроверка пройдена: 327 утверждений");
+console.log("Самопроверка пройдена: 331 утверждение");
