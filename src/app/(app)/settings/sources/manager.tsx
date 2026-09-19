@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
@@ -81,6 +82,10 @@ const SILENT_DAYS = 5;
  * не значит: важно, сколько из них дошло до выпусков и не перепечатки ли это.
  */
 function yieldOf(source: SourceHealth): string {
+  // Прогон его ещё не видел: ни удачи, ни ошибки. Написать такому «за 30 дней
+  // ни одного материала» — той же фразой, что и заброшенному, — значит
+  // сообщить, что он бесполезен, через минуту после того, как его завели.
+  if (!source.last_ok_at && !source.last_error) return "добавлен — первый сбор в ближайшем прогоне";
   if (source.items === 0) return "за 30 дней — ни одного материала";
   const parts = [`за 30 дней: ${source.items} → ${source.in_digest} в выпусках`];
   if (source.mean_score !== null) parts.push(`скор ${source.mean_score}`);
@@ -107,6 +112,13 @@ export function SourcesManager({
   const [error, setError] = useState<string | null>(null);
 
   const dead = sources.filter((source) => source.active && source.last_error);
+  // Выключенные называются один раз и с причиной. Тринадцать одинаковых
+  // меток в строках превращали список в частокол, по которому всё равно
+  // нечего было решить.
+  const off = sources.filter((source) => !source.active);
+  const offByKind = [...new Set(off.map((source) => source.kind))]
+    .map((kind) => `${kind}: ${off.filter((source) => source.kind === kind).length}`)
+    .join(", ");
   const silent = sources.filter(
     (source) => source.active && !source.last_error && (source.silent_days ?? 0) >= SILENT_DAYS,
   );
@@ -145,6 +157,16 @@ export function SourcesManager({
         </Alert>
       ) : null}
 
+      {off.length > 0 ? (
+        <Alert>
+          <AlertTitle>Не опрашивается: {off.length}</AlertTitle>
+          <AlertDescription>
+            {offByKind} — эти источники лежат в каталоге, но прогон их не читает.
+            Включить их больше нечем: остаётся удалить те, что не вернутся.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {editable ? (
       <Card>
         {found && plan.kinds.includes(found.kind) ? (
@@ -160,7 +182,9 @@ export function SourcesManager({
                 setError(null);
                 setFound(null);
                 setInput("");
-                toast.success("Источник добавлен");
+                toast.success(
+                  result?.created ? "Источник добавлен" : "Этот источник уже был в списке",
+                );
               })
             }
           >
@@ -300,11 +324,24 @@ export function SourcesManager({
         <CardHeader>
           <CardTitle>Источники</CardTitle>
           <CardDescription>
-            {sources.filter((s) => s.active).length} включено из {sources.length} · тариф
-            «{plan.label}» опрашивает {plan.maxSources}
+            {sources.filter((s) => s.active).length} опрашивается
+            {off.length > 0 ? `, ${off.length} нет` : ""} · предел тарифа «{plan.label}» —
+            {" "}{plan.maxSources}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
+          {sources.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>Пока ни одного источника</EmptyTitle>
+                <EmptyDescription>
+                  {editable
+                    ? "Вставь ссылку выше — на блог, канал, репозиторий. Пока источников нет, выпуск собирать не из чего."
+                    : "Каталог наполняет владелец ленты."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : null}
           {sources.map((source, index) => (
             <div key={source.id}>
               {index > 0 ? <Separator className="my-1" /> : null}
