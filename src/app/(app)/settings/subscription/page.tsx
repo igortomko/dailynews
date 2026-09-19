@@ -1,4 +1,4 @@
-import { getProfile } from "@/lib/queries";
+import { currentReader } from "@/lib/session";
 import { allows, planOf } from "@/lib/plans";
 import { PlanGate } from "@/components/plan-gate";
 import { SubscriptionForm } from "./form";
@@ -6,7 +6,7 @@ import { SubscriptionForm } from "./form";
 export const dynamic = "force-dynamic";
 
 export default async function SubscriptionPage() {
-  const profile = await getProfile();
+  const profile = await currentReader();
   const plan = planOf(profile.plan);
   if (!allows(plan, "subscription")) {
     return (

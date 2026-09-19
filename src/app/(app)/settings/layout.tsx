@@ -3,7 +3,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/lib/actions";
-import { getProfile } from "@/lib/queries";
+import { currentReader } from "@/lib/session";
 import { planOf } from "@/lib/plans";
 import { SettingsNav } from "./nav";
 
@@ -13,7 +13,7 @@ import { SettingsNav } from "./nav";
  * а не прятаться под кнопку, как в ленте.
  */
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
-  const plan = planOf((await getProfile()).plan);
+  const plan = planOf((await currentReader()).plan);
   return (
     <>
       <PageHeader

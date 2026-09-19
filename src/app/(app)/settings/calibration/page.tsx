@@ -1,4 +1,5 @@
-import { getCalibration, getProfile, getSummaryQuality } from "@/lib/queries";
+import { getCalibration, getSummaryQuality } from "@/lib/queries";
+import { currentReader } from "@/lib/session";
 import { allows, planOf } from "@/lib/plans";
 import { PlanGate } from "@/components/plan-gate";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +27,8 @@ function Row({ label, shown, opened, rate }: { label: string; shown: number; ope
 }
 
 export default async function CalibrationPage() {
-  const plan = planOf((await getProfile()).plan);
+  const reader = await currentReader();
+  const plan = planOf(reader.plan);
   // Тяжёлые запросы статистики не должны выполняться ради страницы,
   // которую тариф всё равно не покажет.
   if (!allows(plan, "calibration")) {
@@ -41,8 +43,8 @@ export default async function CalibrationPage() {
   }
 
   const [{ byScore, byConfidence, byAxis, totals }, quality] = await Promise.all([
-    getCalibration(),
-    getSummaryQuality(),
+    getCalibration(reader.id),
+    getSummaryQuality(reader.id),
   ]);
 
   if (totals.shown === 0) {

@@ -12,6 +12,11 @@ import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { checkSecret, parseUpdate } from "../src/lib/telegram";
+import { pickSurvivors, type Candidate } from "./select";
+import { digestHtml } from "./kindle";
+import { llmCost } from "./cost";
+import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
@@ -233,14 +238,36 @@ assert.equal(
 import { promised } from "../db/schema-gap";
 const promise = promised("db/migrations");
 const columnNames = promise.columns.map((entry) => `${entry.table}.${entry.column}`);
-assert.ok(columnNames.includes("profile.complexity"), "добавленная колонка должна попасть в список");
+assert.ok(columnNames.includes("digests.reader_id"), "добавленная колонка должна попасть в список");
 assert.ok(
   !columnNames.includes("profile.digest_hour"),
   "снятая следующей миграцией колонка требоваться не должна",
 );
 assert.ok(
+  promise.tables.some((entry) => entry.table === "readers"),
+  "заведённая таблица должна попасть в список",
+);
+// Увезённая таблица уносит и обещания своих колонок: 0019 забрала profile
+// целиком, и требовать profile.complexity после неё значит показывать
+// расхождение там, где всё правильно, — а такой проверке перестают верить.
+assert.ok(
+  !promise.tables.some((entry) => entry.table === "profile"),
+  "увезённая таблица требоваться не должна",
+);
+assert.ok(
+  !columnNames.some((name) => name.startsWith("profile.")),
+  "колонки увезённой таблицы требоваться не должны",
+);
+assert.ok(
   promise.constraints.some((entry) => entry.name === "topics_weight_positive"),
   "именованное ограничение должно попасть в список",
+);
+// Увезённая таблица уносит и свои ограничения: profile_digest_size_check
+// из 0018 требовался бы вечно, и сверка схемы показывала бы разрыв там,
+// где всё применено. Один раз так и вышло — сразу после накатывания 0020.
+assert.ok(
+  !promise.constraints.some((entry) => entry.table === "profile"),
+  "ограничения увезённой таблицы требоваться не должны",
 );
 
 // --- список размеров против ограничения базы -----------------------------------
@@ -351,6 +378,141 @@ assert.ok(dense.perSentence > plain.perSentence, "длинные предлож�
 assert.ok(dense.longShare > plain.longShare, "доля длинных слов должна ловить канцелярит");
 assert.equal(readability("").perSentence, 0, "пустой текст не должен делить на ноль");
 
+
+// --- апдейт Telegram ----------------------------------------------------------
+// Разбор апдейта проверяется здесь, а не на живом вебхуке: у вебхука нет
+// ни теста, ни способа заметить, что он стал отвечать не тем, — сообщение
+// просто не приходит.
+const privateStart = (text: string, extra: Record<string, unknown> = {}) => ({
+  message: {
+    text,
+    chat: { id: 4242, type: "private" },
+    from: { id: 4242, is_bot: false, username: "igor", ...extra },
+  },
+});
+
+assert.deepEqual(
+  parseUpdate(privateStart("/start")),
+  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor" },
+  "обычный /start заводит читателя",
+);
+assert.equal(parseUpdate(privateStart("/start@lenta_bot")).kind, "start", "/start@ИмяБота — тот же /start");
+assert.equal(parseUpdate(privateStart("/start login")).kind, "start", "полезная нагрузка не мешает");
+assert.equal(parseUpdate(privateStart("/START")).kind, "start", "регистр команды не важен");
+assert.equal(parseUpdate(privateStart("привет")).kind, "help", "на прочий текст отвечаем подсказкой");
+assert.equal(parseUpdate(privateStart("")).kind, "ignore", "пустое сообщение игнорируем");
+
+// В группе /start прислал бы ссылку входа всем участникам разом, и
+// выглядело бы это как обычный ответ бота.
+assert.equal(
+  parseUpdate({ message: { text: "/start", chat: { id: -100, type: "supergroup" }, from: { id: 1 } } }).kind,
+  "ignore",
+  "в группе ссылка входа не выдаётся",
+);
+assert.equal(parseUpdate(privateStart("/start", { is_bot: true })).kind, "ignore", "боты не читатели");
+assert.equal(parseUpdate({}).kind, "ignore", "апдейт без сообщения");
+assert.equal(parseUpdate(null).kind, "ignore", "пустой апдейт не должен ронять вебхук");
+assert.equal(
+  parseUpdate({ message: { text: "/start", chat: { id: "4242", type: "private" }, from: { id: 4242 } } }).kind,
+  "ignore",
+  "id строкой — не id",
+);
+// Идентификаторы Telegram давно вышли за 2^31; на 2^53 обрывается сам JSON.
+const bigId = 7_446_123_987;
+assert.deepEqual(
+  parseUpdate({
+    message: { text: "/start", chat: { id: bigId, type: "private" }, from: { id: bigId } },
+  }),
+  { kind: "start", telegramId: bigId, chatId: bigId, username: null },
+  "большой telegram_id должен пережить разбор",
+);
+
+// --- секрет вебхука -----------------------------------------------------------
+// Адрес вебхука открыт всему интернету: без этой проверки кто угодно
+// присылает «/start от читателя номер такой-то».
+delete process.env.TELEGRAM_WEBHOOK_SECRET;
+assert.equal(checkSecret("что-нибудь"), false, "без заданного секрета дверь закрыта, а не открыта");
+process.env.TELEGRAM_WEBHOOK_SECRET = "s3cret-token-value";
+assert.equal(checkSecret("s3cret-token-value"), true, "верный секрет проходит");
+assert.equal(checkSecret("s3cret-token-valuX"), false, "подмена одного символа не проходит");
+assert.equal(checkSecret("s3cret"), false, "обрезанный секрет не проходит");
+assert.equal(checkSecret(null), false, "запрос без заголовка — не Telegram");
+
+// --- взвешенный круг по темам --------------------------------------------------
+// Отбор переехал из SQL в код, потому что веса стали персональными:
+// второй экземпляр формулы на SQL разъехался бы с composite() молча.
+// Здесь он проверяется без базы — на числах, а не на пересказе.
+const candidate = (id: number, topicId: number | null, clickbait: number): Candidate => ({
+  id,
+  title: `материал ${id}`,
+  excerpt: "",
+  url: `https://example.com/${id}`,
+  source_label: "тест",
+  topic_id: topicId,
+  topic_label: `тема ${topicId ?? "нет"}`,
+  axes: axes({ clickbait: { noul: clickbait } }),
+});
+
+const pool: Candidate[] = [];
+for (const topicId of [1, 2, 3]) {
+  for (let n = 0; n < 20; n++) pool.push(candidate(topicId * 100 + n, topicId, n / 40));
+}
+const picked = pickSurvivors(pool, DEFAULT_WEIGHTS, new Map([[1, 11], [2, 6], [3, 3]]), 20);
+assert.equal(picked.length, 20, "отбор должен отдать ровно размер дайджеста");
+assert.deepEqual(
+  [1, 2, 3].map((topicId) => picked.filter((s) => s.topic_label === `тема ${topicId}`).length),
+  [11, 6, 3],
+  "места делятся по целям, а не поровну",
+);
+assert.equal(
+  picked.filter((s) => s.topic_label === "тема 1")[0].id, 100,
+  "внутри темы первым идёт лучший по скору",
+);
+
+// Тема, которой у читателя нет, считается за единицу — как материал вне тем.
+// Иначе убранная тема забирала бы прежний бюджет ещё двое суток, ровно
+// столько живут сделанные до этого оценки.
+const strangers = Array.from({ length: 20 }, (_, n) => candidate(900 + n, 4, n / 40));
+const withStranger = pickSurvivors(
+  [...pool, ...strangers],
+  DEFAULT_WEIGHTS,
+  new Map([[1, 11], [2, 6], [3, 3]]),
+  20,
+);
+const strangerCount = withStranger.filter((s) => s.topic_label === "тема 4").length;
+assert.ok(strangerCount <= 2, `тема без цели взяла ${strangerCount} мест — должна идти как одна`);
+assert.ok(strangerCount > 0, "лучший материал вне целей должен уметь пробиться");
+assert.equal(
+  pickSurvivors([candidate(999, null, 0)], DEFAULT_WEIGHTS, new Map(), 5).length, 1,
+  "материал вне тем не должен уронить отбор делением на ноль",
+);
+
+// --- выпуск для Kindle ----------------------------------------------------------
+const book = digestHtml("2026-09-19", "интро", [
+  { title: "Заголовок & <тег>", summary: "описание", url: "https://example.com/a", source_label: "И", topic_label: "Т" },
+]);
+// Без объявленной кодировки Kindle читает кириллицу как мусор,
+// и выпуск приходит целым на вид.
+assert.ok(book.includes('<meta charset="utf-8">'), "кодировка должна быть объявлена");
+assert.ok(book.includes("Заголовок &amp; &lt;тег&gt;"), "разметка из заголовка должна экранироваться");
+assert.ok(!book.includes("<тег>"), "сырой тег из источника не должен попасть в книгу");
+
+// --- цена вызова --------------------------------------------------------------
+// Без верной цены событие о расходе — выдумка, а дневной потолок читателя
+// не срабатывает никогда.
+const million = { input: 1e6, output: 0, cached: 0, reasoning: 0, requests: 1 };
+delete process.env.LLM_INPUT_PRICE;
+assert.equal(llmCost(million), 0.3, "без переменной берётся цена по умолчанию");
+process.env.LLM_INPUT_PRICE = "";
+assert.equal(llmCost(million), 0.3, "пустая переменная — это «не задано», а не ноль");
+process.env.LLM_INPUT_PRICE = "1.5";
+assert.equal(llmCost(million), 1.5, "заданная цена применяется");
+process.env.LLM_INPUT_PRICE = "0";
+assert.equal(llmCost(million), 0, "ноль — законная цена бесплатного тарифа");
+process.env.LLM_INPUT_PRICE = "дорого";
+assert.equal(llmCost(million), 0.3, "нечисло откатывается к цене по умолчанию");
+delete process.env.LLM_INPUT_PRICE;
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -405,7 +567,29 @@ assert.ok(
   "запрещённый вид отсекается до предела по числу, а не занимает место",
 );
 
-import { GATED, allows, cheapestWith } from "../src/lib/plans";
+// Предел в форме обязан считать то же, что опрашивает прогон: иначе после
+// понижения тарифа запрещённый вид занимает места живых источников.
+const afterDowngrade = [
+  source(1, "x"), source(2, "x"), source(3, "x"),
+  source(4, "rss"), source(5, "rss"),
+];
+assert.equal(
+  sourcesForPlan(afterDowngrade, PLANS.free).length,
+  2,
+  "прогон на бесплатном опрашивает только разрешённые виды",
+);
+assert.equal(
+  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
+  2,
+  "и предел в форме обязан считать по тому же правилу",
+);
+
+import { GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
+
+assert.equal(topicsWord(1), "интерес", "единственное число");
+assert.equal(topicsWord(2), "интереса", "два-четыре");
+assert.equal(topicsWord(5), "интересов", "пять и больше");
+assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
 assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
 assert.ok(allows(PLANS.pro, "subscription"), "свой ключ — признак Pro");
@@ -423,36 +607,17 @@ for (const section of GATED) {
   );
 }
 
-// Предел в форме обязан считать то же, что опрашивает прогон. Иначе после
-// понижения тарифа запрещённый вид занимает места живых источников:
-// прогон их не опрашивает, а добавить разрешённый уже нельзя.
-import { topicsWord } from "../src/lib/plans";
-
-const afterDowngrade = [
-  source(1, "x"), source(2, "x"), source(3, "x"),
-  source(4, "rss"), source(5, "rss"),
-];
-assert.equal(
-  sourcesForPlan(afterDowngrade, PLANS.free).length,
-  2,
-  "прогон на бесплатном опрашивает только разрешённые виды",
-);
-assert.equal(
-  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
-  2,
-  "и предел в форме обязан считать по тому же правилу",
-);
-
-assert.equal(topicsWord(1), "интерес", "единственное число");
-assert.equal(topicsWord(2), "интереса", "два-четыре");
-assert.equal(topicsWord(5), "интересов", "пять и больше");
-assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
-
 // Перечень в миграции и перечень в коде расходятся молча: база примет
 // значение, которого код не знает, и planOf молча отдаст бесплатный тариф.
-const planSql = readFileSync("db/migrations/0019_plan.sql", "utf8");
-for (const id of PLAN_IDS) {
-  assert.ok(planSql.includes(`'${id}'`), `тариф ${id} должен быть разрешён миграцией`);
+//
+// Проверяются обе: 0019_plan завела колонку в profile, 0020 увезла её
+// в readers вместе с ограничением. На живой базе работает вторая, на чистой
+// применяются подряд обе, и разойтись им нельзя.
+for (const file of ["0019_plan", "0020_readers"]) {
+  const planSql = readFileSync(`db/migrations/${file}.sql`, "utf8");
+  for (const id of PLAN_IDS) {
+    assert.ok(planSql.includes(`'${id}'`), `тариф ${id} должен быть разрешён в ${file}`);
+  }
 }
 
-console.log("Самопроверка пройдена: 113 утверждений");
+console.log("Самопроверка пройдена: 144 утверждения");

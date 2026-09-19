@@ -80,12 +80,13 @@ function composite(axes: SummaryAxes): number {
 export async function scoreSummaries(
   items: { id: number; title: string; summary: string }[],
   readerContext: string,
-): Promise<{ scored: SummaryQuality[]; inputTokens: number }> {
+): Promise<{ scored: SummaryQuality[]; inputTokens: number; model: string }> {
   const client = new TypeSafeClient();
   const asked = questions(readerContext);
 
   const scored: SummaryQuality[] = [];
   let inputTokens = 0;
+  let model = "";
   let cursor = 0;
 
   const worker = async () => {
@@ -108,6 +109,7 @@ export async function scoreSummaries(
         };
         scored.push({ item_id: item.id, total: composite(axes), axes });
         inputTokens += result.usage.input_tokens;
+        model = result.model;
       } catch (error) {
         console.error(`  ! оценка описания «${item.title.slice(0, 40)}»: ${(error as Error).message}`);
       }
@@ -115,5 +117,5 @@ export async function scoreSummaries(
   };
 
   await Promise.all(Array.from({ length: Math.min(6, items.length) }, worker));
-  return { scored, inputTokens };
+  return { scored, inputTokens, model };
 }

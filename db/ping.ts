@@ -16,40 +16,51 @@ async function main() {
   };
 
   const { sql } = await import("../src/lib/db");
-  const { getProfile, getTopics, getSources, getFeed } = await import("../src/lib/queries");
+  const { getSources, getDigestDays, getFeed } = await import("../src/lib/queries");
+  const { allReaders, getReaderTopics } = await import("../src/lib/readers");
 
   const [meta] = await sql<{ who: string; path: string }[]>`
     select current_user as who, current_setting('search_path') as path
   `;
   console.log(`роль: ${meta.who} · search_path: ${meta.path}`);
 
-  // Последовательно, а не Promise.all: проверке спешить некуда, а веер
-  // из четырёх запросов на общий пулер иногда упирается в выдачу соединений.
-  const profile = await getProfile();
-  const topics = await getTopics();
-  const sources = await getSources();
-  const [latestDay] = await (await import("../src/lib/queries")).getDigestDays();
-  const feed = latestDay ? await getFeed(latestDay) : [];
-  console.log(`профиль: дайджест ${profile.digest_size}, онбординг ${profile.onboarded_at ?? "не пройден"}`);
-  console.log(`темы: ${topics.map((t) => t.slug).join(", ")}`);
-  console.log(`источники: ${sources.length} (включено ${sources.filter((s) => s.active).length})`);
-  console.log(`лента: ${feed.length}`);
-
-  // Последним и громко: код, уехавший раньше миграции, роняет страницу
-  // на несуществующей колонке, и заметно это только при нажатии на ту
-  // самую настройку. Один раз так и было.
+  // Сверка схемы идёт первой, а не последней: спрашивать таблицы, которых
+  // может не быть, — значит получить «relation does not exist» вместо
+  // внятного «база отстаёт, накати миграции». Один раз так и вышло: ping
+  // падал сырой ошибкой драйвера ровно там, где обязан был объяснить.
   const { schemaGaps } = await import("./schema-gap");
   const gaps = await schemaGaps(sql);
-  await sql.end();
-
-  if (gaps.length === 0) {
-    console.log("схема: всё, что обещают миграции, в базе есть");
+  if (gaps.length > 0) {
+    await sql.end();
+    console.error(`\n! база отстаёт от кода: не хватает ${gaps.length}`);
+    for (const gap of gaps) console.error(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
+    console.error("\nНакатить: npm run migrate — нужен SUPABASE_DB_URL, роль приложения не владелец таблиц.");
+    process.exitCode = 1;
     return;
   }
-  console.error(`\n! база отстаёт от кода: не хватает ${gaps.length}`);
-  for (const gap of gaps) console.error(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
-  console.error("\nПрименяет владелец через SQL Editor: роль приложения не владелец таблиц.");
-  process.exitCode = 1;
+  console.log("схема: всё, что обещают миграции, в базе есть");
+
+  // Последовательно, а не Promise.all: проверке спешить некуда, а веер
+  // запросов на общий пулер иногда упирается в выдачу соединений.
+  const readers = await allReaders();
+  const sources = await getSources();
+  console.log(`источники: ${sources.length} (включено ${sources.filter((s) => s.active).length})`);
+  console.log(`читателей: ${readers.length}`);
+
+  for (const reader of readers) {
+    const topics = await getReaderTopics(reader.id);
+    const [latestDay] = await getDigestDays(reader.id);
+    const feed = latestDay ? await getFeed(reader.id, latestDay) : [];
+    const who = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
+    console.log(
+      `  ${who}${reader.owner ? " (владелец)" : ""}: дайджест ${reader.digest_size}, ` +
+      `онбординг ${reader.onboarded_at ?? "не пройден"}, ` +
+      `темы ${topics.map((t) => t.slug).join(", ") || "не заданы"}, ` +
+      `в последнем выпуске ${feed.length}`,
+    );
+  }
+
+  await sql.end();
 }
 
 main().catch((error) => {
