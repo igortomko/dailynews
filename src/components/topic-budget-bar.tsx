@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { colorAt, moveBoundary } from "@/lib/topic-budget";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,7 @@ export function TopicBudgetBar({
   onChange: (next: number[]) => void;
 }) {
   const bar = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState<number | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const total = counts.reduce((sum, count) => sum + count, 0);
@@ -75,8 +76,31 @@ export function TopicBudgetBar({
 
   const shown = hovered ?? active;
 
+  /**
+   * Нажатие мимо полосы снимает выбор. Иначе выбранный кусок остаётся
+   * приглушать соседей, пока не попадёшь ровно по нему второй раз, —
+   * и полоса застревает в состоянии, из которого не видно выхода.
+   * Слушаем pointerdown, а не click: он приходит до того, как под пальцем
+   * что-то откроется или перерисуется.
+   */
+  useEffect(() => {
+    if (active === null) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!box.current?.contains(event.target as Node)) setActive(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActive(null);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [active]);
+
   return (
-    <div className="flex flex-col gap-1.5">
+    <div ref={box} className="flex flex-col gap-1.5">
       {/* Подпись держит высоту всегда: появляясь и исчезая, она дёргала бы
           вниз всё, что под полосой, ровно в момент перетаскивания. */}
       <div className="h-5 text-xs text-muted-foreground" aria-hidden>
