@@ -12,7 +12,7 @@ import { equal } from "./auth";
  */
 export const SECRET_HEADER = "x-telegram-bot-api-secret-token";
 
-const escapeHtml = (s: string) =>
+export const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
@@ -32,6 +32,8 @@ export function checkSecret(header: string | null): boolean {
 export type BotCommand =
   | { kind: "start"; telegramId: number; chatId: number; username: string | null }
   | { kind: "help"; chatId: number }
+  /** Присланная ссылка: бот заводит по ней источник, как форма в вебе. */
+  | { kind: "link"; telegramId: number; chatId: number; text: string }
   /** Ответ на «дочитал?»: единственный сигнал о том, что уехало на читалку. */
   | { kind: "finished"; telegramId: number; itemId: number; finished: boolean; callbackId: string }
   | { kind: "ignore" };
@@ -104,7 +106,26 @@ export function parseUpdate(update: unknown): BotCommand {
     const username = typeof message.from?.username === "string" ? message.from.username : null;
     return { kind: "start", telegramId, chatId, username };
   }
+  // Прислали ссылку — значит, хотят завести источник. Это тот же жест,
+  // что и вставить её в форму, и отвечать на него подсказкой «напиши /start»
+  // значит делать вид, что не понял.
+  if (looksLikeSource(text)) return { kind: "link", telegramId, chatId, text };
+
   return text ? { kind: "help", chatId } : { kind: "ignore" };
+}
+
+/**
+ * Похоже ли сообщение на источник.
+ *
+ * Грубо и нарочно: решать, что это за источник, — дело planFor, а здесь
+ * нужно только отличить ссылку от разговора, не ходя при этом в сеть.
+ * Поисковые запросы X сюда не попадают: в них пробелы, и в переписке
+ * «uranium OR SMR» неотличимо от фразы.
+ */
+export function looksLikeSource(text: string): boolean {
+  const value = text.trim();
+  if (!value || /\s/.test(value) || value.startsWith("/")) return false;
+  return value.includes("://") || value.startsWith("@") || /[^\s@]+\.[^\s@]{2,}/.test(value);
 }
 
 async function call(method: string, body: object): Promise<void> {

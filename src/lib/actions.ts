@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
-import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
+import { discover, planFor, type Found } from "../../pipeline/discover";
+import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
@@ -17,7 +18,7 @@ import type { Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestWith, FEATURES, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
-  PLAN_IDS, PLANS, type Gated,
+  type Gated,
 } from "./plans";
 import { effectivePlan } from "./lemon";
 import { SOURCE_LANGUAGE } from "./voice";
@@ -339,7 +340,6 @@ export async function discoverSource(input: string): Promise<
   }
 }
 
-const KNOWN_KINDS = new Set<Source["kind"]>(["rss", "hackernews", "reddit", "x", "telegram", "email"]);
 
 /**
  * Сохраняется только то, что действительно ответило, и перепроверяется ровно
@@ -353,64 +353,25 @@ export async function addSource(formData: FormData) {
   const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
   const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
-  if (!KNOWN_KINDS.has(kind)) return { error: "Сначала разбери ссылку" };
+  if (!isKnownKind(kind)) return { error: "Сначала разбери ссылку" };
   if (!url) return { error: "Пустой адрес" };
 
   // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
   // чем сходить за фидом и отказать после.
-  const denied = await denyBySource(kind);
-  if (denied) return denied;
+  const denied = await denyForKind(await currentReader(), kind);
+  if (denied) return { error: denied };
 
   const probe = await probeOne(kind, url, inputUrl);
   if (!probe.ok) return { error: `Источник больше не отвечает: ${probe.error}` };
 
   const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
-  // xmax = 0 у настоящей вставки и ненулевой у обновления по конфликту.
-  // Без этого «Источник добавлен» говорилось и тогда, когда он уже был
-  // в списке, — сообщение врало ровно в том случае, когда человеку важно
-  // знать правду.
-  const [row] = await sql<{ created: boolean }[]>`
-    insert into dailynews.sources (kind, label, url, input_url)
-    values (${kind}, ${label}, ${url}, ${inputUrl})
-    on conflict (kind, url) do update
-      set active = true, label = excluded.label, input_url = excluded.input_url,
-          -- Убранный источник, добавленный заново, возвращается вместе
-          -- со своей историей, а не заводится пустым двойником.
-          deleted_at = null
-    returning (xmax = 0) as created
-  `;
+  const { created } = await saveSource(kind, url, inputUrl, label);
   revalidatePath("/settings/sources");
-  return { ok: true as const, label, created: row?.created ?? true };
+  return { ok: true as const, label, created };
 }
 
 
-/**
- * Общая проверка для добавления и включения: одна и та же пара пределов,
- * и разойтись им нельзя — включение в обход добавления открывало бы X
- * на бесплатном тарифе одним переключателем.
- */
-async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
-  const plan = effectivePlan(await currentReader());
-
-  const byKind = kindDenial(plan, kind);
-  if (byKind) return { error: byKind };
-
-  // Считаем только то, что прогон и правда опрашивает: sourcesForPlan
-  // отсекает запрещённый вид до предела по числу. Иначе после понижения
-  // тарифа оставшиеся включёнными ленты X занимают места живых источников —
-  // добавить разрешённый нельзя, пока не выключишь те, которые всё равно
-  // никто не опрашивает.
-  const [{ n }] = await sql<{ n: number }[]>`
-    select count(*)::int as n
-      from dailynews.sources
-     where active and deleted_at is null and kind = any(${plan.kinds})
-  `;
-  if (n >= plan.maxSources) {
-    return { error: `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — выключи лишний` };
-  }
-  return null;
-}
 
 /**
  * Убрать источник из ленты.
