@@ -4,8 +4,10 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/lib/actions";
 import { currentReader } from "@/lib/session";
-import { planOf } from "@/lib/plans";
-import { effectivePlan } from "@/lib/lemon";
+
+import { checkoutUrl, effectivePlan } from "@/lib/lemon";
+import { PLAN_IDS } from "@/lib/plans";
+import { PaywallProvider } from "@/components/paywall";
 import { SettingsNav } from "./nav";
 
 /**
@@ -14,9 +16,15 @@ import { SettingsNav } from "./nav";
  * а не прятаться под кнопку, как в ленте.
  */
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
-  const plan = effectivePlan(await currentReader());
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
+  // Ссылки на оплату собираются здесь: их строит сервер из переменных
+  // окружения, а окно с предложением живёт в клиентских компонентах.
+  const checkout = Object.fromEntries(
+    PLAN_IDS.map((id) => [id, checkoutUrl(id, reader.id)]).filter(([, url]) => url),
+  ) as Record<string, string>;
   return (
-    <>
+    <PaywallProvider checkout={checkout}>
       <PageHeader
         left={
           <div className="flex items-center gap-2">
@@ -61,6 +69,6 @@ export default async function SettingsLayout({ children }: { children: React.Rea
       </aside>
         <div className="min-w-0 flex-1">{children}</div>
       </div>
-    </>
+    </PaywallProvider>
   );
 }

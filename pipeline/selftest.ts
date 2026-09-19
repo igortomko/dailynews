@@ -631,7 +631,9 @@ assert.equal(
   "и предел в форме обязан считать по тому же правилу",
 );
 
-import { FEATURES, GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
+import {
+  FEATURES, GATED, allows, cheapestWith, topicsWord, type FeatureId, type Plan,
+} from "../src/lib/plans";
 
 assert.equal(topicsWord(1), "интерес", "единственное число");
 assert.equal(topicsWord(2), "интереса", "два-четыре");
@@ -639,6 +641,30 @@ assert.equal(topicsWord(5), "интересов", "пять и больше");
 assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
 assert.ok(!allows(PLANS.free, "calibration"), "бесплатный тариф не открывает платных разделов");
+
+// Окно с предложением показывает все тарифы, где возможность есть и которые
+// дороже текущего: один самый дешёвый теряет место, где читатель выбрал бы Pro.
+const offersFor = (feature: FeatureId, current: Plan) =>
+  PLAN_IDS.map((id) => PLANS[id]).filter((p) => FEATURES[feature].has(p) && p.price > current.price);
+
+assert.deepEqual(
+  offersFor("language", PLANS.free).map((p) => p.id),
+  ["plus", "pro"],
+  "за переводом с бесплатного предлагаются оба платных тарифа",
+);
+assert.deepEqual(
+  offersFor("delivery", PLANS.free).map((p) => p.id),
+  ["pro"],
+  "читалка есть только на Pro — предлагать Plus было бы враньём",
+);
+assert.deepEqual(
+  offersFor("delivery", PLANS.plus).map((p) => p.id),
+  ["pro"],
+  "с Plus за читалкой остаётся один тариф — его и предлагаем",
+);
+// Окно вообще не открывается тому, у кого возможность уже есть: корона
+// рисуется по тому же FEATURES.has, и предлагать ему нечего.
+assert.ok(FEATURES.language.has(PLANS.plus), "у Plus перевод уже есть, короны не будет");
 
 // Перевод платный, а язык источника — законное значение, а не пустота:
 // оно уходит в промпт и означает «оставь как в источнике».
@@ -1201,4 +1227,4 @@ assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкш�
 assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
 assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
 
-console.log("Самопроверка пройдена: 342 утверждения");
+console.log("Самопроверка пройдена: 345 утверждений");
