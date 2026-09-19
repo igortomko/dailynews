@@ -374,7 +374,10 @@ export async function addSource(formData: FormData) {
     insert into dailynews.sources (kind, label, url, input_url)
     values (${kind}, ${label}, ${url}, ${inputUrl})
     on conflict (kind, url) do update
-      set active = true, label = excluded.label, input_url = excluded.input_url
+      set active = true, label = excluded.label, input_url = excluded.input_url,
+          -- Убранный источник, добавленный заново, возвращается вместе
+          -- со своей историей, а не заводится пустым двойником.
+          deleted_at = null
     returning (xmax = 0) as created
   `;
   revalidatePath("/settings/sources");
@@ -401,7 +404,7 @@ async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | n
   const [{ n }] = await sql<{ n: number }[]>`
     select count(*)::int as n
       from dailynews.sources
-     where active and kind = any(${plan.kinds})
+     where active and deleted_at is null and kind = any(${plan.kinds})
   `;
   if (n >= plan.maxSources) {
     return { error: `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — выключи лишний` };
@@ -409,10 +412,35 @@ async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | n
   return null;
 }
 
+/**
+ * Убрать источник из ленты.
+ *
+ * Не delete: items.source_id стоит на on delete cascade, и настоящее удаление
+ * уносило собранные материалы, их оценки, их чтения и их записи в уже
+ * отправленных выпусках. Отменить такое нечем — строку источника вернуть
+ * легко, сто семьдесят шесть чтений уже нет. Поэтому источник помечается
+ * и исчезает отовсюду, а история остаётся.
+ *
+ * active не трогается: отмена обязана вернуть то, что было, а не включить
+ * источник, который до удаления был выключен.
+ */
 export async function deleteSource(id: number) {
   await requireOwner();
-  await sql`delete from dailynews.sources where id = ${id}`;
+  const [row] = await sql<{ label: string }[]>`
+    update dailynews.sources set deleted_at = now()
+     where id = ${id} and deleted_at is null
+     returning label
+  `;
   revalidatePath("/settings/sources");
+  return row ? { ok: true as const, label: row.label } : { error: "Источник уже убран" };
+}
+
+/** Отмена: возвращает источник ровно в то состояние, в каком он был. */
+export async function restoreSource(id: number) {
+  await requireOwner();
+  await sql`update dailynews.sources set deleted_at = null where id = ${id}`;
+  revalidatePath("/settings/sources");
+  return { ok: true as const };
 }
 
 /**

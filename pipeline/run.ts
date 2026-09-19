@@ -378,7 +378,7 @@ async function main() {
 
   const readers = await allReaders();
   const topics = await topicsInUse();
-  const all = await sql<Source[]>`select * from dailynews.sources where active order by id`;
+  const all = await sql<Source[]>`select * from dailynews.sources where active and deleted_at is null order by id`;
 
   // Тариф решает не только форма настроек: понижение оставляет лишние
   // источники включёнными в каталоге, и опрашивать их всё равно нельзя —
