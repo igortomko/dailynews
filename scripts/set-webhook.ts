@@ -11,8 +11,10 @@
  * Поллинга здесь нет и не будет: отдельный постоянный процесс на общей
  * машине заводить нельзя, а два процесса с одним токеном отбирают апдейты
  * друг у друга.
+ *
+ * Всё внутри main(): пакет собирается в CJS, и верхнеуровневый await
+ * здесь не переживает сборку — падает не проверка, а сам запуск.
  */
-export {};
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
@@ -41,26 +43,33 @@ const api = async (method: string, body?: object) => {
 
 const url = `${appUrl.replace(/\/$/, "")}/api/telegram`;
 
-await api("setWebhook", {
-  url,
-  secret_token: secret,
-  // Только сообщения: остальные типы апдейтов бот всё равно игнорирует,
-  // а Telegram не станет их слать и повторять.
-  allowed_updates: ["message"],
-  drop_pending_updates: true,
-});
-await api("setMyCommands", { commands: [{ command: "start", description: "Ссылка на ленту" }] });
+async function main() {
+  await api("setWebhook", {
+    url,
+    secret_token: secret,
+    // Только сообщения: остальные типы апдейтов бот всё равно игнорирует,
+    // а Telegram не станет их слать и повторять.
+    allowed_updates: ["message"],
+    drop_pending_updates: true,
+  });
+  await api("setMyCommands", { commands: [{ command: "start", description: "Ссылка на ленту" }] });
 
-// Спрашиваем, а не верим ответу на установку: сверять надо то, что стоит.
-const info = await api("getWebhookInfo") as {
-  url: string;
-  pending_update_count: number;
-  last_error_message?: string;
-};
-if (info.url !== url) {
-  console.error(`! стоит ${info.url || "ничего"}, ожидался ${url}`);
-  process.exit(1);
+  // Спрашиваем, а не верим ответу на установку: сверять надо то, что стоит.
+  const info = await api("getWebhookInfo") as {
+    url: string;
+    pending_update_count: number;
+    last_error_message?: string;
+  };
+  if (info.url !== url) {
+    console.error(`! стоит ${info.url || "ничего"}, ожидался ${url}`);
+    process.exit(1);
+  }
+  console.log(`вебхук: ${info.url}`);
+  console.log(`в очереди: ${info.pending_update_count}`);
+  if (info.last_error_message) console.log(`последняя ошибка: ${info.last_error_message}`);
 }
-console.log(`вебхук: ${info.url}`);
-console.log(`в очереди: ${info.pending_update_count}`);
-if (info.last_error_message) console.log(`последняя ошибка: ${info.last_error_message}`);
+
+main().catch((error) => {
+  console.error(error.message ?? error);
+  process.exit(1);
+});
