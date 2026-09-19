@@ -111,3 +111,16 @@ export async function checkPassword(candidate: string): Promise<boolean> {
 }
 
 export const SESSION_COOKIE = COOKIE;
+
+/**
+ * Адрес, по которому ленту открывают снаружи.
+ *
+ * В standalone-сборке за обратным прокси `nextUrl.origin` — это адрес
+ * прослушивания контейнера, и собранная из него ссылка ведёт на
+ * https://0.0.0.0:3000. Ссылка входа приземлялась именно туда: кука
+ * ставилась, переход выполнялся, страница не открывалась.
+ *
+ * Одна функция на оба места, где адрес собирается: бот шлёт ссылку,
+ * /auth на неё приземляет, и разойтись они не должны.
+ */
+export const appOrigin = (fallback: string) => process.env.APP_URL?.trim() || fallback;
