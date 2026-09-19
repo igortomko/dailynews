@@ -1,7 +1,8 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
 import {
-  allReaders, getReaderTopics, lastActivityAt, pauseReader, recordCall, spentToday, topicsInUse,
+  allReaders, getReaderTopics, lastActivityAt, pauseReader, recordCall, spentToday,
+  topicsInUse, wakeReader,
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -16,7 +17,7 @@ import { enrichImages } from "./og";
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { maxDigestOf, sourcesForPlan } from "../src/lib/plans";
+import { issuesToday, maxDigestOf, sourcesForPlan } from "../src/lib/plans";
 import { effectivePlan } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
 
@@ -97,6 +98,11 @@ async function runForReader(
   // Спящий читатель — это выпуск каждую ночь в пустоту. Спрашиваем один раз
   // и замолкаем до ответа: молчание тоже ответ, и оно бесплатное.
   const sleep = sleepVerdict(reader, await lastActivityAt(reader.id));
+  if (sleep.verdict === "wake") {
+    // Отпуск кончился: возвращаем ленту сами, ничего не переспрашивая.
+    await wakeReader(reader.id);
+    log(`  ${name}: отпуск кончился — лента возвращается`);
+  }
   if (sleep.verdict === "paused") {
     log(`  ${name}: на паузе с ${String(reader.paused_at).slice(0, 10)} — выпуск не пишем`);
     return 0;
@@ -112,8 +118,16 @@ async function runForReader(
     return 0;
   }
 
-  const topics = await getReaderTopics(reader.id);
   const plan = effectivePlan(reader);
+
+  // Бесплатный получает ленту через день. Это честнее, чем урезать выпуск:
+  // урезанный выглядит как плохой продукт, редкий — как бесплатный.
+  if (!issuesToday(plan, reader.id, day)) {
+    log(`  ${name}: тариф «${plan.label}» — выпуск через день, сегодня не его ночь`);
+    return 0;
+  }
+
+  const topics = await getReaderTopics(reader.id);
 
   // Читатель без интересов пропускается, а не получает пустой выпуск:
   // пустой выпуск выглядит как «сегодня ничего не было».

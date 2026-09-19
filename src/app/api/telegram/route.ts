@@ -70,9 +70,12 @@ export async function POST(request: NextRequest) {
     if (command.kind === "resume") {
       // Возвращение — это и есть ответ: паузу снимаем сразу, ничего
       // не переспрашивая. Читатель уже сделал единственное нужное движение.
-      await resumeReader(command.telegramId);
-      await answerCallback(command.callbackId, "Вернул ленту");
-      await sendMessage(command.chatId, "Вернул. Выпуск придёт следующей ночью.");
+      await resumeReader(command.telegramId, command.afterDays);
+      const when = command.afterDays
+        ? `Хорошо, вернусь через ${command.afterDays} ${command.afterDays === 7 ? "дней" : "дней"}.`
+        : "Вернул. Выпуск придёт следующей ночью.";
+      await answerCallback(command.callbackId, command.afterDays ? "Отложил" : "Вернул ленту");
+      await sendMessage(command.chatId, when);
       return NextResponse.json({ ok: true });
     }
 

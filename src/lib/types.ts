@@ -146,5 +146,7 @@ export type Reader = {
   paused_at: string | null;
   /** Когда спросили «продолжать?»: без отметки вопрос уходил бы каждую ночь. */
   sleep_asked_at: string | null;
+  /** Читатель попросил вернуть ленту с этого числа: отпуск, а не уход. */
+  resume_at: string | null;
   onboarded_at: string | null;
 };

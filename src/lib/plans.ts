@@ -42,6 +42,14 @@ export type Plan = {
   kinds: Source["kind"][];
   /** Разделы настроек, открытые тарифом. */
   sections: Gated[];
+  /**
+   * Через сколько дней приходит выпуск. Единица — каждую ночь.
+   *
+   * Это честнее, чем урезать размер выпуска: на бесплатном лента остаётся
+   * такой же, просто реже. Урезанный выпуск выглядит как плохой продукт,
+   * редкий — как бесплатный.
+   */
+  everyDays: number;
 };
 
 // Telegram и почта ничего не стоят: публичный канал читается как страница,
@@ -56,6 +64,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxSources: 5,
     maxTopics: 2,
     digestSizes: [5, 10],
+    everyDays: 2,
     kinds: FREE_KINDS,
     // На бесплатном остаётся то, без чего ленты не будет: интересы
     // и источники. Манера письма и разбор статистики — уже выбор,
@@ -69,6 +78,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxSources: 40,
     maxTopics: 5,
     digestSizes: [20, 40],
+    everyDays: 1,
     kinds: FREE_KINDS,
     sections: ["language"],
   },
@@ -79,6 +89,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxSources: 100,
     maxTopics: 10,
     digestSizes: [20, 40, 60, 80, 100],
+    everyDays: 1,
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
@@ -137,7 +148,8 @@ export const cheapestWith = (section: Gated): Plan =>
  * и оба случая на глаз незаметны.
  */
 export type FeatureId =
-  | "personalization" | "delivery" | "language" | "x" | "topics" | "digest" | "sources";
+  | "personalization" | "delivery" | "language" | "x"
+  | "topics" | "digest" | "sources" | "cadence";
 
 export type Feature = {
   title: string;
@@ -173,6 +185,11 @@ export const FEATURES: Record<FeatureId, Feature> = {
     what: "О чём тебе интересно читать — например, ИИ или дизайн. Выпуск делится между темами, чтобы одна не заняла всё.",
     has: (plan) => plan.maxTopics > PLANS.free.maxTopics,
   },
+  cadence: {
+    title: "Как часто приходит",
+    what: "На платных тарифах выпуск приходит каждую ночь, на бесплатном — через день.",
+    has: (plan) => plan.everyDays <= 1,
+  },
   digest: {
     title: "Новостей в выпуске",
     what: "Сколько новостей приходит за раз. Десять — прочитать за кофе, сто — растянуть на день.",
@@ -184,6 +201,20 @@ export const FEATURES: Record<FeatureId, Feature> = {
     has: (plan) => plan.maxSources > PLANS.free.maxSources,
   },
 };
+
+/**
+ * Выпуск этой ночью или нет.
+ *
+ * День считается от даты, а не от прошлого выпуска: прогон могут запустить
+ * дважды за сутки или пропустить ночь, и отсчёт «от прошлого раза» тогда
+ * съезжает навсегда. Номер читателя в формуле разносит бесплатных по разным
+ * ночам — иначе половина ленты просыпается в один день.
+ */
+export function issuesToday(plan: Plan, readerId: number, day: string | Date): boolean {
+  if (plan.everyDays <= 1) return true;
+  const epochDay = Math.floor(new Date(day).getTime() / 86_400_000);
+  return (epochDay + readerId) % plan.everyDays === 0;
+}
 
 /** Самый дешёвый тариф, на котором возможность есть. */
 export const cheapestFor = (id: FeatureId): Plan =>

@@ -44,6 +44,7 @@ import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
+import { issuesToday } from "../src/lib/plans";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -237,15 +238,26 @@ assert.equal(firstSet(" a ", "b"), "a", "значение обрезается �
 // --- оборванный ответ модели ---------------------------------------------------
 // Провайдер обрывает простыню JSON на середине массива. Падение разбора
 // оставляло день без дайджеста целиком, хотя почти все описания доехали.
-const cut = '{"intro": "сегодня про ИИ", "items": [{"id": 1, "title_ru": "А", "summary": "раз"},' +
-  '{"id": 2, "title_ru": "Б", "summary": "два"},{"id": 3, "title_ru": "В", "summ';
+// Описание приходит тройкой [id, заголовок, текст]: имена полей
+// повторялись на каждом описании и тарифицировались как выход.
+const cut = '{"intro": "сегодня про ИИ", "items": [[1, "А", "раз"],' +
+  '[2, "Б", "два"],[3, "В", "тр';
 assert.equal(parseDigest(cut).items?.length, 2, "из оборванного ответа спасаются целые описания");
 assert.equal(parseDigest(cut).intro, "сегодня про ИИ", "интро переживает обрыв");
 assert.equal(
-  parseDigest('{"intro":"и","items":[{"id":7,"title_ru":"Т","summary":"С"}]}').items?.[0].id,
+  parseDigest('{"intro":"и","items":[[7,"Т","С"]]}').items?.[0].id,
   7,
   "целый ответ разбирается обычным путём",
 );
+assert.equal(
+  parseDigest('{"items":[[7,"Т","С"]]}').items?.[0].title_ru,
+  "Т",
+  "второй элемент тройки — заголовок",
+);
+// Модель иногда возвращает id строкой: сопоставление разберётся, а вот
+// потерять описание из-за типа нельзя.
+assert.equal(parseDigest('{"items":[["7","Т","С"]]}').items?.length, 1, "id строкой тоже принимается");
+assert.equal(parseDigest('{"items":[[7,"Т"]]}').items?.length, 0, "неполная тройка не описание");
 
 // --- объявленная связь вместо связи -------------------------------------------
 // Эта форма и была жалобой читателя: «не понял, зачем мне это». Ось её
@@ -635,7 +647,7 @@ assert.ok(
   const now = new Date("2026-09-20T00:00:00Z");
   const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
   const reader = (over: Record<string, unknown> = {}) =>
-    ({ paused_at: null, onboarded_at: daysAgo(100), ...over }) as never;
+    ({ paused_at: null, resume_at: null, onboarded_at: daysAgo(100), ...over }) as never;
 
   assert.equal(sleepVerdict(reader(), daysAgo(1), now).verdict, "run", "читал вчера — пишем");
   assert.equal(
@@ -669,6 +681,48 @@ assert.ok(
     sleepVerdict(reader({ onboarded_at: null }), null, now).verdict,
     "run",
     "ни событий, ни онбординга — мерить нечего",
+  );
+
+  // Отпуск — это не уход. Читатель назвал дату, и лента возвращается сама:
+  // спрашивать второй раз того, кто уже ответил, — верный способ надоесть.
+  const away = { paused_at: daysAgo(3), resume_at: daysAgo(-4) };
+  assert.equal(
+    sleepVerdict(reader(away), daysAgo(30), now).verdict,
+    "paused",
+    "пока отпуск не кончился, выпуск не пишется",
+  );
+  assert.equal(
+    sleepVerdict(reader({ paused_at: daysAgo(10), resume_at: daysAgo(1) }), daysAgo(30), now).verdict,
+    "wake",
+    "срок вышел — лента возвращается без вопросов",
+  );
+}
+
+// --- выпуск через день на бесплатном ------------------------------------------
+// Реже — честнее, чем меньше: урезанный выпуск выглядит как плохой продукт,
+// редкий — как бесплатный.
+{
+  const days = ["2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23"];
+  for (const day of days) {
+    assert.ok(issuesToday(PLANS.pro, 1, day), "платный тариф приходит каждую ночь");
+    assert.ok(issuesToday(PLANS.plus, 7, day), "и Plus тоже");
+  }
+  // Проверяем чередование, а не конкретный день: фаза зависит от номера
+  // читателя, и прибитый к дате ответ сломался бы от смены нумерации.
+  const free = days.map((day) => issuesToday(PLANS.free, 1, day));
+  assert.deepEqual(
+    free.map((yes, i) => (i === 0 ? null : yes !== free[i - 1])).slice(1),
+    [true, true, true],
+    "бесплатный — через ночь: соседние дни всегда разные",
+  );
+  assert.equal(free.filter(Boolean).length, 2, "за четыре ночи выпуск приходит дважды");
+
+  // Номер читателя разносит бесплатных по разным ночам: иначе половина
+  // ленты просыпается в один день и прогон упирается в него целиком.
+  assert.notDeepEqual(
+    days.map((day) => issuesToday(PLANS.free, 2, day)),
+    free,
+    "соседние номера попадают в разные ночи",
   );
 }
 

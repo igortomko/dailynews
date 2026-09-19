@@ -37,7 +37,7 @@ export type BotCommand =
   /** Ответ на «дочитал?»: единственный сигнал о том, что уехало на читалку. */
   | { kind: "finished"; telegramId: number; itemId: number; finished: boolean; callbackId: string }
   /** Нажал «продолжать» под вопросом спящему: лента включается обратно. */
-  | { kind: "resume"; telegramId: number; chatId: number; callbackId: string }
+  | { kind: "resume"; telegramId: number; chatId: number; afterDays: number; callbackId: string }
   | { kind: "ignore" };
 
 type Update = {
@@ -96,10 +96,13 @@ export function parseUpdate(update: unknown): BotCommand {
       // chat_id берём из сообщения с кнопкой: у спящего читателя переписка
       // та же, но полагаться на равенство telegram_id и chat_id нельзя.
       const chat = callback.message?.chat?.id;
+      // Ноль — «продолжить сейчас», остальное — отпуск на столько дней.
+      const afterDays = /^\d+$/.test(parts[1] ?? "") ? Math.min(60, Number(parts[1])) : 0;
       return {
         kind: "resume",
         telegramId: from,
         chatId: isId(chat) ? chat : from,
+        afterDays,
         callbackId: id,
       };
     }
@@ -204,9 +207,17 @@ export async function askResume(chatId: number, silentDays: number): Promise<voi
     chat_id: chatId,
     text:
       `Ты не открывал ленту ${silentDays} дней — я поставил её на паузу, ` +
-      "чтобы не копить непрочитанное.\n\nВернуть? Выпуск снова придёт завтра ночью.",
+      "чтобы не копить непрочитанное.\n\nВернуть?",
     reply_markup: {
-      inline_keyboard: [[{ text: "Продолжить", callback_data: `${RESUME_PREFIX}:1` }]],
+      // Отпуск — это не уход. Читатель, которому сейчас не до новостей,
+      // без этих кнопок отвечает молчанием, и лента не возвращается вовсе.
+      inline_keyboard: [
+        [{ text: "Продолжить", callback_data: `${RESUME_PREFIX}:0` }],
+        [
+          { text: "Через неделю", callback_data: `${RESUME_PREFIX}:7` },
+          { text: "Через две", callback_data: `${RESUME_PREFIX}:14` },
+        ],
+      ],
     },
   });
 }
