@@ -24,6 +24,22 @@ async function main() {
   `;
   console.log(`роль: ${meta.who} · search_path: ${meta.path}`);
 
+  // Сверка схемы идёт первой, а не последней: спрашивать таблицы, которых
+  // может не быть, — значит получить «relation does not exist» вместо
+  // внятного «база отстаёт, накати миграции». Один раз так и вышло: ping
+  // падал сырой ошибкой драйвера ровно там, где обязан был объяснить.
+  const { schemaGaps } = await import("./schema-gap");
+  const gaps = await schemaGaps(sql);
+  if (gaps.length > 0) {
+    await sql.end();
+    console.error(`\n! база отстаёт от кода: не хватает ${gaps.length}`);
+    for (const gap of gaps) console.error(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
+    console.error("\nНакатить: npm run migrate — нужен SUPABASE_DB_URL, роль приложения не владелец таблиц.");
+    process.exitCode = 1;
+    return;
+  }
+  console.log("схема: всё, что обещают миграции, в базе есть");
+
   // Последовательно, а не Promise.all: проверке спешить некуда, а веер
   // запросов на общий пулер иногда упирается в выдачу соединений.
   const readers = await allReaders();
@@ -44,21 +60,7 @@ async function main() {
     );
   }
 
-  // Последним и громко: код, уехавший раньше миграции, роняет страницу
-  // на несуществующей колонке, и заметно это только при нажатии на ту
-  // самую настройку. Один раз так и было.
-  const { schemaGaps } = await import("./schema-gap");
-  const gaps = await schemaGaps(sql);
   await sql.end();
-
-  if (gaps.length === 0) {
-    console.log("схема: всё, что обещают миграции, в базе есть");
-    return;
-  }
-  console.error(`\n! база отстаёт от кода: не хватает ${gaps.length}`);
-  for (const gap of gaps) console.error(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
-  console.error("\nНакатить: npm run migrate — нужен SUPABASE_DB_URL, роль приложения не владелец таблиц.");
-  process.exitCode = 1;
 }
 
 main().catch((error) => {

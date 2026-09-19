@@ -52,6 +52,12 @@ create table if not exists dailynews.readers (
   kindle_address text,
   kindle_sender  text unique,
 
+  -- Тариф. Колонку завела 0019_plan: её запись есть в журнале живой базы,
+  -- а файла нет ни в одной ветке. Здесь она переезжает вместе со всем
+  -- персональным, а не исчезает заодно с profile: платежей в Ленте нет,
+  -- но и терять выставленное значение не за что.
+  plan           text not null default 'free' check (plan in ('free', 'plus', 'pro')),
+
   -- Потолок расходов на модель в сутки. Вход бесплатный и мгновенный,
   -- значит завести сто аккаунтов может кто угодно; потолок ставится сразу,
   -- а не когда придёт счёт. Дайджест на двенадцать материалов стоит около
@@ -78,6 +84,22 @@ select true, p.reader_context, p.digest_size, p.weights, p.language, p.complexit
   from dailynews.profile p
  where p.id = 1
    and not exists (select 1 from dailynews.readers r where r.owner);
+
+-- Тариф переносится отдельно и под проверкой: на чистой базе колонки
+-- profile.plan нет вовсе — её миграция потерялась, — и безусловная ссылка
+-- на неё уронила бы и verify:db, и первое применение на новом инстансе.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'dailynews' and table_name = 'profile' and column_name = 'plan'
+  ) then
+    update dailynews.readers r
+       set plan = p.plan
+      from dailynews.profile p
+     where r.owner and p.id = 1;
+  end if;
+end $$;
 
 -- Интересы читателя. topics остаётся общим справочником: по нему Jev
 -- классифицирует поток один раз на всех. Персонально здесь только
@@ -145,6 +167,10 @@ create index if not exists digest_items_quality_idx
 -- Перенос состава и написанного текста. Блок выполняется только на первом
 -- применении: db/verify.ts прогоняет все миграции склейкой дважды, и второй
 -- заход приходит уже без колонок, из которых переносить.
+--
+-- Номер 0020, а не 0019: в журнале живой базы уже есть 0019_plan, а в ветке
+-- auto-parse-feed-sources — 0019_source_input_url. Три разные миграции под
+-- одним номером расходятся тем тише, чем дольше их не сводить.
 do $$
 begin
   if exists (
@@ -207,5 +233,5 @@ create index if not exists model_calls_reader_at_idx
 -- следующий читатель кода примет за работающую (урок 0016).
 drop table if exists dailynews.profile;
 
-insert into dailynews.migrations (name) values ('0019_readers')
+insert into dailynews.migrations (name) values ('0020_readers')
   on conflict (name) do nothing;

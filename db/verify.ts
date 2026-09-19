@@ -127,6 +127,15 @@ async function main() {
       "веса по умолчанию в коде и в jsonb-дефолте колонки обязаны совпадать",
     );
 
+    // Тариф достался от потерянной 0019_plan. На чистой базе её колонки нет,
+    // и перенос обязан это пережить, а не уронить всю миграцию.
+    assert.equal(owner.plan, "free", "тариф по умолчанию — free");
+    await assert.rejects(
+      sql`update dailynews.readers set plan = 'platinum' where id = ${owner.id}`,
+      /plan/,
+      "ограничение тарифа должно переехать вместе с колонкой",
+    );
+
     const ownerTopics = await readers.getReaderTopics(owner.id);
     assert.equal(ownerTopics.length, 6, `у владельца ${ownerTopics.length} тем, ожидалось 6`);
     assert.ok(ownerTopics.every((t) => t.weight > 0), "цель темы не может быть нулевой");

@@ -99,6 +99,9 @@ export type Reader = {
   kindle_address: string | null;
   /** Локальная часть обратного адреса. Выдаётся один раз и заморожена. */
   kindle_sender: string | null;
+  /** Тариф. Платежей в Ленте нет: колонка досталась от потерянной 0019_plan
+   *  и переехала вместе с остальным персональным. */
+  plan: string;
   daily_cap_usd: number;
   onboarded_at: string | null;
   llm: { base_url?: string; model?: string; api_key?: string; reasoning_effort?: string };

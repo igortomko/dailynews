@@ -11,7 +11,7 @@ import type { Reader, ReaderTopic, Topic } from "./types";
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
   reader_context, digest_size, weights, language, complexity, style, llm,
-  kindle_address, kindle_sender, daily_cap_usd, onboarded_at
+  kindle_address, kindle_sender, plan, daily_cap_usd, onboarded_at
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {

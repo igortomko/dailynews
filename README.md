@@ -68,7 +68,7 @@ db/migrations/0001_schema_and_role.sql
 db/migrations/0002_tables.sql
 db/migrations/0003_seed.sql
 ...
-db/migrations/0019_readers.sql
+db/migrations/0020_readers.sql
 ```
 
 Применяются все файлы каталога по порядку имён — так же, как их прогоняет
