@@ -7,6 +7,7 @@ import { ru } from "react-day-picker/locale";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const FORMAT = new Intl.DateTimeFormat("ru", { day: "numeric", month: "long", year: "numeric" });
@@ -38,9 +39,20 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
   return (
     <div className="flex items-center gap-1 text-sm font-medium">
       {older ? (
-        <Link href={`/?day=${older}`} aria-label="Предыдущий выпуск" className={cn(arrow, "hover:bg-muted")}>
-          <ChevronLeftIcon className="size-5 sm:size-4" />
-        </Link>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Link
+                href={`/?day=${older}`}
+                aria-label="Предыдущий выпуск"
+                className={cn(arrow, "hover:bg-muted")}
+              />
+            }
+          >
+            <ChevronLeftIcon className="size-5 sm:size-4" />
+          </TooltipTrigger>
+          <TooltipContent>Предыдущий выпуск</TooltipContent>
+        </Tooltip>
       ) : (
         <span aria-hidden className={cn(arrow, "text-muted-foreground/30")}>
           <ChevronLeftIcon className="size-5 sm:size-4" />
@@ -76,9 +88,20 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
       </Popover>
 
       {newer ? (
-        <Link href={`/?day=${newer}`} aria-label="Следующий выпуск" className={cn(arrow, "hover:bg-muted")}>
-          <ChevronRightIcon className="size-5 sm:size-4" />
-        </Link>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Link
+                href={`/?day=${newer}`}
+                aria-label="Следующий выпуск"
+                className={cn(arrow, "hover:bg-muted")}
+              />
+            }
+          >
+            <ChevronRightIcon className="size-5 sm:size-4" />
+          </TooltipTrigger>
+          <TooltipContent>Следующий выпуск</TooltipContent>
+        </Tooltip>
       ) : (
         <span aria-hidden className={cn(arrow, "text-muted-foreground/30")}>
           <ChevronRightIcon className="size-5 sm:size-4" />

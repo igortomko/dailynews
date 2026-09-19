@@ -11,6 +11,18 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
@@ -28,6 +40,85 @@ function yieldOf(source: SourceHealth): string {
     parts.push(`дублей ${Math.round((source.duplicates / source.items) * 100)}%`);
   }
   return parts.join(" · ");
+}
+
+/**
+ * Удаление источника с подтверждением.
+ *
+ * Спрашивать перед каждым действием — дурной тон, но у этого нет отката:
+ * items ссылается на sources с on delete cascade, и вместе со строкой
+ * каталога уходит весь собранный из неё поток, а за ним оценки и места
+ * в прошлых выпусках. Вернуть это нечем — прогон соберёт заново только то,
+ * что сейчас лежит в фиде. Корзина стоит в ряду с переключателем, который
+ * стоит ровно ничего, и промах между ними на семь пикселей.
+ *
+ * Отдельным компонентом, а не через AlertDialogTrigger внутри строки:
+ * у диалога своё состояние, и держать его открытым на весь список значит
+ * помнить, какая строка его открыла.
+ */
+function DeleteSource({ source }: { source: SourceHealth }) {
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Удалить ${source.label}`}
+              onClick={() => setOpen(true)}
+              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            />
+          }
+        >
+          <TrashIcon />
+        </TooltipTrigger>
+        <TooltipContent>Удалить источник и всё, что он дал</TooltipContent>
+      </Tooltip>
+
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10 text-destructive">
+              <TrashIcon />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Удалить «{source.label}»?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Вместе с источником уйдут все собранные из него материалы
+              {source.items > 0 ? ` — за тридцать дней их ${source.items} — ` : ", "}
+              их оценки и места в прошлых выпусках. Отката нет. Чтобы источник
+              просто перестал опрашиваться, хватит переключателя слева.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  // Диалог закрывает сам AlertDialogAction. Отказ ловим:
+                  // молча закрывшийся диалог читается как «удалено»,
+                  // а строка остаётся на месте.
+                  try {
+                    await deleteSource(source.id);
+                    toast.success(`«${source.label}» удалён`);
+                  } catch {
+                    toast.error(`Не удалось удалить «${source.label}»`);
+                  }
+                })
+              }
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 }
 
 /**
@@ -264,16 +355,7 @@ export function SourcesManager({
                 ) : source.last_count !== null ? (
                   <Badge variant="secondary">{source.last_count}</Badge>
                 ) : null}
-                {editable ? (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Удалить ${source.label}`}
-                    onClick={() => startTransition(() => deleteSource(source.id))}
-                  >
-                    <TrashIcon />
-                  </Button>
-                ) : null}
+                {editable ? <DeleteSource source={source} /> : null}
               </div>
             </div>
           ))}

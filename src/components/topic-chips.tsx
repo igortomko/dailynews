@@ -6,6 +6,7 @@ import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
@@ -226,17 +227,28 @@ export function TopicChips({
 
                 <span className="shrink-0 tabular-nums text-muted-foreground">{chip.count}</span>
 
-                <button
-                  type="button"
-                  aria-label={`Убрать ${chip.label}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    remove(index);
-                  }}
-                  className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-background hover:text-foreground"
-                >
-                  <XIcon className="size-3.5" />
-                </button>
+                {/* Красный по наведению: рядом стоит перетаскивание, и обе
+                    цели живут в одном чипе шириной с два пальца. Виден
+                    и без курсора — на тапе group-hover не наступает никогда,
+                    и убрать интерес с телефона было нечем. */}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={`Убрать ${chip.label}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          remove(index);
+                        }}
+                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive [@media(hover:none)]:opacity-100"
+                      />
+                    }
+                  >
+                    <XIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent>Убрать интерес</TooltipContent>
+                </Tooltip>
               </div>
 
               {/* Детали раскрываются под самим чипом, а не внизу формы:
@@ -259,28 +271,42 @@ export function TopicChips({
                   {/* То же, что и полоса, но пальцем и с клавиатуры: на узком
                       экране границу шириной в четыре пиксела не поймать. */}
                   <div className="mt-3 flex items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      aria-label="На одну новость меньше"
-                      onClick={() => nudge(index, -1)}
-                      disabled={chip.count <= MIN_PER_TOPIC}
-                    >
-                      <MinusIcon />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon-sm"
+                            aria-label="На одну новость меньше"
+                            onClick={() => nudge(index, -1)}
+                            disabled={chip.count <= MIN_PER_TOPIC}
+                          />
+                        }
+                      >
+                        <MinusIcon />
+                      </TooltipTrigger>
+                      <TooltipContent>Меньше новостей по этой теме</TooltipContent>
+                    </Tooltip>
                     <span className="w-16 text-center text-sm tabular-nums">
                       {chip.count} из {total}
                     </span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      aria-label="На одну новость больше"
-                      onClick={() => nudge(index, 1)}
-                    >
-                      <PlusIcon />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon-sm"
+                            aria-label="На одну новость больше"
+                            onClick={() => nudge(index, 1)}
+                          />
+                        }
+                      >
+                        <PlusIcon />
+                      </TooltipTrigger>
+                      <TooltipContent>Больше новостей по этой теме — место возьмётся у самой крупной</TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               ) : null}

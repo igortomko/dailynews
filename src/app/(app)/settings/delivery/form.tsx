@@ -15,6 +15,7 @@ import { kindleSetupStep, type KindleStep } from "@/lib/kindle-setup";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const DOMAIN = "kindle.tomko.io";
 
@@ -31,23 +32,32 @@ const AMAZON_SETTINGS = "https://www.amazon.com/hz/mycd/myx";
 function CopyAddress({ value }: { value: string }) {
   if (!value) return <code className="font-mono">—</code>;
   return (
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          toast.success("Адрес скопирован");
-        } catch {
-          // Буфер закрыт настройками браузера или небезопасным соединением.
-          // Молчать нельзя: читатель уверен, что скопировал.
-          toast.error("Браузер не дал скопировать — выдели адрес вручную");
+    // Своя подсказка вместо title: браузерная выезжает через секунду
+    // с лишним и рисуется системным шрифтом — здесь она единственное,
+    // что объясняет, зачем адрес подчёркнут пунктиром.
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(value);
+                toast.success("Адрес скопирован");
+              } catch {
+                // Буфер закрыт настройками браузера или небезопасным
+                // соединением. Молчать нельзя: читатель уверен, что скопировал.
+                toast.error("Браузер не дал скопировать — выдели адрес вручную");
+              }
+            }}
+            className="cursor-pointer font-mono underline decoration-dotted underline-offset-4 hover:text-foreground"
+          />
         }
-      }}
-      title="Скопировать"
-      className="cursor-pointer font-mono underline decoration-dotted underline-offset-4 hover:text-foreground"
-    >
-      {value}
-    </button>
+      >
+        {value}
+      </TooltipTrigger>
+      <TooltipContent>Скопировать адрес</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -240,14 +250,26 @@ export function DeliveryForm({
 
                 <div className="flex flex-wrap items-center gap-4">
                   <Button type="submit" disabled={pending}>Сохранить</Button>
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => run(resetKindleSetup(), "Настройка сброшена", () => setStep("address"))}
-                    className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-50"
-                  >
-                    Настроить заново
-                  </button>
+                  {/* Красный по наведению: сброс стирает адрес читалки
+                      и снимает отметку об одобрении отправителя — до конца
+                      повторной настройки выпуски не доходят вовсе. */}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() =>
+                            run(resetKindleSetup(), "Настройка сброшена", () => setStep("address"))
+                          }
+                          className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4 hover:text-destructive disabled:opacity-50"
+                        />
+                      }
+                    >
+                      Настроить заново
+                    </TooltipTrigger>
+                    <TooltipContent>Стереть адрес читалки и пройти настройку с начала</TooltipContent>
+                  </Tooltip>
                 </div>
               </FieldGroup>
             </form>

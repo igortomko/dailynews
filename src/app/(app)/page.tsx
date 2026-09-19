@@ -6,6 +6,7 @@ import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
@@ -51,15 +52,23 @@ export default async function FeedPage({
       items={items}
       left={<DateNav day={day} days={days} />}
       right={
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Настройки"
-          className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
-          render={<Link href="/settings/personalization" />}
-        >
-          <SettingsIcon />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                nativeButton={false}
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Настройки"
+                className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
+                render={<Link href="/settings/personalization" />}
+              />
+            }
+          >
+            <SettingsIcon />
+          </TooltipTrigger>
+          <TooltipContent>Настройки: интересы, источники, доставка</TooltipContent>
+        </Tooltip>
       }
     />
   );
