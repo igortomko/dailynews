@@ -1423,6 +1423,19 @@ assert.equal(
   "истёкшая подписка не даёт платного выпуска",
 );
 assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
+
+// Владелец не покупает подписку у себя самого: платёж через Lemon Squeezy
+// из кармана в карман — это комиссия за перевод денег самому себе.
+assert.equal(
+  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  "pro",
+  "у владельца тариф правилом, а не платежом",
+);
+assert.equal(
+  effectivePlan(paid({ plan: "free", owner: false })).id,
+  "free",
+  "остальным тариф по-прежнему даёт только подписка",
+);
 assert.ok(endingAt(paid({ plan_ends_at: new Date(Date.now() + DAY).toISOString() })), "дата конца видна интерфейсу");
 assert.equal(endingAt(paid()), null, "у активной подписки конца нет");
 

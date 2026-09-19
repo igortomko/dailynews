@@ -5,7 +5,7 @@ import { SendIcon } from "lucide-react";
 import { login } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 /**
@@ -61,7 +61,7 @@ export function LoginForm({
                     autoComplete="current-password"
                     aria-invalid={state?.error ? true : undefined}
                   />
-                  {state?.error ? <FieldDescription>{state.error}</FieldDescription> : null}
+                  {state?.error ? <FieldError>{state.error}</FieldError> : null}
                 </Field>
                 <Button type="submit" variant="outline" disabled={pending}>
                   Войти

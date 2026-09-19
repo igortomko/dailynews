@@ -61,6 +61,13 @@ export const paymentsConfigured = () => Object.keys(variants()).length > 0;
  * гасить по расписанию, а оно здесь ходит раз в сутки.
  */
 export function effectivePlan(reader: Reader, now = new Date()): Plan {
+  // Владелец не покупает подписку у себя самого. Записать ему «pro»
+  // в колонку было бы короче, но это данные о подписке, которой нет:
+  // статус пришлось бы выдумать «active», и первый же настоящий вебхук
+  // или взгляд в базу этому бы поверил. Тариф владельца — правило,
+  // а не платёж, и живёт оно в коде.
+  if (reader.owner) return PLANS.pro;
+
   const bought = planOf(reader.plan);
   if (bought.id === "free") return bought;
 

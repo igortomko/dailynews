@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -383,11 +383,21 @@ export function SourcesManager({
                       {pending ? "Проверяю…" : "Добавить"}
                     </Button>
                   </div>
-                  <FieldDescription>
-                    {error ??
-                      "Поддерживается: новостные сайты, блоги, YouTube, GitHub, " +
-                        "открытый Telegram-канал и т. д."}
-                  </FieldDescription>
+                  {/*
+                    Отказ и подсказка — разные вещи, и выглядеть одинаково
+                    они не имеют права: серая строка на месте серой строки
+                    читается как продолжение подсказки, а не как «не вышло».
+                    FieldError к тому же объявляет себя role="alert",
+                    и экранный диктор произносит отказ сам.
+                  */}
+                  {error ? (
+                    <FieldError>{error}</FieldError>
+                  ) : (
+                    <FieldDescription>
+                      Поддерживается: новостные сайты, блоги, YouTube, GitHub,
+                      открытый Telegram-канал и т. д.
+                    </FieldDescription>
+                  )}
                 </Field>
 
                 {found && !plan.kinds.includes(found.kind) ? (

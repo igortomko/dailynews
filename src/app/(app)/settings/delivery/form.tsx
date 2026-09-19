@@ -14,7 +14,7 @@ import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { kindleSetupStep, type KindleStep } from "@/lib/kindle-setup";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -185,7 +185,11 @@ export function DeliveryForm({
                     placeholder="имя@kindle.com"
                     aria-invalid={error ? true : undefined}
                   />
-                  <FieldDescription>{error ?? "Заканчивается на @kindle.com."}</FieldDescription>
+                  {error ? (
+                    <FieldError>{error}</FieldError>
+                  ) : (
+                    <FieldDescription>Заканчивается на @kindle.com.</FieldDescription>
+                  )}
                 </Field>
                 <Button type="submit" disabled={pending || locked} className="self-start">
                   Дальше
