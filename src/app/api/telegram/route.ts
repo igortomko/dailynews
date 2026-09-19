@@ -1,7 +1,7 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import { issueLoginToken } from "@/lib/auth";
 import { answerCallback, checkSecret, escapeHtml, loginLink, parseUpdate, sendMessage, SECRET_HEADER } from "@/lib/telegram";
-import { ensureReader, recordFinished } from "@/lib/readers";
+import { ensureReader, recordFinished, resumeReader } from "@/lib/readers";
 import { addByLink } from "@/lib/sources";
 
 /**
@@ -64,6 +64,15 @@ export async function POST(request: NextRequest) {
         }
       });
       await sendMessage(chatId, "Проверяю ссылку…");
+      return NextResponse.json({ ok: true });
+    }
+
+    if (command.kind === "resume") {
+      // Возвращение — это и есть ответ: паузу снимаем сразу, ничего
+      // не переспрашивая. Читатель уже сделал единственное нужное движение.
+      await resumeReader(command.telegramId);
+      await answerCallback(command.callbackId, "Вернул ленту");
+      await sendMessage(command.chatId, "Вернул. Выпуск придёт следующей ночью.");
       return NextResponse.json({ ok: true });
     }
 

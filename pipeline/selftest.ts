@@ -43,6 +43,7 @@ import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
+import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -622,6 +623,52 @@ assert.ok(
   assert.ok(
     at("Читатель: ${readerContext}") < at("Материалы:"),
     "материалы идут после всех правил",
+  );
+}
+
+
+// --- спящий читатель ----------------------------------------------------------
+// Выпуск пишется каждую ночь и каждую ночь стоит денег. Тот, кто две недели
+// не открывал ленту, тратит их впустую — а вернуть его дешевле одним
+// вопросом, чем продолжать писать в пустоту.
+{
+  const now = new Date("2026-09-20T00:00:00Z");
+  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
+  const reader = (over: Record<string, unknown> = {}) =>
+    ({ paused_at: null, onboarded_at: daysAgo(100), ...over }) as never;
+
+  assert.equal(sleepVerdict(reader(), daysAgo(1), now).verdict, "run", "читал вчера — пишем");
+  assert.equal(
+    sleepVerdict(reader(), daysAgo(SLEEP_DAYS - 1), now).verdict,
+    "run",
+    "на день раньше срока ещё пишем: граница не должна срабатывать заранее",
+  );
+  const asked = sleepVerdict(reader(), daysAgo(SLEEP_DAYS + 3), now);
+  assert.equal(asked.verdict, "ask", "две недели молчания — спрашиваем");
+  assert.equal(asked.verdict === "ask" && asked.silentDays, 17, "в вопросе честное число дней");
+
+  assert.equal(
+    sleepVerdict(reader({ paused_at: daysAgo(2) }), daysAgo(30), now).verdict,
+    "paused",
+    "спросили один раз и молчим: вопрос каждую ночь — это спам, а не забота",
+  );
+
+  // У нового читателя ещё не было случая что-то открыть: пауза на второй
+  // день выглядела бы поломкой, а не заботой.
+  assert.equal(
+    sleepVerdict(reader({ onboarded_at: daysAgo(2) }), null, now).verdict,
+    "run",
+    "без событий считаем от онбординга",
+  );
+  assert.equal(
+    sleepVerdict(reader({ onboarded_at: daysAgo(40) }), null, now).verdict,
+    "ask",
+    "завёлся и не вернулся — тоже спящий",
+  );
+  assert.equal(
+    sleepVerdict(reader({ onboarded_at: null }), null, now).verdict,
+    "run",
+    "ни событий, ни онбординга — мерить нечего",
   );
 }
 

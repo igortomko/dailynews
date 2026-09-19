@@ -36,6 +36,8 @@ export type BotCommand =
   | { kind: "link"; telegramId: number; chatId: number; text: string }
   /** Ответ на «дочитал?»: единственный сигнал о том, что уехало на читалку. */
   | { kind: "finished"; telegramId: number; itemId: number; finished: boolean; callbackId: string }
+  /** Нажал «продолжать» под вопросом спящему: лента включается обратно. */
+  | { kind: "resume"; telegramId: number; chatId: number; callbackId: string }
   | { kind: "ignore" };
 
 type Update = {
@@ -48,12 +50,15 @@ type Update = {
     id?: unknown;
     data?: unknown;
     from?: { id?: unknown; is_bot?: unknown };
+    message?: { chat?: { id?: unknown } };
   };
 };
 
 /** Полезная нагрузка кнопки «дочитал». Telegram даёт под неё 64 байта,
  *  поэтому id материала, а не заголовок. */
 export const FINISHED_PREFIX = "fin";
+/** Ответ на «продолжать?» у спящего читателя. */
+export const RESUME_PREFIX = "res";
 
 const isId = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value);
@@ -84,6 +89,17 @@ export function parseUpdate(update: unknown): BotCommand {
         telegramId: from,
         itemId: Number(parts[1]),
         finished: parts[2] === "1",
+        callbackId: id,
+      };
+    }
+    if (isId(from) && callback.from?.is_bot !== true && id && parts[0] === RESUME_PREFIX) {
+      // chat_id берём из сообщения с кнопкой: у спящего читателя переписка
+      // та же, но полагаться на равенство telegram_id и chat_id нельзя.
+      const chat = callback.message?.chat?.id;
+      return {
+        kind: "resume",
+        telegramId: from,
+        chatId: isId(chat) ? chat : from,
         callbackId: id,
       };
     }
@@ -172,6 +188,25 @@ export async function askFinished(chatId: number, itemId: number, title: string)
         { text: "Дочитал", callback_data: `${FINISHED_PREFIX}:${itemId}:1` },
         { text: "Не пошло", callback_data: `${FINISHED_PREFIX}:${itemId}:0` },
       ]],
+    },
+  });
+}
+
+/**
+ * Вопрос спящему читателю.
+ *
+ * Ответ одной кнопкой: спросить «продолжать?» и заставить искать сайт —
+ * это способ не получить ответа. Молчание тоже ответ, и оно бесплатное:
+ * пока кнопку не нажали, выпуск не пишется.
+ */
+export async function askResume(chatId: number, silentDays: number): Promise<void> {
+  await call("sendMessage", {
+    chat_id: chatId,
+    text:
+      `Ты не открывал ленту ${silentDays} дней — я поставил её на паузу, ` +
+      "чтобы не копить непрочитанное.\n\nВернуть? Выпуск снова придёт завтра ночью.",
+    reply_markup: {
+      inline_keyboard: [[{ text: "Продолжить", callback_data: `${RESUME_PREFIX}:1` }]],
     },
   });
 }

@@ -36,6 +36,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "плохие поля" }, { status: 400 });
   }
 
+  // Читатель вернулся — пауза снимается сама. Кнопка в боте остаётся
+  // коротким путём для тех, кто до сайта не дошёл.
+  await sql`
+    update dailynews.readers
+       set paused_at = null, sleep_asked_at = null
+     where id = ${readerId} and paused_at is not null
+  `;
+
   const dwell = Number.isFinite(payload.dwell_ms) ? Math.min(3_600_000, Math.max(0, Number(payload.dwell_ms))) : null;
 
   await sql`
