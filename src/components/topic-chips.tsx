@@ -7,7 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
-import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
+import { DIGEST_SIZES, MAX_DIGEST, MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ChipInput } from "@/lib/actions";
 
@@ -37,7 +44,7 @@ export function TopicChips({
   const setCounts = (counts: number[]) => setChips(withCounts(chips, counts));
 
   const setTotal = (next: number) => {
-    const size = Math.min(50, Math.max(3, Math.round(next) || 3));
+    const size = Math.min(MAX_DIGEST, Math.max(3, Math.round(next) || 3));
     setTotalState(size);
     setChips(withCounts(chips, normalize(chips.map((chip) => chip.count), size)));
   };
@@ -96,19 +103,25 @@ export function TopicChips({
 
       <Field>
         <FieldLabel htmlFor="digest_size">Количество новостей</FieldLabel>
-        <Input
-          id="digest_size"
-          name="digest_size"
-          type="number"
-          min={3}
-          max={50}
-          value={total}
-          onChange={(event) => setTotal(Number(event.target.value))}
-          // Не w-24: Field задаёт детям width:100% через *:w-full, и она
-          // стоит в стилях после обычных утилит. Ширина проигрывает молча,
-          // поле остаётся во всю строку.
-          className="max-w-24"
-        />
+        {/* Список, а не поле ввода: шаг в двадцать — заметная разница в том,
+            сколько читать, а «37» такой разницы не несёт. Значение вне списка
+            (например, прежние 12) остаётся выбранным, пока его не сменили. */}
+        <Select
+          value={String(total)}
+          onValueChange={(value: string | null) => value && setTotal(Number(value))}
+        >
+          <SelectTrigger id="digest_size" className="max-w-28">
+            <SelectValue>{total}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {(DIGEST_SIZES.includes(total) ? DIGEST_SIZES : [total, ...DIGEST_SIZES]).map((size) => (
+              <SelectItem key={size} value={String(size)}>
+                {size}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <input type="hidden" name="digest_size" value={total} />
       </Field>
 
       {chips.length > 0 ? (

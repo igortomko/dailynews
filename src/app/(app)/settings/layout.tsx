@@ -31,7 +31,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       />
 
       <div className="mx-auto flex max-w-3xl flex-col gap-8 px-4 py-6 sm:flex-row sm:gap-10">
-      <aside className="flex shrink-0 flex-col gap-1 sm:w-44">
+      {/* Колонка разделов прибита к экрану: в источниках список на два
+          экрана, и «Выйти» с ним уезжало вниз страницы — на месте оставалась
+          пустая колонка. Высота считается от окна за вычетом шапки (3rem)
+          и полей (по 1.5rem), поэтому «Выйти» стоит внизу экрана, а не внизу
+          документа. На узком экране разделы идут лентой поверху, и прибивать
+          там нечего. */}
+      <aside className="flex shrink-0 flex-col gap-1 sm:sticky sm:top-[4.5rem] sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start">
         <SettingsNav />
         <form action={logout} className="mt-4 sm:mt-auto">
           <Button variant="ghost" size="sm" type="submit" className="w-full justify-start px-2">
