@@ -39,7 +39,7 @@
 ```bash
 npm run dev          # интерфейс
 npm run pipeline     # прогон вручную (нужен .env)
-npm test             # 76 утверждений, без сети и базы
+npm test             # 80 утверждений, без сети и базы
 npm run verify:db    # схема и все запросы на Postgres в процессе (PGlite)
 npm run dry-run      # живой сбор и дедуп, без Jev и без общей базы
 npm run ping         # живое подключение: роль, профиль, темы, источники
