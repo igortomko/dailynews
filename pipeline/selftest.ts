@@ -5,7 +5,32 @@
  *
  *   npx tsx pipeline/selftest.ts
  */
-import assert from "node:assert/strict";
+import assertStrict from "node:assert/strict";
+
+/**
+ * Утверждения считает сам файл, а не человек в конце.
+ *
+ * Число в последней строке вели руками, и оно разъезжалось с правдой каждый
+ * раз, когда две ветки правили тесты одновременно: считать по тексту нельзя —
+ * часть утверждений живёт в циклах и срабатывает по нескольку раз. Разъехалось
+ * уже трижды, и каждый раз выглядело как «тестов стало меньше».
+ */
+let checks = 0;
+const count = <T>(fn: T): T =>
+  ((...args: unknown[]) => {
+    checks++;
+    return (fn as (...a: unknown[]) => unknown)(...args);
+  }) as T;
+const assert: typeof assertStrict = new Proxy(assertStrict, {
+  apply: (target, thisArg, args) => {
+    checks++;
+    return Reflect.apply(target as (...a: unknown[]) => unknown, thisArg, args);
+  },
+  get: (target, prop, receiver) => {
+    const value = Reflect.get(target, prop, receiver);
+    return typeof value === "function" ? count(value) : value;
+  },
+}) as typeof assertStrict;
 import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -1265,5 +1290,5 @@ assert.ok(!looksLikeSource("uranium OR SMR min_faves:100"), "запрос X в �
 assert.ok(!looksLikeSource("/help"), "команда не источник");
 assert.ok(!looksLikeSource(""), "пустая строка не источник");
 
-console.log("Самопроверка пройдена: 328 утверждений");
-console.log("Самопроверка пройдена: 328 утверждений");
+console.log(`Самопроверка пройдена: ${checks} утверждений`);
+console.log(`Самопроверка пройдена: ${checks} утверждений`);
