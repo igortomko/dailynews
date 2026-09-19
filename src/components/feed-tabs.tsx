@@ -29,7 +29,7 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
 
   return (
     <Tabs defaultValue="all" className="flex flex-col gap-4">
-      <TabsList className="flex-wrap">
+      <TabsList className="w-full justify-start overflow-x-auto">
         {tabs.map((tab) => (
           <TabsTrigger key={tab.slug} value={tab.slug}>
             {tab.label}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { XIcon, PlusIcon } from "lucide-react";
+import { XIcon, PlusIcon, ChevronUpIcon, ChevronDownIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,16 @@ export function TopicChips({ initial }: { initial: ChipInput[] }) {
 
   const setHint = (index: number, hint: string) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, hint } : chip)));
+
+  // Порядок интересов — это порядок вкладок в ленте. Первой должна стоять
+  // тема, ради которой открываешь ленту, а не та, что завели раньше других.
+  const move = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= chips.length) return;
+    const next = [...chips];
+    [next[index], next[target]] = [next[target], next[index]];
+    setChips(next);
+  };
 
   const unused = SUGGESTIONS.filter(
     (suggestion) => !chips.some((chip) => chip.label.toLowerCase() === suggestion.toLowerCase()),
@@ -83,14 +93,34 @@ export function TopicChips({ initial }: { initial: ChipInput[] }) {
 
       {chips.length > 0 ? (
         <Field>
-          <FieldLabel>Уточнения</FieldLabel>
+          <FieldLabel>Порядок и уточнения</FieldLabel>
           <FieldDescription>
-            Чем точнее описан интерес, тем меньше новостей попадёт в него по ошибке.
-            Это описание читает модель, которая раскладывает поток по темам.
+            Порядок здесь — это порядок вкладок в ленте. Уточнение читает модель,
+            раскладывающая поток по темам: чем оно точнее, тем меньше попадёт по ошибке.
           </FieldDescription>
           <div className="flex flex-col gap-2">
             {chips.map((chip, index) => (
               <div key={`${chip.label}-${index}`} className="flex items-center gap-2">
+                <div className="flex shrink-0 flex-col">
+                  <button
+                    type="button"
+                    aria-label={`Выше: ${chip.label}`}
+                    disabled={index === 0}
+                    className="cursor-pointer text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-25"
+                    onClick={() => move(index, -1)}
+                  >
+                    <ChevronUpIcon className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Ниже: ${chip.label}`}
+                    disabled={index === chips.length - 1}
+                    className="cursor-pointer text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-25"
+                    onClick={() => move(index, 1)}
+                  >
+                    <ChevronDownIcon className="size-3.5" />
+                  </button>
+                </div>
                 <Badge variant="secondary" className="shrink-0">
                   {chip.label}
                   <button

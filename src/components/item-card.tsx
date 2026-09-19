@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
 import type { FeedItem } from "@/lib/queries";
@@ -18,18 +19,31 @@ function report(body: { item_id: number; event: string; dwell_ms?: number }, bea
   void fetch("/api/read", { method: "POST", body: json, keepalive: true });
 }
 
-/**
- * Только те пометки, что меняют решение читать: материал окажется тоньше,
- * чем обещает заголовок. «Факт», «анонс» и «прогноз» читателю ничего не
- * говорят заранее — их незачем выносить в строку.
- */
-const WARNINGS: Record<string, string> = {
+const KIND: Record<string, string> = {
+  fact: "факт",
+  forecast: "прогноз",
   opinion: "мнение",
+  announcement: "анонс",
   reprint: "перепечатка",
 };
 
+const HORIZON: Record<string, string> = {
+  years: "годы",
+  months: "месяцы",
+  noise: "шум дня",
+};
+
+/** Домен издания: источник ведёт на издание, заголовок — на сам материал. */
+function siteOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
 export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boolean }) {
-  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
@@ -64,7 +78,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
   }, [item.id]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!expanded) return;
     openedAt.current = Date.now();
     report({ item_id: item.id, event: "opened" });
 
@@ -79,23 +93,34 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
       flush();
       window.removeEventListener("pagehide", flush);
     };
-  }, [open, item.id]);
+  }, [expanded, item.id]);
 
   const title = item.title_ru || item.title;
-  const kind = item.axes?.kind?.choice;
-  const warning = kind ? WARNINGS[kind] : undefined;
+  const site = siteOf(item.url);
+  const kind = item.axes?.kind?.choice ? KIND[item.axes.kind.choice] : undefined;
+  const horizon = item.axes?.horizon?.choice ? HORIZON[item.axes.horizon.choice] : undefined;
   const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
 
   return (
     <article
       ref={article}
-      className={cn(
-        "border-b py-4 last:border-0",
-        item.read_count > 0 && "opacity-55",
-      )}
+      className={cn("border-b py-5 last:border-0", item.read_count > 0 && "opacity-55")}
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground/70">{item.source_label}</span>
+      {/* Источник мелким и с весом, остальное — приглушённым.
+          Размеры взяты с Google News: 12px/500 на источник, 13px на время. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8125rem] text-muted-foreground">
+        {site ? (
+          <a
+            href={site}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-[0.75rem] font-medium text-foreground/75 hover:underline"
+          >
+            {item.source_label}
+          </a>
+        ) : (
+          <span className="text-[0.75rem] font-medium text-foreground/75">{item.source_label}</span>
+        )}
         <span aria-hidden>·</span>
         <span>{relativeTime(item.day)}</span>
         {showTopic && item.topic_label ? (
@@ -104,23 +129,15 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
             <span>{item.topic_label}</span>
           </>
         ) : null}
-        {warning ? (
-          <>
-            <span aria-hidden>·</span>
-            <span>{warning}</span>
-          </>
-        ) : null}
-        {clickbait ? (
-          <>
-            <span aria-hidden>·</span>
-            <span className="text-destructive">кликбейт</span>
-          </>
-        ) : null}
+        {kind ? <Badge variant="secondary">{kind}</Badge> : null}
+        {horizon ? <Badge variant="secondary">{horizon}</Badge> : null}
+        {clickbait ? <Badge variant="destructive">кликбейт</Badge> : null}
       </div>
 
-      {/* Заголовок — единственный сильный элемент строки и сам же ссылка:
-          отдельная кнопка «Источник» повторялась бы под каждым материалом. */}
-      <h3 className="mt-1 text-pretty text-[1.0625rem] font-medium leading-snug">
+      {/* Иерархию держит размер, а не жирность: у Google News заголовки
+          идут весом 400 с межстрочным около 1.25. Полужирный при таком
+          размере начинает шуметь и мешает пробегать список глазами. */}
+      <h3 className="mt-1.5 text-pretty text-xl font-normal leading-[1.3]">
         <a
           href={item.url}
           target="_blank"
@@ -134,17 +151,12 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
 
       {item.summary ? (
         <p
-          onClick={() => setOpen((value) => !value)}
-          className={cn(
-            "mt-1.5 max-w-[62ch] cursor-pointer text-pretty text-sm leading-relaxed text-muted-foreground",
-            !open && "line-clamp-2",
-          )}
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-2 max-w-[68ch] cursor-text text-pretty text-[0.9375rem] leading-relaxed text-muted-foreground"
         >
           {item.summary}
         </p>
       ) : null}
-
     </article>
   );
 }
-
