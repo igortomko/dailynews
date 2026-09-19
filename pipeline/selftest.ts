@@ -640,7 +640,23 @@ assert.equal(topicsWord(2), "интереса", "два-четыре");
 assert.equal(topicsWord(5), "интересов", "пять и больше");
 assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
-assert.ok(!allows(PLANS.free, "calibration"), "бесплатный тариф не открывает платных разделов");
+assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
+// Качество отбора — это качество сервиса, а не платная добавка: читатель
+// на бесплатном пробует именно его. Поэтому калибровки нет среди разделов,
+// которые тариф может закрыть, а из меню она убрана как наше слово,
+// а не читателя — страница осталась по своему адресу.
+assert.ok(
+  !(GATED as readonly string[]).includes("calibration"),
+  "калибровка не должна закрываться тарифом",
+);
+assert.ok(
+  !readFileSync("src/app/(app)/settings/nav.tsx", "utf8").includes("/settings/calibration"),
+  "и не должна стоять в списке разделов",
+);
+assert.ok(
+  existsSync("src/app/(app)/settings/calibration/page.tsx"),
+  "но страница остаётся: ряд чисел нужен для правок отбора",
+);
 
 // Окно с предложением показывает все тарифы, где возможность есть и которые
 // дороже текущего: один самый дешёвый теряет место, где читатель выбрал бы Pro.
@@ -683,7 +699,7 @@ assert.ok(
   "раздел подписки не должен закрываться тарифом",
 );
 assert.ok(
-  allows(PLANS.plus, "calibration") && allows(PLANS.pro, "calibration"),
+  allows(PLANS.plus, "language") && allows(PLANS.pro, "language"),
   "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
 );
 // Персонализация не стоит ни одного лишнего токена, поэтому тарифом
@@ -1227,4 +1243,4 @@ assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкш�
 assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
 assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
 
-console.log("Самопроверка пройдена: 345 утверждений");
+console.log("Самопроверка пройдена: 347 утверждений");

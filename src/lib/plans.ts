@@ -24,7 +24,7 @@ export type PlanId = (typeof PLAN_IDS)[number];
  * и держать их за тарифом значит ухудшать бесплатный выпуск без причины,
  * ради ощущения, что платное что-то даёт.
  */
-export const GATED = ["calibration", "delivery", "language"] as const;
+export const GATED = ["delivery", "language"] as const;
 export type Gated = (typeof GATED)[number];
 
 export type Plan = {
@@ -70,7 +70,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxTopics: 5,
     digestSizes: [20, 40],
     kinds: FREE_KINDS,
-    sections: ["calibration", "language"],
+    sections: ["language"],
   },
   pro: {
     id: "pro",
@@ -82,7 +82,7 @@ export const PLANS: Record<PlanId, Plan> = {
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
-    sections: ["calibration", "delivery", "language"],
+    sections: ["delivery", "language"],
   },
 };
 
@@ -137,8 +137,7 @@ export const cheapestWith = (section: Gated): Plan =>
  * и оба случая на глаз незаметны.
  */
 export type FeatureId =
-  | "personalization" | "calibration" | "delivery" | "language"
-  | "x" | "topics" | "digest" | "sources";
+  | "personalization" | "delivery" | "language" | "x" | "topics" | "digest" | "sources";
 
 export type Feature = {
   title: string;
@@ -153,11 +152,6 @@ export const FEATURES: Record<FeatureId, Feature> = {
     what: "На каком языке приходит выпуск и как он написан: попроще или как специалисту, суховато или живее. Есть на любом тарифе.",
     // Доступна всем: промпт от неё не дорожает ни на токен.
     has: () => true,
-  },
-  calibration: {
-    title: "Отчёт о попаданиях",
-    what: "Видно, угадывает ли лента: что ты открывал, что пролистнул и становится ли выбор точнее.",
-    has: (plan) => allows(plan, "calibration"),
   },
   language: {
     title: "Перевод на свой язык",
