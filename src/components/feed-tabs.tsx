@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemCard } from "@/components/item-card";
 import type { FeedItem } from "@/lib/queries";
-import type { Topic } from "@/lib/types";
+import type { ReaderTopic } from "@/lib/types";
 
 export function FeedTabs({
   topics,
@@ -12,7 +12,7 @@ export function FeedTabs({
   left,
   right,
 }: {
-  topics: Topic[];
+  topics: ReaderTopic[];
   items: FeedItem[];
   left: React.ReactNode;
   right: React.ReactNode;

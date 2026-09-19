@@ -68,7 +68,7 @@ export function SubscriptionForm({
             action={(formData) =>
               startTransition(async () => {
                 const result = await saveLlm(formData);
-                if (result?.error) {
+                if (result && "error" in result) {
                   setError(result.error);
                   return;
                 }
@@ -98,7 +98,7 @@ export function SubscriptionForm({
                 />
                 <FieldDescription>
                   {error ??
-                    "Ключ лежит в базе открытым текстом. База закрыта снаружи и читатель у неё один, но если это не устраивает — оставь поле пустым и задай ключ переменной окружения: она старше по приоритету."}
+                    "Ключ лежит в базе открытым текстом, в твоей строке: соседям он не виден, но и от администратора базы не закрыт. Не устраивает — оставь поле пустым, тогда дайджест пишется общим ключом из окружения: он старше по приоритету."}
                 </FieldDescription>
               </Field>
               <div className="flex gap-2">
@@ -107,7 +107,18 @@ export function SubscriptionForm({
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => startTransition(async () => { await clearLlmKey(); toast.success("Ключ убран"); })}
+                    onClick={() =>
+                  startTransition(async () => {
+                    // Отказ тарифа нельзя запивать успехом: «Ключ убран»
+                    // при оставшемся ключе — это отказ, похожий на успех.
+                    const result = await clearLlmKey();
+                    if (result && "error" in result) {
+                      toast.error(result.error);
+                      return;
+                    }
+                    toast.success("Ключ убран");
+                  })
+                }
                   >
                     Убрать ключ
                   </Button>

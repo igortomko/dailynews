@@ -1,11 +1,23 @@
+/** Общий справочник: по нему Jev классифицирует поток один раз на всех. */
 export type Topic = {
+  id: number;
+  slug: string;
+  label: string;
+  hint: string;
+  /** Цель по умолчанию для читателя, который добавляет тему из каталога. */
+  weight: number;
+  position: number;
+  active: boolean;
+};
+
+/** Тема в ленте конкретного читателя: вес здесь — его цель по числу новостей. */
+export type ReaderTopic = {
   id: number;
   slug: string;
   label: string;
   hint: string;
   weight: number;
   position: number;
-  active: boolean;
 };
 
 export type Source = {
@@ -59,8 +71,22 @@ export type Weights = {
   depth: number;
 };
 
-export type Profile = {
+/**
+ * Веса по умолчанию. Обязаны совпадать с jsonb-дефолтом readers.weights:
+ * расхождение проверяет npm run verify:db. Ими же считается scores.total —
+ * скор каталога, от которого персональный отличается ровно весами.
+ */
+export const DEFAULT_WEIGHTS: Weights = {
+  topic: 40, novelty: 20, specifics: 20, actionable: 10,
+  horizon: 10, kind: 25, clickbait: -30, depth: 15,
+};
+
+export type Reader = {
   id: number;
+  /** Приходит из драйвера строкой: bigint. Сравнивать только в SQL. */
+  telegram_id: string | null;
+  username: string | null;
+  owner: boolean;
   reader_context: string;
   digest_size: number;
   language: string;
@@ -69,6 +95,14 @@ export type Profile = {
   /** Манера письма. Незнакомое значение читается как «нейтральный». */
   style: string;
   weights: Weights;
+  /** Адрес @kindle.com. Пусто — выпуск в Kindle не уходит. */
+  kindle_address: string | null;
+  /** Локальная часть обратного адреса. Выдаётся один раз и заморожена. */
+  kindle_sender: string | null;
+  /** Тариф: пределы по источникам, интересам и размеру выпуска (src/lib/plans.ts).
+   *  Персонален, как и всё остальное здесь: у каждого читателя свой. */
+  plan: string;
+  daily_cap_usd: number;
   onboarded_at: string | null;
   llm: { base_url?: string; model?: string; api_key?: string; reasoning_effort?: string };
 };

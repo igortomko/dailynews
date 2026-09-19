@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
-import { DIGEST_SIZES, MAX_DIGEST, MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
+import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
+import { maxDigestOf, type Plan } from "@/lib/plans";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { topUpDigest, type ChipInput } from "@/lib/actions";
@@ -18,9 +19,12 @@ export function TopicChips({
   initialTotal,
   inToday,
   onChange,
+  plan,
 }: {
   initial: ChipInput[];
   initialTotal: number;
+  /** Тариф: он задаёт и потолок числа интересов, и доступные размеры выпуска. */
+  plan: Plan;
   /** Сколько материалов в последнем выпуске: с ним сверяется предложение догрузить. */
   inToday: number;
   onChange?: () => void;
@@ -43,7 +47,7 @@ export function TopicChips({
   const setCounts = (counts: number[]) => setChips(withCounts(chips, counts));
 
   const setTotal = (next: number) => {
-    const size = Math.min(MAX_DIGEST, Math.max(3, Math.round(next) || 3));
+    const size = Math.min(maxDigestOf(plan), Math.max(3, Math.round(next) || 3));
     setTotalState(size);
     setChips(withCounts(chips, normalize(chips.map((chip) => chip.count), size)));
     if (size > inToday) offerTopUp(size);
@@ -79,9 +83,12 @@ export function TopicChips({
   const [dragging, setDragging] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
 
+  const full = chips.length >= plan.maxTopics;
+
   const add = (label: string) => {
     const trimmed = label.trim();
     if (!trimmed) return;
+    if (full) return;
     if (chips.some((chip) => chip.label.toLowerCase() === trimmed.toLowerCase())) return;
     const next = [...chips, { slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC }];
     // Новая тема берёт место у самой крупной, а не растит дайджест:
@@ -139,7 +146,7 @@ export function TopicChips({
           onValueChange={(value: string[]) => value[0] && setTotal(Number(value[0]))}
           variant="outline"
         >
-          {(DIGEST_SIZES.includes(total) ? DIGEST_SIZES : [total, ...DIGEST_SIZES]).map((size) => (
+          {(plan.digestSizes.includes(total) ? plan.digestSizes : [total, ...plan.digestSizes]).map((size) => (
             <ToggleGroupItem key={size} value={String(size)}>
               {size}
             </ToggleGroupItem>
@@ -298,11 +305,16 @@ export function TopicChips({
               }
             }}
           />
-          <Button type="button" variant="outline" onClick={() => add(draft)}>
+          <Button type="button" variant="outline" disabled={full} onClick={() => add(draft)}>
             <PlusIcon data-icon="inline-start" />
             Добавить
           </Button>
         </div>
+        <FieldDescription>
+          {full
+            ? `Тариф «${plan.label}» держит ${plan.maxTopics} — освободи место, убрав интерес`
+            : `${chips.length} из ${plan.maxTopics} на тарифе «${plan.label}»`}
+        </FieldDescription>
       </Field>
     </FieldGroup>
   );

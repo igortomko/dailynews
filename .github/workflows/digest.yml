@@ -13,7 +13,9 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Письмо дайджеста персонально, поэтому время растёт с числом читателей;
+    # сбор и оценка идут один раз на всех и не растут.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +26,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Собрать, оценить, отправить
+      - name: Собрать, оценить, разослать
         env:
           # Строка пулера: у прямого хоста Supabase только IPv6,
           # а раннеры GitHub ходят по IPv4.
@@ -34,7 +36,13 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # Нужен переносу владельца, не рассылке: уведомление уходит
+          # в чат каждого читателя из dailynews.readers.
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Без ключа выпуск не уходит на читалку, но прогон идёт.
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          LLM_INPUT_PRICE: ${{ vars.LLM_INPUT_PRICE }}
+          LLM_OUTPUT_PRICE: ${{ vars.LLM_OUTPUT_PRICE }}
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
