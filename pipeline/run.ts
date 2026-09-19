@@ -8,7 +8,8 @@ import { composite, scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
 import { notify } from "../src/lib/telegram";
-import { sendToKindle } from "./kindle";
+import { sendToKindle, kindleDigestVerdict } from "./kindle";
+import { askFinished } from "../src/lib/telegram";
 import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
@@ -29,9 +30,14 @@ export async function collect(sources: Source[]): Promise<number[]> {
       await sql`update dailynews.sources set last_error = ${result.error} where id = ${result.source.id}`;
       continue;
     }
+    // Тишина отмечается временем, а не счётчиком: прогон могут запустить
+    // дважды за сутки, и счётчик посчитал бы два дня за один. Снимается
+    // первой же записью.
     await sql`
       update dailynews.sources
-         set last_ok_at = now(), last_count = ${result.items.length}, last_error = null
+         set last_ok_at = now(), last_count = ${result.items.length}, last_error = null,
+             silent_since = case when ${result.items.length} > 0 then null
+                                 else coalesce(silent_since, now()) end
        where id = ${result.source.id}
     `;
 
@@ -40,10 +46,10 @@ export async function collect(sources: Source[]): Promise<number[]> {
       // повторного прогона в тот же день.
       const rows = await sql<{ id: number }[]>`
         insert into dailynews.items
-          (source_id, url, url_canon, title, title_norm, excerpt, points, comments, published_at)
+          (source_id, url, url_canon, title, title_norm, excerpt, body, points, comments, published_at)
         values (
-          ${result.source.id}, ${item.url}, ${canonUrl(item.url)}, ${item.title},
-          ${normalizeTitle(item.title)}, ${item.excerpt},
+          ${result.source.id}, ${item.url}, ${item.canon ?? canonUrl(item.url)}, ${item.title},
+          ${normalizeTitle(item.title)}, ${item.excerpt}, ${item.body ?? null},
           ${item.points}, ${item.comments}, ${item.published_at}
         )
         on conflict (url_canon) do nothing
@@ -52,6 +58,20 @@ export async function collect(sources: Source[]): Promise<number[]> {
       if (rows[0]) inserted.push(rows[0].id);
     }
   }
+
+  // Источник, отвечающий 200 и отдающий ноль, — самая незаметная поломка
+  // в ленте: ошибки нет, дайджест приходит, просто одного голоса в нём
+  // больше не слышно. Поэтому тишина называется вслух в каждом прогоне.
+  const silent = await sql<{ label: string; days: number }[]>`
+    select label, (current_date - silent_since::date)::int as days
+      from dailynews.sources
+     where active and silent_since is not null
+     order by silent_since
+  `;
+  if (silent.length > 0) {
+    log(`  молчат: ${silent.map((row) => `${row.label} (${row.days} дн.)`).join(", ")}`);
+  }
+
   return inserted;
 }
 
@@ -91,9 +111,27 @@ async function runForReader(
   // тарифа, а платит за письмо описаний владелец ключа. Тот же потолок
   // стоит на догрузке из интерфейса — иначе он обходился бы кнопкой.
   const digestSize = Math.min(reader.digest_size, maxDigestOf(plan));
+
+  // Сколько уже лежит в сегодняшнем выпуске. Состав дописывается, а не
+  // заменяется: прочитанное утром не должно исчезать из ленты. Но без этого
+  // вычитания повторный прогон дописывал бы ещё digestSize материалов поверх,
+  // и выпуск рос бы с каждым запуском — сорок, восемьдесят, сто двадцать.
+  // Выглядело бы это как «сегодня много новостей».
+  const [today] = await sql<{ taken: number }[]>`
+    select count(*)::int as taken
+      from dailynews.digests d
+      join dailynews.digest_items di on di.digest_id = d.id
+     where d.reader_id = ${reader.id} and d.day = ${day}
+  `;
+  const missing = digestSize - today.taken;
+  if (missing <= 0) {
+    log(`  ${name}: выпуск за ${day} уже полон (${today.taken} из ${digestSize}) — пропуск`);
+    return 0;
+  }
+
   const mySources = sourcesForPlan(allSources, plan).map((source) => source.id);
   const survivors = await selectSurvivors(
-    sql, reader.id, reader.weights, targetsOf(topics), digestSize, mySources,
+    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
   if (survivors.length === 0) {
     log(`  ${name}: свежих материалов нет — пропуск`);
@@ -261,16 +299,21 @@ async function deliver(
     }
   }
 
-  if (!reader.kindle_address) return;
-  if (!reader.kindle_sender) {
-    // Молчать здесь нельзя: адрес читалки вписан, значит выпуска ждут.
-    log(`  ${name}: Kindle — обратный адрес не выдан, отправка пропущена`);
+  const kindle = kindleDigestVerdict(reader);
+  if (!kindle.send) {
+    // Пустой адрес — читатель не просил, говорить не о чем. Остальные две
+    // причины он должен увидеть: одна сбой, другая его собственный выбор.
+    if (kindle.reason === "no-sender") {
+      log(`  ${name}: Kindle — обратный адрес не выдан, отправка пропущена`);
+    } else if (kindle.reason === "switched-off") {
+      log(`  ${name}: Kindle — выпуск выключен в настройках`);
+    }
     return;
   }
   try {
     const sent = await sendToKindle({
-      to: reader.kindle_address,
-      sender: reader.kindle_sender,
+      to: kindle.to,
+      sender: kindle.sender,
       day,
       intro,
       articles: survivors.map((s) => ({
@@ -284,6 +327,47 @@ async function deliver(
     log(sent ? `  ${name}: Kindle отправлен` : `  ${name}: RESEND_API_KEY не задан — Kindle пропущен`);
   } catch (error) {
     log(`  ${name}: Kindle — ${(error as Error).message}`);
+  }
+}
+
+/**
+ * Спросить про вчерашние отправки на читалку: дочитал или не пошло.
+ *
+ * Отправка — единственная часть продукта без петли измерения. Отбор
+ * калибруется открытиями, описания — шестью осями Jev, а про книгу
+ * на читалке никто не знает ничего: Amazon обратно не говорит и не может.
+ *
+ * Спрашиваем на следующий день, а не в тот же вечер: вечером он её
+ * и читает. Один вопрос на статью — повторно уже спрошенное не трогаем,
+ * иначе бот превращается в напоминалку, которую выключают.
+ */
+async function askAboutYesterday(reader: Reader): Promise<void> {
+  if (!reader.telegram_id) return;
+
+  const pending = await sql<{ item_id: number; title: string }[]>`
+    select ks.item_id, coalesce(i.title_ru, i.title) as title
+      from dailynews.kindle_sends ks
+      join dailynews.items i on i.id = ks.item_id
+     where ks.reader_id = ${reader.id}
+       and ks.status = 'sent'
+       and ks.at < now() - interval '12 hours'
+       and ks.at > now() - interval '7 days'
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.reader_id = ks.reader_id and r.item_id = ks.item_id
+            and r.event in ('finished', 'unfinished')
+       )
+     order by ks.at
+     limit 3
+  `;
+
+  for (const row of pending) {
+    try {
+      await askFinished(Number(reader.telegram_id), row.item_id, row.title);
+    } catch (error) {
+      // Заблокировавший бота читатель не должен ронять прогон остальных.
+      log(`  читатель ${reader.id}: вопрос о дочитывании — ${(error as Error).message}`);
+    }
   }
 }
 
@@ -387,6 +471,7 @@ async function main() {
       personal += await runForReader(reader, day, all, {
         collected: collected.length, duplicates, scored: scored.length,
       });
+      await askAboutYesterday(reader);
     } catch (error) {
       // Один упавший читатель не должен оставить без выпуска остальных.
       console.error(`  ! читатель ${reader.id}: ${(error as Error).message}`);

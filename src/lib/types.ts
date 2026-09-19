@@ -22,21 +22,37 @@ export type ReaderTopic = {
 
 export type Source = {
   id: number;
-  kind: "rss" | "hackernews" | "reddit" | "x";
+  kind: "rss" | "hackernews" | "reddit" | "x" | "telegram" | "email";
   label: string;
   url: string;
   config: Record<string, unknown>;
   active: boolean;
+  /** Что вставил человек, до разбора. url — уже разрешённый адрес фида. */
+  input_url: string | null;
   last_ok_at: string | null;
   last_count: number | null;
   last_error: string | null;
+  /** С какого момента источник отвечает и не даёт ни одной свежей записи. */
+  silent_since: string | null;
 };
 
 /** Сырой материал до скоринга. */
 export type RawItem = {
   url: string;
+  /**
+   * Чем дедупить, если адрес для этого не годится. У письма «посмотреть
+   * в браузере» одинаков во всех выпусках рассылки, а Message-ID уникален
+   * по RFC. Пусто — канонизируется адрес, как у всех остальных.
+   */
+  canon?: string;
   title: string;
   excerpt: string;
+  /**
+   * Полный текст, если фид его отдал (content:encoded у Substack
+   * и WordPress). HTML как есть: чистит его тот же defuddle, что и
+   * скачанную страницу. Пусто — статью придётся забирать по ссылке.
+   */
+  body?: string;
   points: number | null;
   comments: number | null;
   published_at: Date | null;
@@ -95,8 +111,20 @@ export type Reader = {
   /** Манера письма. Незнакомое значение читается как «нейтральный». */
   style: string;
   weights: Weights;
-  /** Адрес @kindle.com. Пусто — выпуск в Kindle не уходит. */
+  /** Адрес @kindle.com. Пусто — на читалку не уходит ничего. */
   kindle_address: string | null;
+  /**
+   * Слать ли на читалку сам выпуск. Адресом пользуется и ручная отправка
+   * отдельной статьи, поэтому «не присылай выпуск» — это переключатель,
+   * а не стёртый адрес.
+   */
+  kindle_digest: boolean;
+  /**
+   * Читатель подтвердил, что добавил наш обратный адрес в список одобренных
+   * Amazon. Снаружи это не проверяется ничем: неодобренное письмо
+   * отбрасывается молча. Пока false — обратный адрес ещё можно менять.
+   */
+  kindle_approved: boolean;
   /** Локальная часть обратного адреса. Выдаётся один раз и заморожена. */
   kindle_sender: string | null;
   /** Тариф: пределы по источникам, интересам и размеру выпуска (src/lib/plans.ts).

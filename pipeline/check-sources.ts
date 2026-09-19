@@ -1,43 +1,27 @@
 /**
- * Проверка источников живым запросом. Тем же кодом пользуется интерфейс,
- * когда добавляешь фид руками: каталог из непроверенных адресов —
- * это молча пустая вкладка через неделю.
+ * Разбор ссылки живым запросом из командной строки — ровно тем же кодом,
+ * которым пользуется форма добавления источника. Каталог из непроверенных
+ * адресов превращается в пустую вкладку через неделю.
  *
- *   npx tsx pipeline/check-sources.ts <url> [url...]
+ *   npx tsx pipeline/check-sources.ts <ссылка> [ссылка...]
  */
-import { fetchAllSources } from "./fetch";
-import type { Source } from "../src/lib/types";
-
-export function asSource(url: string, id = 0): Source {
-  return {
-    id,
-    kind: url.includes("reddit.com") ? "reddit" : "rss",
-    label: url,
-    url,
-    config: {},
-    active: true,
-    last_ok_at: null,
-    last_count: null,
-    last_error: null,
-  };
-}
-
-export async function checkFeed(url: string) {
-  const [result] = await fetchAllSources([asSource(url)]);
-  return result.ok
-    ? { ok: true as const, count: result.items.length, sample: result.items[0]?.title ?? "" }
-    : { ok: false as const, count: 0, sample: "", error: result.error };
-}
+import { discover } from "./discover";
 
 if (process.argv[2]) {
-  const sources = process.argv.slice(2).map(asSource);
-  fetchAllSources(sources).then((results) => {
-    for (const r of results) {
+  (async () => {
+    for (const input of process.argv.slice(2)) {
+      const result = await discover(input);
+      if (!result.ok) {
+        console.log(`FAIL  ${input}\n      ${result.error}\n`);
+        continue;
+      }
+      const { kind, url, label, entries, fresh, sample, via } = result.found;
       console.log(
-        r.ok
-          ? `OK   ${String(r.items.length).padStart(3)}  ${r.source.url}  ${r.items[0]?.title.slice(0, 55) ?? ""}`
-          : `FAIL   0  ${r.source.url}  ${r.error}`,
+        `OK    ${input}\n` +
+        `      ${kind} · ${via} · свежих ${fresh} из ${entries}\n` +
+        `      ${url}\n` +
+        `      ${label} — ${sample.slice(0, 70)}\n`,
       );
     }
-  });
+  })();
 }

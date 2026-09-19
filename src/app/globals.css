@@ -49,6 +49,13 @@
 }
 
 :root {
+  /* Фон страницы опущен с белого до 0.971, а --muted, --accent и --secondary
+     остались дефолтами shadcn (0.97), рассчитанными на белый фон под ними.
+     Разница вышла в 0.001 — невидимая. Молча пропали не только ховеры
+     ghost-кнопок: дорожка слайдера, скелетоны, фон табов, чипы тем и
+     подсветка пункта меню — всё это красится в --muted и сливалось с фоном.
+     Отказ выглядел как успех: классы на месте, стили применяются, а смотреть не на что.
+     Держим ту же дельту, что и shadcn между белым и 0.97, — около 0.03. */
   --background: oklch(0.971 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -57,11 +64,11 @@
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.94 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.94 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --accent: oklch(0.94 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
@@ -77,7 +84,7 @@
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.94 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);

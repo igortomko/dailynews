@@ -1,5 +1,6 @@
 import { sql } from "./db";
 import type { Reader, ReaderTopic, Topic } from "./types";
+import { kindleSenderName } from "./kindle-setup";
 
 /**
  * Всё, что знает о читателях. Живёт отдельно от queries.ts, потому что нужно
@@ -11,7 +12,8 @@ import type { Reader, ReaderTopic, Topic } from "./types";
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
   reader_context, digest_size, weights, language, complexity, style, llm,
-  kindle_address, kindle_sender, plan, daily_cap_usd, onboarded_at
+  kindle_address, kindle_sender, kindle_digest, kindle_approved,
+  plan, daily_cap_usd, onboarded_at
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -60,27 +62,37 @@ export async function catalogTopics(): Promise<Topic[]> {
 }
 
 /**
- * Обратный адрес для Kindle. Выдаётся один раз и дальше не меняется:
- * каждая смена означает, что читатель заново одобряет отправителя
- * в настройках Amazon, а до тех пор выпуски молча не доходят.
+ * Обратный адрес для Kindle. Замораживается не при выдаче, а при одобрении.
  *
- * Зовётся из двух мест: при заведении через /start и при сохранении адреса
- * читалки. Только первого не хватало — читатель, вписавший адрес до того,
- * как написал боту, оставался без отправителя, и доставка тихо пропускалась.
+ * Пока читатель не подтвердил, что добавил адрес в список одобренных Amazon,
+ * менять его безопасно: он нигде не записан. После подтверждения смена
+ * означает молчаливую потерю доставки — в Amazon останется одобренным
+ * прежний, а новый будет отбрасываться без единой ошибки.
+ *
+ * Отсюда и перевыдача: строка, перенесённая из profile, пришла без Telegram,
+ * и адрес достался запасной. Как только читатель привязывает аккаунт,
+ * появляется его id, и до одобрения адрес пересобирается из него.
+ *
+ * Зовётся при заведении через /start и при сохранении адреса читалки.
+ * Только первого не хватало — читатель, вписавший адрес до того, как написал
+ * боту, оставался без отправителя, и доставка тихо пропускалась.
  */
-export async function freezeKindleSender(id: number, username: string | null): Promise<void> {
-  const base = (username ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24);
-  // Второй кандидат содержит id читателя, поэтому занятым быть не может.
-  for (const candidate of [base || `reader${id}`, `${base || "reader"}-${id}`]) {
-    try {
-      await sql`
-        update dailynews.readers set kindle_sender = ${candidate}
-         where id = ${id} and kindle_sender is null
-      `;
-      return;
-    } catch {
-      // unique_violation: имя занято соседом — берём вариант с номером.
-    }
+export async function freezeKindleSender(
+  id: number,
+  telegramId: string | number | null,
+): Promise<void> {
+  const candidate = kindleSenderName(id, telegramId);
+  try {
+    await sql`
+      update dailynews.readers set kindle_sender = ${candidate}
+       where id = ${id}
+         and not kindle_approved
+         and kindle_sender is distinct from ${candidate}
+    `;
+  } catch {
+    // Зовётся из входа через /start. Свалиться здесь значит не пустить
+    // читателя в ленту из-за адреса, который он ещё даже не видел:
+    // прежний адрес остаётся, и он рабочий.
   }
 }
 
@@ -115,7 +127,7 @@ export async function ensureReader(
   `;
 
   if (!reader.kindle_sender) {
-    await freezeKindleSender(reader.id, username);
+    await freezeKindleSender(reader.id, reader.telegram_id);
     return (await getReader(reader.id)) ?? reader;
   }
   return reader;
@@ -135,7 +147,7 @@ export async function spentToday(readerId: number): Promise<number> {
 
 export type CallRecord = {
   readerId: number | null;
-  stage: "score" | "digest" | "summary";
+  stage: "score" | "digest" | "summary" | "translate" | "translation-quality";
   model: string;
   tokensIn: number;
   tokensOut?: number;
@@ -151,5 +163,32 @@ export async function recordCall(call: CallRecord): Promise<void> {
       ${call.readerId}, ${call.stage}, ${call.model},
       ${call.tokensIn}, ${call.tokensOut ?? 0}, ${call.costUsd}
     )
+  `;
+}
+
+/**
+ * Ответ на «дочитал?» из бота.
+ *
+ * Пишется select-ом из собственной отправки, а не значениями из апдейта:
+ * нажатие приходит с telegram_id, и без этой связки чужой ответ лёг бы
+ * в чужую калибровку. Скор — снимок из выпуска этого читателя, как
+ * и у всех остальных событий чтения.
+ */
+export async function recordFinished(
+  telegramId: number,
+  itemId: number,
+  finished: boolean,
+): Promise<void> {
+  await sql`
+    insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+    select r.id, ${itemId}, ${finished ? "finished" : "unfinished"}, di.total, sc.confidence
+      from dailynews.readers r
+      join dailynews.kindle_sends ks on ks.reader_id = r.id and ks.item_id = ${itemId}
+      join dailynews.digest_items di on di.item_id = ks.item_id
+      join dailynews.digests d on d.id = di.digest_id and d.reader_id = r.id
+      join dailynews.scores sc on sc.item_id = ks.item_id
+     where r.telegram_id = ${telegramId}::bigint and ks.status = 'sent'
+     order by d.day desc
+     limit 1
   `;
 }

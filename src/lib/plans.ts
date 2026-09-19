@@ -39,7 +39,9 @@ export type Plan = {
   sections: Gated[];
 };
 
-const FREE_KINDS: Source["kind"][] = ["rss", "hackernews", "reddit"];
+// Telegram и почта ничего не стоят: публичный канал читается как страница,
+// а ящик свой. Платный здесь только X — у него счёт за прочитанные посты.
+const FREE_KINDS: Source["kind"][] = ["rss", "hackernews", "reddit", "telegram", "email"];
 
 export const PLANS: Record<PlanId, Plan> = {
   free: {
@@ -88,6 +90,21 @@ export const PLANS: Record<PlanId, Plan> = {
  */
 export function planOf(id: string | null | undefined): Plan {
   return PLANS[(id ?? "") as PlanId] ?? PLANS.free;
+}
+
+/**
+ * Почему этот вид источника тарифу не положен, или null, если положен.
+ *
+ * Отдельной функцией, потому что спросить надо дважды и в разных местах:
+ * при сохранении и до разбора ссылки. X — платный, у него счёт
+ * за прочитанные посты, и разбор сам по себе уже стоит денег.
+ */
+export function kindDenial(plan: Plan, kind: Source["kind"]): string | null {
+  if (plan.kinds.includes(kind)) return null;
+  const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
+  return where.length
+    ? `Источники ${kind} есть только на тарифе «${where.join("», «")}»`
+    : `Источники ${kind} недоступны`;
 }
 
 export const maxDigestOf = (plan: Plan) => plan.digestSizes[plan.digestSizes.length - 1];

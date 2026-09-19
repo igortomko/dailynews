@@ -14,7 +14,8 @@ import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
-import { digestHtml } from "./kindle";
+import { digestHtml, kindleDigestVerdict } from "./kindle";
+import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
@@ -22,6 +23,9 @@ import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
 import type { Axes, Weights } from "../src/lib/types";
+import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
+import { explain, parseTelegram } from "./fetch";
+import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 
 const weights: Weights = {
   topic: 40, novelty: 20, specifics: 20, actionable: 10,
@@ -526,7 +530,7 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
 // им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
 // решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
-import { PLAN_IDS, PLANS, maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
+import { PLAN_IDS, PLANS, kindDenial, maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
 import type { Source } from "../src/lib/types";
 
 assert.equal(planOf("pro").id, "pro", "известный тариф читается как он сам");
@@ -620,4 +624,429 @@ for (const file of ["0019_plan", "0020_readers"]) {
   }
 }
 
-console.log("Самопроверка пройдена: 144 утверждения");
+// Вердикт по выпуску на читалку. Адрес обслуживает и ручную отправку
+// отдельной статьи, поэтому выключенный выпуск не требует стереть адрес —
+// и не должен молча уходить при выключенном переключателе.
+{
+  const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
+  const ok = kindleDigestVerdict(full);
+  assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
+  assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_digest: false }),
+    { send: false, reason: "switched-off" },
+    "выключенный переключатель отменяет выпуск, хотя адрес на месте",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_address: null }),
+    { send: false, reason: "no-address" },
+    "без адреса слать некуда, и говорить об этом не о чем",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_sender: null }),
+    { send: false, reason: "no-sender" },
+    "вписанный адрес без обратного — сбой, о нём сообщают в лог",
+  );
+}
+
+// --- разбор вставленной ссылки ------------------------------------------------
+// Источник добавляется одной ссылкой, тип выясняет код. Каждое правило по хосту
+// проверяется здесь на строке-примере: у сервисов меняются и адреса, и разметка,
+// а правило, которое перестало срабатывать, выглядит ровно как «у этого сайта
+// нет фида» — отказ, неотличимый от честного ответа.
+const first = (input: string) => {
+  const plan = planFor(input);
+  return "refuse" in plan ? null : plan.candidates[0];
+};
+const refusal = (input: string) => {
+  const plan = planFor(input);
+  return "refuse" in plan ? plan.refuse : null;
+};
+
+assert.equal(asUrl("example.com/blog")?.origin, "https://example.com", "голый домен — это адрес");
+assert.equal(asUrl("from:karpathy OR from:sama"), null, "запрос X адресом не является");
+assert.equal(asUrl("LocalLLaMA"), null, "слово без точки адресом не является");
+
+// YouTube и GitHub — главная причина затеи: фид есть, но по адресу,
+// который человек не угадает.
+assert.equal(
+  first("https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA")?.url,
+  "https://www.youtube.com/feeds/videos.xml?channel_id=UCHnyfMqiRRG1u-2MsSQLbXA",
+  "канал YouTube по id",
+);
+assert.equal(
+  first("https://www.youtube.com/playlist?list=PLabc123")?.url,
+  "https://www.youtube.com/feeds/videos.xml?playlist_id=PLabc123",
+  "плейлист YouTube",
+);
+// У @handle id в адресе нет, зато YouTube объявляет фид в <link rel="alternate">:
+// такая ссылка обязана уйти во второй слой, а не в отдельный разбор разметки.
+assert.ok(
+  (planFor("https://www.youtube.com/@veritasium") as { probePage: boolean }).probePage,
+  "@handle уходит на разбор разметки страницы",
+);
+assert.equal(
+  first("https://github.com/vercel/next.js")?.url,
+  "https://github.com/vercel/next.js/releases.atom",
+  "репозиторий GitHub — сначала релизы",
+);
+// Репозиторий без единого релиза отвечает 200 и пустым фидом: это отказ,
+// выглядящий как успех, поэтому следом обязаны идти коммиты.
+assert.equal(
+  (planFor("https://github.com/vercel/next.js") as { candidates: { url: string }[] }).candidates[1].url,
+  "https://github.com/vercel/next.js/commits.atom",
+  "у репозитория без релизов остаются коммиты",
+);
+assert.equal(
+  first("https://github.com/igortomko")?.url,
+  "https://github.com/igortomko.atom",
+  "пользователь GitHub",
+);
+assert.equal(first("https://simonw.substack.com/about")?.url, "https://simonw.substack.com/feed", "Substack");
+assert.equal(
+  first("https://arxiv.org/list/cs.AI/recent")?.url,
+  "http://export.arxiv.org/rss/cs.AI",
+  "раздел arXiv",
+);
+assert.equal(first("https://www.reddit.com/r/LocalLLaMA/")?.url, "LocalLLaMA", "сабреддит — имя, а не адрес");
+assert.equal(first("https://news.ycombinator.com/")?.url, "topstories", "Hacker News по умолчанию");
+assert.equal(first("https://news.ycombinator.com/newest")?.url, "newstories", "другой листинг HN");
+assert.equal(first("https://x.com/karpathy")?.url, "from:karpathy", "аккаунт X превращается в запрос");
+assert.equal(first("from:karpathy OR from:sama")?.kind, "x", "текст с операторами — это запрос X");
+assert.equal(first("from:karpathy")?.kind, "x", "один оператор без пробелов — тоже запрос");
+// Собачка есть и у Telegram, и у X, но платный из двух только X: угадать
+// в его пользу значит взять деньги за догадку. Живой случай: @eugene_rid
+// уходил в платную выдачу X и возвращался оттуда отказом об оплате.
+assert.equal(first("@eugene_rid")?.kind, "telegram", "@имя — это канал Telegram, а не запрос X");
+assert.equal(first("@eugene_rid")?.url, "eugene_rid", "собачка в имя канала не входит");
+// Одинокое слово запросом не является, и слать его в платную выдачу,
+// чтобы получить оттуда пустоту, незачем.
+assert.ok(refusal("LocalLLaMA"), "слово без ссылки и операторов — отказ, а не платный запрос");
+assert.ok(refusal("@ab"), "слишком короткое имя каналом быть не может");
+assert.ok(refusal("https://x.com/home"), "служебный путь X не аккаунт");
+assert.equal(first("https://t.me/durov")?.url, "durov", "канал Telegram — имя, а не адрес");
+assert.equal(first("https://t.me/s/durov")?.url, "durov", "ссылка на веб-просмотр даёт тот же канал");
+assert.equal(first("https://t.me/durov/123")?.url, "durov", "ссылка на пост даёт канал целиком");
+// Читать закрытый чат нечем, и сказать это надо сразу, а не выяснять
+// на практике.
+assert.ok(refusal("https://t.me/+AbCdEf"), "приглашение в закрытый чат — отказ вслух");
+assert.ok(
+  (planFor("https://simonwillison.net/") as { probePage: boolean }).probePage,
+  "обычный сайт идёт на разбор разметки",
+);
+
+// --- фиды, объявленные в разметке --------------------------------------------
+// Разметка настоящая: относительный href у simonwillison.net, абсолютный
+// у YouTube, и рядом с ними — alternate без type, который фидом не является.
+const head = `
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" media="handheld" href="https://m.youtube.com/@veritasium">
+  <link rel="alternate" type="application/atom+xml" title="Atom" href="/atom/everything/">
+  <link type='application/rss+xml' rel='alternate' href='/blog/rss'>
+  <link rel="alternate" type="application/rss+xml" title="RSS" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCH">
+`;
+const links = feedLinks(head, "https://simonwillison.net/blog/");
+assert.equal(links.length, 3, "берутся только объявления фидов, а не всякий alternate");
+assert.equal(links[0], "https://simonwillison.net/atom/everything/", "относительный href разворачивается");
+assert.equal(links[1], "https://simonwillison.net/blog/rss", "кавычки и порядок атрибутов бывают любые");
+assert.ok(links[2].includes("channel_id=UCH"), "абсолютный href остаётся как есть");
+assert.deepEqual(feedLinks("<html><body>ничего</body></html>", "https://a.com"), [], "нет объявлений — нет адресов");
+// У YouTube объявление фида лежит в теле, на 761-й тысяче символов из 2,7 млн.
+// Отсечка «фид объявляют в шапке» давала «у этого сайта нет фида» ровно
+// на том случае, ради которого всё затевалось.
+assert.equal(
+  feedLinks(
+    `<head><title>x</title></head><body>${"<p>текст</p>".repeat(40_000)}` +
+      `<link rel="alternate" type="application/rss+xml" href="/late.xml"></body>`,
+    "https://a.com",
+  )[0],
+  "https://a.com/late.xml",
+  "объявление фида ищется во всём документе, а не в первых килобайтах",
+);
+
+assert.ok(looksLikeFeed('<?xml version="1.0"?><rss version="2.0">'), "фид с декларацией");
+assert.ok(looksLikeFeed('<feed xmlns="http://www.w3.org/2005/Atom">'), "Atom без декларации");
+assert.ok(!looksLikeFeed("<!doctype html><html>"), "страница фидом не притворяется");
+
+const guessed = guesses("https://example.com/blog");
+assert.ok(guessed.includes("https://example.com/blog/feed"), "путь пробуется относительно страницы");
+assert.ok(guessed.includes("https://example.com/atom.xml"), "и относительно корня");
+
+// --- почему фида не нашлось ---------------------------------------------------
+// «Фида нет», «страница собирается в браузере» и «пейволл» — три разных ответа
+// для читателя, и одинаковое «не нашлось» на все три ему ничего не говорит.
+assert.equal(
+  diagnose('<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script>'),
+  "материалы за пейволлом",
+  "пейволл объявляет себя сам, в schema.org",
+);
+assert.equal(
+  diagnose(`<!doctype html><html><head><title>x</title></head><body><div id="root"></div><script>${"var a=1;".repeat(300)}</script></body></html>`),
+  "страница собирается в браузере",
+  "пустая оболочка под скриптом",
+);
+assert.equal(
+  diagnose(`<html><body><article>${"Обычная страница с настоящим текстом внутри. ".repeat(20)}</article></body></html>`),
+  null,
+  "у живой страницы причины нет — значит, фида и правда нет",
+);
+
+// --- почему источник не ответил -----------------------------------------------
+// Node отдаёт «fetch failed» и на несуществующий домен, и на просроченный
+// сертификат, и на оборванное соединение, а настоящую причину прячет в cause.
+// Одинаковая строка в списке источников не даёт решить, чинить адрес, ждать
+// или выбрасывать источник.
+const failed = (code: string) =>
+  Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("x"), { code }) });
+
+assert.equal(explain(failed("ENOTFOUND")), "домен не существует", "несуществующий домен назван");
+assert.equal(explain(failed("CERT_HAS_EXPIRED")), "просроченный сертификат", "сертификат назван");
+assert.equal(explain(failed("ECONNREFUSED")), "хост отказал в соединении", "отказ в соединении назван");
+assert.notEqual(explain(failed("ENOTFOUND")), explain(failed("ECONNRESET")), "разные причины — разный текст");
+assert.equal(
+  explain(new Error("HTTP 402")),
+  "нужна оплата (402) — у провайдера кончился баланс",
+  "402 от перепродавца X — это счёт, а не поломка источника",
+);
+assert.equal(explain(new Error("HTTP 403")), "источник закрылся от робота (403)", "403 — это не поломка адреса");
+assert.equal(explain(new Error("HTTP 404")), "адрес больше не существует (404)", "404 назван");
+assert.equal(explain(new Error("HTTP 429")), "источник просит реже (429)", "429 назван");
+assert.equal(explain(new Error("HTTP 503")), "сервер источника не в порядке (503)", "пятисотые назван");
+assert.equal(
+  explain(Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" })),
+  "не ответил за отведённое время",
+  "таймаут назван",
+);
+// Незнакомую ошибку нельзя проглатывать: лучше сырой текст, чем ровное
+// «что-то пошло не так» на всё подряд.
+assert.equal(explain(new Error("не похоже на RSS или Atom")), "не похоже на RSS или Atom", "незнакомое доходит как есть");
+assert.equal(explain(undefined), "не ответил без объяснений", "пустая ошибка не даёт пустую строку");
+
+// --- публичный канал Telegram -------------------------------------------------
+// Разбор чужой разметки ломается при её смене молча, поэтому тест идёт
+// по сохранённому куску настоящей страницы, а не по её представлению
+// в чьей-то голове. Обновлять файл — новым сохранением.
+const tgPage = readFileSync("pipeline/fixtures/telegram-channel.html", "utf8");
+const tg = parseTelegram(tgPage, "telegram");
+assert.equal(tg.title, "Telegram News", "название канала берётся из og:title");
+assert.equal(tg.items.length, 2, `постов ${tg.items.length}, в куске сохранено 2`);
+assert.match(tg.items[0].url, /^https:\/\/t\.me\/telegram\/\d+$/, "ссылка ведёт на конкретный пост");
+assert.notEqual(tg.items[0].url, tg.items[1].url, "у постов разные адреса — иначе дедуп схлопнет канал в один");
+assert.ok(tg.items[0].title.length > 0, "у поста есть заголовок");
+assert.ok(tg.items[0].title.length <= 200, "заголовок не длиннее двухсот символов");
+// <br> превращается в перенос до чистки тегов: иначе заголовком становится
+// весь пост целиком, а не его первая строка.
+assert.ok(!tg.items[0].title.includes("\n"), "заголовок — одна строка");
+assert.ok(
+  tg.items[0].excerpt.length > tg.items[0].title.length,
+  "в тексте поста больше, чем в его первой строке",
+);
+assert.ok(tg.items[0].published_at instanceof Date, "дата поста разобрана");
+assert.ok(
+  (tg.items[1].published_at?.getTime() ?? 0) > (tg.items[0].published_at?.getTime() ?? 0),
+  "у постов разные даты, и они идут по возрастанию — на этом держится отсечка свежести",
+);
+
+// Пост без текста — одни картинки. Такие бывают, и если резать страницу
+// тремя независимыми списками, один такой пост сдвинет все даты на единицу,
+// и каждая новость получит чужое время. Выглядит это нормально.
+const mediaOnly = tgPage.replace(
+  /<div class="tgme_widget_message_text[^"]*"[^>]*>[\s\S]*?<\/div>/,
+  '<div class="tgme_widget_message_photo"></div>',
+);
+const trimmed = parseTelegram(mediaOnly, "telegram");
+assert.equal(trimmed.items.length, 1, "пост без текста пропускается, а не занимает чужое место");
+assert.equal(
+  trimmed.items[0].published_at?.toISOString(),
+  tg.items[1].published_at?.toISOString(),
+  "у оставшегося поста своя дата, а не съехавшая на соседнюю",
+);
+
+// Закрытый, несуществующий и выключивший веб-просмотр канал отвечает 200
+// и уводит на страницу контакта. Сохранить такой источник значит завести
+// пустую вкладку, которая через неделю выглядит просто заброшенной.
+assert.throws(
+  () => parseTelegram(readFileSync("pipeline/fixtures/telegram-contact.html", "utf8"), "нет"),
+  /не публичный канал/,
+  "страница контакта — это отказ, а не пустой канал",
+);
+
+// --- письма -------------------------------------------------------------------
+// Выделенный ящик: одно письмо — один материал, дедуп по Message-ID,
+// отправитель опознаётся по From. Из письма не подгружается ничего.
+//
+// Куски собраны руками и покрывают кодировки, которые рассылки используют
+// на самом деле: тема в base64 по RFC 2047, текст в quoted-printable,
+// разметка в base64, Message-ID, перенесённый по строкам.
+// latin1, а не utf8: ровно так письмо приходит из сокета — байт в байт.
+// Прочитав его как utf8, мы бы декодировали текст дважды, и кириллица
+// рассыпалась бы в «&5=0 A?>B». Длина литерала в IMAP тоже считается
+// в байтах, и только при latin1 она совпадает с длиной строки.
+const rawLetter = readFileSync("pipeline/fixtures/letter-newsletter.eml", "latin1");
+const letter = parseLetter(rawLetter);
+
+assert.equal(letter.subject, "Выпуск 142: чем кончилась история с ценами на уран", "тема из base64 по RFC 2047");
+// Message-ID переносится по строкам, как всякий длинный заголовок.
+// Неразвёрнутый, он перестаёт совпадать сам с собой, и письмо приезжает
+// в ленту заново каждый прогон.
+assert.equal(
+  letter.messageId,
+  "0000019a-4f21-7c3d-9b55-aa1c2d3e4f50 @mail.example-letter.test",
+  "Message-ID собирается из перенесённых строк",
+);
+assert.equal(addressOf(letter.from), "letters@example-letter.test", "отправитель опознаётся по From");
+assert.equal(letter.date?.getUTCDate(), 18, "дата письма разобрана");
+// Простой текст предпочитается разметке: он уже написан для чтения.
+assert.ok(letter.text.includes("142 долларов"), "текст расшифрован из quoted-printable");
+assert.ok(letter.text.includes("—"), "=E2=80=94 разворачивается в тире, а не остаётся кодом");
+assert.ok(!letter.text.includes("=E2"), "в тексте не остаётся кодов quoted-printable");
+
+// Трекинговый пиксель — это <img src>. Он не должен ни подгружаться,
+// ни попасть в поле адреса, ни доехать до текста.
+assert.ok(!letter.text.includes("track.example-letter.test"), "пиксель не доезжает до текста");
+assert.notEqual(letter.link, "https://track.example-letter.test/open/abc123.gif", "пиксель не становится адресом");
+// Веб-версия берётся из того, что объявил отправитель (List-Archive),
+// а не из первой попавшейся ссылки.
+assert.equal(letter.link, "https://example-letter.test/archive", "ссылка из объявленного архива рассылки");
+
+assert.equal(decodeWords("=?utf-8?q?=D0=A6=D0=B5=D0=BD=D0=B0?="), "Цена", "quoted-printable в заголовке");
+assert.equal(decodeWords("Обычная тема"), "Обычная тема", "незакодированный заголовок не трогается");
+assert.equal(addressOf("Ben Thompson <ben@stratechery.com>"), "ben@stratechery.com", "адрес из имени со скобками");
+assert.equal(addressOf("plain@example.com"), "plain@example.com", "голый адрес остаётся собой");
+assert.equal(imapDate(new Date("2026-09-19T00:00:00Z")), "19-Sep-2026", "дата в том виде, в каком её ждёт SEARCH");
+
+// Ответ сервера режется по объявленной длине литерала, а не по виду строки:
+// в теле письма встречается что угодно, включая строку, неотличимую
+// от служебной. Порезав по виду, получили бы короткое письмо вместо ошибки.
+const fetched = readFileSync("pipeline/fixtures/imap-fetch.txt", "latin1");
+const letters = lettersFrom(fetched);
+assert.equal(letters.length, 2, `писем ${letters.length}, в ответе два`);
+assert.ok(letters[1].text.includes("d4 OK FETCH completed"), "служебная на вид строка внутри письма — это текст письма");
+assert.ok(letters[1].text.includes("Отвечаем в следующем выпуске"), "письмо не обрывается на этой строке");
+assert.notEqual(letters[0].messageId, letters[1].messageId, "у писем разные Message-ID — на них держится дедуп");
+
+// То же самое на уровне протокола: «тег OK» внутри литерала не заканчивает
+// ответ, и ждать надо дальше.
+const withLiteral = "* 1 FETCH (UID 1 BODY[] {22}\r\nd3 OK не конец ответа\nd3 OK done\r\n";
+assert.equal(responseEnd(withLiteral, "d3"), withLiteral.length, "ответ кончается после литерала, а не внутри него");
+assert.equal(responseEnd("* 1 EXISTS\r\n", "d3"), -1, "незаконченный ответ не считается законченным");
+const refused = "d3 NO [AUTHENTICATIONFAILED]\r\n";
+assert.equal(responseEnd(refused, "d3"), refused.length, "отказ тоже конец ответа");
+
+// --- X только на Pro ----------------------------------------------------------
+// X — единственный платный вид источника: счёт идёт за прочитанные посты.
+// Тариф спрашивается не только при сохранении, но и до разбора ссылки:
+// разбор X — это уже запрос к twitterapi.io. Потратить деньги и отказать
+// после значит взять плату за отказ.
+assert.equal(kindDenial(PLANS.pro, "x"), null, "на Pro источники X разрешены");
+assert.ok(kindDenial(PLANS.free, "x"), "на бесплатном X закрыт");
+assert.ok(kindDenial(PLANS.plus, "x"), "на Plus X тоже закрыт");
+assert.match(kindDenial(PLANS.free, "x")!, /Pro/, "отказ называет тариф, который его открывает");
+for (const freeKind of ["rss", "hackernews", "telegram", "email"] as const) {
+  assert.equal(kindDenial(PLANS.free, freeKind), null, `${freeKind} остаётся на бесплатном тарифе`);
+}
+// Вид известен до всякой сети — на этом и держится отказ без запроса.
+assert.equal(
+  (planFor("from:karpathy OR from:sama") as { candidates: { kind: string }[] }).candidates[0].kind,
+  "x",
+  "запрос X опознаётся правилом, а не пробой",
+);
+assert.equal(
+  (planFor("https://x.com/karpathy") as { candidates: { kind: string }[] }).candidates[0].kind,
+  "x",
+  "ссылка на аккаунт X — тоже X",
+);
+
+// Порядок шагов настройки Kindle. Перепутанные условия дали бы экран,
+// на котором просят одобрить отправителя, которого ещё не выдали.
+assert.equal(
+  kindleSetupStep({ kindle_address: null, kindle_approved: false }), "address",
+  "адреса нет — первый шаг",
+);
+assert.equal(
+  kindleSetupStep({ kindle_address: "a@kindle.com", kindle_approved: false }), "sender",
+  "адрес есть, отправитель не одобрен — второй шаг",
+);
+assert.equal(
+  kindleSetupStep({ kindle_address: "a@kindle.com", kindle_approved: true }), "done",
+  "одобрено — обычные настройки",
+);
+// Подтверждение весомее адреса: стёртое поле в настройках выключает отправку,
+// но не отправляет читателя проходить настройку заново. Сброс снимает и то,
+// и другое — иначе экран и база считали бы шаг по-разному.
+assert.equal(
+  kindleSetupStep({ kindle_address: null, kindle_approved: true }), "done",
+  "подтверждение держит экран настроек даже без адреса",
+);
+
+// Имя обратного адреса. Telegram-id, а не username: username читатель меняет
+// когда захочет, а адрес после одобрения в Amazon заморожен навсегда.
+assert.equal(kindleSenderName(1, "52308619"), "52308619", "адрес собирается из Telegram-id");
+assert.equal(kindleSenderName(1, 52308619), "52308619", "число из драйвера и строка дают одно имя");
+assert.equal(kindleSenderName(7, null), "reader7", "без привязанного Telegram — номер читателя");
+// Пустая строка и мусор — не id. Приняв их за имя, мы бы выдали адрес
+// вида `@kindle.tomko.io`, и письма исчезали бы молча.
+assert.equal(kindleSenderName(7, ""), "reader7", "пустая строка именем не становится");
+assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем не становится");
+
+// --- отправка статьи на читалку ------------------------------------------------
+import { splitBlocks, chunkBlocks, chunkProblem, alreadyIn } from "./translate";
+import { samplePairs } from "./translation-quality";
+import { articleBlocker } from "./kindle";
+import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
+import type { Reader } from "../src/lib/types";
+
+// Модель на длинном тексте возвращает пересказ вместо перевода. Книга при
+// этом приходит, текст на русском, абзацы на месте — просто их меньше.
+// Эти проверки и есть единственное, что отличает такой отказ от успеха.
+const src = ["Первый абзац достаточной длины.", "Второй абзац той же длины."];
+assert.ok(chunkProblem(src, ["Раз.", "Два."]).startsWith("короче"), "пересказ ловится по длине");
+assert.ok(chunkProblem(src, ["Один длинный блок вместо двух."]).startsWith("блоков"), "потерянный блок ловится по счёту");
+assert.equal(chunkProblem(src, src), "", "перевод той же длины и числа блоков проходит");
+
+// Отступ слева обязан пережить нарезку: по нему узнаётся листинг без
+// заборчика из обратных кавычек. Общий trim его съедал, и такой код
+// молча уходил в перевод.
+assert.ok(splitBlocks("Текст\n\n    int main() {}")[1].startsWith("    "), "отступ листинга сохраняется");
+assert.equal(splitBlocks("Текст  \n\nЕщё")[0], "Текст", "хвостовые пробелы убираются");
+assert.equal(splitBlocks("\n\n  \n\n").length, 0, "пустой текст не даёт блоков-призраков");
+assert.equal(chunkBlocks(["одинокий блок длиннее потолка"], 5).length, 1, "блок длиннее потолка не выбрасывается");
+
+// Оценка перевода смотрит на прозу, а не на листинги и заголовки:
+// они одинаково хороши в любом переводе и разбавили бы ряд.
+const long = (mark: string) => mark + "я".repeat(250);
+const pairs = samplePairs(
+  ["```int main(){}```", long("а"), "## Заголовок", long("б")],
+  ["```int main(){}```", long("а"), "## Заголовок", long("б")],
+);
+assert.ok(pairs.every((pair) => !pair.from.startsWith("```")), "листинги в выборку не попадают");
+assert.ok(pairs.every((pair) => !pair.from.startsWith("##")), "заголовки в выборку не попадают");
+assert.equal(samplePairs([], []).length, 0, "пустая статья не ломает выборку");
+
+// Три причины отказа, и каждая выключает по своей.
+const base = { id: 1, daily_cap_usd: 1, kindle_address: "a@kindle.com", kindle_sender: "52308619", kindle_approved: true } as Reader;
+assert.ok(articleBlocker({ ...base, kindle_address: null }, 0).includes("адрес читалки"), "без адреса читалки отправки нет");
+assert.ok(articleBlocker({ ...base, kindle_sender: null }, 0).includes("обратный адрес"), "без обратного адреса отправки нет");
+assert.ok(articleBlocker({ ...base, kindle_approved: false }, 0).includes("Amazon"), "неодобренный отправитель останавливает отправку: письмо исчезло бы молча");
+assert.ok(articleBlocker(base, 1).includes("потолок"), "исчерпанный потолок останавливает отправку");
+assert.equal(articleBlocker(base, 0.5), "", "настроенная отправка не блокируется");
+
+// Нажатие кнопки приходит не сообщением, а callback_query. Без этой ветки
+// оно проваливалось в ignore: часики на кнопке крутились, ответ терялся.
+const tap = parseBotUpdate({ callback_query: { id: "c1", data: "fin:42:1", from: { id: 7 } } });
+assert.equal(tap.kind, "finished", "нажатие кнопки разбирается");
+assert.equal(tap.kind === "finished" && tap.itemId, 42, "id материала достаётся из нагрузки");
+assert.equal(tap.kind === "finished" && tap.finished, true, "единица значит «дочитал»");
+assert.equal(parseBotUpdate({ callback_query: { id: "c1", data: "fin:42:0", from: { id: 7 } } }).kind, "finished", "ноль тоже ответ, а не мусор");
+assert.equal(parseBotUpdate({ callback_query: { id: "c1", data: "чужое:1:1", from: { id: 7 } } }).kind, "ignore", "чужая нагрузка игнорируется");
+assert.equal(parseBotUpdate({ callback_query: { id: "c1", data: "fin:42:1", from: { id: 7, is_bot: true } } }).kind, "ignore", "нажатие от бота игнорируется");
+
+// Русский текст русскому читателю переводить нечего. Без этой проверки
+// он уходил в модель, возвращался почти собой же и стоил как перевод.
+assert.ok(alreadyIn("Совет директоров одобрил сделку в среду вечером.", "русском"), "русский текст узнаётся");
+assert.ok(!alreadyIn("The board approved the deal on Wednesday evening.", "русском"), "английский не принимается за русский");
+assert.ok(!alreadyIn("Совет директоров одобрил сделку.", "английском"), "для английского читателя проверка молчит");
+assert.ok(!alreadyIn("", "русском"), "пустой текст не делит на ноль");
+assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержку swap на узлах.", "русском"), "латинские термины внутри русского не сбивают счёт");
+
+console.log("Самопроверка пройдена: 271 утверждений");

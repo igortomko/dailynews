@@ -6,17 +6,17 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
-import { checkFeed } from "../../pipeline/check-sources";
+import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import { freezeKindleSender, getReaderTopics, recordCall, spentToday } from "./readers";
+import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, maxDigestOf, planOf, sourcesForPlan, topicsWord,
+  allows, cheapestWith, kindDenial, maxDigestOf, planOf, sourcesForPlan, topicsWord,
   PLAN_IDS, PLANS, type Gated,
 } from "./plans";
 import { getSources } from "./queries";
@@ -228,27 +228,90 @@ export async function clearLlmKey() {
  * одобрение отправителя в настройках Amazon, а до тех пор выпуски молча
  * не доходят.
  */
-export async function saveKindle(formData: FormData) {
+/**
+ * Переключатель выпуска на экране «настроено». Только он, без адреса.
+ *
+ * Общее действие «сохранить всё, что на форме» здесь было бы ловушкой:
+ * адрес на этом экране — строка, а не поле, в FormData он не приходит,
+ * и прочитанный как пустой обнулил бы доставку при нажатии «Сохранить».
+ */
+export async function saveKindleDigest(formData: FormData) {
+  const readerId = await currentReaderId();
+  // Флажок приходит только когда включён: выключенный checkbox формы
+  // не отправляется вовсе, и `null` здесь значит «выключен», а не «не трогали».
+  const digest = formData.get("kindle_digest") !== null;
+
+  await sql`
+    update dailynews.readers
+       set kindle_digest = ${digest}, updated_at = now()
+     where id = ${readerId}
+  `;
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Первый шаг настройки Kindle: куда слать. Отдельно от переключателя, потому
+ * что на этом шаге его на экране ещё нет: общее действие прочитало бы
+ * отсутствие флажка как «выключен» и погасило бы отправку тому,
+ * кто проходит настройку заново.
+ */
+export async function saveKindleAddress(formData: FormData) {
   const readerId = await currentReaderId();
   const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
-  if (address && !/^[^@\s]+@kindle\.com$/.test(address)) {
+  if (!address) return { error: "Впиши адрес читалки" };
+  if (!/^[^@\s]+@kindle\.com$/.test(address)) {
     return { error: "Адрес должен заканчиваться на @kindle.com" };
   }
 
   await sql`
     update dailynews.readers
-       set kindle_address = ${address || null}, updated_at = now()
+       set kindle_address = ${address}, updated_at = now()
      where id = ${readerId}
   `;
+  const reader = await getReader(readerId);
+  if (reader) await freezeKindleSender(readerId, reader.telegram_id);
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
 
-  // Обратный адрес выдаётся здесь же, если его ещё нет: иначе читатель,
-  // вписавший адрес читалки до первого /start, остался бы без отправителя,
-  // и выпуск не уходил бы — при сохранённом адресе и без единой ошибки.
-  if (address) {
-    const reader = await currentReader();
-    if (!reader.kindle_sender) await freezeKindleSender(reader.id, reader.username);
-  }
+/**
+ * Второй шаг: читатель подтверждает, что добавил наш адрес в одобренные.
+ * Проверить это снаружи нечем — Amazon молчит и про успех, и про отказ,
+ * а неодобренное письмо просто исчезает. Поэтому шаг закрывает человек.
+ *
+ * С этого момента обратный адрес заморожен: в Amazon записан именно он.
+ */
+export async function approveKindleSender() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set kindle_approved = true, updated_at = now()
+     where id = ${readerId} and kindle_address is not null
+  `;
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
 
+/**
+ * Пройти настройку заново — с первого шага.
+ *
+ * Снимается и подтверждение, и адрес читалки. Оставить адрес значило бы,
+ * что шаг настройки считается по-разному на экране и в базе: клиент показал
+ * бы первый шаг, а перезагрузка страницы вернула бы на второй, потому что
+ * адрес на месте. Разъехавшиеся состояния здесь — это ровно та тихая ошибка,
+ * которую потом ищут глазами.
+ *
+ * Вместе с подтверждением размораживается обратный адрес: смысл сброса
+ * в том, чтобы одобрить в Amazon заново, а значит и отправителя можно менять.
+ */
+export async function resetKindleSetup() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set kindle_approved = false, kindle_address = null, updated_at = now()
+     where id = ${readerId}
+  `;
   revalidatePath("/settings/delivery");
   return { ok: true as const };
 }
@@ -264,30 +327,75 @@ async function requireOwner() {
   return reader;
 }
 
+/**
+ * Разобрать вставленную ссылку: что это за источник, где у него фид и как он
+ * называется. Ничего не сохраняет — показывает, что нашлось, чтобы читатель
+ * подтвердил. Тип источника знать не нужно, название уже лежит в фиде.
+ *
+ * Тоже под владельцем: каталог общий, а разбор ходит в сеть — у такой кнопки
+ * не должно быть ста рук.
+ */
+export async function discoverSource(input: string): Promise<
+  { ok: true; found: Found } | { ok: false; error: string }
+> {
+  await requireOwner();
+  const raw = input.trim().slice(0, 500);
+  if (!raw) return { ok: false, error: "Пустая строка" };
+
+  // Тариф спрашивается до сети. Какой это будет вид, planFor знает без
+  // единого запроса, а разбор ссылки X — уже платный запрос к twitterapi.io:
+  // потратить деньги и отказать после сохранения значит взять плату
+  // за отказ. Вид определяется правилами по хосту, поэтому отказ здесь —
+  // это отказ по тарифу, а не догадка.
+  const planned = planFor(raw);
+  if (!("refuse" in planned)) {
+    const plan = planOf((await currentReader()).plan);
+    const denials = planned.candidates.map((candidate) => kindDenial(plan, candidate.kind));
+    if (denials.every(Boolean)) return { ok: false, error: denials[0]! };
+  }
+
+  try {
+    return await discover(raw);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message.slice(0, 300) };
+  }
+}
+
+const KNOWN_KINDS = new Set<Source["kind"]>(["rss", "hackernews", "reddit", "x", "telegram", "email"]);
+
+/**
+ * Сохраняется только то, что действительно ответило, и перепроверяется ровно
+ * тот кандидат, который показала форма: если разбор гнать заново, сохранится
+ * одно, а подтверждал читатель другое. Источник, сохранённый без единой
+ * записи, через неделю неотличим от заброшенного — а он таким и родился.
+ */
 export async function addSource(formData: FormData) {
   await requireOwner();
-  const kind = String(formData.get("kind") ?? "rss") as "rss" | "reddit" | "hackernews" | "x";
+  // Вид сужается один раз: дальше он уходит и в предел тарифа, и в пробу.
+  const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
-  const label = String(formData.get("label") ?? "").trim() || url;
+  const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
+  if (!KNOWN_KINDS.has(kind)) return { error: "Сначала разбери ссылку" };
   if (!url) return { error: "Пустой адрес" };
 
+  // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
+  // чем сходить за фидом и отказать после.
   const denied = await denyBySource(kind);
   if (denied) return denied;
 
-  // Источник проверяется живым запросом до сохранения: каталог из
-  // непроверенных адресов превращается в пустую вкладку через неделю.
-  if (kind === "rss") {
-    const probe = await checkFeed(url);
-    if (!probe.ok) return { error: `Фид не отвечает: ${probe.error ?? "пусто"}` };
-  }
+  const probe = await probeOne(kind, url, inputUrl);
+  if (!probe.ok) return { error: `Источник больше не отвечает: ${probe.error}` };
+
+  const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
   await sql`
-    insert into dailynews.sources (kind, label, url)
-    values (${kind}, ${label}, ${url})
-    on conflict (kind, url) do update set active = true, label = excluded.label
+    insert into dailynews.sources (kind, label, url, input_url)
+    values (${kind}, ${label}, ${url}, ${inputUrl})
+    on conflict (kind, url) do update
+      set active = true, label = excluded.label, input_url = excluded.input_url
   `;
   revalidatePath("/settings/sources");
-  return { ok: true as const };
+  return { ok: true as const, label };
 }
 
 export async function setSourceActive(id: number, active: boolean) {
@@ -312,14 +420,8 @@ export async function setSourceActive(id: number, active: boolean) {
 async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
   const plan = planOf((await currentReader()).plan);
 
-  if (!plan.kinds.includes(kind)) {
-    const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
-    return {
-      error: where.length
-        ? `Источники ${kind} есть только на тарифе «${where.join("», «")}»`
-        : `Источники ${kind} недоступны`,
-    };
-  }
+  const byKind = kindDenial(plan, kind);
+  if (byKind) return { error: byKind };
 
   // Считаем только то, что прогон и правда опрашивает: sourcesForPlan
   // отсекает запрещённый вид до предела по числу. Иначе после понижения
