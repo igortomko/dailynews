@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ThumbsUpIcon, ThumbsDownIcon, UndoIcon, BookOpenIcon, CheckIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
 import type { FeedItem } from "@/lib/queries";
@@ -104,6 +105,27 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
     };
   }, [expanded, item.id]);
 
+  const sendToKindle = async () => {
+    setKindle("sending");
+    try {
+      const res = await fetch("/api/kindle", {
+        method: "POST",
+        body: JSON.stringify({ item_id: item.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? `ошибка ${res.status}`);
+      setKindle("sent");
+      // Честно про время: статья забирается и переводится целиком. Обещать
+      // мгновенность — значит получить второй тап через десять секунд.
+      toast.success("Уехала на Kindle", {
+        description: "Перевод и сборка занимают около минуты",
+      });
+    } catch (error) {
+      setKindle("idle");
+      toast.error(error instanceof Error ? error.message : "Не отправилось");
+    }
+  };
+
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
   const kind = item.axes?.kind?.choice ? KIND[item.axes.kind.choice] : undefined;
@@ -129,7 +151,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
   return (
     <article
       ref={article}
-      className="group border-b py-5 last:border-0"
+      className="group border-b py-5 transition-opacity duration-150 last:border-0"
     >
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
@@ -155,9 +177,14 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                   {item.source_label}
                 </span>
               )}
+              {/* Метка стоит вплотную к источнику, а не за метаданными:
+                  место под время и тему держится всегда, чтобы строка
+                  не дёргалась при наведении, — и «кликбейт» за этим местом
+                  висел в пустоте, оторванный от того, к чему относится. */}
+              {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
               <span className="truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                 {[
-                  relativeTime(item.day),
+                  relativeTime(item.published_at),
                   showTopic ? item.topic_label : null,
                   kind,
                   horizon,
@@ -166,8 +193,6 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                   .join(", ")}
               </span>
             </span>
-
-            {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
 
             {/* Оценка тоже по наведению: нужна раз на десяток материалов,
                 а в покое спорит с заголовком. Поднятый палец виден всегда,
@@ -180,81 +205,96 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                 vote === "up" && "opacity-100",
               )}
             >
-              <button
-                type="button"
-                aria-label="Отправить на Kindle"
-                disabled={kindle !== "idle"}
-                onClick={async () => {
-                  setKindle("sending");
-                  try {
-                    const res = await fetch("/api/kindle", {
-                      method: "POST",
-                      body: JSON.stringify({ item_id: item.id }),
-                    });
-                    const body = await res.json().catch(() => ({}));
-                    if (!res.ok) throw new Error(body?.error ?? `ошибка ${res.status}`);
-                    setKindle("sent");
-                    // Честно про время: статья забирается и переводится
-                    // целиком. Обещать мгновенность — значит получить
-                    // второй тап через десять секунд.
-                    toast.success("Уехала на Kindle", {
-                      description: "Перевод и сборка занимают около минуты",
-                    });
-                  } catch (error) {
-                    setKindle("idle");
-                    toast.error(error instanceof Error ? error.message : "Не отправилось");
+              {/* Иконка без подписи опознаётся только по догадке. Подпись
+                  для экранного диктора у них была и раньше; всплывающая
+                  говорит то же самое глазами — на курсоре и на фокусе. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Отправить на Kindle"
+                      disabled={kindle !== "idle"}
+                      onClick={sendToKindle}
+                      className={cn(
+                        "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                        kindle === "idle"
+                          ? "cursor-pointer text-muted-foreground/50"
+                          : "text-foreground",
+                      )}
+                    />
                   }
-                }}
-                className={cn(
-                  "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
-                  kindle === "idle" ? "cursor-pointer text-muted-foreground/50" : "text-foreground",
-                )}
-              >
-                {kindle === "sending" ? (
-                  <Spinner className="size-3.5" />
-                ) : kindle === "sent" ? (
-                  <CheckIcon className="size-3.5" />
-                ) : (
-                  <BookOpenIcon className="size-3.5" />
-                )}
-              </button>
-              <button
-                type="button"
-                aria-label="Больше такого"
-                aria-pressed={vote === "up"}
-                onClick={() => {
-                  setVote(vote === "up" ? null : "up");
-                  if (vote !== "up") report({ item_id: item.id, event: "up" });
-                }}
-                className={cn(
-                  "flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
-                  vote === "up" ? "text-foreground" : "text-muted-foreground/50",
-                )}
-              >
-                <ThumbsUpIcon className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                aria-label="Скрыть и меньше такого"
-                onClick={() => {
-                  setVote("down");
-                  report({ item_id: item.id, event: "down" });
-                }}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <ThumbsDownIcon className="size-3.5" />
-              </button>
+                >
+                  {kindle === "sending" ? (
+                    <Spinner className="size-3.5" />
+                  ) : kindle === "sent" ? (
+                    <CheckIcon className="size-3.5" />
+                  ) : (
+                    <BookOpenIcon className="size-3.5" />
+                  )}
+                </TooltipTrigger>
+                <TooltipContent>Отправить статью на читалку</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Больше такого"
+                      aria-pressed={vote === "up"}
+                      onClick={() => {
+                        setVote(vote === "up" ? null : "up");
+                        if (vote !== "up") report({ item_id: item.id, event: "up" });
+                      }}
+                      className={cn(
+                        "flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                        vote === "up" ? "text-foreground" : "text-muted-foreground/50",
+                      )}
+                    />
+                  }
+                >
+                  <ThumbsUpIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent>Больше такого в следующих выпусках</TooltipContent>
+              </Tooltip>
+
+              {/* Палец вниз убирает материал из ленты — единственное здесь
+                  действие, которое что-то отнимает. Красный по наведению
+                  отличает его от соседних двух до нажатия, а не после. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Скрыть и меньше такого"
+                      onClick={() => {
+                        setVote("down");
+                        report({ item_id: item.id, event: "down" });
+                      }}
+                      className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    />
+                  }
+                >
+                  <ThumbsDownIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent>Скрыть и меньше такого</TooltipContent>
+              </Tooltip>
             </div>
           </div>
 
-          {/* Вес 500, а не 400 и не 700. Четырёхсотый на двадцати пикселях
-              сливается с описанием под ним — заголовок перестаёт быть входом
-              в материал. Полужирный при этом размере шумит и мешает пробегать
-              список глазами. Inter подключён переменным, поэтому пятисотый
-              берётся без второго файла шрифта. */}
+          {/* Вес 600. Пятисотый на двадцати пикселях отличался от описания
+              под ним слишком слабо, чтобы глаз цеплялся за заголовок как
+              за якорь: список читался сплошным полотном, и на каждую карточку
+              уходил лишний скачок. Семисотый на этом размере уже кричит.
+              Inter подключён переменным, поэтому шестисотый берётся без
+              второго файла шрифта.
+              Отрицательный трекинг — на крупном кегле: Inter рисован
+              под текстовые размеры, и на двадцати пикселях межбуквенное
+              по умолчанию разваливает слово на буквы. */}
           <h3
             className={cn(
-              "mt-1.5 text-pretty text-xl font-medium leading-[1.3]",
+              "mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]",
               item.read_count > 0 && "text-foreground/55",
             )}
           >
@@ -272,7 +312,10 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
           {item.summary ? (
             <p
               onClick={() => setExpanded((value) => !value)}
-              className="mt-2 max-w-[68ch] cursor-text text-pretty text-[0.9375rem] leading-relaxed text-foreground/80"
+              // 16 пикселей, а не 15: описание — единственный сплошной текст
+              // в карточке, и на нём экономить кегль незачем. Строка держится
+              // в 68 знаков — дальше глаз промахивается мимо начала следующей.
+              className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground/80"
             >
               {item.summary}
             </p>
