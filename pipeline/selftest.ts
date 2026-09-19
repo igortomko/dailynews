@@ -226,6 +226,23 @@ assert.equal(
   "настоящая связь через глагол помечаться не должна",
 );
 
+// --- что миграции обещают базе -------------------------------------------------
+// Проверка схемы читает миграции регулярками. Забудет про drop — начнёт
+// требовать колонки, которые сама же миграция и убрала, и ей перестанут
+// верить на второй день.
+import { promised } from "../db/schema-gap";
+const promise = promised("db/migrations");
+const columnNames = promise.columns.map((entry) => `${entry.table}.${entry.column}`);
+assert.ok(columnNames.includes("profile.complexity"), "добавленная колонка должна попасть в список");
+assert.ok(
+  !columnNames.includes("profile.digest_hour"),
+  "снятая следующей миграцией колонка требоваться не должна",
+);
+assert.ok(
+  promise.constraints.some((entry) => entry.name === "topics_weight_positive"),
+  "именованное ограничение должно попасть в список",
+);
+
 // --- список размеров против ограничения базы -----------------------------------
 // Форма предлагает список, база держит check. Разъедутся — читатель выберет
 // число, которое база отвергнет, и виноватым будет выглядеть он.
@@ -342,4 +359,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 80 утверждений");
+console.log("Самопроверка пройдена: 85 утверждений");
