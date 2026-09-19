@@ -11,9 +11,6 @@ import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
-import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
-import { explain, parseTelegram } from "./fetch";
-import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -25,6 +22,9 @@ import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
 import type { Axes, Weights } from "../src/lib/types";
+import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
+import { explain, parseTelegram } from "./fetch";
+import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 
 const weights: Weights = {
   topic: 40, novelty: 20, specifics: 20, actionable: 10,
@@ -515,6 +515,139 @@ assert.equal(llmCost(million), 0, "ноль — законная цена бес
 process.env.LLM_INPUT_PRICE = "дорого";
 assert.equal(llmCost(million), 0.3, "нечисло откатывается к цене по умолчанию");
 delete process.env.LLM_INPUT_PRICE;
+
+// --- расположение middleware ------------------------------------------------
+// Проект использует srcDirectory, и Next подключает middleware только из src/.
+// Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
+// просто отдаются всем. Один раз так и было.
+import { existsSync } from "node:fs";
+assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
+assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
+
+
+// --- тарифы -----------------------------------------------------------------
+// Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
+// им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
+// решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
+import { PLAN_IDS, PLANS, kindDenial, maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
+import type { Source } from "../src/lib/types";
+
+assert.equal(planOf("pro").id, "pro", "известный тариф читается как он сам");
+assert.equal(planOf("нет такого").id, "free", "незнакомый тариф откатывается к бесплатному");
+assert.equal(planOf(null).id, "free", "пустой тариф откатывается к бесплатному");
+assert.ok(!PLANS.free.kinds.includes("x"), "X не должен быть доступен на бесплатном");
+assert.ok(!PLANS.plus.kinds.includes("x"), "X не должен быть доступен на Plus");
+assert.ok(PLANS.pro.kinds.includes("x"), "X — признак Pro");
+assert.ok(
+  maxDigestOf(PLANS.free) < maxDigestOf(PLANS.plus) &&
+    maxDigestOf(PLANS.plus) < maxDigestOf(PLANS.pro),
+  "размер выпуска должен расти с тарифом",
+);
+
+const source = (id: number, kind: Source["kind"], active = true) =>
+  ({ id, kind, active, label: `s${id}`, url: `https://e/${id}`, config: {},
+     last_ok_at: null, last_count: null, last_error: null } as unknown as Source);
+
+const catalogue = [
+  source(3, "x"), source(1, "rss"), source(2, "hackernews"),
+  source(4, "rss", false), source(5, "rss"), source(6, "rss"),
+  source(7, "rss"), source(8, "rss"), source(9, "rss"),
+];
+
+const onPlus = sourcesForPlan(catalogue, PLANS.plus);
+assert.ok(!onPlus.some((s) => s.kind === "x"), "прогон на Plus не должен опрашивать X");
+assert.ok(!onPlus.some((s) => s.id === 4), "выключенный источник не опрашивается");
+
+const onFree = sourcesForPlan(catalogue, PLANS.free);
+assert.equal(onFree.length, PLANS.free.maxSources, "бесплатный тариф режет до своего предела");
+assert.deepEqual(
+  onFree.map((s) => s.id),
+  [1, 2, 5, 6, 7],
+  "остаются заведённые раньше, иначе набор пляшет от прогона к прогону",
+);
+assert.ok(
+  !sourcesForPlan(catalogue, PLANS.free).some((s) => s.kind === "x"),
+  "запрещённый вид отсекается до предела по числу, а не занимает место",
+);
+
+// Предел в форме обязан считать то же, что опрашивает прогон: иначе после
+// понижения тарифа запрещённый вид занимает места живых источников.
+const afterDowngrade = [
+  source(1, "x"), source(2, "x"), source(3, "x"),
+  source(4, "rss"), source(5, "rss"),
+];
+assert.equal(
+  sourcesForPlan(afterDowngrade, PLANS.free).length,
+  2,
+  "прогон на бесплатном опрашивает только разрешённые виды",
+);
+assert.equal(
+  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
+  2,
+  "и предел в форме обязан считать по тому же правилу",
+);
+
+import { GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
+
+assert.equal(topicsWord(1), "интерес", "единственное число");
+assert.equal(topicsWord(2), "интереса", "два-четыре");
+assert.equal(topicsWord(5), "интересов", "пять и больше");
+assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
+
+assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
+assert.ok(allows(PLANS.pro, "subscription"), "свой ключ — признак Pro");
+assert.ok(!allows(PLANS.plus, "subscription"), "на Plus своего ключа нет");
+assert.ok(
+  allows(PLANS.plus, "personalization") && allows(PLANS.pro, "personalization"),
+  "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
+);
+for (const section of GATED) {
+  // Заглушка зовёт cheapestWith и печатает его подпись: раздел, которого
+  // нет ни в одном тарифе, показал бы «на тарифе Pro» и никогда не открылся.
+  assert.ok(
+    allows(cheapestWith(section), section),
+    `раздел ${section} должен быть хоть на одном тарифе`,
+  );
+}
+
+// Перечень в миграции и перечень в коде расходятся молча: база примет
+// значение, которого код не знает, и planOf молча отдаст бесплатный тариф.
+//
+// Проверяются обе: 0019_plan завела колонку в profile, 0020 увезла её
+// в readers вместе с ограничением. На живой базе работает вторая, на чистой
+// применяются подряд обе, и разойтись им нельзя.
+for (const file of ["0019_plan", "0020_readers"]) {
+  const planSql = readFileSync(`db/migrations/${file}.sql`, "utf8");
+  for (const id of PLAN_IDS) {
+    assert.ok(planSql.includes(`'${id}'`), `тариф ${id} должен быть разрешён в ${file}`);
+  }
+}
+
+// Вердикт по выпуску на читалку. Адрес обслуживает и ручную отправку
+// отдельной статьи, поэтому выключенный выпуск не требует стереть адрес —
+// и не должен молча уходить при выключенном переключателе.
+{
+  const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
+  const ok = kindleDigestVerdict(full);
+  assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
+  assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_digest: false }),
+    { send: false, reason: "switched-off" },
+    "выключенный переключатель отменяет выпуск, хотя адрес на месте",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_address: null }),
+    { send: false, reason: "no-address" },
+    "без адреса слать некуда, и говорить об этом не о чем",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_sender: null }),
+    { send: false, reason: "no-sender" },
+    "вписанный адрес без обратного — сбой, о нём сообщают в лог",
+  );
+}
+
 // --- разбор вставленной ссылки ------------------------------------------------
 // Источник добавляется одной ссылкой, тип выясняет код. Каждое правило по хосту
 // проверяется здесь на строке-примере: у сервисов меняются и адреса, и разметка,
@@ -789,12 +922,28 @@ assert.equal(responseEnd("* 1 EXISTS\r\n", "d3"), -1, "незаконченны�
 const refused = "d3 NO [AUTHENTICATIONFAILED]\r\n";
 assert.equal(responseEnd(refused, "d3"), refused.length, "отказ тоже конец ответа");
 
-// --- расположение middleware ------------------------------------------------
-// Проект использует srcDirectory, и Next подключает middleware только из src/.
-// Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
-// просто отдаются всем. Один раз так и было.
-import { existsSync } from "node:fs";
-assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
-assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
+// --- X только на Pro ----------------------------------------------------------
+// X — единственный платный вид источника: счёт идёт за прочитанные посты.
+// Тариф спрашивается не только при сохранении, но и до разбора ссылки:
+// разбор X — это уже запрос к twitterapi.io. Потратить деньги и отказать
+// после значит взять плату за отказ.
+assert.equal(kindDenial(PLANS.pro, "x"), null, "на Pro источники X разрешены");
+assert.ok(kindDenial(PLANS.free, "x"), "на бесплатном X закрыт");
+assert.ok(kindDenial(PLANS.plus, "x"), "на Plus X тоже закрыт");
+assert.match(kindDenial(PLANS.free, "x")!, /Pro/, "отказ называет тариф, который его открывает");
+for (const freeKind of ["rss", "hackernews", "telegram", "email"] as const) {
+  assert.equal(kindDenial(PLANS.free, freeKind), null, `${freeKind} остаётся на бесплатном тарифе`);
+}
+// Вид известен до всякой сети — на этом и держится отказ без запроса.
+assert.equal(
+  (planFor("from:karpathy OR from:sama") as { candidates: { kind: string }[] }).candidates[0].kind,
+  "x",
+  "запрос X опознаётся правилом, а не пробой",
+);
+assert.equal(
+  (planFor("https://x.com/karpathy") as { candidates: { kind: string }[] }).candidates[0].kind,
+  "x",
+  "ссылка на аккаунт X — тоже X",
+);
 
-console.log("Самопроверка пройдена: 203 утверждений");
+console.log("Самопроверка пройдена: 239 утверждений");
