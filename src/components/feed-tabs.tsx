@@ -6,7 +6,17 @@ import { ItemCard } from "@/components/item-card";
 import type { FeedItem } from "@/lib/queries";
 import type { Topic } from "@/lib/types";
 
-export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[] }) {
+export function FeedTabs({
+  topics,
+  items,
+  left,
+  right,
+}: {
+  topics: Topic[];
+  items: FeedItem[];
+  left: React.ReactNode;
+  right: React.ReactNode;
+}) {
   // «Прочее» показывается вкладкой, только если туда что-то попало: пустая
   // вкладка сообщает о системе, а не о новостях.
   const hasOther = items.some((item) => !item.topic_slug);
@@ -30,31 +40,36 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
         : items.filter((item) => item.topic_slug === slug);
 
   return (
-    <Tabs defaultValue="all" className="flex flex-col gap-2">
-      {/* Вкладки как в Google News: подчёркивание вместо плашки. Плашка
-          обводит каждую тему рамкой и превращает ряд в набор кнопок;
-          подчёркивание отмечает одну, остальные оставляет текстом.
-          Полоса выходит за колонку и растушёвана: семь тем по-русски
-          не помещаются, а обрезанный край должен читаться как «есть ещё». */}
-      {/* Вынос должен совпадать с отступами панели, иначе растушёвка
-          обрывается не у края и полоса выглядит обрезанной, а не
-          прокручиваемой. Полоса скроллится: семь тем по-русски не
-          помещаются ни в какую ширину. */}
-      <div className="-mx-4 overflow-x-auto border-b [scrollbar-width:none] sm:-mx-6 [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
-        <TabsList className="h-auto w-max justify-start gap-1 rounded-none border-0 bg-transparent p-0 px-4 sm:px-6">
-          {tabs.map((tab) => (
-            <TabsTrigger
-              key={tab.slug}
-              value={tab.slug}
-              className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-2 pb-2.5 text-[0.8125rem] whitespace-nowrap text-muted-foreground shadow-none data-[selected]:border-foreground data-[selected]:font-medium data-[selected]:text-foreground data-[state=active]:border-foreground data-[state=active]:font-medium data-[state=active]:text-foreground"
-            >
-              {tab.label}
-              <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </div>
+    <Tabs defaultValue="all">
+      {/* Шапка живёт внутри Tabs: полоса вкладок и содержимое должны быть
+          в одном корне, иначе переключение их не связывает.
+          Дата и настройки — по краям экрана, а не по колонке текста:
+          управление лентой относится ко всей странице. Вкладки под ними
+          по центру; когда не помещаются, начинают прокручиваться —
+          семь тем по-русски не влезают ни в какую ширину. */}
+      <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur">
+        <div className="flex h-12 items-center justify-between gap-3 px-4">
+          {left}
+          {right}
+        </div>
+        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
+          <TabsList className="mx-auto h-auto w-max justify-start gap-1 rounded-none border-0 bg-transparent p-0 px-4">
+            {tabs.map((tab) => (
+              <TabsTrigger
+                key={tab.slug}
+                value={tab.slug}
+                className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-2 pb-2.5 text-[0.8125rem] whitespace-nowrap text-muted-foreground shadow-none data-[selected]:border-foreground data-[selected]:font-medium data-[selected]:text-foreground data-[state=active]:border-foreground data-[state=active]:font-medium data-[state=active]:text-foreground"
+              >
+                {tab.label}
+                <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+      </header>
 
+      <div className="mx-auto max-w-3xl px-4 py-4 sm:py-6">
+        <div className="rounded-xl border bg-card px-4 sm:px-6">
       {tabs.map((tab) => {
         const list = forTab(tab.slug);
         return (
@@ -74,6 +89,8 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
           </TabsContent>
         );
       })}
+        </div>
+      </div>
     </Tabs>
   );
 }
