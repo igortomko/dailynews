@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
 import type { FeedItem } from "@/lib/queries";
+import { HORIZON, KIND } from "@/lib/axis-labels";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
 const SEEN_MS = 1500;
@@ -20,20 +21,6 @@ function report(body: { item_id: number; event: string; dwell_ms?: number }, bea
   }
   void fetch("/api/read", { method: "POST", body: json, keepalive: true });
 }
-
-const KIND: Record<string, string> = {
-  fact: "факт",
-  forecast: "прогноз",
-  opinion: "мнение",
-  announcement: "анонс",
-  reprint: "перепечатка",
-};
-
-const HORIZON: Record<string, string> = {
-  years: "годы",
-  months: "месяцы",
-  noise: "шум дня",
-};
 
 /** Домен издания: источник ведёт на издание, заголовок — на сам материал. */
 function siteOf(url: string): string | null {
@@ -192,17 +179,19 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                       body: JSON.stringify({ item_id: item.id }),
                     });
                     const body = await res.json().catch(() => ({}));
-                    if (!res.ok) throw new Error(body?.error ?? `ошибка ${res.status}`);
+                    // Код ответа наружу не уходит: он говорит, что увидела машина,
+                    // а не что делать читателю.
+                    if (!res.ok) throw new Error(body?.error ?? "Не отправилось на Kindle — попробуй ещё раз");
                     setKindle("sent");
                     // Честно про время: статья забирается и переводится
                     // целиком. Обещать мгновенность — значит получить
                     // второй тап через десять секунд.
-                    toast.success("Уехала на Kindle", {
-                      description: "Перевод и сборка занимают около минуты",
+                    toast.success("Статья ушла на Kindle", {
+                      description: "Придёт примерно через минуту",
                     });
                   } catch (error) {
                     setKindle("idle");
-                    toast.error(error instanceof Error ? error.message : "Не отправилось");
+                    toast.error(error instanceof Error ? error.message : "Не отправилось на Kindle — попробуй ещё раз");
                   }
                 }}
                 className={cn(

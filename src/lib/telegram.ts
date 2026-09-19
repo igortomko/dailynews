@@ -163,6 +163,51 @@ export async function answerCallback(callbackId: string, text: string): Promise<
   await call("answerCallbackQuery", { callback_query_id: callbackId, text });
 }
 
+/**
+ * Дата словами: «2026-09-19» → «19 сентября». В базе день лежит строкой,
+ * и без разворота читатель каждое утро получал бы машинную дату.
+ * Год не пишется: выпуск приходит в день выпуска.
+ */
+const MONTHS = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
+
+export function dayInWords(day: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  // Незнакомая форма возвращается как есть: подменять её выдуманной датой
+  // хуже, чем показать строку из базы.
+  if (!match) return day;
+  // Формат совпал — это ещё не дата: «2026-13-19» дал бы «19 undefined»
+  // в единственном сообщении, которое читатель видит каждое утро.
+  const month = Number(match[2]);
+  const date = Number(match[3]);
+  // Календарём, а не диапазоном: «2026-02-31» проходит проверку на 1–31
+  // и выходит «31 февраля». Date нормализует такую дату в марта первое,
+  // и расхождение после нормализации и есть ответ.
+  const parsed = new Date(Date.UTC(Number(match[1]), month - 1, date));
+  if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== date) return day;
+  return `${date} ${MONTHS[month - 1]}`;
+}
+
+/**
+ * Русское склонение при числе. Одна реализация на все слова: копия на каждое
+ * новое слово — это ещё одно место, где «11» однажды получит «выпуск».
+ * Одиннадцать–четырнадцать берут форму множественного вопреки последней
+ * цифре, и мимо этого проходят чаще всего.
+ */
+function plural(n: number, one: string, few: string, many: string): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 14) return many;
+  const ones = n % 10;
+  if (ones === 1) return one;
+  if (ones >= 2 && ones <= 4) return few;
+  return many;
+}
+
+export const digestsWord = (n: number) => plural(n, "выпуск", "выпуска", "выпусков");
+export const newsWord = (n: number) => plural(n, "новость", "новости", "новостей");
+
 export type Headline = { title: string; topic: string };
 
 /**
@@ -189,7 +234,7 @@ export async function notify(
     .join("\n\n");
 
   const text = [
-    `<b>Дайджест за ${escapeHtml(day)}</b> — ${headlines.length} материалов`,
+    `<b>Выпуск за ${escapeHtml(dayInWords(day))}</b> — ${headlines.length} ${newsWord(headlines.length)}`,
     intro ? escapeHtml(intro) : "",
     body,
     `<a href="${escapeHtml(appUrl)}">Читать</a>`,

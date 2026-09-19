@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import { maxDigestOf, PLANS, type Plan } from "@/lib/plans";
+import { maxDigestOf, topicsWord, PLANS, type Plan } from "@/lib/plans";
 import { usePaywall, PaywallCrown } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
@@ -60,21 +60,21 @@ export function TopicChips({
    * гадать, почему в ленте по-прежнему двадцать материалов.
    */
   const offerTopUp = (size: number) =>
-    toast(`Сейчас в выпуске ${inToday}. Загрузить ещё ${size - inToday}?`, {
-      description: "Займёт пару минут: описания пишутся заново.",
+    toast(`Сейчас в выпуске ${inToday}. Добавить ещё ${size - inToday}?`, {
+      description: "Займёт пару минут",
       action: {
-        label: "Загрузить",
+        label: "Добавить",
         onClick: () =>
           startTopUp(async () => {
-            const running = toast.loading("Догружаю выпуск…");
+            const running = toast.loading("Добавляю новости…");
             const result = await topUpDigest();
             toast.dismiss(running);
             if (result?.error) {
               toast.error(result.error);
             } else if (result?.added) {
-              toast.success(`Добавлено ${result.added}`);
+              toast.success(`Добавлено: ${result.added}`);
             } else {
-              toast.info(result?.note ?? "Свежих материалов больше нет");
+              toast.info(result?.note ?? "Больше свежих новостей нет");
             }
           }),
       },
@@ -146,7 +146,7 @@ export function TopicChips({
 
       <Field>
         <FieldLabel htmlFor="digest_size" className="flex items-center gap-1.5">
-          Количество новостей
+          Новостей в выпуске
           {maxDigestOf(plan) < maxDigestOf(PLANS.pro) ? (
             <PaywallCrown feature="digest" plan={plan} />
           ) : null}
@@ -198,7 +198,7 @@ export function TopicChips({
             counts={chips.map((chip) => chip.count)}
             onChange={setCounts}
           />
-          <FieldDescription>Тяни границы, чтобы отдать теме больше или меньше.</FieldDescription>
+          <FieldDescription>Тяни границы, чтобы отдать теме больше или меньше</FieldDescription>
         </Field>
       ) : null}
 
@@ -285,11 +285,11 @@ export function TopicChips({
                     rows={2}
                     value={chip.hint}
                     aria-label={`Что относится к теме «${chip.label}»`}
-                    placeholder="через запятую: что сюда попадает"
+                    placeholder="через запятую: что сюда относится"
                     onChange={(event) => patch(index, { hint: event.target.value })}
                   />
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Чем точнее описание, тем лучше
+                    Чем точнее, тем меньше лишнего в выпуске
                   </p>
 
                   {/* То же, что и полоса, но пальцем и с клавиатуры: на узком
@@ -353,7 +353,7 @@ export function TopicChips({
         {topicsPaywall.dialog}
         <FieldDescription>
           {full
-            ? `Тариф «${plan.label}» держит ${plan.maxTopics} — освободи место, убрав интерес`
+            ? `На тарифе «${plan.label}» ${plan.maxTopics} ${topicsWord(plan.maxTopics)} — убери один, чтобы добавить новый`
             : `${chips.length} из ${plan.maxTopics} на тарифе «${plan.label}»`}
         </FieldDescription>
       </Field>

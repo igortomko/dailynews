@@ -7,16 +7,21 @@ import { FEATURES, type FeatureId, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
 
 const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
-  { href: "/settings/personalization", label: "Персонализация" },
+  { href: "/settings/personalization", label: "Язык и подача" },
   { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/sources", label: "Источники" },
   { href: "/settings/delivery", label: "Доставка", feature: "delivery" },
-  { href: "/settings/calibration", label: "Калибровка", feature: "calibration" },
   { href: "/settings/subscription", label: "Подписка" },
   { href: "/settings/about", label: "О проекте" },
 ];
 
 /**
+ * «Калибровки» в списке нет намеренно, а страница осталась и открывается
+ * прямой ссылкой. Она отвечает на вопрос «угадывает ли отбор» — это мера
+ * нашего качества, а не ручка читателя: увидев её, он начинает думать
+ * о механике вместо новостей. Тариф на ней по-прежнему проверяется,
+ * поэтому ссылка не обходит оплату.
+ *
  * Закрытый раздел показывается с короной, а не прячется: спрятанный пункт
  * не даёт понять, что в продукте вообще есть — и за что предлагается
  * платить. Ссылка остаётся рабочей, на той стороне стоит заглушка;

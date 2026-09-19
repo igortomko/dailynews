@@ -29,8 +29,8 @@ export function LoginForm({
         <CardTitle>Лента</CardTitle>
         <CardDescription>
           {expired
-            ? "Ссылка истекла — попроси у бота новую."
-            : "Вход через бота: он же присылает выпуск каждое утро."}
+            ? "Ссылка устарела — попроси у бота новую"
+            : "Бот пришлёт ссылку — и новости каждое утро"}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -38,12 +38,12 @@ export function LoginForm({
           {bot ? (
             <Button render={<a href={`https://t.me/${bot}?start=login`} />}>
               <SendIcon data-icon="inline-start" />
-              Написать боту /start
+              Войти через Telegram
             </Button>
           ) : (
             <FieldDescription>
               Напиши боту <code className="font-mono">/start</code> — он пришлёт ссылку
-              на ленту. Ссылка действует 10 минут.
+              на ленту. Она работает 10 минут.
             </FieldDescription>
           )}
 

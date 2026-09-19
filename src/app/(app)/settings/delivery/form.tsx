@@ -124,14 +124,13 @@ export function DeliveryForm({
         <CardHeader>
           <CardTitle>Telegram</CardTitle>
           <CardDescription>
-            Каждое утро в твой Telegram приходит ссылка на свежий выпуск твоих
-            персональных новостей.
+            Каждое утро сюда приходит ссылка на свежие новости
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           {connected
-            ? `Подключён${username ? ` как @${username}` : ""}.`
-            : "Не подключён — напиши боту /start, и он свяжет этот аккаунт."}
+            ? `Подключён${username ? `: @${username}` : ""}`
+            : "Не подключён — напиши боту /start"}
         </CardContent>
       </Card>
 
@@ -145,8 +144,8 @@ export function DeliveryForm({
           </CardTitle>
           <CardDescription>
             {step === "done"
-              ? "Выпуск уходит книгой на читалку."
-              : "Ты можешь автоматически получать выпуск на свой Kindle. Это два шага."}
+              ? "Выпуск приходит книгой на читалку"
+              : "Выпуск может приходить книгой на читалку. Настройка — два шага."}
           </CardDescription>
         </CardHeader>
 
@@ -164,7 +163,7 @@ export function DeliveryForm({
                     «Manage Your Content and Devices»
                   </a>{" "}
                   → Preferences → Personal Document Settings. Там лежит адрес
-                  вида имя@kindle.com — вставь его сюда.
+                  вида имя@kindle.com — скопируй его сюда.
                 </p>
                 <Field data-invalid={error ? true : undefined}>
                   <FieldLabel htmlFor="kindle_address">Адрес читалки</FieldLabel>
@@ -175,7 +174,7 @@ export function DeliveryForm({
                     placeholder="имя@kindle.com"
                     aria-invalid={error ? true : undefined}
                   />
-                  <FieldDescription>{error ?? "Заканчивается на @kindle.com."}</FieldDescription>
+                  <FieldDescription>{error ?? "Заканчивается на @kindle.com"}</FieldDescription>
                 </Field>
                 <Button type="submit" disabled={pending || locked} className="self-start">
                   Дальше
@@ -188,22 +187,26 @@ export function DeliveryForm({
               внёс в одобренные. Проверить это снаружи нечем — подтверждает он. */}
           {step === "sender" ? (
             <FieldGroup>
-              <StepMark now={2} of={2} title="Разреши наш адрес отправителя" />
+              <StepMark now={2} of={2} title="Разреши нам писать на читалку" />
               <p className="text-sm text-muted-foreground">
                 В том же разделе Amazon есть «Approved Personal Document E-mail
                 List». Добавь туда{" "}
-                <CopyAddress value={sender ? `${sender}@${DOMAIN}` : ""} />{" "}
-                — без этого письмо отбрасывается молча, без единой ошибки.
+                <CopyAddress value={sender ? `${sender}@${DOMAIN}` : ""} />
+              </p>
+              {/* Отдельной строкой, а не хвостом абзаца: это единственное
+                  предупреждение на экране, и дочитывать до него нельзя
+                  заставлять — пропустивший его не увидит ни одной ошибки. */}
+              <p className="text-sm font-medium">
+                Без этого Amazon выбросит письмо и ничего не скажет — выпуск
+                просто не придёт.
               </p>
               {!connected ? (
                 <Alert>
                   <AlertTitle>Сначала привяжи Telegram</AlertTitle>
                   <AlertDescription>
-                    Пока Telegram не привязан, отправитель собран из номера
-                    читателя. Напиши боту <code className="font-mono">/start</code> —
-                    адрес пересоберётся из твоего username, и в Amazon его будет
-                    видно глазами. После подтверждения он замораживается: менять
-                    его потом значит потерять доставку молча.
+                    Напиши боту <code className="font-mono">/start</code> — тогда
+                    в адресе будет твоё имя, а не номер. Поменять его потом
+                    нельзя: Amazon придётся заново разрешать новый.
                   </AlertDescription>
                 </Alert>
               ) : null}
@@ -211,9 +214,9 @@ export function DeliveryForm({
                 <Button
                   type="button"
                   disabled={pending || locked}
-                  onClick={() => run(approveKindleSender(), "Настроено", () => setStep("done"))}
+                  onClick={() => run(approveKindleSender(), "Kindle настроен", () => setStep("done"))}
                 >
-                  Добавил, готово
+                  Добавил в Amazon
                 </Button>
                 <Button type="button" variant="ghost" disabled={pending || locked}
                         onClick={() => setStep("address")}>
@@ -235,9 +238,9 @@ export function DeliveryForm({
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <span className="text-sm font-medium">Отправитель</span>
+                  <span className="text-sm font-medium">Пишем с адреса</span>
                   <span className="text-sm text-muted-foreground">
-                    <CopyAddress value={`${sender}@${DOMAIN}`} /> разрешён в Amazon.
+                    <CopyAddress value={`${sender}@${DOMAIN}`} /> — разрешён в Amazon
                   </span>
                 </div>
 
@@ -246,7 +249,7 @@ export function DeliveryForm({
                   <FieldLabel htmlFor="kindle_digest" className="font-normal">
                     Присылать выпуск на читалку
                     <FieldDescription>
-                      Выключено — адрес остаётся для отправки отдельных статей.
+                      Выключишь — останется отправка отдельных статей
                     </FieldDescription>
                   </FieldLabel>
                 </Field>

@@ -31,7 +31,6 @@ const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = 
   { feature: "digest", value: (plan) => `до ${maxDigestOf(plan)}` },
   { feature: "x", value: (plan) => plan.kinds.includes("x") },
   { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
-  { feature: "calibration", value: (plan) => FEATURES.calibration.has(plan) },
 ];
 
 function Value({ value }: { value: string | boolean }) {
@@ -52,8 +51,8 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
       <CardHeader>
         <CardTitle>Тарифы</CardTitle>
         <CardDescription>
-          Тариф решает, за сколькими источниками следит лента, сколько у тебя тем и какого
-          размера выпуск приходит.
+          От тарифа зависит, за сколькими источниками следит лента, сколько у тебя
+          интересов и сколько новостей в выпуске
         </CardDescription>
       </CardHeader>
 
@@ -131,10 +130,10 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
             {ends
               ? `Подписка отменена, тариф «${current.label}» работает до ${ends.toLocaleDateString("ru-RU")}.`
               : reader.subscription_status === "past_due"
-                ? "Последний платёж не прошёл — Lemon Squeezy повторит списание."
+                ? "Платёж не прошёл — попробуем списать ещё раз"
                 : reader.plan_renews_at
-                  ? `Продлится ${new Date(reader.plan_renews_at).toLocaleDateString("ru-RU")}.`
-                  : "Смена карты, отмена и счета — на странице управления."}
+                  ? `Продлим ${new Date(reader.plan_renews_at).toLocaleDateString("ru-RU")}`
+                  : "Смена карты, отмена и счета — на странице управления"}
           </p>
         </CardContent>
       ) : null}

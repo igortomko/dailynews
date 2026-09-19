@@ -848,16 +848,14 @@ assert.ok(guessed.includes("https://example.com/atom.xml"), "и относите
 // --- почему фида не нашлось ---------------------------------------------------
 // «Фида нет», «страница собирается в браузере» и «пейволл» — три разных ответа
 // для читателя, и одинаковое «не нашлось» на все три ему ничего не говорит.
-assert.equal(
-  diagnose('<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script>'),
-  "материалы за пейволлом",
-  "пейволл объявляет себя сам, в schema.org",
-);
-assert.equal(
-  diagnose(`<!doctype html><html><head><title>x</title></head><body><div id="root"></div><script>${"var a=1;".repeat(300)}</script></body></html>`),
-  "страница собирается в браузере",
-  "пустая оболочка под скриптом",
-);
+const paywalled = diagnose('<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script>');
+const shellOnly = diagnose(`<!doctype html><html><head><title>x</title></head><body><div id="root"></div><script>${"var a=1;".repeat(300)}</script></body></html>`);
+assert.ok(paywalled, "подписка объявляет себя сама, в schema.org");
+assert.ok(shellOnly, "пустая оболочка под скриптом распознаётся");
+// Различимость, а не формулировка: сами слова — предмет правок текста,
+// и держать их золотым образцом значит ронять тест на каждой такой правке.
+// Слипшиеся причины тест по-прежнему ловит.
+assert.notEqual(paywalled, shellOnly, "две разные причины не должны давать один ответ");
 assert.equal(
   diagnose(`<html><body><article>${"Обычная страница с настоящим текстом внутри. ".repeat(20)}</article></body></html>`),
   null,
@@ -1098,10 +1096,25 @@ assert.equal(samplePairs([], []).length, 0, "пустая статья не ло
 
 // Три причины отказа, и каждая выключает по своей.
 const base = { id: 1, daily_cap_usd: 1, kindle_address: "a@kindle.com", kindle_sender: "52308619", kindle_approved: true } as Reader;
-assert.ok(articleBlocker({ ...base, kindle_address: null }, 0).includes("адрес читалки"), "без адреса читалки отправки нет");
-assert.ok(articleBlocker({ ...base, kindle_sender: null }, 0).includes("обратный адрес"), "без обратного адреса отправки нет");
-assert.ok(articleBlocker({ ...base, kindle_approved: false }, 0).includes("Amazon"), "неодобренный отправитель останавливает отправку: письмо исчезло бы молча");
-assert.ok(articleBlocker(base, 1).includes("потолок"), "исчерпанный потолок останавливает отправку");
+const blockers = [
+  articleBlocker({ ...base, kindle_address: null }, 0),
+  articleBlocker({ ...base, kindle_sender: null }, 0),
+  articleBlocker({ ...base, kindle_approved: false }, 0),
+  articleBlocker(base, 1),
+];
+assert.ok(blockers.every((text) => text.length > 0), "каждая из четырёх причин останавливает отправку");
+// Различимость, а не формулировка: одинаковый текст на разные причины
+// оставил бы читателя чинить не то. Сами слова — предмет правок текста,
+// и держать их золотым образцом значит ронять тест на каждой такой правке.
+assert.equal(new Set(blockers).size, 4, "причины отказа должны быть различимы на глаз");
+assert.match(
+  articleBlocker({ ...base, kindle_approved: false }, 0), /Amazon/,
+  "неодобренный отправитель называет Amazon: чинится это только там",
+);
+assert.match(
+  articleBlocker(base, 1), /завтра/,
+  "предел, который снимется сам, обязан сказать когда — иначе читатель идёт искать несуществующую настройку",
+);
 assert.equal(articleBlocker(base, 0.5), "", "настроенная отправка не блокируется");
 
 // Нажатие кнопки приходит не сообщением, а callback_query. Без этой ветки
@@ -1191,4 +1204,138 @@ assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкш�
 assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
 assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
 
-console.log("Самопроверка пройдена: 337 утверждений");
+// —————————————————————————————————————————————————————————————————————————
+// Одно обращение на весь продукт
+//
+// Правило записано и в AGENTS.md, и в скилле — и всё равно было нарушено:
+// «Расскажите о себе… под ваши интересы» прожило в самом читаемом поле
+// онбординга до аудита текста. Правило, которое некому проверить, держится
+// ровно до следующей правки.
+//
+// Проверяются местоимения и повелительное на «-ьте» и «-йтесь»/«-ьтесь».
+// Эти окончания в русском бывают только у глаголов, поэтому ложной тревоги
+// не будет никогда — а ложная тревога здесь опаснее пропуска: она роняет
+// сборку на правильном тексте, и чинят её, дописывая слово в исключения.
+// Тем же движением потом «чинится» и настоящее нарушение.
+//
+// «-йте» и «-ите» не проверяются: их делят с глаголами существительные
+// в предложном падеже — «на сайте», «в свите», «об элите». Отсечь их
+// по предлогу не выходит, между предлогом и словом встаёт определение
+// («на этом сайте»), и проверка снова краснеет на верной строке.
+// Поэтому «Откройте» и «Расскажите» ловятся только местоимением рядом;
+// на практике вежливая строка почти всегда приносит «вы» или «ваш»
+// с собой — так и было с той единственной, что дожила до аудита.
+//
+// Границы выписаны руками: \b перед кириллицей не работает — тот же промах,
+// что и с «ключевой» в словаре.
+const BOUNDARY = "(^|[^а-яёА-ЯЁ])";
+const POLITE = new RegExp(
+  `${BOUNDARY}(вы|вас|вам|ваш|ваша|ваше|ваши|вашу|вашем|вашей|вашего|вашему|вашим|вашими|ваших|вами)([^а-яёА-ЯЁ]|$)` +
+  `|${BOUNDARY}[а-яё]+(ьте|[йь]тесь)([^а-яёА-ЯЁ]|$)`,
+  "i",
+);
+
+/**
+ * Строки из файла, за вычетом комментариев.
+ *
+ * Разбор наивный, по синтаксису, а не по дереву, и у него есть слепые пятна:
+ * строка, начинающаяся со звёздочки внутри шаблонного литерала, считается
+ * продолжением комментария; «/*» и « //» внутри строкового литерала тоже
+ * принимаются за начало комментария и обрезают хвост строки. В обе стороны
+ * это пропуски, не ложные тревоги, — и это выбрано намеренно: ложная тревога
+ * здесь роняет сборку на верном тексте, а чинят её, дописывая исключение,
+ * и тем же движением потом глушат настоящее нарушение. Настоящий разбор
+ * TSX ради двух проверок дороже, чем названный пропуск.
+ */
+function uiText(file: string): { line: number; text: string }[] {
+  // Список путей ведётся руками, и переименование файла иначе валит
+  // самопроверку голым ENOENT вместо указания на строку списка.
+  if (!existsSync(file)) {
+    throw new Error(`UI_FILES: файла ${file} нет — поправь список в selftest.ts`);
+  }
+  const out: { line: number; text: string }[] = [];
+  let inBlock = false;
+  for (const [index, raw] of readFileSync(file, "utf8").split("\n").entries()) {
+    let line = raw;
+    if (inBlock) {
+      const close = line.indexOf("*/");
+      if (close < 0) continue;
+      inBlock = false;
+      line = line.slice(close + 2);
+    }
+    // Блочные комментарии выбрасываются и посередине строки: `foo(); /* … */`
+    // и `<div>{/* … */}</div>` иначе попадали бы под проверку и роняли бы её
+    // на тексте, которого читатель не видит.
+    line = line.replace(/\{?\/\*[\s\S]*?\*\/\}?/g, " ");
+    const open = line.indexOf("/*");
+    if (open >= 0) {
+      inBlock = true;
+      line = line.slice(0, open);
+    }
+    // «//» после пробела — это комментарий в хвосте строки кода; читатель
+    // его не видит, и ронять на нём проверку нельзя. Резать все «//» нельзя:
+    // в «https://…» это часть адреса, и перед ним стоит двоеточие.
+    line = line.replace(/\s\/\/.*$/, "");
+    const trimmed = line.trim();
+    if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+    if (/[а-яёА-ЯЁ]/.test(trimmed)) out.push({ line: index + 1, text: trimmed });
+  }
+  return out;
+}
+
+const UI_FILES = [
+  // Конвейер тоже говорит с читателем: отказы отправки на Kindle приходят
+  // тостом в ленту, отказы разбора ссылки — под поле в «Источниках».
+  "pipeline/kindle.ts",
+  "pipeline/kindle-article.ts",
+  "pipeline/discover.ts",
+  "src/lib/voice.ts",
+  "src/lib/plans.ts",
+  "src/lib/actions.ts",
+  "src/lib/telegram.ts",
+  "src/app/login/form.tsx",
+  "src/app/api/telegram/route.ts",
+  "src/app/api/kindle/route.ts",
+  "src/components/first-digest.tsx",
+  "src/components/item-card.tsx",
+  "src/components/feed-tabs.tsx",
+  "src/components/topic-chips.tsx",
+  "src/components/plan-table.tsx",
+  "src/components/plan-gate.tsx",
+  "src/components/paywall.tsx",
+  "src/app/(app)/page.tsx",
+  "src/app/(app)/settings/nav.tsx",
+  "src/app/(app)/settings/about/page.tsx",
+  "src/app/(app)/settings/calibration/page.tsx",
+  "src/app/(app)/settings/delivery/form.tsx",
+  "src/app/(app)/settings/interests/form.tsx",
+  "src/app/(app)/settings/personalization/form.tsx",
+  "src/app/(app)/settings/sources/manager.tsx",
+];
+
+const politeHits: string[] = [];
+for (const file of UI_FILES) {
+  for (const { line, text } of uiText(file)) {
+    if (POLITE.test(text)) politeHits.push(`${file}:${line} — ${text.slice(0, 90)}`);
+  }
+}
+assert.deepEqual(
+  politeHits, [],
+  "продукт говорит на «ты», а здесь пробралось «вы». Если это не текст читателю, " +
+  "а промпт для модели (в voice.ts они лежат рядом намеренно) — вынеси строку " +
+  `из UI_FILES, а не правь текст:\n${politeHits.join("\n")}`,
+);
+
+// Заодно, по тому же обходу: извинения и «пожалуйста» в интерфейсе.
+// Ни одно из них не говорит читателю, что делать, — а «Извините» ещё
+// и берёт на себя вину за то, в чём продукт не виноват.
+const APOLOGY = /(^|[^а-яёА-ЯЁ])(извини|извините|прости|простите|пожалуйста|упс|ой)([^а-яёА-ЯЁ]|$)/i;
+const apologyHits: string[] = [];
+for (const file of UI_FILES) {
+  for (const { line, text } of uiText(file)) {
+    if (APOLOGY.test(text)) apologyHits.push(`${file}:${line} — ${text.slice(0, 90)}`);
+  }
+}
+assert.deepEqual(apologyHits, [], `извинения вместо выхода:\n${apologyHits.join("\n")}`);
+
+console.log("Самопроверка пройдена: 340 утверждений");

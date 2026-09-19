@@ -7,7 +7,7 @@ import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DateNav } from "@/components/date-nav";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { FirstDigest } from "@/components/first-digest";
 
 export const dynamic = "force-dynamic";
 
@@ -26,19 +26,7 @@ export default async function FeedPage({
     getReaderTopics(reader.id),
   ]);
 
-  if (days.length === 0) {
-    return (
-      <Empty className="mx-auto max-w-page">
-        <EmptyHeader>
-          <EmptyTitle>Ещё ни одного выпуска</EmptyTitle>
-          <EmptyDescription>
-            Прогон идёт раз в сутки. Собрать прямо сейчас:
-            <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">npm run pipeline</code>
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
+  if (days.length === 0) return <FirstDigest />;
 
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.

@@ -1,5 +1,7 @@
 import { getCalibration, getSummaryQuality } from "@/lib/queries";
 import { currentReader } from "@/lib/session";
+import { digestsWord, newsWord } from "@/lib/telegram";
+import { axisValue } from "@/lib/axis-labels";
 import { allows } from "@/lib/plans";
 import { effectivePlan } from "@/lib/lemon";
 import { PlanGate } from "@/components/plan-gate";
@@ -37,8 +39,8 @@ export default async function CalibrationPage() {
       <PlanGate
         section="calibration"
         plan={plan}
-        title="Калибровка"
-        what="Растёт ли доля прочитанного с ростом скора и как меняется качество описаний по дням."
+        title="Что зашло"
+        what="Видно, угадывает ли лента: что ты открывал, что пролистнул и становится ли выбор точнее."
       />
     );
   }
@@ -52,8 +54,8 @@ export default async function CalibrationPage() {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>Нечего калибровать</EmptyTitle>
-          <EmptyDescription>Ни одного дайджеста ещё не было.</EmptyDescription>
+          <EmptyTitle>Пока нечего показать</EmptyTitle>
+          <EmptyDescription>Первый выпуск ещё не приходил</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -65,21 +67,20 @@ export default async function CalibrationPage() {
     <div className="flex flex-col gap-6">
       <Alert>
         <AlertTitle>
-          {totals.opened} из {totals.shown} открыто за {totals.days} дайджестов
+          Открыл {totals.opened} из {totals.shown} за {totals.days} {digestsWord(totals.days)}
         </AlertTitle>
         <AlertDescription>
-          Смысл не в проценте, а в наклоне. Если верхние корзины скора открываются не чаще
-          нижних — отбор угадывает. Если высокая уверенность не совпадает с открытиями,
-          неверно подобраны сами оси, а не их веса.
+          Важно не само число, а растёт ли оно сверху вниз. Если новости с высокой
+          оценкой открываются не чаще прочих — лента пока угадывает.
         </AlertDescription>
       </Alert>
 
       {totals.shown < MIN_SAMPLE ? (
         <Alert variant="destructive">
-          <AlertTitle>Данных мало</AlertTitle>
+          <AlertTitle>Данных пока мало</AlertTitle>
           <AlertDescription>
-            {totals.shown} показов. До {MIN_SAMPLE} любые проценты ниже — это шум,
-            менять по ним веса не стоит.
+            Показали {totals.shown} {newsWord(totals.shown)}. Надёжные цифры начинаются
+            примерно с {MIN_SAMPLE}.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -89,8 +90,8 @@ export default async function CalibrationPage() {
           <CardHeader>
             <CardTitle>Качество описаний</CardTitle>
             <CardDescription>
-              Те же вопросы, но о собственном выходе. Смысл не в отдельном числе,
-              а в ряду: правка формулировок либо двигает его, либо нет.
+              Лента сама оценивает, что написала. Смотреть надо на ряд по дням,
+              а не на одно число.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-1.5 text-sm">
@@ -116,26 +117,26 @@ export default async function CalibrationPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Скор против открытий</CardTitle>
-          <CardDescription>Корзины от нижней к верхней. Ожидается рост слева направо.</CardDescription>
+          <CardTitle>Оценка и открытия</CardTitle>
+          <CardDescription>Чем выше оценка, тем чаще должны открывать</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {byScore.map((row) => (
-            <Row key={row.bucket} label={`корзина ${row.bucket}`} shown={row.shown} opened={row.opened} rate={row.open_rate} />
+            <Row key={row.bucket} label={`оценка ${row.bucket}`} shown={row.shown} opened={row.opened} rate={row.open_rate} />
           ))}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Уверенность против открытий</CardTitle>
+          <CardTitle>Насколько лента была уверена</CardTitle>
           <CardDescription>
-            Уверенность без корреляции с чтением означает, что оси описывают не то различение.
+            Если уверенность не совпадает с открытиями — лента смотрит не на то
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {byConfidence.map((row) => (
-            <Row key={row.bucket} label={`корзина ${row.bucket}`} shown={row.shown} opened={row.opened} rate={row.open_rate} />
+            <Row key={row.bucket} label={`уверенность ${row.bucket}`} shown={row.shown} opened={row.opened} rate={row.open_rate} />
           ))}
         </CardContent>
       </Card>
@@ -144,13 +145,13 @@ export default async function CalibrationPage() {
         <Card key={axis}>
           <CardHeader>
             <CardTitle className="capitalize">{axis}</CardTitle>
-            <CardDescription>Только значения, встретившиеся минимум трижды.</CardDescription>
+            <CardDescription>Показываем то, что встретилось хотя бы три раза</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {byAxis
               .filter((row) => row.axis === axis)
               .map((row) => (
-                <Row key={`${axis}-${row.value}`} label={row.value} shown={row.shown} opened={row.opened} rate={row.open_rate} />
+                <Row key={`${axis}-${row.value}`} label={axisValue(row.value)} shown={row.shown} opened={row.opened} rate={row.open_rate} />
               ))}
           </CardContent>
         </Card>

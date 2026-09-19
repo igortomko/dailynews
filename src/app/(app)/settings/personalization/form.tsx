@@ -68,7 +68,7 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          {first ? "Настрой ленту" : "Персонализация"}
+          {first ? "Настрой ленту" : "Язык и подача"}
           <span
             aria-live="polite"
             className="flex items-center gap-1 text-xs font-normal text-muted-foreground"
@@ -78,7 +78,7 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
         </CardTitle>
         {first ? (
           <CardDescription>
-            По этим направлениям будут собираться новости, и по ним же раскладываться вкладки.
+            Скажи, на каком языке и как писать новости. Интересы выберешь следующим шагом.
           </CardDescription>
         ) : null}
       </CardHeader>
@@ -118,7 +118,7 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
                   </SelectContent>
                 </Select>
                 <input type="hidden" name="language" value={language} />
-                <FieldDescription>Источники остаются на своих языках.</FieldDescription>
+                <FieldDescription>Новости придут на этом языке, даже если источник на другом</FieldDescription>
               </Field>
 
               {/* Ползунок и селект меняются мимо события формы: базовый компонент
@@ -173,16 +173,16 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="reader_context">Кто читает</FieldLabel>
+              <FieldLabel htmlFor="reader_context">О себе</FieldLabel>
               <Textarea
                 id="reader_context"
                 name="reader_context"
                 rows={5}
                 defaultValue={profile?.reader_context ?? ""}
-                placeholder="Чем занимаешься, какой стек, что за продукт, где живёшь"
+                placeholder="Чем занимаешься, что за продукт, где живёшь"
               />
               <FieldDescription>
-                Расскажите о себе, это влияет на саммари и отбор новостей под ваши интересы.
+                Чем подробнее, тем точнее новости и понятнее описания
               </FieldDescription>
             </Field>
 

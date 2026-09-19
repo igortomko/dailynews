@@ -20,6 +20,31 @@
 import { explain, fetchDoc, fetchText, freshest, parseFeed, type FeedDoc } from "./fetch";
 import type { Source } from "../src/lib/types";
 
+/**
+ * Кандидат в строку лога, без того, что нельзя писать в общий лог.
+ *
+ * У почтового источника `url` — это адрес читателя, а в адресе фида
+ * запросто едет ключ (`?token=…`) или логин с паролем. Разбираться,
+ * почему «у сайта нет ленты», надо по путям, которые мы пробовали, —
+ * а не по тому, чей это ящик.
+ */
+function redacted(candidate: Candidate): string {
+  if (candidate.kind === "email") return candidate.url.replace(/^[^@]+/, "***");
+  try {
+    const url = new URL(candidate.url);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return candidate.url;
+  }
+}
+
+/**
+ * Как нашли ленту на сайте. Одна строка на оба пути — объявленный
+ * в разметке и угаданный по типовому адресу: читателю эта разница не видна
+ * и не нужна, а две копии одного текста разъедутся на первой же правке.
+ */
+const VIA_SITE = "нашли на сайте";
+
 export type Candidate = {
   kind: Source["kind"];
   /** Смысл зависит от kind: адрес фида, имя сабреддита, листинг HN, запрос X. */
@@ -70,7 +95,7 @@ export function planFor(input: string): Plan {
   const address = input.trim().toLowerCase();
   if (/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address)) {
     return {
-      candidates: [{ kind: "email", url: address, via: "письма от этого отправителя" }],
+      candidates: [{ kind: "email", url: address, via: "письма с этого адреса" }],
       probePage: false,
     };
   }
@@ -78,7 +103,7 @@ export function planFor(input: string): Plan {
   const url = asUrl(input);
   if (!url) {
     const query = input.trim();
-    if (!query) return { refuse: "Пустая строка" };
+    if (!query) return { refuse: "Вставь ссылку" };
 
     // @имя — это канал Telegram. Собачка есть и у X, но платный из двух
     // только X: угадать в его пользу значит взять деньги за догадку.
@@ -96,7 +121,7 @@ export function planFor(input: string): Plan {
     // выдачу, чтобы получить оттуда пустоту, незачем.
     if (!/\s/.test(query) && !/(^|\s)[a-z_]+:/i.test(query)) {
       return {
-        refuse: "Не похоже ни на ссылку, ни на запрос. Канал Telegram — @имя, аккаунт X — x.com/имя",
+        refuse: "Не похоже на ссылку. Канал Telegram — @имя, аккаунт X — x.com/имя",
       };
     }
     return { candidates: [{ kind: "x", url: query, via: "поисковый запрос X" }], probePage: false };
@@ -126,7 +151,7 @@ export function planFor(input: string): Plan {
     if (handle && !X_RESERVED.has(handle.toLowerCase()) && /^[A-Za-z0-9_]{1,15}$/.test(handle)) {
       return only("x", `from:${handle}`, `посты @${handle}`);
     }
-    return { refuse: "У X фида нет. Вставь ссылку на аккаунт (x.com/имя) или поисковый запрос." };
+    return { refuse: "Вставь ссылку на аккаунт целиком: x.com/имя" };
   }
 
   if (host === "youtube.com" || host === "m.youtube.com") {
@@ -172,14 +197,14 @@ export function planFor(input: string): Plan {
     // Ссылка бывает на канал, на его веб-просмотр и на отдельный пост.
     const name = segments[0] === "s" ? segments[1] : segments[0];
     if (!name || name.startsWith("+") || name === "joinchat") {
-      return { refuse: "Приглашение в закрытый чат читать нечем — нужен публичный канал t.me/имя" };
+      return { refuse: "Закрытый чат читать нечем — нужен открытый канал t.me/имя" };
     }
     return only("telegram", name, `публичный канал @${name}`);
   }
 
   // Общий случай: сначала сам адрес — он может уже быть фидом, — а если это
   // страница, второй слой достанет из её разметки объявленный фид.
-  return { candidates: [{ kind: "rss", url: url.toString(), via: "адрес как есть" }], probePage: true };
+  return { candidates: [{ kind: "rss", url: url.toString(), via: "по адресу" }], probePage: true };
 }
 
 /** Похоже ли тело ответа на фид, а не на страницу. */
@@ -238,15 +263,15 @@ export function guesses(base: string): string[] {
 export function diagnose(html: string): string | null {
   // schema.org: так пейволл объявляет себя поисковикам. Дороже и честнее,
   // чем гадать по словам «подписка» в тексте.
-  if (/"isAccessibleForFree"\s*:\s*(false|"false")/i.test(html)) return "материалы за пейволлом";
-  if (/content=["']locked["']/i.test(html) && /content_tier/i.test(html)) return "материалы за пейволлом";
+  if (/"isAccessibleForFree"\s*:\s*(false|"false")/i.test(html)) return "статьи читаются только по подписке";
+  if (/content=["']locked["']/i.test(html) && /content_tier/i.test(html)) return "статьи читаются только по подписке";
 
   const text = html
     .replace(/<(script|style|noscript|template)[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (html.length > 2000 && text.length < 200) return "страница собирается в браузере";
+  if (html.length > 2000 && text.length < 200) return "сайт ничего не отдаёт без браузера";
   return null;
 }
 
@@ -313,15 +338,10 @@ function labelFor(doc: FeedDoc | null, candidate: Candidate): string {
  * действительно что-то отдал. Кандидат, ответивший 200 и пустым фидом,
  * не выигрывает: ровно так выглядит репозиторий без релизов.
  */
-async function tryCandidates(
-  candidates: Candidate[],
-  input: string,
-  tried: string[],
-): Promise<Discovery> {
+async function tryCandidates(candidates: Candidate[], input: string): Promise<Discovery> {
   let lastError = "";
 
   for (const candidate of candidates) {
-    tried.push(candidate.url);
     try {
       // Тем же фетчером, которым ходит прогон: у X, HN, Reddit и Telegram свой.
       const doc: FeedDoc = await fetchDoc(probe(candidate, PROBE_CONFIG));
@@ -331,8 +351,8 @@ async function tryCandidates(
         // но сегодня пусто»: arXiv в выходные отдаёт фид со skipDays и без
         // единой записи, и без названия это неотличимо от промаха.
         lastError = doc?.title
-          ? `это фид «${doc.title}», но записей в нём сейчас нет`
-          : "фид ответил, но записей в нём нет";
+          ? `у «${doc.title}» есть лента новостей, но она пустая`
+          : "лента новостей нашлась, но она пустая";
         continue;
       }
       const source = probe(candidate);
@@ -355,7 +375,14 @@ async function tryCandidates(
       lastError = explain(error).slice(0, 200);
     }
   }
-  return { ok: false, error: lastError || "ни один адрес не ответил" };
+  // Перечень попыток читателю не уходит, но и пропадать ему нельзя: без него
+  // «у этого сайта нет ленты» там, где она есть, воспроизводится только
+  // руками. В лог — да, в ответ — нет.
+  console.log(
+    `  discover: не подошло ни одно из ${candidates.length}: ` +
+    candidates.map(redacted).join(", "),
+  );
+  return { ok: false, error: lastError || "Ни один адрес не ответил" };
 }
 
 /**
@@ -368,19 +395,20 @@ export async function probeOne(
   url: string,
   input: string,
 ): Promise<Discovery> {
-  return tryCandidates([{ kind, url, via: "проверка перед сохранением" }], input, []);
+  return tryCandidates([{ kind, url, via: "по адресу" }], input);
 }
 
 export async function discover(input: string): Promise<Discovery> {
   const plan = planFor(input);
   if ("refuse" in plan) return { ok: false, error: plan.refuse };
 
-  const tried: string[] = [];
 
   if (!plan.probePage) {
-    const result = await tryCandidates(plan.candidates, input, tried);
+    const result = await tryCandidates(plan.candidates, input);
     if (result.ok) return result;
-    return { ok: false, error: `${result.error} (${tried.join(", ")})` };
+    // Без перечня адресов, которые мы пробовали: читателю он ничего
+    // не говорит и повлиять на него он не может.
+    return { ok: false, error: result.error };
   }
 
   // Общий случай: страница качается один раз. Если это уже фид — готово;
@@ -397,7 +425,7 @@ export async function discover(input: string): Promise<Discovery> {
   if (looksLikeFeed(page)) {
     const doc = parseFeed(page);
     if (doc.items.length > 0) {
-      const candidate: Candidate = { kind: "rss", url: base, via: "это уже фид" };
+      const candidate: Candidate = { kind: "rss", url: base, via: "по адресу" };
       const fresh = freshest(doc.items, probe(candidate));
       return {
         ok: true,
@@ -414,25 +442,27 @@ export async function discover(input: string): Promise<Discovery> {
         },
       };
     }
-    return { ok: false, error: "Это фид, но записей в нём нет" };
+    return { ok: false, error: "Лента новостей нашлась, но она пустая" };
   }
 
   const declared: Candidate[] = feedLinks(page, base).map((url) => ({
     kind: "rss" as const,
     url,
-    via: "фид объявлен в разметке страницы",
+    via: VIA_SITE,
   }));
   const guessed: Candidate[] = guesses(base)
     .filter((url) => !declared.some((candidate) => candidate.url === url))
-    .map((url) => ({ kind: "rss" as const, url, via: "угаданный путь" }));
+    .map((url) => ({ kind: "rss" as const, url, via: VIA_SITE }));
 
-  const result = await tryCandidates([...declared, ...guessed], input, tried);
+  const result = await tryCandidates([...declared, ...guessed], input);
   if (result.ok) return result;
 
   const why = diagnose(page);
-  if (why) return { ok: false, error: `Фида не нашлось: ${why}` };
+  if (why) return { ok: false, error: `Новости отсюда не забрать: ${why}` };
   return {
     ok: false,
-    error: `Фида не нашлось. Пробовали: ${tried.map((url) => url.replace(/^https?:\/\//, "")).join(", ")}`,
+    // Список наших попыток наружу не уходит — ни здесь, ни в ветке выше:
+    // читатель не может ни повлиять на него, ни что-то из него понять.
+    error: "У этого сайта нет ленты новостей — её должен завести сам сайт",
   };
 }

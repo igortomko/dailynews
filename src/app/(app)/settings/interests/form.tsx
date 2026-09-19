@@ -59,7 +59,7 @@ export function InterestsForm({
             {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
           </span>
         </CardTitle>
-        <CardDescription>Направления, по которым собираются новости.</CardDescription>
+        <CardDescription>О чём собирать новости</CardDescription>
       </CardHeader>
       <CardContent>
         <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>

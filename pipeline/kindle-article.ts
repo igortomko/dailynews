@@ -182,6 +182,6 @@ export async function queueArticleSend(
     on conflict do nothing
     returning id
   `;
-  if (!row) return { error: "уже отправляется или отправлено" };
+  if (!row) return { error: "Эта статья уже в пути" };
   return { id: row.id };
 }
