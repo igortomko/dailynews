@@ -1668,10 +1668,18 @@ assert.deepEqual(readableOf(["linkedin", "threads"]).map((n) => n.id), [],
   const fallback = cardFromVoice({ language: "русском", complexity: 5, style: "телеграфный" });
   assert.equal(fallback.built_from, 0, "запасная карточка ни на чём не собрана, и это видно");
   assert.deepEqual(fallback.frame, [], "каркаса в запасной карточке нет");
-  assert.ok(cardBlock(fallback).includes("Каркаса нет"), "промпт честно говорит, что каркаса нет");
+  // Без прочитанных постов промпт обязан сказать, что формы мы не знаем,
+  // а не выдумать её: пост чужой формой выдаёт себя раньше, чем чужими словами.
   assert.ok(
-    cardBlock({ voice: ["а"], frame: ["б"], taboo: [], built_from: 9, sources: [], ranked: true })
-      .includes("его же постов между собой"),
+    cardBlock(fallback).includes("Формы его постов мы не знаем"),
+    "промпт честно говорит, что формы мы не знаем",
+  );
+  assert.ok(!cardBlock(fallback).includes("его пост 1"), "примеров нет — их неоткуда взять");
+  assert.ok(
+    cardBlock({
+      voice: ["а"], structure: [], hooks: [], samples: [], frame: ["б"], taboo: [],
+      built_from: 9, sources: [], ranked: true,
+    }).includes("сравнением его же постов по просмотрам"),
     "каркас в промпте назван тем, чем он является: сравнением его постов",
   );
 }

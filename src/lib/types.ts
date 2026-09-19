@@ -181,6 +181,12 @@ export type Reader = {
  */
 export type VoiceCardRow = {
   voice: string[];
+  /** Из каких блоков собран его пост и в каком порядке. */
+  structure: string[];
+  /** Чем он открывает пост — его набор приёмов с примерами. */
+  hooks: string[];
+  /** Два-три его поста целиком: образец формы для промпта. */
+  samples: string[];
   frame: string[];
   taboo: string[];
   built_from: number;

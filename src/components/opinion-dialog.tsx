@@ -51,7 +51,7 @@ export function OpinionDialog({
   const [state, setState] = useState<
     | { kind: "writing" }
     | { kind: "failed"; error: string }
-    | { kind: "ready"; drafts: SavedDraft[]; added: string[]; fallback: boolean }
+    | { kind: "ready"; drafts: SavedDraft[]; hook: string; added: string[]; fallback: boolean }
   >({ kind: "writing" });
   const [edited, setEdited] = useState<Record<number, string>>({});
   const [variant, setVariant] = useState("1");
@@ -72,6 +72,7 @@ export function OpinionDialog({
           : {
               kind: "ready",
               drafts: result.drafts,
+              hook: result.hook,
               added: result.added,
               fallback: result.fallback,
             },
@@ -110,6 +111,11 @@ export function OpinionDialog({
         <DialogHeader>
           <DialogTitle>Своё мнение</DialogTitle>
           <DialogDescription className="line-clamp-2">{title}</DialogDescription>
+          {/* Каким приёмом открыт пост — видно до чтения: не понравился вход,
+              второй вариант заходит иначе, и это его выбор, а не догадка. */}
+          {state.kind === "ready" && state.hook ? (
+            <span className="text-xs text-muted-foreground">Вход: {state.hook}</span>
+          ) : null}
         </DialogHeader>
 
         {state.kind === "writing" ? (

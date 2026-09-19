@@ -961,7 +961,9 @@ async function main() {
     // Карточка автора кладётся объектом, а не строкой: JSON.stringify в jsonb
     // сохраняет строку, и voice_card->'voice' молча становится null (0005).
     await readers.saveVoiceCard(owner.id, {
-      voice: ["короткие фразы"], frame: ["в верхних есть число"], taboo: [],
+      voice: ["короткие фразы"], structure: ["первая строка — заголовок капсом"],
+      hooks: ["заголовок капсом: «ХРАНИЛИЩЕ»"], samples: ["его пост целиком"],
+      frame: ["в верхних есть число"], taboo: [],
       built_from: 20, sources: ["telegram"], ranked: true,
     });
     const [cardRow] = await sql<{ kind: string; first: string | null }[]>`
@@ -970,6 +972,13 @@ async function main() {
     `;
     assert.equal(cardRow.kind, "object", "карточка в jsonb обязана быть объектом, а не строкой");
     assert.equal(cardRow.first, "короткие фразы", "пункт голоса читается запросом, а не разбором строки");
+    const [shape] = await sql<{ form: string | null }[]>`
+      select voice_card->'structure'->>0 as form from dailynews.readers where id = ${owner.id}
+    `;
+    assert.equal(
+      shape.form, "первая строка — заголовок капсом",
+      "форма поста доезжает до базы отдельным полем: без неё пост собирается новостной заметкой",
+    );
     assert.ok(
       (await readers.getReader(owner.id))?.voice_card?.voice.length,
       "getReader обязан выбирать карточку: без неё пост писался бы настройками подачи",
