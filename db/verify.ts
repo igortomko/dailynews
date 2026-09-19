@@ -301,6 +301,13 @@ async function main() {
     ]);
     await makeDigest(second.id, today, [{ id: ids[3], total: 60, title: "Vera: CBT" }]);
 
+    // Материал старше своего выпуска: без этого проверка ниже проходила бы
+    // и на сломанном запросе — сегодняшний день и сегодняшняя публикация
+    // неотличимы, а именно их лента и путала.
+    await sql`
+      update dailynews.items set published_at = now() - interval '3 days' where id = ${ids[0]}
+    `;
+
     // --- лента: каждому своя ----------------------------------------------------
     const ownerFeed = await queries.getFeed(owner.id, today);
     const secondFeed = await queries.getFeed(second.id, today);
@@ -327,6 +334,14 @@ async function main() {
     assert.ok(stored.kind, "axes->'kind'->>'choice' не должен быть null");
     assert.equal(ownerFeed[0].axes.kind.choice, "fact", "axes должны разобраться из jsonb");
     assert.equal(ownerFeed[0].read_count, 0);
+    // Время материала, а не день выпуска. Карточка показывала d.day, и все
+    // материалы выпуска получали один возраст, отсчитанный от полудня того
+    // дня: в ленте за сегодня везде стояло «1ч» независимо от материала.
+    const age = Date.now() - new Date(ownerFeed[0].published_at).getTime();
+    assert.ok(
+      age > 2.5 * 86_400_000,
+      `лента должна отдавать время материала, а не день выпуска (возраст ${Math.round(age / 3_600_000)}ч)`,
+    );
     assert.ok(
       !ownerFeed.some((item) => String(item.id) === String(ids[1])),
       "дубль не должен попасть в ленту",

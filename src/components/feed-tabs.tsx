@@ -84,7 +84,15 @@ export function FeedTabs({
       {tabs.map((tab) => {
         const list = forTab(tab.slug);
         return (
-          <TabsContent key={tab.slug} value={tab.slug} className="flex flex-col">
+          <TabsContent
+            key={tab.slug}
+            value={tab.slug}
+            /* Наведённая карточка остаётся в полную силу, соседние гаснут:
+               глазу не нужно удерживать, на какой он строке. Только на мыши —
+               на тапе :hover залипает, и лента осталась бы приглушённой вся,
+               кроме последней тронутой карточки. */
+            className="flex flex-col [@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-40"
+          >
             {list.length === 0 ? (
               <Empty>
                 <EmptyHeader>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeftIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { logout } from "@/lib/actions";
 import { currentReader } from "@/lib/session";
 
@@ -28,15 +29,23 @@ export default async function SettingsLayout({ children }: { children: React.Rea
       <PageHeader
         left={
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Назад к ленте"
-              className="text-muted-foreground hover:text-foreground"
-              render={<Link href="/" />}
-            >
-              <ArrowLeftIcon />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    nativeButton={false}
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Назад к ленте"
+                    className="text-muted-foreground hover:text-foreground"
+                    render={<Link href="/" />}
+                  />
+                }
+              >
+                <ArrowLeftIcon />
+              </TooltipTrigger>
+              <TooltipContent>Назад к ленте</TooltipContent>
+            </Tooltip>
             <h1 className="text-sm font-medium">Настройки</h1>
           </div>
         }

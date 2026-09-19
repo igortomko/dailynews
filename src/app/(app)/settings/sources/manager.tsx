@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { Source } from "@/lib/types";
@@ -422,15 +423,26 @@ export function SourcesManager({
                   </Badge>
                 ) : null}
                 {editable ? (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Убрать ${source.label} из ленты`}
-                    title="Убрать из ленты. Собранные материалы и статистика останутся, действие можно отменить"
-                    onClick={() => startTransition(() => remove(source.id))}
-                  >
-                    <TrashIcon />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Убрать ${source.label} из ленты`}
+                          onClick={() => startTransition(() => remove(source.id))}
+                          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        />
+                      }
+                    >
+                      <TrashIcon />
+                    </TooltipTrigger>
+                    {/* Своя подсказка вместо title: браузерная выезжает через
+                        секунду с лишним и рисуется системным шрифтом. */}
+                    <TooltipContent>
+                      Убрать из ленты — материалы и статистика останутся, действие можно отменить
+                    </TooltipContent>
+                  </Tooltip>
                 ) : null}
               </div>
             </div>

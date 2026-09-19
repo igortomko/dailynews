@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 /**
@@ -24,7 +25,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ru" className={inter.variable} suppressHydrationWarning>
       <body className="min-h-svh bg-background font-sans antialiased">
-        {children}
+        {/* Задержка общая на всё приложение: подсказка, выскакивающая
+            мгновенно, мельтешит при проходе курсора по ряду иконок.
+            Полсекунды — это «я остановился и не понимаю», а не «я мимо». */}
+        <TooltipProvider delay={500}>{children}</TooltipProvider>
         <Toaster position="bottom-center" />
       </body>
     </html>

@@ -2,7 +2,7 @@ import { CheckIcon, CrownIcon, MinusIcon, SproutIcon, ZapIcon } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { checkoutUrl, endingAt } from "@/lib/lemon";
 import { maxDigestOf, FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
@@ -47,7 +47,6 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
   const paying = Boolean(reader.subscription_id);
 
   return (
-    <TooltipProvider>
     <Card>
       <CardHeader>
         <CardTitle>Тарифы</CardTitle>
@@ -160,6 +159,5 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
         </CardContent>
       ) : null}
     </Card>
-    </TooltipProvider>
   );
 }

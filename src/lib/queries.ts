@@ -24,6 +24,14 @@ export type FeedItem = {
   confidence: number;
   axes: Axes;
   day: string;
+  /**
+   * Время самого материала, а не день выпуска. Раньше карточка показывала
+   * `day`, и это был отказ, похожий на успех: дата есть, выглядит свежей,
+   * но у всех материалов выпуска она одна и та же и отсчитывается от полудня
+   * того дня. В ленте за сегодня все двенадцать карточек честно писали «1ч»,
+   * хотя внутри лежали материалы возрастом от суток до недели.
+   */
+  published_at: Date;
   read_count: number;
 };
 
@@ -116,6 +124,9 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
            d.day::text as day,
+           -- coalesce обязателен: у письма и части фидов своей даты нет,
+           -- а без неё карточка осталась бы вовсе без времени.
+           coalesce(i.published_at, i.collected_at) as published_at,
            (select count(*)::int from dailynews.reads r
              where r.item_id = i.id and r.reader_id = ${readerId}
                and r.event in ('opened', 'outbound')) as read_count
