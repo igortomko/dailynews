@@ -104,7 +104,12 @@ function voiceRules(voice: Voice): string {
 export const firstSet = (...values: (string | undefined)[]) =>
   values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
 
-function resolve() {
+/** Экспортируется, чтобы перевод статьи решал провайдера тем же кодом:
+ *  вторая копия дефолтов разъезжается с первой молча.
+ *
+ *  Настройки читателя здесь нет: раздел своих ключей убран, и ключ из базы
+ *  вместе с ним. Всё приходит из окружения, и это единственный источник. */
+export function resolve() {
   return {
     baseUrl:
       firstSet(process.env.LLM_BASE_URL) ??

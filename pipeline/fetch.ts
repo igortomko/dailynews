@@ -129,17 +129,25 @@ export function parseFeed(xml: string): FeedDoc {
     }
     if (!title || !url?.startsWith("http")) return [];
 
+    // Полный текст фида берётся ДО обрезки. Раньше он проходил через
+    // stripHtml и slice(1200) и исчезал: для Substack и WordPress это
+    // означало лезть за статьёй на сайт, хотя она уже приехала целиком,
+    // чистая и даром. Потолок — на случай фида, отдающего книгу в одной
+    // записи; хранится это для всего потока.
+    const full = firstString(node["content:encoded"]) || firstString(node.content);
+    const body = full && full.length > 600 ? full.slice(0, 400_000) : undefined;
+
     const excerpt = stripHtml(
       firstString(node.description) ||
         firstString(node.summary) ||
-        firstString(node["content:encoded"]) ||
-        firstString(node.content),
+        full,
     ).slice(0, 1200);
 
     return [{
       url,
       title,
       excerpt,
+      body,
       points: null,
       comments: null,
       published_at: parseDate(node.pubDate ?? node.published ?? node.updated ?? node["dc:date"]),

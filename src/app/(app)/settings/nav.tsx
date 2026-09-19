@@ -12,7 +12,7 @@ const SECTIONS: { href: string; label: string; section?: Gated }[] = [
   { href: "/settings/sources", label: "Источники" },
   { href: "/settings/delivery", label: "Доставка" },
   { href: "/settings/calibration", label: "Калибровка", section: "calibration" },
-  { href: "/settings/subscription", label: "Подписка", section: "subscription" },
+  { href: "/settings/subscription", label: "Подписка" },
   { href: "/settings/about", label: "О проекте" },
 ];
 
