@@ -1,6 +1,7 @@
 name: yt-probe
 on:
-  workflow_dispatch:
+  push:
+    branches: [claude/youtube-channel-video-summary-8fe29c]
 jobs:
   probe:
     runs-on: ubuntu-latest
