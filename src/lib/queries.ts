@@ -24,11 +24,34 @@ export type FeedItem = {
   confidence: number;
   axes: Axes;
   day: string;
+  /**
+   * Время самого материала, а не день выпуска. Раньше карточка показывала
+   * `day`, и это был отказ, похожий на успех: дата есть, выглядит свежей,
+   * но у всех материалов выпуска она одна и та же и отсчитывается от полудня
+   * того дня. В ленте за сегодня все двенадцать карточек честно писали «1ч»,
+   * хотя внутри лежали материалы возрастом от суток до недели.
+   */
+  published_at: Date;
   read_count: number;
+  /**
+   * Уехал ли материал на читалку. Состояние жило только в карточке:
+   * перезагрузка теряла его, кнопка снова предлагала отправить, а повтор
+   * ловил 409 от частичного индекса — отказ там, где всё было сделано.
+   * Провалившуюся отправку сюда не считаем: её повторить можно и нужно.
+   */
+  kindled: boolean;
+  /**
+   * Попадался ли материал на глаза до этого захода. Лента идёт по убыванию
+   * скора, а читают её сверху вниз — значит виденное лежит подряд с начала,
+   * и граница между ним и остальным отвечает на «докуда я вчера дочитал».
+   */
+  seen: boolean;
 };
 
 export async function getSources(): Promise<Source[]> {
-  return sql<Source[]>`select * from dailynews.sources order by kind, label`;
+  return sql<Source[]>`
+    select * from dailynews.sources where deleted_at is null order by kind, label
+  `;
 }
 
 
@@ -55,7 +78,7 @@ export type SourceHealth = Source & {
  * а не в where: иначе источник без единого материала выпал бы из списка
  * вместо того, чтобы показать ноль.
  */
-export async function getSourceHealth(): Promise<SourceHealth[]> {
+export async function getSourceHealth(readerId: number): Promise<SourceHealth[]> {
   return sql<SourceHealth[]>`
     with digested as (
       -- Состав выпуска переехал из массива digests.item_ids в digest_items,
@@ -72,13 +95,25 @@ export async function getSourceHealth(): Promise<SourceHealth[]> {
            count(g.item_id)::int as in_digest,
            round(avg(sc.total)::numeric, 1)::float as mean_score
       from dailynews.sources s
+      -- Только свои: каталог общий, а список источников — это список того,
+      -- из чего собирают выпуск этому читателю. Чужая строка здесь была бы
+      -- ровно тем отказом, что выглядит как успех: список полон, убрать
+      -- из него нечего, и в выпуске всё равно не то.
+      join dailynews.reader_sources rs on rs.source_id = s.id and rs.reader_id = ${readerId}
       left join dailynews.items i
              on i.source_id = s.id
             and i.collected_at > now() - interval '30 days'
       left join dailynews.scores sc on sc.item_id = i.id
       left join digested g on g.item_id = i.id
+     where s.deleted_at is null
      group by s.id
-     order by s.kind, s.label
+     -- Порядок по вниманию, а не по алфавиту: в списке из тридцати строк
+     -- сломанное обязано быть сверху. По kind наверх всплывали десять
+     -- сабреддитов подряд, а источник с ошибкой лежал где-то в середине.
+     order by (s.last_error is not null) desc,
+              (s.silent_since is not null) desc,
+              count(i.id) desc,
+              s.label
   `;
 }
 
@@ -107,9 +142,18 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
            d.day::text as day,
+           -- coalesce обязателен: у письма и части фидов своей даты нет,
+           -- а без неё карточка осталась бы вовсе без времени.
+           coalesce(i.published_at, i.collected_at) as published_at,
            (select count(*)::int from dailynews.reads r
              where r.item_id = i.id and r.reader_id = ${readerId}
-               and r.event in ('opened', 'outbound')) as read_count
+               and r.event in ('opened', 'outbound')) as read_count,
+           exists (select 1 from dailynews.reads r
+                    where r.item_id = i.id and r.reader_id = ${readerId}
+                      and r.event = 'seen') as seen,
+           exists (select 1 from dailynews.kindle_sends ks
+                    where ks.item_id = i.id and ks.reader_id = ${readerId}
+                      and ks.status in ('queued', 'sent')) as kindled
       from dailynews.digests d
       join dailynews.digest_items di on di.digest_id = d.id
       join dailynews.items i on i.id = di.item_id
@@ -281,4 +325,46 @@ export async function getCollectedLast24h(sourceIds: number[]): Promise<number> 
        and source_id = any(${sourceIds}::bigint[])
   `;
   return row?.n ?? 0;
+}
+
+/**
+ * Чужие источники, которые уже кормят эти темы.
+ *
+ * Считается по собранному: сколько материалов источник дал по этим темам
+ * за месяц. Это не рейтинг «хороших» источников вообще — это ответ на «кто
+ * пишет о том, что ты выбрал», и он взрослеет вместе с каталогом сам,
+ * без второго списка, который кто-то должен поддерживать руками.
+ *
+ * Своих в ответе нет: предлагать взять то, что уже взято, — это предложение,
+ * на которое нельзя нажать.
+ */
+export async function catalogFor(
+  readerId: number,
+  topicSlugs: string[],
+  kinds: string[],
+  limit = 12,
+): Promise<{ id: number; kind: string; label: string; url: string; items: number }[]> {
+  if (topicSlugs.length === 0 || kinds.length === 0) return [];
+  return sql<{ id: number; kind: string; label: string; url: string; items: number }[]>`
+    select s.id::int as id, s.kind, s.label, s.url, count(distinct i.id)::int as items
+      from dailynews.sources s
+      join dailynews.items i on i.source_id = s.id
+           and i.collected_at > now() - interval '30 days' and i.dup_of is null
+      join dailynews.scores sc on sc.item_id = i.id
+      join dailynews.topics t on t.id = sc.topic_id and t.slug = any(${topicSlugs})
+     where s.deleted_at is null
+       -- Виды тарифа: X платный, и предлагать его бесплатному читателю
+       -- значит показать кнопку, которая откажет после нажатия.
+       and s.kind = any(${kinds})
+       and not exists (
+         select 1 from dailynews.reader_sources rs
+          where rs.source_id = s.id and rs.reader_id = ${readerId}
+       )
+     group by s.id
+     -- distinct обязателен и здесь, и в порядке: материал, попавший сразу
+     -- в две выбранные темы, join отдаёт дважды, и «12 материалов за месяц»
+     -- превращается в двадцать четыре.
+     order by count(distinct i.id) desc, s.label
+     limit ${limit}
+  `;
 }

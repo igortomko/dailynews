@@ -4,6 +4,23 @@ import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
+/**
+ * Тост обратный странице, а не «как карточка»: на светлой теме — чёрный.
+ *
+ * Белая плашка с тонкой рамкой на светлой странице читалась как ещё один
+ * блок интерфейса: она появлялась и исчезала, а сказанное в ней не доходило.
+ * Тосту нечем настаивать на себе, кроме контраста, — он не двигает вёрстку
+ * и не ждёт нажатия. Поэтому цвета взяты обратные странице: фон из
+ * --foreground, текст из --background. Названы переменными, а не чёрным
+ * с белым: заведись тёмная тема — тост останется заметным, перевернувшись
+ * вместе со страницей, а не сольётся с ней. Это же делает и всплывающая
+ * подсказка — две вещи, которые лежат поверх страницы, выглядят одинаково.
+ *
+ * Иконка остаётся единственным цветным пятном: на общем чёрном фоне успех
+ * и ошибка иначе неотличимы, а разбирать это по тексту — лишняя работа.
+ * Оттенок переворачивается вместе с плашкой: 400 читается на тёмной,
+ * на светлой он выцветает до неразличимого — берём 600.
+ */
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
 
@@ -13,16 +30,16 @@ const Toaster = ({ ...props }: ToasterProps) => {
       className="toaster group"
       icons={{
         success: (
-          <CircleCheckIcon className="size-4" />
+          <CircleCheckIcon className="size-4 text-emerald-400 dark:text-emerald-600" />
         ),
         info: (
-          <InfoIcon className="size-4" />
+          <InfoIcon className="size-4 text-sky-400 dark:text-sky-600" />
         ),
         warning: (
-          <TriangleAlertIcon className="size-4" />
+          <TriangleAlertIcon className="size-4 text-amber-400 dark:text-amber-600" />
         ),
         error: (
-          <OctagonXIcon className="size-4" />
+          <OctagonXIcon className="size-4 text-red-400 dark:text-red-600" />
         ),
         loading: (
           <Loader2Icon className="size-4 animate-spin" />
@@ -30,15 +47,19 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          "--normal-bg": "var(--foreground)",
+          "--normal-text": "var(--background)",
+          "--normal-border": "transparent",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }
       toastOptions={{
         classNames: {
           toast: "cn-toast",
+          // Подпись под заголовком у sonner приглушена своим цветом,
+          // рассчитанным на светлую плашку: на чёрной она проваливается
+          // в фон. Тот же текст, что и заголовок, только прозрачнее.
+          description: "!text-background/70",
         },
       }}
       {...props}

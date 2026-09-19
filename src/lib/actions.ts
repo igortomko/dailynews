@@ -6,22 +6,32 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
-import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
+import { discover, planFor, type Found } from "../../pipeline/discover";
+import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
+import {
+  addReaderSource, deleteChannel, freezeKindleSender, getChannels, getReader, getReaderTopics,
+  readerSources, recordCall, saveChannel, saveVoiceCard, saveVoiceSample, spentToday,
+} from "./readers";
+import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
+import { buildVoiceCard, cardFromVoice, readOwnPosts, type VoiceCard } from "../../pipeline/voice-card";
+import { writePost } from "../../pipeline/post";
+import { NETWORK_IDS, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
-import type { Source } from "./types";
+import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
-  PLAN_IDS, PLANS, digestCap, type Gated,
+  allows, cheapestWith, digestCap, FEATURES, kindDenial, maxDigestOf, sourcesForPlan,
+  topicsWord, type Gated,
 } from "./plans";
 import { effectivePlan } from "./lemon";
-import { getSources } from "./queries";
+import { SOURCE_LANGUAGE } from "./voice";
 import { toSlug } from "./slug";
+import { starterBySlug } from "./starter-topics";
+import { resolveSuggestions } from "./onboarding";
 
 /**
  * Запасной вход владельца. Читатели входят ссылкой из бота; пароль остаётся
@@ -69,7 +79,11 @@ export async function savePersonalization(formData: FormData) {
   const readerId = await currentReaderId();
 
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
-  const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
+  const asked_language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
+  // Перевод — платная возможность, и проверяется она здесь, а не только
+  // в форме: поле отправляется по своему адресу мимо погашенного селекта.
+  const plan = effectivePlan(await currentReader());
+  const language = FEATURES.language.has(plan) ? asked_language : SOURCE_LANGUAGE;
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
   // Ползунок шлёт строку, а нечисло превратилось бы в NaN и уронило запрос
   // ограничением, а не подсказкой. Держим в границах колонки здесь же.
@@ -132,11 +146,38 @@ export async function saveInterests(formData: FormData) {
     digestSize,
   );
 
+  await writeTopics(readerId, chips, slugs, counts, digestSize, true);
+
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+
+
+/**
+ * Запись интересов и бюджета внимания.
+ *
+ * Общая для настроек и для первого экрана: правила одни и те же, а разойдясь,
+ * они разойдутся молча — онбординг начнёт заводить то, что форма настроек
+ * отвергает, и увидеть это можно будет только по съехавшим темам.
+ *
+ * `finish` — ставить ли отметку о пройденном онбординге. На первом экране
+ * нельзя: интересы выбраны, источников ещё нет, и лента, решив, что
+ * настройка закончена, повела бы читателя в пустой выпуск.
+ */
+async function writeTopics(
+  readerId: number,
+  chips: ChipInput[],
+  slugs: string[],
+  counts: number[],
+  digestSize: number,
+  finish: boolean,
+): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`
       update dailynews.readers
          set digest_size = ${digestSize},
-             onboarded_at = coalesce(onboarded_at, now()),
+             onboarded_at = ${finish ? sql`coalesce(onboarded_at, now())` : sql`onboarded_at`},
              updated_at = now()
        where id = ${readerId}
     `;
@@ -176,12 +217,7 @@ export async function saveInterests(formData: FormData) {
       `;
     }
   });
-
-  revalidatePath("/", "layout");
-  return { ok: true as const };
 }
-
-
 
 /**
  * Адрес Kindle. Обратный адрес не трогаем: он выдан один раз при заведении
@@ -290,30 +326,15 @@ export async function resetKindleSetup() {
 }
 
 /**
- * Каталог источников общий, поэтому правит его владелец. Это не роли:
- * удаление источника уносит каскадом собранные материалы, и у такой кнопки
- * не должно быть ста рук.
- */
-async function requireOwner() {
-  const reader = await currentReader();
-  if (!reader.owner) redirect("/settings/sources");
-  return reader;
-}
-
-/**
  * Разобрать вставленную ссылку: что это за источник, где у него фид и как он
  * называется. Ничего не сохраняет — показывает, что нашлось, чтобы читатель
  * подтвердил. Тип источника знать не нужно, название уже лежит в фиде.
- *
- * Тоже под владельцем: каталог общий, а разбор ходит в сеть — у такой кнопки
- * не должно быть ста рук.
  */
 export async function discoverSource(input: string): Promise<
   { ok: true; found: Found } | { ok: false; error: string }
 > {
-  await requireOwner();
   const raw = input.trim().slice(0, 500);
-  if (!raw) return { ok: false, error: "Вставь ссылку" };
+  if (!raw) return { ok: false, error: "Пустая строка" };
 
   // Тариф спрашивается до сети. Какой это будет вид, planFor знает без
   // единого запроса, а разбор ссылки X — уже платный запрос к twitterapi.io:
@@ -334,7 +355,6 @@ export async function discoverSource(input: string): Promise<
   }
 }
 
-const KNOWN_KINDS = new Set<Source["kind"]>(["rss", "hackernews", "reddit", "x", "telegram", "email"]);
 
 /**
  * Сохраняется только то, что действительно ответило, и перепроверяется ровно
@@ -343,70 +363,61 @@ const KNOWN_KINDS = new Set<Source["kind"]>(["rss", "hackernews", "reddit", "x",
  * записи, через неделю неотличим от заброшенного — а он таким и родился.
  */
 export async function addSource(formData: FormData) {
-  await requireOwner();
+  const reader = await currentReader();
   // Вид сужается один раз: дальше он уходит и в предел тарифа, и в пробу.
   const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
   const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
-  if (!KNOWN_KINDS.has(kind)) return { error: "Сначала проверь ссылку" };
+  if (!isKnownKind(kind)) return { error: "Сначала проверь ссылку" };
   if (!url) return { error: "Вставь ссылку" };
 
   // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
   // чем сходить за фидом и отказать после.
-  const denied = await denyBySource(kind);
-  if (denied) return denied;
+  const denied = await denyForKind(reader, kind);
+  if (denied) return { error: denied };
 
   const probe = await probeOne(kind, url, inputUrl);
-  if (!probe.ok) return { error: `Источник перестал отвечать: ${probe.error}` };
+  if (!probe.ok) return { error: `Источник больше не отвечает: ${probe.error}` };
 
   const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
-  await sql`
-    insert into dailynews.sources (kind, label, url, input_url)
-    values (${kind}, ${label}, ${url}, ${inputUrl})
-    on conflict (kind, url) do update
-      set active = true, label = excluded.label, input_url = excluded.input_url
-  `;
+  const { created } = await saveSource(reader.id, kind, url, inputUrl, label);
   revalidatePath("/settings/sources");
-  return { ok: true as const, label };
+  return { ok: true as const, label, created };
 }
+
 
 
 /**
- * Общая проверка для добавления и включения: одна и та же пара пределов,
- * и разойтись им нельзя — включение в обход добавления открывало бы X
- * на бесплатном тарифе одним переключателем.
+ * Убрать источник из своей ленты.
+ *
+ * Удаляется строка связки, а не сам источник. У настоящего delete
+ * на items.source_id стоит on delete cascade: оно уносило бы собранные
+ * материалы, их оценки, их чтения и записи в уже отправленных выпусках —
+ * и не только свои. Отменить такое нечем: строку источника вернуть легко,
+ * сто семьдесят шесть чтений уже нет.
+ *
+ * Каталог при этом не редеет, и это правильно: он общий, а источник,
+ * которого не выбрал никто, прогон и так не опрашивает — он собирает
+ * объединение личных наборов.
  */
-async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
-  const plan = effectivePlan(await currentReader());
-
-  const byKind = kindDenial(plan, kind);
-  if (byKind) return { error: byKind };
-
-  // Считаем только то, что прогон и правда опрашивает: sourcesForPlan
-  // отсекает запрещённый вид до предела по числу. Иначе после понижения
-  // тарифа оставшиеся включёнными ленты X занимают места живых источников —
-  // добавить разрешённый нельзя, пока не выключишь те, которые всё равно
-  // никто не опрашивает.
-  const [{ n }] = await sql<{ n: number }[]>`
-    select count(*)::int as n
-      from dailynews.sources
-     where active and kind = any(${plan.kinds})
+export async function deleteSource(id: number) {
+  const readerId = await currentReaderId();
+  const [row] = await sql<{ label: string }[]>`
+    delete from dailynews.reader_sources rs
+     using dailynews.sources s
+     where rs.source_id = s.id and rs.reader_id = ${readerId} and rs.source_id = ${id}
+     returning s.label
   `;
-  if (n >= plan.maxSources) {
-    return {
-      error:
-        `На тарифе «${plan.label}» лента следит за ${plan.maxSources} источниками — ` +
-        `убери один, чтобы добавить новый`,
-    };
-  }
-  return null;
+  revalidatePath("/settings/sources");
+  return row ? { ok: true as const, label: row.label } : { error: "Источник уже убран" };
 }
 
-export async function deleteSource(id: number) {
-  await requireOwner();
-  await sql`delete from dailynews.sources where id = ${id}`;
+/** Отмена: возвращает источник в ленту. Каталог его и не терял. */
+export async function restoreSource(id: number) {
+  await addReaderSource(await currentReaderId(), id);
   revalidatePath("/settings/sources");
+  return { ok: true as const };
 }
 
 /**
@@ -423,9 +434,24 @@ export async function deleteSource(id: number) {
  * Поэтому же она занимает минуты, а не секунды.
  */
 export async function topUpDigest() {
-  const reader = await currentReader();
-  // Только сколько уже набрано: сам выпуск перечитывается в транзакции ниже,
-  // после письма описаний, — за это время последним может стать другой.
+  const result = await fillDigest(await currentReader());
+  revalidatePath("/", "layout");
+  return result;
+}
+
+/**
+ * Собственно сборка. Отдельно от topUpDigest, потому что последний шаг
+ * онбординга зовёт её, не перерисовывая страницу: revalidatePath перерисовал
+ * бы сам мастер, а тот, увидев пройденный онбординг, увёл бы читателя
+ * на ленту — мимо экрана, ради которого всё и собиралось.
+ */
+async function fillDigest(reader: Reader) {
+  // Только сколько уже набрано: сама строка выпуска заводится в самом конце,
+  // после письма описаний. Заведённая здесь, она пережила бы любой отказ ниже —
+  // исчерпанный дневной предел, пустой отбор, оборванный ответ модели, —
+  // и в базе остался бы пустой выпуск за сегодня. Лента перестала бы
+  // предлагать сбор (день-то уже есть), а калибровка посчитала бы выпуск,
+  // которого читатель не получал. Ночной прогон делает так же.
   const [existing] = await sql<{ taken: number }[]>`
     select (select count(*)::int from dailynews.digest_items di where di.digest_id = d.id) as taken
       from dailynews.digests d
@@ -452,7 +478,7 @@ export async function topUpDigest() {
   const topics = await getReaderTopics(reader.id);
   // Источники тарифа те же, что в ночном прогоне: кнопка не должна
   // приносить то, чего прогон не принёс бы.
-  const mySources = sourcesForPlan(await getSources(), effectivePlan(reader)).map((s) => s.id);
+  const mySources = sourcesForPlan(await readerSources(reader.id), effectivePlan(reader)).map((s) => s.id);
   const survivors = await selectSurvivors(
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
@@ -504,53 +530,20 @@ export async function topUpDigest() {
   const qualityById = new Map(quality.scored.map((row) => [String(row.item_id), row]));
 
   /*
-    Строка выпуска заводится здесь, а не в начале: раньше она пережила бы
-    любой отказ выше — исчерпанный дневной предел, пустой отбор, оборванный
-    ответ модели, — и в базе остался бы пустой выпуск за сегодня. Лента
-    перестала бы предлагать «Собрать сейчас» (день-то уже есть), а калибровка
-    посчитала бы выпуск, которого читатель не получал. Ночной прогон делает
-    так же: вставляет выпуск после письма описаний.
-
-    `taken` перечитывается из базы, а не берётся из первого select: между
-    ним и этим местом ночной прогон мог успеть собрать сегодняшний выпуск,
-    и позиции пошли бы с единицы поверх уже занятых.
-  */
-  /*
-    Догружается последний выпуск, а не сегодняшний по календарю, и это
-    намеренно: догрузку зовут двумя кнопками, и обе смотрят на тот выпуск,
-    который читатель видит на экране. Полоса интересов прямо считает
-    «сейчас в выпуске N» по `days[0]`, и собери мы вместо этого новый день,
-    обещание в вопросе разошлось бы с тем, что придёт. Новый день заводится
-    только тогда, когда выпусков нет вовсе.
-  */
-  /*
     Всё письмо в базу — одной транзакцией. Врозь оно коммитится по шагу,
     и падение на любом из них (материал удалён между отбором и вставкой —
     и внешний ключ не пускает) оставляет заведённый выпуск и часть строк:
-    лента и разбор попаданий посчитают его наравне с настоящим. Ровно тот
-    недобор, от которого вынесена вставка выпуска вниз.
+    лента и разбор попаданий посчитают его наравне с настоящим.
 
-    Строка выпуска берётся `for update`: между счётом занятых мест
-    и вставками может вклиниться ночной прогон, и тогда `position`
-    у разных материалов совпадает (уникальности на нём нет), а сумма
-    переваливает за потолок тарифа. Замок держится до конца транзакции.
+    Выпуск перечитывается здесь, а не берётся из `existing`: тот прочитан
+    до письма описаний, и за минуты письма ночной прогон успевает собрать
+    новый день. `for update` держит саму строку от чужой записи в неё,
+    но вставку прогоном нового дня не задерживает — у новой строки другой
+    ключ. Остаётся окно в несколько минут, в которое материалы лягут
+    во вчерашний выпуск; закрыть его по-настоящему можно только общим
+    замком с прогоном, а он пишет выпуск вне транзакции.
   */
   const added = await sql.begin(async (tx) => {
-    /*
-      Последний выпуск перечитывается здесь, а не берётся из `existing`:
-      тот прочитан до письма описаний, и за минуты письма ночной прогон
-      успевает собрать новый день. Перечитанный — уже сегодняшний.
-
-      `for update` при этом держит только саму строку, от чужой записи
-      в неё. Вставку ночным прогоном нового дня он не задерживает: у новой
-      строки другой ключ, и конфликтующего замка на ней нет. Остаётся окно
-      в несколько минут: прогон коммитит новый выпуск ровно между этим
-      select и вставками — тогда материалы лягут во вчерашний, а лента
-      покажет сегодняшний, и найти их можно будет стрелкой по датам.
-      Закрыть это по-настоящему можно только общим замком с прогоном,
-      а он пишет выпуск вне транзакции; половинчатый замок здесь хуже
-      названного вслух окна.
-    */
     const [current] = await tx<{ id: number }[]>`
       select id::int as id from dailynews.digests
        where reader_id = ${reader.id}
@@ -559,13 +552,14 @@ export async function topUpDigest() {
     `;
     let digestId = current?.id;
     if (digestId === undefined) {
-      const day = new Date().toISOString().slice(0, 10);
       // `on conflict` — про гонку с ночным прогоном: он мог завести
-      // сегодняшний выпуск между этим select и вставкой.
+      // сегодняшний выпуск между этим select и вставкой. Интро уже написано
+      // и оплачено этим же вызовом: не сохранить его значило бы отличаться
+      // от ночного выпуска молча.
       const [row] = await tx<{ id: number }[]>`
-        insert into dailynews.digests (reader_id, day, intro, stats)
-        values (${reader.id}, ${day}, ${written.intro}, ${sql.json({ source: "manual" })})
-        on conflict (reader_id, day) do update set day = excluded.day
+        insert into dailynews.digests (reader_id, day, intro)
+        values (${reader.id}, current_date, ${written.intro})
+        on conflict (reader_id, day) do update set reader_id = excluded.reader_id
         returning id::int as id
       `;
       digestId = row.id;
@@ -602,9 +596,331 @@ export async function topUpDigest() {
     return rows;
   });
 
-  revalidatePath("/", "layout");
   // Считаем вставленное, а не отобранное: при двух наложившихся нажатиях
   // `do nothing` отбрасывает часть строк молча, и «Добавлено: 5» на трёх
   // добавленных — отказ, выглядящий как успех.
   return { ok: true as const, added };
+}
+
+// ---------------------------------------------------------------------------
+// Блогерский Pro: площадки, голос, посты.
+//
+// Предел проверяется в каждом действии, а не только на странице: действие
+// зовётся по своему адресу мимо страницы с заглушкой, и без этой проверки
+// бесплатный читатель получал бы посты за наш счёт через fetch из консоли.
+// ---------------------------------------------------------------------------
+
+/** Что вставил читатель → какая это сеть. Разбор тот же, что у источников. */
+const NETWORK_BY_KIND: Partial<Record<Source["kind"], NetworkId>> = {
+  telegram: "telegram",
+  x: "x",
+  rss: "blog",
+};
+
+/**
+ * Добавить площадку ссылкой.
+ *
+ * Адрес разбирает тот же `discover`, что и источники: он же проверяет, что
+ * канал публичный и хоть что-то отдаёт. Сохраняется только ответившее —
+ * площадка, принятая пустой, выглядит настроенной, а голос по ней собрать
+ * не из чего, и понять это можно будет только по пустой карточке.
+ */
+export async function addChannel(input: string): Promise<{ ok: true; network: NetworkId; label: string } | { error: string }> {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+
+  const found = await discover(input);
+  if (!found.ok) return { error: found.error };
+
+  const network = NETWORK_BY_KIND[found.found.kind];
+  if (!network) {
+    return { error: "Это похоже на рассылку, а не на твой канал: нужен канал Telegram, аккаунт X или блог" };
+  }
+
+  await saveChannel(readerId, network, {
+    handle: found.found.url,
+    input_url: found.found.input_url,
+    label: found.found.label,
+  });
+  revalidatePath("/settings/channels");
+  return { ok: true as const, network, label: found.found.label };
+}
+
+/** Отметить сеть, куда он публикует. Адрес при этом не трогается. */
+export async function toggleChannel(network: string, on: boolean) {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: "Неизвестная сеть" };
+
+  if (on) await saveChannel(readerId, network);
+  else await deleteChannel(readerId, network);
+  revalidatePath("/settings/channels");
+  return { ok: true as const };
+}
+
+/**
+ * Вставленные руками посты.
+ *
+ * Не обходной путь, а единственный для LinkedIn и Threads: ленту они наружу
+ * не отдают вовсе. Поэтому поле живёт рядом со списком площадок, а не
+ * в «если ничего не получилось».
+ */
+export async function saveSample(formData: FormData) {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+  await saveVoiceSample(readerId, String(formData.get("sample") ?? "").slice(0, 20_000));
+  revalidatePath("/settings/channels");
+  return { ok: true as const };
+}
+
+/**
+ * Собрать карточку автора заново.
+ *
+ * Руками, а не по расписанию: голос меняется годами, и ночной пересчёт
+ * платил бы за один и тот же ответ каждую ночь. Кнопка стоит рядом с числом
+ * прочитанных постов — видно, на чём карточка собрана.
+ */
+export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ranked: boolean; failed: string[] } | { error: string }> {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const reader = await currentReader();
+
+  const spent = await spentToday(reader.id);
+  if (spent >= reader.daily_cap_usd) {
+    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+  }
+
+  const channels = await getChannels(reader.id);
+  const { posts, failed } = await readOwnPosts(
+    channels.map((channel) => ({ network: channel.network as NetworkId, handle: channel.handle })),
+    reader.voice_sample,
+  );
+  if (posts.length === 0) {
+    return {
+      error: failed.length
+        ? `Ни одна площадка не ответила: ${failed.map((entry) => `${entry.network} — ${entry.why}`).join("; ")}`
+        : "Читать нечего: добавь канал ссылкой или вставь три своих поста",
+    };
+  }
+
+  try {
+    const built = await buildVoiceCard(posts);
+    await saveVoiceCard(reader.id, built.card);
+    await recordCall({
+      readerId: reader.id, stage: "voice", model: built.model,
+      tokensIn: built.usage.input, tokensOut: built.usage.output,
+      costUsd: llmCost(built.usage),
+    });
+    revalidatePath("/settings/channels");
+    return {
+      ok: true as const,
+      built_from: built.card.built_from,
+      ranked: built.card.ranked,
+      failed: failed.map((entry) => `${entry.network}: ${entry.why}`),
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не собралось" };
+  }
+}
+
+/**
+ * Черновики поста по материалу выпуска.
+ *
+ * Материал берётся из выпуска этого читателя, а не из общей `items`:
+ * запрос без `reader_id` отдал бы соседний выпуск — вовремя и без ошибок.
+ * Заодно это и есть проверка, что материал ему вообще показывали.
+ */
+export async function writeOpinion(itemId: number): Promise<
+  | { ok: true; drafts: SavedDraft[]; added: string[]; fallback: boolean; built_from: number }
+  | { error: string }
+> {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const reader = await currentReader();
+
+  const spent = await spentToday(reader.id);
+  if (spent >= reader.daily_cap_usd) {
+    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+  }
+
+  const item = await postSourceFor(reader.id, itemId);
+  if (!item) return { error: "Этого материала в твоих выпусках нет" };
+
+  const channels = await getChannels(reader.id);
+  const networks = tabsOf(channels.map((channel) => channel.network));
+  if (networks.length === 0) {
+    return { error: "Сначала отметь в настройках, где ты публикуешь" };
+  }
+
+  // Карточка есть — пишем его голосом. Нет — настройками подачи, и мотатка
+  // обязана сказать это вслух: иначе он прочтёт общий черновик и решит,
+  // что возможность не работает.
+  const card = reader.voice_card?.voice?.length
+    ? (reader.voice_card as VoiceCard)
+    : cardFromVoice({
+        language: reader.language,
+        complexity: reader.complexity,
+        style: reader.style,
+      });
+
+  try {
+    const written = await writePost(item, card, networks.map((network) => network.id));
+    await recordCall({
+      readerId: reader.id, stage: "post", model: written.model,
+      tokensIn: written.usage.input, tokensOut: written.usage.output,
+      costUsd: llmCost(written.usage),
+    });
+    const saved = await saveDrafts(reader.id, item.id, written.drafts);
+    return {
+      ok: true as const,
+      drafts: saved,
+      added: written.added,
+      fallback: card.built_from === 0,
+      built_from: card.built_from,
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не написалось" };
+  }
+}
+
+/** Он скопировал пост: отметка и его правка — вход для следующей карточки. */
+export async function takeOpinion(postId: number, text: string) {
+  const readerId = await currentReaderId();
+  const ok = await takeDraft(readerId, postId, text.slice(0, 10_000));
+  return ok ? { ok: true as const } : { error: "Черновик не найден" };
+}
+
+/**
+ * Первый экран: выбранные интересы.
+ *
+ * Слаги из готового набора и то, что читатель вписал руками, приходят
+ * отдельно — у первых уже есть подсказка для Jev, выверенная под общий
+ * справочник, и брать её из формы значило бы позволить переписать критерий
+ * классификации всем сразу.
+ *
+ * Размер выпуска здесь не спрашивается: на первом экране это третье решение
+ * подряд, а тариф и так знает свой. Поменять его можно в «Интересах».
+ */
+export async function saveOnboardingInterests(slugs: string[], custom: string[]) {
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
+
+  const picked = slugs
+    .map((slug) => starterBySlug.get(slug))
+    .filter((topic) => topic !== undefined)
+    .map((topic) => ({ slug: topic.slug, label: topic.label, hint: topic.hint, count: MIN_PER_TOPIC }));
+
+  // Вписанное руками: подсказки у него нет, и это нормально — Jev получит
+  // само название. Пустая тема в справочник не уезжает.
+  const mine = custom
+    .map((label) => label.trim().slice(0, 60))
+    .filter(Boolean)
+    .map((label) => ({ slug: toSlug(label), label, hint: "", count: MIN_PER_TOPIC }));
+
+  const chips = [...picked, ...mine].filter(
+    (chip, index, all) => chip.slug && all.findIndex((other) => other.slug === chip.slug) === index,
+  );
+
+  if (chips.length === 0) return { error: "Выбери хотя бы один интерес" };
+  if (chips.length > plan.maxTopics) {
+    return {
+      error:
+        `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
+        `а выбрано ${chips.length}`,
+    };
+  }
+
+  const digestSize = plan.digestSizes[0];
+  await writeTopics(
+    reader.id,
+    chips,
+    chips.map((chip) => chip.slug),
+    normalize(chips.map(() => MIN_PER_TOPIC), digestSize),
+    digestSize,
+    false,
+  );
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/**
+ * Первый экран: выбранные источники.
+ *
+ * Форма присылает ключи, а не адреса. Подобранный список пересобирается
+ * на сервере из тех же интересов, и всё, чего в нём нет, отбрасывается:
+ * иначе в общий каталог можно было бы вставить что угодно под нашим
+ * названием, и следующий читатель увидел бы это среди предложений.
+ *
+ * Пробы здесь нет намеренно: эти фиды проверены живым запросом, когда
+ * попадали в набор, а пять проб подряд — это пять секунд ожидания на шаге,
+ * где читатель всего лишь нажимает на названия. Вставленная руками ссылка
+ * проверяется по-прежнему (addSource).
+ */
+export async function saveOnboardingSources(keys: string[]) {
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
+  const topics = await getReaderTopics(reader.id);
+
+  const chosen = await resolveSuggestions(
+    reader.id,
+    topics.map((topic) => topic.slug),
+    plan,
+    keys.slice(0, 100),
+  );
+  if (chosen.length === 0) return { error: "Выбери хотя бы один источник" };
+
+  let added = 0;
+  for (const feed of chosen) {
+    // Предел тарифа спрашивается на каждом, а не один раз на список:
+    // считать «сколько было плюс сколько выбрано» значит повторить
+    // формулу предела второй раз и разойтись с ней на первом же отказе.
+    const denied = await denyForKind(reader, feed.kind);
+    if (denied) {
+      // Причину берём у того, кто отказал. Своя формулировка здесь врала бы
+      // про предел числа там, где отказ был по виду источника, — и читатель
+      // убирал бы лишнее, не понимая, почему это не помогает.
+      if (added === 0) return { error: denied };
+      break;
+    }
+    await saveSource(reader.id, feed.kind, feed.url, feed.url, feed.label);
+    added++;
+  }
+
+  revalidatePath("/", "layout");
+  return { ok: true as const, added };
+}
+
+/**
+ * Последний шаг: собрать первый выпуск и открыть ленту.
+ *
+ * Поток уже собран и оценён — он общий, — поэтому новому читателю нужен
+ * только отбор его весами и описания его языком. Без этого шага онбординг
+ * заканчивался бы обещанием: настроил, нажал «готово» и увидел пустую
+ * ленту до следующей ночи.
+ *
+ * Отметка о пройденном онбординге ставится до сборки, а не после: выпуска
+ * может не получиться (поток пуст, потолок исчерпан), и ронять читателя
+ * обратно на первый экран из-за этого нельзя — настройку он закончил.
+ */
+export async function finishOnboarding() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set onboarded_at = coalesce(onboarded_at, now()), updated_at = now()
+     where id = ${readerId}
+  `;
+  // Перерисовки здесь нет намеренно: мастер должен дорисовать свой
+  // последний экран, а не быть уведённым с него собственным успехом.
+  try {
+    return await fillDigest(await currentReader());
+  } catch (error) {
+    // Отказ обязан вернуться значением, а не броском: мастер ждёт ответа,
+    // и на упавшем обещании он остался бы крутить спиннер до закрытия
+    // вкладки. Настройка при этом уже сохранена — терять её не за что.
+    console.error(`первый выпуск: ${(error as Error).message}`);
+    return { error: "Не получилось собрать первый выпуск — соберу ночью" };
+  }
 }

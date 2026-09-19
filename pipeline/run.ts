@@ -1,21 +1,26 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
-import { allReaders, getReaderTopics, recordCall, spentToday, topicsInUse } from "../src/lib/readers";
+import {
+  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks,
+  readerSources, recordCall, spentToday, topicsInUse, wakeReader,
+} from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { markDuplicates } from "./dedup";
 import { composite, scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
-import { notify } from "../src/lib/telegram";
+import { askResume, notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
 import { askFinished } from "../src/lib/telegram";
 import { enrichImages } from "./og";
-import { scoreSummaries } from "./summary-quality";
+import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoIdOf } from "./youtube";
+import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { digestCap, sourcesForPlan } from "../src/lib/plans";
+import { digestCap, issuesToday, sourcesForPlan } from "../src/lib/plans";
 import { effectivePlan } from "../src/lib/lemon";
+import { sleepVerdict } from "../src/lib/sleep";
 
 const log = (msg: string) => console.log(msg);
 
@@ -66,7 +71,7 @@ export async function collect(sources: Source[]): Promise<number[]> {
   const silent = await sql<{ label: string; days: number }[]>`
     select label, (current_date - silent_since::date)::int as days
       from dailynews.sources
-     where active and silent_since is not null
+     where deleted_at is null and silent_since is not null
      order by silent_since
   `;
   if (silent.length > 0) {
@@ -74,6 +79,94 @@ export async function collect(sources: Source[]): Promise<number[]> {
   }
 
   return inserted;
+}
+
+/**
+ * Расшифровать ролики среди новых материалов.
+ *
+ * Стоит рядом со сбором и до оценки нарочно: Jev оценивает материал
+ * по заголовку и тексту, и ролик без расшифровки приходил к нему одной
+ * строкой описания. Один вызов модели на ролик, `reader_id = null` —
+ * содержание ролика общее, как и оценка; второй читатель того же канала
+ * не платит за него заново.
+ *
+ * Отказ доступа прекращает весь шаг: «нас приняли за робота» — свойство
+ * адреса, а не ролика, и сорок одинаковых отказов подряд ничего не добавят.
+ */
+export async function transcribeVideos(): Promise<{ done: number; cost: number }> {
+  // Берём всё окно, а не то, что вставил этот прогон: первая попытка
+  // могла не удаться — провайдер ответил 401, YouTube отказал, — и ролик
+  // остался бы с описанием из фида навсегда, потому что новым он больше
+  // никогда не будет. Отметка о попытке и есть то, что отличает
+  // «уже ходили» от «ещё нет».
+  const rows = await sql<{ id: number; url: string; title: string; label: string }[]>`
+    select i.id, i.url, i.title, s.label
+      from dailynews.items i
+      join dailynews.sources s on s.id = i.source_id
+     where i.dup_of is null
+       and i.transcribed_at is null
+       and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
+     order by i.id
+  `;
+  const videos = rows.flatMap((row) => {
+    const videoId = videoIdOf(row.url);
+    return videoId ? [{ ...row, videoId }] : [];
+  });
+  if (videos.length === 0) return { done: 0, cost: 0 };
+
+  const take = videos.slice(0, MAX_VIDEOS_PER_RUN);
+  if (videos.length > take.length) {
+    log(`   роликов ${videos.length}, расшифруем ${take.length} — остальные в следующий прогон`);
+  }
+
+  let done = 0;
+  let cost = 0;
+  let noCaptions = 0;
+  for (const video of take) {
+    try {
+      const transcript = await fetchTranscript(video.videoId);
+      if (!transcript) {
+        // Субтитров у ролика нет вовсе — это ответ, а не сбой: отмечаем,
+        // иначе он опрашивался бы каждую ночь до конца окна свежести.
+        await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
+        noCaptions++;
+        continue;
+      }
+      const writeup = await describeVideo(video.title, video.label, transcript.text, transcript.lang);
+      await sql`
+        update dailynews.items
+           set excerpt = ${writeup.summary}, body = ${articleHtml(writeup.article) || null},
+               transcribed_at = now()
+         where id = ${video.id}
+      `;
+      // Оценка снимается вместе с текстом, по которому её ставили: ролик,
+      // расшифрованный не в тот же прогон, что собран, уже оценён — и оценён
+      // по описанию из фида. У торгового канала это «🎁 Получить БЕСПЛАТНО
+      // индикаторы»: ни темы, ни конкретики, скор 8 из ста. Конспект менял
+      // текст, а решение о материале принималось по старому. Шаг оценки
+      // идёт следом в этом же прогоне и переоценит по содержанию.
+      await sql`delete from dailynews.scores where item_id = ${video.id}`;
+      await recordCall({
+        readerId: null, stage: "video", model: writeup.model,
+        tokensIn: writeup.usage.input, tokensOut: writeup.usage.output,
+        costUsd: llmCost(writeup.usage),
+      });
+      cost += llmCost(writeup.usage);
+      done++;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Отказ доступа виден по статусу проигрывателя: он один на все ролики.
+      if (/LOGIN_REQUIRED|AGE_VERIFICATION|player HTTP 4/.test(message)) {
+        log(`   YouTube не отдаёт субтитры (${message}). Ролики остаются с описанием из фида.`);
+        if (!process.env.YT_PROXY) log("   YT_PROXY не задан — с датацентрового адреса субтитров не будет.");
+        break;
+      }
+      log(`   ролик «${video.title.slice(0, 40)}»: ${message}`);
+    }
+  }
+
+  if (noCaptions > 0) log(`   без субтитров: ${noCaptions}`);
+  return { done, cost };
 }
 
 /**
@@ -86,12 +179,43 @@ export async function collect(sources: Source[]): Promise<number[]> {
 async function runForReader(
   reader: Reader,
   day: string,
-  allSources: Source[],
   shared: { collected: number; duplicates: number; scored: number },
 ): Promise<number> {
   const name = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
-  const topics = await getReaderTopics(reader.id);
+
+  // Спящий читатель — это выпуск каждую ночь в пустоту. Спрашиваем один раз
+  // и замолкаем до ответа: молчание тоже ответ, и оно бесплатное.
+  const sleep = sleepVerdict(reader, await lastActivityAt(reader.id));
+  if (sleep.verdict === "wake") {
+    // Отпуск кончился: возвращаем ленту сами, ничего не переспрашивая.
+    await wakeReader(reader.id);
+    log(`  ${name}: отпуск кончился — лента возвращается`);
+  }
+  if (sleep.verdict === "paused") {
+    log(`  ${name}: на паузе с ${String(reader.paused_at).slice(0, 10)} — выпуск не пишем`);
+    return 0;
+  }
+  if (sleep.verdict === "ask") {
+    await pauseReader(reader.id);
+    if (reader.telegram_id) {
+      await askResume(Number(reader.telegram_id), sleep.silentDays);
+      log(`  ${name}: молчит ${sleep.silentDays} дней — пауза, спросил в боте`);
+    } else {
+      log(`  ${name}: молчит ${sleep.silentDays} дней — пауза, спросить негде`);
+    }
+    return 0;
+  }
+
   const plan = effectivePlan(reader);
+
+  // Бесплатный получает ленту через день. Это честнее, чем урезать выпуск:
+  // урезанный выглядит как плохой продукт, редкий — как бесплатный.
+  if (!issuesToday(plan, reader.id, day)) {
+    log(`  ${name}: тариф «${plan.label}» — выпуск через день, сегодня не его ночь`);
+    return 0;
+  }
+
+  const topics = await getReaderTopics(reader.id);
 
   // Читатель без интересов пропускается, а не получает пустой выпуск:
   // пустой выпуск выглядит как «сегодня ничего не было».
@@ -130,7 +254,7 @@ async function runForReader(
     return 0;
   }
 
-  const mySources = sourcesForPlan(allSources, plan).map((source) => source.id);
+  const mySources = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
   const survivors = await selectSurvivors(
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
@@ -165,21 +289,33 @@ async function runForReader(
   // Вторая петля Jev: тот же инструмент оценивает не входящий поток,
   // а собственный выход. Правка промпта либо улучшает ряд чисел, либо нет —
   // на глаз двенадцать описаний в день всегда читаются нормально.
-  const quality = await scoreSummaries(
-    digest.items.map((item) => ({
-      id: Number(item.id), title: item.title_ru, summary: item.summary,
-    })),
-    reader.reader_context,
-  );
-  const qualityCost = jevCost(quality.inputTokens);
-  await recordCall({
-    readerId: reader.id, stage: "summary", model: quality.model,
-    tokensIn: quality.inputTokens, costUsd: qualityCost,
-  });
+  //
+  // Меряем у одного читателя и по выборке: промпт один на всех, и сотня
+  // описаний у каждого — это один и тот же ответ, оплаченный столько раз,
+  // сколько у нас читателей. Ряд по дням от этого не страдает, а вход
+  // петли дороже входа самого дайджеста: 3170 токенов на описание против 527.
+  const measuresQuality = reader.owner;
+  const quality = measuresQuality
+    ? await scoreSummaries(
+        qualitySample(digest.items).map((item: (typeof digest.items)[number]) => ({
+          id: Number(item.id), title: item.title_ru, summary: item.summary,
+        })),
+        reader.reader_context,
+      )
+    : null;
+  const qualityCost = quality ? jevCost(quality.inputTokens) : 0;
+  if (quality) {
+    await recordCall({
+      readerId: reader.id, stage: "summary", model: quality.model,
+      tokensIn: quality.inputTokens, costUsd: qualityCost,
+    });
+  }
 
-  const meanQuality = quality.scored.length
+  // Ноль сюда писать нельзя: он неотличим от настоящего нуля и утянул бы
+  // ряд вниз у всех, кому замер не делался.
+  const meanQuality = quality?.scored.length
     ? quality.scored.reduce((sum, row) => sum + row.total, 0) / quality.scored.length
-    : 0;
+    : null;
 
   // Ползунок сложности меняет промпт — а меняется ли текст, видно только
   // по ряду этих двух чисел рядом с положением ползунка.
@@ -196,7 +332,7 @@ async function runForReader(
       ${sql.json({
         ...shared,
         flagged: digest.flagged ?? 0,
-        summary_quality: Number(meanQuality.toFixed(1)),
+        summary_quality: meanQuality === null ? null : Number(meanQuality.toFixed(1)),
         complexity: reader.complexity,
         plan: plan.id,
         words_per_sentence: Number(perSentence.toFixed(1)),
@@ -209,7 +345,7 @@ async function runForReader(
         digest_output_tokens: digest.usage.output,
         digest_reasoning_tokens: digest.usage.reasoning,
         digest_reasoning_effort: digest.reasoningEffort,
-        jev_input_tokens: quality.inputTokens,
+        jev_input_tokens: quality?.inputTokens ?? 0,
         cost_usd: Number((digestCost + qualityCost).toFixed(5)),
         // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
         // строку, и stats->>'cost_usd' молча возвращает null.
@@ -224,7 +360,7 @@ async function runForReader(
   `;
 
   const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
-  const qualityById = new Map(quality.scored.map((q) => [String(q.item_id), q]));
+  const qualityById = new Map((quality?.scored ?? []).map((q) => [String(q.item_id), q]));
 
   for (const [index, survivor] of survivors.entries()) {
     const written = writtenById.get(String(survivor.id));
@@ -246,7 +382,10 @@ async function runForReader(
   }
 
   log(
-    `  ${name}: ${survivors.length} материалов, качество ${meanQuality.toFixed(0)} из 85, ` +
+    `  ${name}: ${survivors.length} материалов, ` +
+    (meanQuality === null
+      ? "качество не меряли (промпт один на всех), "
+      : `качество ${meanQuality.toFixed(0)} из 85 по ${quality?.scored.length} описаниям, `) +
     `${perSentence.toFixed(1)} слов в предложении (ползунок ${reader.complexity} из 5), ` +
     `$${(digestCost + qualityCost).toFixed(4)}`,
   );
@@ -344,23 +483,7 @@ async function deliver(
  */
 async function askAboutYesterday(reader: Reader): Promise<void> {
   if (!reader.telegram_id) return;
-
-  const pending = await sql<{ item_id: number; title: string }[]>`
-    select ks.item_id, coalesce(i.title_ru, i.title) as title
-      from dailynews.kindle_sends ks
-      join dailynews.items i on i.id = ks.item_id
-     where ks.reader_id = ${reader.id}
-       and ks.status = 'sent'
-       and ks.at < now() - interval '12 hours'
-       and ks.at > now() - interval '7 days'
-       and not exists (
-         select 1 from dailynews.reads r
-          where r.reader_id = ks.reader_id and r.item_id = ks.item_id
-            and r.event in ('finished', 'unfinished')
-       )
-     order by ks.at
-     limit 3
-  `;
+  const pending = await pendingKindleAsks(reader.id);
 
   for (const row of pending) {
     try {
@@ -378,7 +501,7 @@ async function main() {
 
   const readers = await allReaders();
   const topics = await topicsInUse();
-  const all = await sql<Source[]>`select * from dailynews.sources where active order by id`;
+  const all = await sql<Source[]>`select * from dailynews.sources where deleted_at is null order by id`;
 
   // Тариф решает не только форма настроек: понижение оставляет лишние
   // источники включёнными в каталоге, и опрашивать их всё равно нельзя —
@@ -390,11 +513,13 @@ async function main() {
   // бесплатный читал бы платный источник за чужой счёт.
   const allowed = new Map<number, Source>();
   for (const reader of readers) {
-    for (const source of sourcesForPlan(all, effectivePlan(reader))) allowed.set(source.id, source);
+    for (const source of sourcesForPlan(await readerSources(reader.id), effectivePlan(reader))) {
+      allowed.set(source.id, source);
+    }
   }
   const sources = [...allowed.values()].sort((a, b) => a.id - b.id);
   if (sources.length < all.length) {
-    log(`   тарифы читателей: опрашиваем ${sources.length} из ${all.length} включённых`);
+    log(`   выбор читателей и их тарифы: опрашиваем ${sources.length} из ${all.length} в каталоге`);
   }
 
   if (topics.length === 0) {
@@ -407,6 +532,11 @@ async function main() {
   log(`1. Сбор: ${sources.length} источников`);
   const collected = await collect(sources);
   log(`   новых материалов: ${collected.length}`);
+
+  const videos = await transcribeVideos();
+  if (videos.done > 0) {
+    log(`   расшифровано роликов: ${videos.done} (${videos.cost.toFixed(3)} $)`);
+  }
 
   log("2. Дедуп");
   // Берём всё окно, а не результат вставки: если прогон упал между
@@ -469,7 +599,7 @@ async function main() {
   let personal = 0;
   for (const reader of readers) {
     try {
-      personal += await runForReader(reader, day, all, {
+      personal += await runForReader(reader, day, {
         collected: collected.length, duplicates, scored: scored.length,
       });
       await askAboutYesterday(reader);

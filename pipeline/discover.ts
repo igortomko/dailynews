@@ -320,6 +320,7 @@ const probe = (candidate: Candidate, config: Record<string, unknown> = {}): Sour
   last_count: null,
   last_error: null,
   silent_since: null,
+  deleted_at: null,
 });
 
 function labelFor(doc: FeedDoc | null, candidate: Candidate): string {

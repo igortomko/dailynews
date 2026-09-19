@@ -34,6 +34,8 @@ export type Source = {
   last_error: string | null;
   /** С какого момента источник отвечает и не даёт ни одной свежей записи. */
   silent_since: string | null;
+  /** Убран из ленты. История остаётся, отмена возвращает как было. */
+  deleted_at: string | null;
 };
 
 /** Сырой материал до скоринга. */
@@ -55,6 +57,16 @@ export type RawItem = {
   body?: string;
   points: number | null;
   comments: number | null;
+  /**
+   * Просмотры, если площадка их показывает. Читает это только карточка
+   * автора: ей нужно отличить его удачный пост от среднего, и просмотры —
+   * единственное число, которое `t.me/s/` отдаёт бесплатно.
+   *
+   * В скоринг не уходит: там про материал спрашивают `points`, и подмена
+   * смысла колонки поменяла бы вопрос Jev для всех telegram-источников
+   * сразу, а числа до и после такой правки несравнимы.
+   */
+  views?: number | null;
   published_at: Date | null;
 };
 
@@ -140,5 +152,49 @@ export type Reader = {
   plan_ends_at: string | null;
   /** Их страница управления: смена карты, отмена, возобновление. */
   portal_url: string | null;
+  /** Пусто — лента идёт. Время — с какого момента выпуск не пишется. */
+  paused_at: string | null;
+  /** Когда спросили «продолжать?»: без отметки вопрос уходил бы каждую ночь. */
+  sleep_asked_at: string | null;
+  /** Читатель попросил вернуть ленту с этого числа: отпуск, а не уход. */
+  resume_at: string | null;
+  /** Описание из профиля Telegram. Только для порядка стартовых интересов. */
+  bio: string | null;
+  /** Стартовые интересы по убыванию близости к bio. Пусто — обычный порядок. */
+  suggested_topics: string[];
+  /** Когда прошёл проверку подписки на канал. Пусто — ещё не проходил. */
+  channel_checked_at: string | null;
   onboarded_at: string | null;
+  /**
+   * Карточка автора: голос, каркас удачных постов, табу. Пусто — ни одного
+   * его текста ещё не читали, и пост пишется настройками подачи.
+   */
+  voice_card: VoiceCardRow | null;
+  voice_built_at: string | null;
+  /** Посты, вставленные руками: LinkedIn и Threads наружу не отдают ничего. */
+  voice_sample: string;
+};
+
+/**
+ * Карточка автора так, как она лежит в jsonb. Полная форма и её сборка —
+ * в `pipeline/voice-card.ts`; здесь только то, что читает интерфейс.
+ */
+export type VoiceCardRow = {
+  voice: string[];
+  frame: string[];
+  taboo: string[];
+  built_from: number;
+  sources: string[];
+  ranked: boolean;
+};
+
+/** Площадка читателя: откуда читаем его текст и куда он публикует. */
+export type ReaderChannel = {
+  network: string;
+  /** Пусто у сетей, которые наружу ничего не отдают. */
+  handle: string | null;
+  /** Что вставил человек: в списке показывается это, а не адрес фида. */
+  input_url: string | null;
+  label: string | null;
+  created_at: string;
 };

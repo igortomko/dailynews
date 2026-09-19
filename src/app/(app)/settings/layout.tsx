@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { ArrowLeftIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { logout } from "@/lib/actions";
 import { currentReader } from "@/lib/session";
-import { planOf } from "@/lib/plans";
-import { effectivePlan } from "@/lib/lemon";
+
+import { checkoutUrl, effectivePlan } from "@/lib/lemon";
+import { PLAN_IDS } from "@/lib/plans";
+import { PaywallProvider } from "@/components/paywall";
 import { SettingsNav } from "./nav";
 
 /**
@@ -14,33 +18,63 @@ import { SettingsNav } from "./nav";
  * а не прятаться под кнопку, как в ленте.
  */
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
-  const plan = effectivePlan(await currentReader());
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
+  const onboarding = !reader.onboarded_at;
+  // Ссылки на оплату собираются здесь: их строит сервер из переменных
+  // окружения, а окно с предложением живёт в клиентских компонентах.
+  const checkout = Object.fromEntries(
+    PLAN_IDS.map((id) => [id, checkoutUrl(id, reader.id)]).filter(([, url]) => url),
+  ) as Record<string, string>;
   return (
-    <>
+    <PaywallProvider checkout={checkout}>
       <PageHeader
         left={
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Назад к ленте"
-              className="text-muted-foreground hover:text-foreground"
-              render={<Link href="/" />}
-            >
-              <ArrowLeftIcon />
-            </Button>
-            <h1 className="text-sm font-medium">Настройки</h1>
+            {/* Пока онбординг не пройден, лента недостижима: она сама
+                возвращает сюда. Стрелка «назад к ленте» в этот момент —
+                кнопка, которая обещает и не делает: нажал, и та же страница.
+                Отказ, неотличимый от работы, поэтому её просто нет. */}
+            {onboarding ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    nativeButton={false}
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Назад к ленте"
+                    // На телефоне 40, на указателе 32: под палец 28 —
+                    // это иконка, а не цель. Так же сделаны шестерёнка
+                    // в ленте и переключатель темы рядом.
+                    className="size-10 text-muted-foreground hover:text-foreground sm:size-8"
+                    render={<Link href="/" />}
+                  />
+                }
+              >
+                <ArrowLeftIcon />
+              </TooltipTrigger>
+              <TooltipContent>Назад к ленте</TooltipContent>
+            </Tooltip>
+            )}
+            <h1 className="text-sm font-medium">{onboarding ? "Знакомство" : "Настройки"}</h1>
           </div>
         }
         // На телефоне колонка разделов идёт лентой поверху, и «Выйти» под ней
         // занимало целую строку ради одной кнопки. В шапке справа место уже
         // есть и пустует. На широком экране выход остаётся внизу колонки.
         right={
-          <form action={logout} className="sm:hidden">
-            <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">
-              Выйти
-            </Button>
-          </form>
+          <div className="flex items-center gap-1">
+            {/* Переключатель темы стоит на обеих страницах: уйти в настройки
+                и не найти его там, где он только что был, — это заставить
+                вернуться за ним в ленту. */}
+            <ThemeToggle className="size-10 sm:size-8" />
+            <form action={logout} className="sm:hidden">
+              <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">
+                Выйти
+              </Button>
+            </form>
+          </div>
         }
       />
 
@@ -61,6 +95,6 @@ export default async function SettingsLayout({ children }: { children: React.Rea
       </aside>
         <div className="min-w-0 flex-1">{children}</div>
       </div>
-    </>
+    </PaywallProvider>
   );
 }

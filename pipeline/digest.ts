@@ -157,16 +157,13 @@ export async function writeDigest(
       `--- id: ${s.id}`,
       `ЗАГОЛОВОК: ${s.title}`,
       `ИСТОЧНИК: ${s.source_label} · тема: ${s.topic_label}`,
-      `ТИП: ${s.axes.kind.choice} · горизонт: ${s.axes.horizon.choice}`,
       `ТЕКСТ: ${s.excerpt.slice(0, 900) || "(нет)"}`,
     ].join("\n"))
     .join("\n\n");
 
-  const promptFor = (list: Survivor[], askIntro: boolean) => `${readerContext}
+  const promptFor = (list: Survivor[], askIntro: boolean) => `Ниже ${list.length} материалов, уже отобранных по интересам читателя.
 
-Ниже ${list.length} материалов, уже отобранных по интересам читателя.
-
-Для каждого дай "title_ru" — заголовок на ${language} языке: живой, не дословный перевод.
+Для каждого дай "title_ru" — заголовок: живой, не дословный перевод.
 
 И "summary" — текст, после которого материал можно не открывать.
 
@@ -201,8 +198,6 @@ export async function writeDigest(
 Проверка на смысл: после описания читатель должен уметь пересказать мысль материала
 одним предложением. Если пересказать нечего — так и напиши, коротко, и это
 честнее пересказа оглавления.
-
-${voiceRules(voice)}
 
 Что в описании должно быть:
 — первым предложением: доказательство или механизм — откуда это известно,
@@ -249,8 +244,6 @@ ${voiceRules(voice)}
     хорошо:     Может быть критично при разработке систем, где важен
                 контроль над логикой обработки данных.
 
-Чего в нём быть не должно:
-${bannedFor(language)};
 — больше одного тире на весь текст.
 
 Единицы пишутся сокращённо: км, мин, с, кг, г, млн, тыс., %, г. для года.
@@ -262,14 +255,26 @@ ${bannedFor(language)};
 предложения. Цифры из источника должны попасть в текст. Детали чужой реализации —
 только если читателю с ними что-то делать.
 
+
+Язык выпуска: ${language}. Заголовки и описания пишутся на нём.
+
+Чего в нём быть не должно:
+${bannedFor(language)};
+
+${voiceRules(voice)}
+
 ${askIntro ? `И ещё "intro" — одно-два предложения обо всей подборке: что сегодня главное и есть ли
 связь между материалами. Без приветствий. Связи нет — так и скажи.` : ""}
+
+Читатель: ${readerContext}
 
 Материалы:
 ${blockOf(list)}
 
-Ответь только валидным JSON, без markdown:
-{${askIntro ? '"intro": "...", ' : ""}"items": [{"id": <число>, "title_ru": "...", "summary": "..."}]}`;
+Ответь только валидным JSON, без markdown. Каждое описание — тройка
+[id, заголовок, описание], без имён полей: имена повторяются на каждом
+описании и стоят как текст.
+{${askIntro ? '"intro": "...", ' : ""}"items": [[<число>, "...", "..."]]}`;
 
   const ask = async (list: Survivor[], askIntro: boolean) => {
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -394,16 +399,32 @@ ${blockOf(list)}
  * молча отдать девятнадцать вместо двадцати нельзя.
  */
 export function parseDigest(json: string): { intro?: string; items?: Written[] } {
+  /** Тройка [id, заголовок, описание] — то, что просит промпт. */
+  const fromTriple = (row: unknown): Written | null => {
+    if (!Array.isArray(row) || row.length < 3) return null;
+    const [id, title, summary] = row;
+    if (id === undefined || id === null) return null;
+    if (typeof title !== "string" || typeof summary !== "string") return null;
+    return { id: id as Written["id"], title_ru: title, summary };
+  };
+
+  const items: Written[] = [];
   try {
-    return JSON.parse(json) as { intro?: string; items?: Written[] };
+    const parsed = JSON.parse(json) as { intro?: string; items?: unknown[] };
+    for (const row of parsed.items ?? []) {
+      const item = fromTriple(row);
+      if (item) items.push(item);
+    }
+    return { intro: parsed.intro, items };
   } catch {
-    const items: Written[] = [];
-    for (const chunk of json.match(/\{[^{}]*\}/g) ?? []) {
+    // Ответ оборван на середине массива. Спасаем закрывшиеся тройки:
+    // из-за одного недописанного куска нельзя терять весь день.
+    for (const chunk of json.match(/\[\s*"?\d+"?\s*,[\s\S]*?"\s*\]/g) ?? []) {
       try {
-        const item = JSON.parse(chunk) as Written;
-        if (item?.id !== undefined && typeof item.summary === "string") items.push(item);
+        const item = fromTriple(JSON.parse(chunk));
+        if (item) items.push(item);
       } catch {
-        // Обрезанный объект пропускаем: он и есть место обрыва.
+        // Обрезанная тройка пропускается: она и есть место обрыва.
       }
     }
     const intro = json.match(/"intro"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1] ?? "";

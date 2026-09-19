@@ -2,8 +2,11 @@ name: Daily digest
 
 on:
   schedule:
-    # Полночь по Сан-Паулу (UTC−3). Выпуск готов к утру.
-    - cron: '0 3 * * *'
+    # 02:00 по Сан-Паулу (UTC−3). Не полночь намеренно: у DeepSeek
+    # пиковый тариф в 01:00–04:00 и 06:00–10:00 UTC, вдвое дороже обычного,
+    # и прежние 03:00 UTC попадали ровно в него. Окно 04:00–06:00 UTC —
+    # единственная дешёвая щель между пиками; к утру выпуск всё равно готов.
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -25,6 +28,31 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Субтитры YouTube отдаются только жилым адресам: и с раннера GitHub,
+      # и с VPS плеер отвечает «Sign in to confirm you're not a bot» на любой
+      # клиент — проверено на обоих. WARP даёт исходящий адрес Cloudflare,
+      # который YouTube принимает; поднимается за десять секунд и живёт
+      # ровно этот прогон.
+      #
+      # Шаг не имеет права ронять выпуск: не поднялся — ролики остаются
+      # с описанием из фида, о чём прогон скажет вслух. Поэтому YT_PROXY
+      # выставляется только после того, как канал ответил.
+      - name: Исходящий канал для субтитров (Cloudflare WARP)
+        continue-on-error: true
+        run: |
+          docker run -d --name warp --memory=300m --cap-add NET_ADMIN \
+            --device /dev/net/tun -p 127.0.0.1:1080:1080 caomingjun/warp
+          for i in $(seq 1 18); do
+            sleep 5
+            if curl -s --max-time 8 -x http://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace | grep -q 'warp=on'; then
+              echo "YT_PROXY=http://127.0.0.1:1080" >> "$GITHUB_ENV"
+              echo "WARP поднялся за $((i * 5)) с"
+              exit 0
+            fi
+          done
+          echo "WARP не поднялся: ролики останутся с описанием из фида" >&2
+          exit 1
 
       - name: Собрать, оценить, разослать
         env:

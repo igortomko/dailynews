@@ -2,9 +2,6 @@ import { getCalibration, getSummaryQuality } from "@/lib/queries";
 import { currentReader } from "@/lib/session";
 import { digestsWord, newsWord } from "@/lib/telegram";
 import { axisValue } from "@/lib/axis-labels";
-import { allows } from "@/lib/plans";
-import { effectivePlan } from "@/lib/lemon";
-import { PlanGate } from "@/components/plan-gate";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -31,20 +28,6 @@ function Row({ label, shown, opened, rate }: { label: string; shown: number; ope
 
 export default async function CalibrationPage() {
   const reader = await currentReader();
-  const plan = effectivePlan(reader);
-  // Тяжёлые запросы статистики не должны выполняться ради страницы,
-  // которую тариф всё равно не покажет.
-  if (!allows(plan, "calibration")) {
-    return (
-      <PlanGate
-        section="calibration"
-        plan={plan}
-        title="Что зашло"
-        what="Видно, угадывает ли лента: что ты открывал, что пролистнул и становится ли выбор точнее."
-      />
-    );
-  }
-
   const [{ byScore, byConfidence, byAxis, totals }, quality] = await Promise.all([
     getCalibration(reader.id),
     getSummaryQuality(reader.id),

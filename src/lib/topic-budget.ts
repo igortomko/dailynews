@@ -107,3 +107,23 @@ export function moveBoundary(counts: number[], boundary: number, cumulative: num
   next[boundary + 1] = pair - next[boundary];
   return next;
 }
+
+/** Зазор между кусками полосы, px. Совпадает с `gap-1` в разметке. */
+export const BAR_GAP = 4;
+
+/**
+ * Где стоит ручка границы, в CSS-выражении.
+ *
+ * Куски выложены флексом с зазором, поэтому цветная часть уже полосы
+ * на суммарную ширину зазоров. Доля «сколько новостей слева» отсчитывается
+ * от цветной части, а не от всей ширины, и к ней добавляются зазоры,
+ * пройденные слева. Считать долей от полной ширины — значит промахиваться
+ * тем сильнее, чем правее граница: на последних кусках ручка уезжает
+ * на соседний сегмент и выглядит его ручкой.
+ */
+export function handleLeft(counts: number[], boundary: number, gap = BAR_GAP): string {
+  const total = counts.reduce((sum, count) => sum + count, 0) || 1;
+  const left = counts.slice(0, boundary + 1).reduce((sum, count) => sum + count, 0);
+  const gapsBefore = gap * boundary + gap / 2;
+  return `calc((100% - ${gap * (counts.length - 1)}px) * ${left / total} + ${gapsBefore}px)`;
+}

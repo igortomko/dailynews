@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { colorAt, moveBoundary } from "@/lib/topic-budget";
+import { colorAt, handleLeft, moveBoundary } from "@/lib/topic-budget";
 import { cn } from "@/lib/utils";
 
 /**
@@ -69,10 +69,16 @@ export function TopicBudgetBar({
   const nudge = (boundary: number, by: number) =>
     onChange(moveBoundary(counts, boundary, upTo(boundary) + by));
 
-  // Ручки выбранного куска: левая — граница с предыдущим, правая — со следующим.
-  const handles = active === null
+  // Ручки куска, на который смотрят: левая — граница с предыдущим, правая —
+  // со следующим. Наведения достаточно, выбирать заранее не нужно: полоса,
+  // которую можно тянуть, обязана показать это до нажатия — иначе подпись
+  // «тяни границы» остаётся единственным намёком, а мышь его не видит.
+  // Выбор всё равно главнее наведения: во время перетаскивания указатель
+  // уходит на соседний кусок, и ручка не должна перепрыгивать за ним.
+  const focused = active ?? hovered;
+  const handles = focused === null
     ? []
-    : [active - 1, active].filter((boundary) => boundary >= 0 && boundary < counts.length - 1);
+    : [focused - 1, focused].filter((boundary) => boundary >= 0 && boundary < counts.length - 1);
 
   const shown = hovered ?? active;
 
@@ -119,7 +125,10 @@ export function TopicBudgetBar({
             // название пустое и неуникальное, и React путает сегменты.
             key={index}
             type="button"
-            title={`${labels[index]} — ${counts[index]} из ${total}`}
+            // Браузерной подсказки здесь нет намеренно: подпись над полосой
+            // говорит то же самое сразу и на своём месте, а title выезжал бы
+            // поверх полосы через секунду — ровно там, где в этот момент
+            // тянут границу.
             aria-label={`${labels[index]}, ${counts[index]} из ${total}`}
             aria-pressed={active === index}
             onClick={() => setActive(active === index ? null : index)}
@@ -156,7 +165,7 @@ export function TopicBudgetBar({
               if (event.key === "ArrowRight") { event.preventDefault(); nudge(boundary, 1); }
               if (event.key === "Escape") setActive(null);
             }}
-            style={{ left: `${(upTo(boundary) / total) * 100}%` }}
+            style={{ left: handleLeft(counts, boundary) }}
             // Белая, а не тёмная: тёмная ручка на цветной полосе читается
             // как ещё один кусок, только чёрный.
             className="absolute top-1/2 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-col-resize rounded-full border border-foreground/15 bg-background shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"

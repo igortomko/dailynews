@@ -21,6 +21,27 @@ export type SummaryAxes = {
 
 export type SummaryQuality = { item_id: number; total: number; axes: SummaryAxes };
 
+/**
+ * Сколько описаний в день попадает в замер.
+ *
+ * Петля меряет наш промпт, а не выпуск конкретного читателя: промпт один
+ * на всех, и мерить его сотней описаний у каждого — значит платить за один
+ * и тот же ответ столько раз, сколько у нас читателей. Смысл в ряду по дням,
+ * а не в отдельном числе, и дюжины описаний для ряда достаточно.
+ */
+export const QUALITY_SAMPLE = 12;
+
+/**
+ * Равномерная выборка, а не первые N: описания приходят в порядке отбора,
+ * и первые двенадцать — это всегда лучшие материалы дня. Ряд по ним поехал
+ * бы вверх и перестал сравниваться с днями, когда выпуск был короче.
+ */
+export function qualitySample<T>(items: T[], limit = QUALITY_SAMPLE): T[] {
+  if (items.length <= limit) return items;
+  const step = items.length / limit;
+  return Array.from({ length: limit }, (_, index) => items[Math.floor(index * step)]);
+}
+
 function questions(readerContext: string) {
   return {
     self_sufficient: score(

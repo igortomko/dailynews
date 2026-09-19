@@ -21,8 +21,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { assertOwn, startLocalPg } from "./free-port";
 
-const PORT = 55432;
+
 
 async function main() {
   const db = await PGlite.create({ extensions: { pg_trgm } });
@@ -67,9 +68,10 @@ async function main() {
   assert.equal(role.limit, 10, "лимит соединений роли должен быть 10");
   console.log(`  роль: search_path прибит, лимит ${role.limit}`);
 
-  const server = new PGLiteSocketServer({ db, port: PORT, host: "127.0.0.1" });
-  await server.start();
-  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${PORT}/postgres`;
+  // Метка проверяется после подключения: свободный порт успевает занять
+  // соседняя проверка из другого worktree, и клиент уходит к её базе.
+  const local = await startLocalPg(db, (port) => new PGLiteSocketServer({ db, port, host: "127.0.0.1" }));
+  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${local.port}/postgres`;
   process.env.DB_POOL_MAX = "1";
 
   // queries.ts помечен server-only, чтобы не уехать в клиентский бандл.
@@ -87,6 +89,9 @@ async function main() {
 
   // Импорт после DATABASE_URL: модуль db.ts читает его на загрузке.
   const { sql } = await import("../src/lib/db");
+  // Своим же соединением: сокет PGlite обслуживает одно подключение,
+  // и пробное рядом с рабочим оставляет сервер отдающим пустоту.
+  await assertOwn(local, async (text) => (await sql.unsafe(text))[0] as { token?: string });
   const queries = await import("../src/lib/queries");
   const readers = await import("../src/lib/readers");
   const { markDuplicates } = await import("../pipeline/dedup");
@@ -99,14 +104,21 @@ async function main() {
     const topics = await readers.catalogTopics();
     const sources = await queries.getSources();
     assert.ok(topics.length >= 6, `тем ${topics.length}, ожидалось не меньше 6`);
-    assert.ok(sources.length >= 20, `источников ${sources.length}`);
-    // Reddit заведён, но выключен: заявку на Data API можно подать позже,
-    // а на источники ссылаются уже собранные материалы.
-    const reddit = sources.filter((s) => s.kind === "reddit");
-    assert.ok(reddit.length > 0, "источники Reddit должны остаться в каталоге");
-    assert.ok(reddit.every((s) => !s.active), "источники Reddit должны быть выключены");
-    assert.ok(sources.some((s) => s.kind === "x" && s.active), "источники X должны быть включены");
-    console.log(`  темы: ${topics.length}, источники: ${sources.length}`);
+    assert.ok(sources.length > 0, `источников ${sources.length}`);
+    // Состояний у источника два: заведён или убран. Reddit и X 0006 выключала,
+    // 0031 убрала — включить их было нечем, прогон их не читал, а в списке
+    // они выглядели живыми.
+    assert.ok(
+      !sources.some((s) => s.kind === "reddit" || s.kind === "x"),
+      "выключенные виды убраны из каталога, а не лежат в нём третьим состоянием",
+    );
+    assert.ok(sources.every((s) => s.active), "у неубранных active всегда true — колонка больше ничего не значит");
+    // Убраны, но не уничтожены: строки на месте, и материалы, которые на них
+    // ссылаются, тоже.
+    const [{ removed }] = await sql<{ removed: number }[]>`
+      select count(*)::int as removed from dailynews.sources where deleted_at is not null`;
+    assert.ok(removed > 0, "убранные источники остаются в базе вместе со своей историей");
+    console.log(`  темы: ${topics.length}, источники: ${sources.length}, убрано ${removed}`);
 
     // --- перенос читателя из profile ------------------------------------------
     // Строка profile была живой: контекст, веса, пройденный онбординг.
@@ -294,6 +306,13 @@ async function main() {
     ]);
     await makeDigest(second.id, today, [{ id: ids[3], total: 60, title: "Vera: CBT" }]);
 
+    // Материал старше своего выпуска: без этого проверка ниже проходила бы
+    // и на сломанном запросе — сегодняшний день и сегодняшняя публикация
+    // неотличимы, а именно их лента и путала.
+    await sql`
+      update dailynews.items set published_at = now() - interval '3 days' where id = ${ids[0]}
+    `;
+
     // --- лента: каждому своя ----------------------------------------------------
     const ownerFeed = await queries.getFeed(owner.id, today);
     const secondFeed = await queries.getFeed(second.id, today);
@@ -320,6 +339,14 @@ async function main() {
     assert.ok(stored.kind, "axes->'kind'->>'choice' не должен быть null");
     assert.equal(ownerFeed[0].axes.kind.choice, "fact", "axes должны разобраться из jsonb");
     assert.equal(ownerFeed[0].read_count, 0);
+    // Время материала, а не день выпуска. Карточка показывала d.day, и все
+    // материалы выпуска получали один возраст, отсчитанный от полудня того
+    // дня: в ленте за сегодня везде стояло «1ч» независимо от материала.
+    const age = Date.now() - new Date(ownerFeed[0].published_at).getTime();
+    assert.ok(
+      age > 2.5 * 86_400_000,
+      `лента должна отдавать время материала, а не день выпуска (возраст ${Math.round(age / 3_600_000)}ч)`,
+    );
     assert.ok(
       !ownerFeed.some((item) => String(item.id) === String(ids[1])),
       "дубль не должен попасть в ленту",
@@ -333,6 +360,38 @@ async function main() {
              (${owner.id}, ${ids[0]}, 'outbound', 120, 0.8),
              (${second.id}, ${ids[3]}, 'opened', 60, 0.8)
     `;
+    // Граница «досюда дочитал» держится на этом поле: материал, попадавшийся
+    // на глаза, отмечен, остальные нет. Если запрос начнёт отдавать true всем
+    // подряд, граница уедет в начало ленты и будет врать молча.
+    const seenFlags = (await queries.getFeed(owner.id, today)).map((item) => item.seen);
+    assert.deepEqual(seenFlags, [false, false], "до события seen ни один материал не отмечен");
+    await sql`
+      insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+      values (${owner.id}, ${ids[0]}, 'seen', 120, 0.8)
+    `;
+    const withSeen = await queries.getFeed(owner.id, today);
+    assert.equal(withSeen[0].seen, true, "показанный материал должен быть отмечен");
+    assert.equal(withSeen[1].seen, false, "чужой строке события seen взяться неоткуда");
+
+    // Отметка «уехало на читалку» переживает перезагрузку только если её
+    // отдаёт лента: раньше она жила в карточке и стиралась обновлением
+    // страницы — кнопка снова предлагала отправить, а повтор ловил отказ
+    // от частичного индекса. Провалившаяся отправка отметкой не считается:
+    // её и нужно повторить.
+    assert.equal(withSeen[0].kindled, false, "до отправки материал не отмечен");
+    await sql`
+      insert into dailynews.kindle_sends (reader_id, item_id, status)
+      values (${owner.id}, ${ids[0]}, 'sent'), (${owner.id}, ${ids[2]}, 'failed')
+    `;
+    const withKindle = await queries.getFeed(owner.id, today);
+    assert.equal(withKindle[0].kindled, true, "отправленный материал должен быть отмечен");
+    assert.equal(
+      withKindle.find((item) => String(item.id) === String(ids[2]))?.kindled,
+      false,
+      "провалившаяся отправка не отмечается: её повторяют",
+    );
+    await sql`delete from dailynews.kindle_sends where reader_id = ${owner.id}`;
+
     const afterRead = await queries.getFeed(owner.id, today);
     assert.equal(afterRead[0].read_count, 2, "счётчик чтений должен вырасти");
 
@@ -387,7 +446,7 @@ async function main() {
     // Источник, отвечающий 200 и отдающий ноль, — самая незаметная поломка
     // в ленте. Отдача считается из items, scores и digests, и считать её надо
     // ровно здесь: один неверный join — и полезный источник выглядит пустым.
-    const health = await queries.getSourceHealth();
+    const health = await queries.getSourceHealth(owner.id);
     assert.equal(health.length, sources.length, "в отдаче должны быть все источники, включая пустые");
     const used = health.find((row) => row.id === source.id)!;
     assert.equal(used.items, 4, `материалов ${used.items}, вставлено 4`);
@@ -401,13 +460,238 @@ async function main() {
     // Тишина отмечается временем: прогон могут запустить дважды за сутки,
     // и счётчик посчитал бы два дня за один.
     await sql`update dailynews.sources set silent_since = now() - interval '4 days' where id = ${empty.id}`;
-    const afterSilence = await queries.getSourceHealth();
+    const afterSilence = await queries.getSourceHealth(owner.id);
     assert.equal(
       afterSilence.find((row) => row.id === empty.id)!.silent_days,
       4,
       "дни тишины считаются от отметки",
     );
     console.log(`  отдача источника: ${used.items} → ${used.in_digest} в дайджесте, скор ${used.mean_score}`);
+
+    // --- порядок списка: сломанное сверху --------------------------------------
+    // В каталоге из тридцати строк источник с ошибкой, лежащий в середине,
+    // не будет найден никогда. Порядок задаёт запрос, поэтому проверяется он.
+    const broken = health.find((row) => row.id !== source.id && row.id !== empty.id)!;
+    await sql`update dailynews.sources set last_error = 'HTTP 500' where id = ${broken.id}`;
+    // Отметку тишины снимаем: она стоит в порядке выше отдачи, и с ней
+    // сравнение по числу материалов ничего не проверяет.
+    await sql`update dailynews.sources set silent_since = null where id = ${empty.id}`;
+    const ordered = await queries.getSourceHealth(owner.id);
+    assert.equal(ordered[0].id, broken.id, "источник с ошибкой должен быть первым");
+    assert.ok(
+      ordered.findIndex((row) => row.id === source.id) <
+        ordered.findIndex((row) => row.id === empty.id),
+      "при прочих равных давший материалы стоит выше пустого",
+    );
+    // Убранный исчезает из списка совсем — ни хвостом, ни как-либо ещё:
+    // третьего состояния у источника больше нет.
+    await sql`update dailynews.sources set deleted_at = now() where id = ${broken.id}`;
+    assert.ok(
+      !(await queries.getSourceHealth(owner.id)).some((row) => row.id === broken.id),
+      "убранный источник не остаётся в списке даже с ошибкой",
+    );
+    await sql`update dailynews.sources set last_error = null, deleted_at = null where id = ${broken.id}`;
+
+    // --- «добавлен» против «уже был» -------------------------------------------
+    // xmax = 0 у настоящей вставки и ненулевой у обновления по конфликту.
+    // Приём неочевидный: сломается — интерфейс начнёт врать, что источник
+    // добавлен, когда он лишь обновлён.
+    const insertTwice = async () => {
+      const [row] = await sql<{ created: boolean }[]>`
+        insert into dailynews.sources (kind, label, url, input_url)
+        values ('rss', 'проба', 'https://twice.example.com/feed', null)
+        on conflict (kind, url) do update
+          set active = true, label = excluded.label, input_url = excluded.input_url
+        returning (xmax = 0) as created
+      `;
+      return row.created;
+    };
+    assert.equal(await insertTwice(), true, "первая вставка — новый источник");
+    assert.equal(await insertTwice(), false, "вторая — обновление, а не добавление");
+    await sql`delete from dailynews.sources where url = 'https://twice.example.com/feed'`;
+    console.log("  список: сломанное сверху, убранное не показывается, повтор отличим от вставки");
+
+    // --- убрать можно, потерять нельзя -----------------------------------------
+    // Удаление перестало удалять: каскад уносил материалы, чтения и записи
+    // в прошлых выпусках, и отменить это было нечем. Проверяется главное:
+    // источник исчезает отовсюду, история остаётся, отмена возвращает как было.
+    const before = (await queries.getSourceHealth(owner.id)).length;
+    const itemsBefore = (await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n;
+    assert.ok(itemsBefore > 0, "у источника должны быть материалы, иначе проверка ничего не значит");
+
+    await sql`update dailynews.sources set deleted_at = now() where id = ${source.id}`;
+
+    assert.equal(
+      (await queries.getSourceHealth(owner.id)).length, before - 1,
+      "убранный источник исчезает из списка",
+    );
+    assert.ok(
+      !(await queries.getSources()).some((row) => row.id === source.id),
+      "и из каталога, по которому считается предел тарифа",
+    );
+    const polled = await sql<{ id: number }[]>`
+      select id from dailynews.sources where active and deleted_at is null`;
+    assert.ok(!polled.some((row) => row.id === source.id), "и из того, что опрашивает прогон");
+    assert.equal(
+      (await sql<{ n: number }[]>`
+        select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n,
+      itemsBefore,
+      "материалы остаются на месте: в этом весь смысл мягкого удаления",
+    );
+
+    await sql`update dailynews.sources set deleted_at = null where id = ${source.id}`;
+    assert.equal(
+      (await queries.getSourceHealth(owner.id)).length, before,
+      "отмена возвращает источник в список",
+    );
+    console.log(`  убрать и вернуть: ${itemsBefore} материалов пережили удаление`);
+
+    // --- источники персональны ------------------------------------------------
+    // До reader_sources «источники тарифа» означали первые N строк общего
+    // каталога: у всех читателей набор был один и тот же. На втором читателе
+    // это ровно тот отказ, что выглядит как успех — выпуск приходит вовремя
+    // и собран из чужих источников.
+    const mine = await queries.getSourceHealth(owner.id);
+    const theirs = await queries.getSourceHealth(second.id);
+    assert.ok(mine.length > 0, "у владельца источники есть");
+    assert.equal(theirs.length, 0, "у нового читателя своих источников нет, пока он их не выбрал");
+
+    await readers.addReaderSource(second.id, source.id);
+    assert.deepEqual(
+      (await queries.getSourceHealth(second.id)).map((row) => row.id), [source.id],
+      "взятый источник появляется только у взявшего",
+    );
+    assert.equal(
+      (await queries.getSourceHealth(owner.id)).length, mine.length,
+      "и ничего не меняет у соседа",
+    );
+
+    // Убрать у себя — это удалить строку связки. Настоящее удаление уносило
+    // бы каскадом материалы, оценки и чтения, и не только свои.
+    await readers.removeReaderSource(second.id, source.id);
+    assert.equal(
+      (await queries.getSourceHealth(second.id)).length, 0, "убранный уходит из своего списка",
+    );
+    assert.equal(
+      (await sql<{ n: number }[]>`
+        select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n,
+      itemsBefore,
+      "а материалы источника остаются на месте",
+    );
+    console.log(`  источники: ${mine.length} у владельца, у нового — только выбранные им`);
+
+    // --- ссылка, присланная боту -----------------------------------------------
+    // Вебхук открыт всему интернету, а разбор ссылки ходит в сеть: платный
+    // вид обязан отсекаться до единого запроса наружу — здесь это и видно,
+    // потому что сети в проверке нет вовсе.
+    const { addByLink } = await import("../src/lib/sources");
+    // Владелец берётся из базы, а не заводится по telegram_id: у перенесённой
+    // из profile строки его нет, и ensureReader завёл бы вместо неё нового
+    // читателя — тогда проверка меряла бы не то, что думает.
+    const [ownerNow] = await sql<(typeof owner)[]>`select * from dailynews.readers where owner`;
+    assert.ok(ownerNow?.owner, "владелец должен найтись");
+    // Платный вид отсекается до запроса наружу — и эта проверка однажды
+    // перестала мерить то, что думает. Тариф владельца на время стал
+    // правилом в коде: effectivePlan отдавал ему Pro независимо от колонки,
+    // «владелец на бесплатном» становился состоянием, которого не бывает,
+    // и разбор уходил в платную выдачу X, падая на незаданном ключе.
+    // Правило вернули в колонку — владелец снова может посмотреть на продукт
+    // глазами бесплатного читателя, и проверка снова про отсечку, а не про
+    // него. Оставлена в прежнем виде намеренно: обходной путь через
+    // kindDenial проверял бы правило, но не то, что addByLink его спросит.
+    const { PLANS } = await import("../src/lib/plans");
+    const paid = await addByLink({ ...ownerNow, plan: "free" }, "from:karpathy OR from:sama");
+    assert.equal(paid.ok, false, "X на бесплатном тарифе не заводится");
+    assert.match((paid as { error: string }).error, /Pro/, "отказ называет тариф, который его открывает");
+
+    // Предел считается по своему набору, а не по каталогу: иначе пятый
+    // источник, заведённый кем угодно, закрывал бы добавление всем
+    // бесплатным читателям разом.
+    const { denyForKind } = await import("../src/lib/sources");
+    const fresh = (await readers.getReader(second.id))!;
+    assert.equal(
+      await denyForKind(fresh, "rss"), null,
+      "у читателя без источников место есть, сколько бы их ни было в каталоге",
+    );
+    // А у того, кто набрал свой предел, места нет. Считается его набор:
+    // до reader_sources предел мерили по каталогу, и пятый источник,
+    // заведённый кем угодно, закрывал добавление всем бесплатным разом.
+    for (const row of sources.slice(0, PLANS.free.maxSources)) {
+      await readers.addReaderSource(second.id, row.id);
+    }
+    assert.ok(
+      await denyForKind(fresh, "rss"),
+      "набравший предел упирается в него",
+    );
+    await sql`delete from dailynews.reader_sources where reader_id = ${second.id}`;
+    console.log("  предел тарифа считается по своему набору, а не по каталогу");
+
+    // --- первый заход ----------------------------------------------------------
+    // Шаг онбординга считается по данным, а не хранится колонкой: колонка
+    // расходится с правдой при первом же отказе на середине — в базе стоит
+    // «выбирает источники», интересов нет, и экран показывает пустой список
+    // того, что подобрано под них.
+    const { onboardingStep, suggestSources } = await import("../src/lib/onboarding");
+    const newcomer = await readers.ensureReader(BIG_TELEGRAM_ID + 11, "novichok");
+    assert.equal(await onboardingStep(newcomer.id), "interests", "без интересов — первый шаг");
+
+    const energy = topicBy("energy");
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${newcomer.id}, ${energy.id}, 1, 1)`;
+    assert.equal(await onboardingStep(newcomer.id), "sources", "интересы есть, источников нет — второй");
+
+    // Подборка под интересы: стартовый список отвечает за темы без истории,
+    // каталог — за то, чтобы предложения взрослели сами.
+    const offered = await suggestSources(newcomer.id, ["energy"], PLANS.free);
+    assert.ok(offered.length > 0, "под выбранный интерес должно найтись, что предложить");
+    assert.equal(
+      new Set(offered.map((row) => row.key)).size, offered.length,
+      "один источник не предлагается дважды",
+    );
+
+    await readers.addReaderSource(newcomer.id, source.id);
+    assert.equal(await onboardingStep(newcomer.id), "ready", "интересы и источники есть — последний шаг");
+    assert.ok(
+      !(await suggestSources(newcomer.id, ["energy"], PLANS.free)).some((row) => row.url === source.url),
+      "взятый источник исчезает из предложений: нажать на него нечем",
+    );
+
+    // Вид, которого тариф не даёт, не предлагается вовсе: показанный
+    // источник X отказал бы уже после нажатия, и читатель убирал бы лишнее,
+    // не понимая, почему это не помогает.
+    const [paidSource] = await sql<{ id: number }[]>`
+      insert into dailynews.sources (kind, label, url)
+      values ('x', 'платный поиск', 'uranium OR SMR')
+      returning id::int as id`;
+    await sql`
+      insert into dailynews.items (source_id, url, url_canon, title, title_norm, collected_at)
+      values (${paidSource.id}, 'https://x.com/p/1', 'x.com/p/1', 'пост', 'post', now())`;
+    await sql`
+      insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+      select i.id, ${energy.id}, 90, 0.9, '{}'::jsonb, 'jev'
+        from dailynews.items i where i.source_id = ${paidSource.id}`;
+    assert.ok(
+      !(await suggestSources(newcomer.id, ["energy"], PLANS.free)).some((row) => row.kind === "x"),
+      "бесплатному не предлагается платный вид источника",
+    );
+    assert.ok(
+      (await suggestSources(newcomer.id, ["energy"], PLANS.pro)).some((row) => row.kind === "x"),
+      "а на Pro он в подборке есть",
+    );
+    await sql`delete from dailynews.sources where id = ${paidSource.id}`;
+
+    // Убранный из каталога не возвращает читателя на шаг назад и не считается
+    // за источник: третьего состояния у источника нет.
+    await sql`update dailynews.sources set deleted_at = now() where id = ${source.id}`;
+    assert.equal(
+      await onboardingStep(newcomer.id), "sources",
+      "убранный источник перестаёт считаться сразу, а не выглядит живым",
+    );
+    await sql`update dailynews.sources set deleted_at = null where id = ${source.id}`;
+    await sql`delete from dailynews.readers where id = ${newcomer.id}`;
+    console.log(`  первый заход: шаг считается по данным, под интерес нашлось ${offered.length} источников`);
 
     // --- новые виды источников ------------------------------------------------
     // Ограничение переименовано намеренно: переопределение под прежним именем
@@ -427,11 +711,52 @@ async function main() {
     `;
     console.log("  виды источников: telegram и email приняты, выдуманный отвергнут");
 
+    // --- этапы расхода ---------------------------------------------------------
+    // Этап, которого нет в ограничении, роняет запись о расходе целиком:
+    // вызов оплачен, а в model_calls его нет, и дневной потолок считает
+    // не те деньги. Так уже ломалось дважды — с переводом статьи и
+    // с расшифровкой ролика, — и оба раза список закрывали тем, что знали
+    // в своей ветке.
+    // Список — объединение по всем веткам, а не по этой: ограничение общее,
+    // и каждая ветка пересоздаёт его под тем же именем. Взявшая только свои
+    // значения стирает чужие вместе с их строками.
+    const stages = [
+      "score", "digest", "summary", "translate", "translation-quality",
+      "video", "voice", "post", "post-quality", "interests",
+    ];
+    for (const stage of stages) {
+      await readers.recordCall({
+        readerId: owner.id, stage: stage as never, model: "проба", tokensIn: 1, costUsd: 0,
+      });
+    }
+    await assert.rejects(
+      readers.recordCall({
+        readerId: owner.id, stage: "выдуманный" as never, model: "проба", tokensIn: 1, costUsd: 0,
+      }),
+      /model_calls_stage_check/,
+      "незнакомый этап отвергается ограничением, а не пишется молча",
+    );
+    await sql`delete from dailynews.model_calls where model = 'проба'`;
+    console.log("  этапы расхода: все известные пишутся, выдуманный отвергнут");
+
     // --- сверка формы схемы видит переопределение ------------------------------
     // Ограничение, переопределённое под тем же именем, по имени неотличимо
     // от применённого: 0018 так и проскочил. Теперь сверяется и содержимое.
     const { schemaGaps } = await import("./schema-gap");
-    assert.deepEqual(await schemaGaps(sql), [], "на полной схеме расхождений быть не должно");
+    const gaps = await schemaGaps(sql);
+    if (gaps.length > 0) {
+      // Расхождение «в базе нет ни одной таблицы» означает не сломанную
+      // схему, а разговор не с той базой. Разница видна только отсюда,
+      // поэтому она называется вслух, а не оставляется на догадки.
+      const [seen] = await sql<{ n: number }[]>`
+        select count(*)::int as n from information_schema.tables where table_schema = 'dailynews'
+      `;
+      const [mark] = await sql<{ token: string }[]>`select token from public.pg_owner_token`;
+      console.error(
+        `  таблиц видно ${seen.n}, метка базы ${mark?.token === local.token ? "своя" : `чужая (${mark?.token})`}`,
+      );
+    }
+    assert.deepEqual(gaps, [], "на полной схеме расхождений быть не должно");
 
     // Откатываем ограничение к версии 0025 — как если бы 0026 не применили.
     await sql`delete from dailynews.sources where kind = 'email'`;
@@ -595,10 +920,189 @@ async function main() {
     );
     console.log("  цель темы: ноль запрещён ограничением");
 
+
+    // --- блогерский Pro: площадки, голос, черновики ------------------------
+    //
+    // Пост уходит под именем читателя, поэтому чужой здесь дороже, чем
+    // в ленте: сосед опубликовал бы наш черновик по нашему же промаху.
+    const posts = await import("../src/lib/posts");
+
+    await readers.saveChannel(owner.id, "telegram", {
+      handle: "ownerchannel", input_url: "t.me/ownerchannel", label: "Канал владельца",
+    });
+    await readers.saveChannel(owner.id, "linkedin");
+    await readers.saveChannel(second.id, "telegram", { handle: "verachannel" });
+
+    const ownerChannels = await readers.getChannels(owner.id);
+    assert.deepEqual(
+      ownerChannels.map((channel) => channel.network).sort(),
+      ["linkedin", "telegram"],
+      "площадки читателя — только его",
+    );
+    assert.equal(
+      ownerChannels.find((channel) => channel.network === "telegram")?.handle,
+      "ownerchannel",
+      "чужой канал в свой список не попадает",
+    );
+    assert.equal(
+      ownerChannels.find((channel) => channel.network === "linkedin")?.handle,
+      null,
+      "LinkedIn читать нечем: строка означает только «дай таб»",
+    );
+    // Отметка «публикую здесь» не должна стирать разобранный адрес: галочка
+    // и ссылка живут в одной строке, и upsert без coalesce терял бы канал.
+    await readers.saveChannel(owner.id, "telegram");
+    assert.equal(
+      (await readers.getChannels(owner.id)).find((c) => c.network === "telegram")?.handle,
+      "ownerchannel",
+      "повторная отметка сети не стирает канал",
+    );
+
+    // Карточка автора кладётся объектом, а не строкой: JSON.stringify в jsonb
+    // сохраняет строку, и voice_card->'voice' молча становится null (0005).
+    await readers.saveVoiceCard(owner.id, {
+      voice: ["короткие фразы"], frame: ["в верхних есть число"], taboo: [],
+      built_from: 20, sources: ["telegram"], ranked: true,
+    });
+    const [cardRow] = await sql<{ kind: string; first: string | null }[]>`
+      select jsonb_typeof(voice_card) as kind, voice_card->'voice'->>0 as first
+        from dailynews.readers where id = ${owner.id}
+    `;
+    assert.equal(cardRow.kind, "object", "карточка в jsonb обязана быть объектом, а не строкой");
+    assert.equal(cardRow.first, "короткие фразы", "пункт голоса читается запросом, а не разбором строки");
+    assert.ok(
+      (await readers.getReader(owner.id))?.voice_card?.voice.length,
+      "getReader обязан выбирать карточку: без неё пост писался бы настройками подачи",
+    );
+
+    // Материал для поста — только из его выпусков. Это и есть проверка права:
+    // чужой материал постом не становится.
+    const forPost = await posts.postSourceFor(owner.id, ids[0]);
+    assert.equal(forPost?.title, "Владелец: GPT-6", "заголовок берётся из его выпуска, а не из items");
+    assert.equal(
+      await posts.postSourceFor(second.id, ids[0]),
+      undefined,
+      "материал чужого выпуска постом не становится",
+    );
+
+    const saved = await posts.saveDrafts(owner.id, ids[0], [
+      { network: "telegram", variant: 1, text: "первый", length: 6, over: false, unverified: [] },
+      { network: "telegram", variant: 2, text: "второй", length: 6, over: false, unverified: [] },
+    ]);
+    assert.equal(saved.length, 2, "оба варианта сохранены: выбор между ними — сигнал о вкусе");
+    assert.ok(saved.every((draft) => draft.id > 0), "у каждого черновика свой номер");
+
+    // Номер черновика приходит из браузера: без читателя в условии сосед
+    // помечал бы чужую строку.
+    assert.equal(
+      await posts.takeDraft(second.id, saved[0].id, "первый"),
+      false,
+      "чужой черновик пометить нельзя",
+    );
+    assert.ok(await posts.takeDraft(owner.id, saved[0].id, "первый"), "свой — можно");
+    const [taken] = await sql<{ taken_text: string | null }[]>`
+      select taken_text from dailynews.reader_posts where id = ${saved[0].id}
+    `;
+    assert.equal(taken.taken_text, null, "не правил — копии текста в базе не появляется");
+    await posts.takeDraft(owner.id, saved[1].id, "второй, но переписанный");
+    const [edited] = await sql<{ taken_text: string | null }[]>`
+      select taken_text from dailynews.reader_posts where id = ${saved[1].id}
+    `;
+    assert.equal(
+      edited.taken_text, "второй, но переписанный",
+      "его правка сохраняется: без неё вкус автора не измерить ничем",
+    );
+    assert.equal(await posts.takenToday(owner.id), 2, "взятые за сутки считаются по читателю");
+    assert.equal(await posts.takenToday(second.id), 0, "у соседа свой счёт");
+    console.log("  блогер: площадки и черновики у каждого свои, правка сохраняется");
+
+    // Оплаченные этапы обязаны проходить ограничение: этап, которого нет
+    // в check, уронил бы запись расхода — а с ней и ответ, уже оплаченный.
+    for (const stage of ["voice", "post", "post-quality"] as const) {
+      await readers.recordCall({
+        readerId: owner.id, stage, model: "deepseek-flash", tokensIn: 10, tokensOut: 5, costUsd: 0,
+      });
+    }
+    console.log("  расход: этапы voice, post и post-quality принимаются");
+
+    // --- список колонок читателя не должен отставать от таблицы ------------
+    //
+    // 0029 завела подписку, effectivePlan её читает, а select в readers.ts
+    // остался прежним: платящий читатель считался бесплатным и в вебе,
+    // и в прогоне — молча, без единой ошибки. Проверка сверяет форму,
+    // а не память: колонка, появившаяся в таблице, обязана доехать до кода.
+    const live = (await sql<{ column_name: string }[]>`
+      select column_name from information_schema.columns
+       where table_schema = 'dailynews' and table_name = 'readers'
+    `).map((row) => row.column_name);
+    // Читаются кодом не все: llm остался неиспользованным, служебные времена
+    // никому не нужны. Список исключений короткий и назван вслух — молчаливое
+    // исключение здесь ничем не отличалось бы от забытой колонки.
+    const SKIP = new Set(["llm", "created_at", "updated_at", "reader_context_hash"]);
+    const loaded = new Set(Object.keys((await readers.getReader(owner.id)) ?? {}));
+    const missed = live.filter((column) => !SKIP.has(column) && !loaded.has(column));
+    assert.deepEqual(
+      missed, [],
+      `колонки читателя есть в базе, но не выбираются кодом: ${missed.join(", ")}`,
+    );
+    console.log(`  читатель: выбираются все ${live.length - SKIP.size} нужных колонок`);
+    // Вопрос «дочитал?» спрашивал заголовок из items.title_ru — колонки,
+    // которой нет с тех пор, как тексты дайджеста стали персональными.
+    // Запрос падал каждую ночь строкой в логе, вопрос не уходил ни разу,
+    // а прогон отчитывался успехом. Проверяется сам запрос прогона,
+    // а не его копия: копия разъезжается молча.
+    assert.equal((await readers.pendingKindleAsks(owner.id)).length, 0, "без отправок спрашивать не о чем");
+
+    const [sentItem] = await sql<{ id: number }[]>`
+      select id from dailynews.items order by id limit 1
+    `;
+    if (sentItem) {
+      await sql`
+        insert into dailynews.kindle_sends (reader_id, item_id, status, at)
+        values (${owner.id}, ${sentItem.id}, 'sent', now() - interval '1 day')
+      `;
+      const asks = await readers.pendingKindleAsks(owner.id);
+      assert.equal(asks.length, 1, "отправленная сутки назад статья попадает в вопрос");
+      assert.ok(asks[0].title.length > 0, "заголовок берётся из выпуска читателя или из материала");
+      console.log("  «дочитал?»: запрос выполняется и находит заголовок");
+    }
+
+    // Расшифровка шла только по свежевставленным материалам: первая
+    // неудача — провайдер ответил 401 — и ролик оставался с описанием
+    // из фида навсегда, потому что новым он больше никогда не будет.
+    const [video] = await sql<{ id: number }[]>`
+      insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+      select id, 'https://www.youtube.com/watch?v=abcdefghijk',
+             'youtube.com/watch?v=abcdefghijk', 'Ролик', 'ролик', 'описание из фида'
+        from dailynews.sources limit 1
+      returning id
+    `;
+    const waiting = async () => (await sql<{ id: number }[]>`
+      select id from dailynews.items
+       where transcribed_at is null and url like '%youtube.com/watch%'
+    `).length;
+    assert.equal(await waiting(), 1, "ролик без отметки ждёт расшифровки");
+    await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
+    assert.equal(await waiting(), 0, "с отметкой за ним больше не ходят");
+    // Оценка живёт вместе с текстом: расшифровка его меняет, и решение
+    // о материале нельзя принимать по прежнему. Ролик, расшифрованный
+    // не в тот же прогон, что собран, оценён по описанию из фида —
+    // у торгового канала это реклама индикаторов, скор 8 из ста.
+    await sql`
+      insert into dailynews.scores (item_id, total, confidence, axes, model)
+      values (${video.id}, 8.4, 0.5, ${sql.json({ kind: "прежняя" })}, 'проба')
+    `;
+    await sql`delete from dailynews.scores where item_id = ${video.id}`;
+    const [left] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.scores where item_id = ${video.id}
+    `;
+    assert.equal(left.n, 0, "снятая оценка не мешает переоценить ролик по конспекту");
+    console.log("  расшифровка: неудачная попытка повторяется, удачная — нет");
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});
-    await server.stop();
+    await local.stop();
     await db.close();
   }
 }

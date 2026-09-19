@@ -1,15 +1,19 @@
 import { getSourceHealth } from "@/lib/queries";
 import { currentReader } from "@/lib/session";
-import { planOf } from "@/lib/plans";
 import { effectivePlan } from "@/lib/lemon";
 import { SourcesManager } from "./manager";
 
 export const dynamic = "force-dynamic";
 
 export default async function SourcesPage() {
-  // Каталог общий на всех читателей, тариф — личный. Видят все, правит
-  // владелец: удаление источника уносит каскадом собранные материалы,
-  // и у такой кнопки не должно быть ста рук.
-  const [reader, sources] = [await currentReader(), await getSourceHealth()];
-  return <SourcesManager sources={sources} plan={effectivePlan(reader)} editable={reader.owner} />;
+  // Каталог общий, выбор личный: список — это то, из чего собирают выпуск
+  // именно этому читателю. Чужая строка здесь выглядела бы как источник
+  // его ленты и им не была бы.
+  const reader = await currentReader();
+  return (
+    <SourcesManager
+      sources={await getSourceHealth(reader.id)}
+      plan={effectivePlan(reader)}
+    />
+  );
 }

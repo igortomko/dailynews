@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 /**
@@ -24,8 +26,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ru" className={inter.variable} suppressHydrationWarning>
       <body className="min-h-svh bg-background font-sans antialiased">
-        {children}
-        <Toaster position="bottom-center" />
+        {/*
+          Тема идёт за системной и переключателя не имеет. Переменные .dark
+          лежали в globals.css с первого дня, next-themes стоял в зависимостях,
+          а провайдера не было ни одного: тёмная тема существовала в коде
+          и не существовала на экране — ровно тот отказ, что выглядит
+          как успех. Выпуск читают вечером, и белая страница в темноте бьёт
+          по глазам сильнее, чем стоит любой переключатель.
+          Своего выбора нет намеренно: настройка, которую читатель уже сделал
+          в системе, не должна спрашиваться второй раз.
+        */}
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          {/* Задержка общая на всё приложение: подсказка, выскакивающая
+              мгновенно, мельтешит при проходе курсора по ряду иконок.
+              Полсекунды — это «я остановился и не понимаю», а не «я мимо». */}
+          <TooltipProvider delay={500}>{children}</TooltipProvider>
+          <Toaster position="bottom-center" />
+        </ThemeProvider>
       </body>
     </html>
   );

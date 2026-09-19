@@ -14,9 +14,10 @@ import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { kindleSetupStep, type KindleStep } from "@/lib/kindle-setup";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const DOMAIN = "kindle.tomko.io";
 
@@ -33,23 +34,32 @@ const AMAZON_SETTINGS = "https://www.amazon.com/hz/mycd/myx";
 function CopyAddress({ value }: { value: string }) {
   if (!value) return <code className="font-mono">—</code>;
   return (
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          toast.success("Адрес скопирован");
-        } catch {
-          // Буфер закрыт настройками браузера или небезопасным соединением.
-          // Молчать нельзя: читатель уверен, что скопировал.
-          toast.error("Браузер не дал скопировать — выдели адрес вручную");
+    // Своя подсказка вместо title: браузерная выезжает через секунду
+    // с лишним и рисуется системным шрифтом — здесь она единственное,
+    // что объясняет, зачем адрес подчёркнут пунктиром.
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(value);
+                toast.success("Адрес скопирован");
+              } catch {
+                // Буфер закрыт настройками браузера или небезопасным
+                // соединением. Молчать нельзя: читатель уверен, что скопировал.
+                toast.error("Браузер не дал скопировать — выдели адрес вручную");
+              }
+            }}
+            className="cursor-pointer font-mono underline decoration-dotted underline-offset-4 hover:text-foreground"
+          />
         }
-      }}
-      title="Скопировать"
-      className="cursor-pointer font-mono underline decoration-dotted underline-offset-4 hover:text-foreground"
-    >
-      {value}
-    </button>
+      >
+        {value}
+      </TooltipTrigger>
+      <TooltipContent>Скопировать адрес</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -124,13 +134,14 @@ export function DeliveryForm({
         <CardHeader>
           <CardTitle>Telegram</CardTitle>
           <CardDescription>
-            Каждое утро сюда приходит ссылка на свежие новости
+            Каждое утро в твой Telegram приходит ссылка на свежий выпуск твоих
+            персональных новостей.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           {connected
-            ? `Подключён${username ? `: @${username}` : ""}`
-            : "Не подключён — напиши боту /start"}
+            ? `Подключён${username ? ` как @${username}` : ""}.`
+            : "Не подключён — напиши боту /start, и он свяжет этот аккаунт."}
         </CardContent>
       </Card>
 
@@ -144,8 +155,8 @@ export function DeliveryForm({
           </CardTitle>
           <CardDescription>
             {step === "done"
-              ? "Выпуск приходит книгой на читалку"
-              : "Выпуск может приходить книгой на читалку. Настройка — два шага."}
+              ? "Выпуск уходит книгой на читалку."
+              : "Ты можешь автоматически получать выпуск на свой Kindle. Это два шага."}
           </CardDescription>
         </CardHeader>
 
@@ -163,7 +174,7 @@ export function DeliveryForm({
                     «Manage Your Content and Devices»
                   </a>{" "}
                   → Preferences → Personal Document Settings. Там лежит адрес
-                  вида имя@kindle.com — скопируй его сюда.
+                  вида имя@kindle.com — вставь его сюда.
                 </p>
                 <Field data-invalid={error ? true : undefined}>
                   <FieldLabel htmlFor="kindle_address">Адрес читалки</FieldLabel>
@@ -174,7 +185,11 @@ export function DeliveryForm({
                     placeholder="имя@kindle.com"
                     aria-invalid={error ? true : undefined}
                   />
-                  <FieldDescription>{error ?? "Заканчивается на @kindle.com"}</FieldDescription>
+                  {error ? (
+                    <FieldError>{error}</FieldError>
+                  ) : (
+                    <FieldDescription>Заканчивается на @kindle.com</FieldDescription>
+                  )}
                 </Field>
                 <Button type="submit" disabled={pending || locked} className="self-start">
                   Дальше
@@ -187,26 +202,22 @@ export function DeliveryForm({
               внёс в одобренные. Проверить это снаружи нечем — подтверждает он. */}
           {step === "sender" ? (
             <FieldGroup>
-              <StepMark now={2} of={2} title="Разреши нам писать на читалку" />
+              <StepMark now={2} of={2} title="Разреши наш адрес отправителя" />
               <p className="text-sm text-muted-foreground">
                 В том же разделе Amazon есть «Approved Personal Document E-mail
                 List». Добавь туда{" "}
-                <CopyAddress value={sender ? `${sender}@${DOMAIN}` : ""} />
-              </p>
-              {/* Отдельной строкой, а не хвостом абзаца: это единственное
-                  предупреждение на экране, и дочитывать до него нельзя
-                  заставлять — пропустивший его не увидит ни одной ошибки. */}
-              <p className="text-sm font-medium">
-                Без этого Amazon выбросит письмо и ничего не скажет — выпуск
-                просто не придёт.
+                <CopyAddress value={sender ? `${sender}@${DOMAIN}` : ""} />{" "}
+                — без этого письмо отбрасывается молча, без единой ошибки.
               </p>
               {!connected ? (
                 <Alert>
                   <AlertTitle>Сначала привяжи Telegram</AlertTitle>
                   <AlertDescription>
-                    Напиши боту <code className="font-mono">/start</code> — тогда
-                    в адресе будет твоё имя, а не номер. Поменять его потом
-                    нельзя: Amazon придётся заново разрешать новый.
+                    Пока Telegram не привязан, отправитель собран из номера
+                    читателя. Напиши боту <code className="font-mono">/start</code> —
+                    адрес пересоберётся из твоего username, и в Amazon его будет
+                    видно глазами. После подтверждения он замораживается: менять
+                    его потом значит потерять доставку молча.
                   </AlertDescription>
                 </Alert>
               ) : null}
@@ -214,9 +225,9 @@ export function DeliveryForm({
                 <Button
                   type="button"
                   disabled={pending || locked}
-                  onClick={() => run(approveKindleSender(), "Kindle настроен", () => setStep("done"))}
+                  onClick={() => run(approveKindleSender(), "Настроено", () => setStep("done"))}
                 >
-                  Добавил в Amazon
+                  Добавил, готово
                 </Button>
                 <Button type="button" variant="ghost" disabled={pending || locked}
                         onClick={() => setStep("address")}>
@@ -238,9 +249,9 @@ export function DeliveryForm({
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <span className="text-sm font-medium">Пишем с адреса</span>
+                  <span className="text-sm font-medium">Отправитель</span>
                   <span className="text-sm text-muted-foreground">
-                    <CopyAddress value={`${sender}@${DOMAIN}`} /> — разрешён в Amazon
+                    <CopyAddress value={`${sender}@${DOMAIN}`} /> разрешён в Amazon.
                   </span>
                 </div>
 
@@ -249,21 +260,33 @@ export function DeliveryForm({
                   <FieldLabel htmlFor="kindle_digest" className="font-normal">
                     Присылать выпуск на читалку
                     <FieldDescription>
-                      Выключишь — останется отправка отдельных статей
+                      Выключено — адрес остаётся для отправки отдельных статей.
                     </FieldDescription>
                   </FieldLabel>
                 </Field>
 
                 <div className="flex flex-wrap items-center gap-4">
                   <Button type="submit" disabled={pending || locked}>Сохранить</Button>
-                  <button
-                    type="button"
-                    disabled={pending || locked}
-                    onClick={() => run(resetKindleSetup(), "Настройка сброшена", () => setStep("address"))}
-                    className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-50"
-                  >
-                    Настроить заново
-                  </button>
+                  {/* Красный по наведению: сброс стирает адрес читалки
+                      и снимает отметку об одобрении отправителя — до конца
+                      повторной настройки выпуски не доходят вовсе. */}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          disabled={pending || locked}
+                          onClick={() =>
+                            run(resetKindleSetup(), "Настройка сброшена", () => setStep("address"))
+                          }
+                          className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4 hover:text-destructive disabled:opacity-50"
+                        />
+                      }
+                    >
+                      Настроить заново
+                    </TooltipTrigger>
+                    <TooltipContent>Стереть адрес читалки и пройти настройку с начала</TooltipContent>
+                  </Tooltip>
                 </div>
               </FieldGroup>
             </form>

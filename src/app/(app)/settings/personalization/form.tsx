@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { savePersonalization } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
@@ -17,17 +18,17 @@ import {
 } from "@/components/ui/select";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  LANGUAGES,
-  DEFAULT_COMPLEXITY,
-  DEFAULT_STYLE,
-  STYLES,
-  complexityAt,
-  styleOf,
-} from "@/lib/voice";
+import { LANGUAGES, DEFAULT_COMPLEXITY, DEFAULT_STYLE, STYLES, complexityAt, styleOf, SOURCE_LANGUAGE } from "@/lib/voice";
 import type { Reader } from "@/lib/types";
+import { FEATURES, type Plan } from "@/lib/plans";
+import { PaywallCrown, usePaywall } from "@/components/paywall";
 
-export function PersonalizationForm({ profile }: { profile: Reader }) {
+export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
+  // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
+  // источника. Селект показывается целиком и погашенным, а не прячется:
+  // по нему видно, что именно даёт переход.
+  const translates = FEATURES.language.has(plan);
+  const languagePaywall = usePaywall("language", plan);
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const form = useRef<HTMLFormElement>(null);
@@ -69,9 +70,15 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {first ? "Настрой ленту" : "Язык и подача"}
+          {/* Зелёный только у «сохранено»: это единственное состояние,
+              которое сообщает, что всё в порядке. «Сохраняю…» ничего
+              не обещает и красится как обычная подпись. */}
           <span
             aria-live="polite"
-            className="flex items-center gap-1 text-xs font-normal text-muted-foreground"
+            className={cn(
+              "flex items-center gap-1 text-xs font-normal",
+              saved && !pending ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+            )}
           >
             {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
           </span>
@@ -93,19 +100,32 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
                 сами: две трёхсотпиксельные колонки на телефоне нечитаемы. */}
             <div className="grid gap-5 @md/field-group:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor="language">Язык</FieldLabel>
+                <FieldLabel htmlFor="language" className="flex items-center gap-1.5">
+                  Язык
+                  {translates ? null : <PaywallCrown feature="language" plan={plan} />}
+                </FieldLabel>
                 {/* Список из пятнадцати, а колонка осталась свободным текстом:
                     миграция 0014 убрала список из трёх ровно потому, что его
                     выбирал автор формы. Сохранённое значение вне списка
                     остаётся выбранным, а не подменяется первым пунктом. */}
                 <Select
-                  value={language}
+                  value={translates ? language : SOURCE_LANGUAGE}
                   onValueChange={(value: string | null) => {
                     if (!value) return;
+                    if (!translates) {
+                      languagePaywall.open();
+                      return;
+                    }
                     setLanguage(value);
                     schedule();
                   }}
                 >
+                  {/* Не disabled: выключенный селект не ловит нажатие, и окно
+                      с предложением тарифа, которое открывает onValueChange,
+                      не открывалось никогда — ветка была мёртвой. Корона
+                      у подписи говорит, что раздел платный, а выбор языка
+                      показывает, за что именно платить. Значение при этом
+                      не меняется: окно открывается вместо него. */}
                   <SelectTrigger id="language" className="w-full">
                     <SelectValue>{language}</SelectValue>
                   </SelectTrigger>
@@ -117,8 +137,17 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <input type="hidden" name="language" value={language} />
-                <FieldDescription>Новости придут на этом языке, даже если источник на другом</FieldDescription>
+                <input
+                  type="hidden"
+                  name="language"
+                  value={translates ? language : SOURCE_LANGUAGE}
+                />
+                {languagePaywall.dialog}
+                <FieldDescription>
+                  {translates
+                    ? "Источники остаются на своих языках."
+                    : "Выпуск приходит на языке источника — перевод есть на «Plus» и «Pro»."}
+                </FieldDescription>
               </Field>
 
               {/* Ползунок и селект меняются мимо события формы: базовый компонент
@@ -182,7 +211,8 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
                 placeholder="Чем занимаешься, что за продукт, где живёшь"
               />
               <FieldDescription>
-                Чем подробнее, тем точнее новости и понятнее описания
+                Расскажи о себе: это влияет и на то, как написаны описания,
+                и на то, что вообще попадёт в выпуск.
               </FieldDescription>
             </Field>
 
@@ -196,10 +226,13 @@ export function PersonalizationForm({ profile }: { profile: Reader }) {
                 onClick={() => {
                   clearTimeout(timer.current);
                   save();
-                  router.push("/");
+                  // У блогера настройка на шаг длиннее: голос собирается
+                  // с его каналов, и просить их потом — значит получить
+                  // первый пост, написанный ничьим голосом.
+                  router.push(FEATURES.posts.has(plan) ? "/settings/channels?first=1" : "/");
                 }}
               >
-                Готово
+                {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
               </Button>
             ) : null}
           </FieldGroup>

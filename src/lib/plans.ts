@@ -7,10 +7,11 @@
  *
  * Считать пределы умеет и интерфейс, и конвейер — и оба обязаны считать
  * одинаково. Понижение тарифа не выключает лишние источники задним числом:
- * они остаются в каталоге включёнными, и только прогон решает, кого
- * опрашивать. Поэтому предел применяется в двух местах, а живёт в одном.
+ * они остаются в наборе читателя, и только прогон решает, кого опрашивать.
+ * Поэтому предел применяется в двух местах, а живёт в одном.
  */
 import type { Source } from "./types";
+import { plural } from "./plural";
 
 export const PLAN_IDS = ["free", "plus", "pro"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
@@ -24,7 +25,7 @@ export type PlanId = (typeof PLAN_IDS)[number];
  * и держать их за тарифом значит ухудшать бесплатный выпуск без причины,
  * ради ощущения, что платное что-то даёт.
  */
-export const GATED = ["calibration", "delivery"] as const;
+export const GATED = ["delivery", "language", "posts"] as const;
 export type Gated = (typeof GATED)[number];
 
 export type Plan = {
@@ -34,7 +35,14 @@ export type Plan = {
   price: number;
   /** Сколько источников опрашивается. Остальные включённые просто ждут. */
   maxSources: number;
-  /** Сколько интересов живёт одновременно. */
+  /**
+   * Сколько интересов живёт одновременно.
+   *
+   * Персонален только предел, а цена — общая: темы всех читателей уходят
+   * в вопрос Jev одним списком, и каждая удлиняет его на каждом материале
+   * потока. Пятикратный рост предела сам по себе ничего не стоит, а вот
+   * три сотни заведённых тем — это уже $2.8 в месяц на всех.
+   */
   maxTopics: number;
   /** Размеры выпуска, доступные на тарифе. Первый — по умолчанию. */
   digestSizes: number[];
@@ -42,6 +50,14 @@ export type Plan = {
   kinds: Source["kind"][];
   /** Разделы настроек, открытые тарифом. */
   sections: Gated[];
+  /**
+   * Через сколько дней приходит выпуск. Единица — каждую ночь.
+   *
+   * Это честнее, чем урезать размер выпуска: на бесплатном лента остаётся
+   * такой же, просто реже. Урезанный выпуск выглядит как плохой продукт,
+   * редкий — как бесплатный.
+   */
+  everyDays: number;
 };
 
 // Telegram и почта ничего не стоят: публичный канал читается как страница,
@@ -54,8 +70,9 @@ export const PLANS: Record<PlanId, Plan> = {
     label: "Бесплатный",
     price: 0,
     maxSources: 5,
-    maxTopics: 2,
+    maxTopics: 5,
     digestSizes: [5, 10],
+    everyDays: 2,
     kinds: FREE_KINDS,
     // На бесплатном остаётся то, без чего ленты не будет: интересы
     // и источники. Манера письма и разбор статистики — уже выбор,
@@ -65,24 +82,34 @@ export const PLANS: Record<PlanId, Plan> = {
   plus: {
     id: "plus",
     label: "Plus",
-    price: 1.99,
-    maxSources: 15,
-    maxTopics: 5,
+    price: 3.99,
+    maxSources: 40,
+    maxTopics: 15,
     digestSizes: [20, 40],
+    everyDays: 1,
     kinds: FREE_KINDS,
-    sections: ["calibration"],
+    // Читалка переехала сюда с Pro: Plus — тариф для того, кто читает,
+    // и книга на Kindle — самое читательское, что в продукте есть.
+    // Расход при этом ступенька, а не наклон: у Resend бесплатны 3 000 писем
+    // в месяц и 100 в день, то есть до сотни ежедневных выпусков это $0,
+    // а дальше $20 в месяц на всех.
+    sections: ["language", "delivery"],
   },
   pro: {
     id: "pro",
     label: "Pro",
-    price: 4.99,
-    maxSources: 40,
-    maxTopics: 10,
+    price: 9.99,
+    maxSources: 100,
+    maxTopics: 30,
     digestSizes: [20, 40, 60, 80, 100],
+    everyDays: 1,
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
-    sections: ["calibration", "delivery"],
+    // Своё мнение — то, чем Pro отличается от Plus. Стоит оно $0.0007
+    // за нажатие (замер 19 сентября 2026), то есть 6% себестоимости тарифа:
+    // цена здесь за пользу, а не за расход.
+    sections: ["delivery", "language", "posts"],
   },
 };
 
@@ -143,14 +170,7 @@ export const digestCap = (digestSize: number, plan: Plan) =>
 export const allows = (plan: Plan, section: Gated) => plan.sections.includes(section);
 
 /** «2 интереса», «5 интересов» — форма нужна и в отказе, и в заглушке. */
-export function topicsWord(n: number): string {
-  const tens = n % 100;
-  if (tens >= 11 && tens <= 14) return "интересов";
-  const ones = n % 10;
-  if (ones === 1) return "интерес";
-  if (ones >= 2 && ones <= 4) return "интереса";
-  return "интересов";
-}
+export const topicsWord = (n: number) => plural(n, "интерес", "интереса", "интересов");
 
 /** Самый дешёвый тариф, который открывает раздел. Для подписи в заглушке. */
 export const cheapestWith = (section: Gated): Plan =>
@@ -165,7 +185,8 @@ export const cheapestWith = (section: Gated): Plan =>
  * и оба случая на глаз незаметны.
  */
 export type FeatureId =
-  | "personalization" | "calibration" | "delivery" | "x" | "topics" | "digest" | "sources";
+  | "personalization" | "delivery" | "language" | "x" | "posts"
+  | "topics" | "digest" | "sources" | "cadence";
 
 export type Feature = {
   title: string;
@@ -181,15 +202,20 @@ export const FEATURES: Record<FeatureId, Feature> = {
     // Доступна всем: промпт от неё не дорожает ни на токен.
     has: () => true,
   },
-  calibration: {
-    title: "Отчёт о попаданиях",
-    what: "Видно, угадывает ли лента: что ты открывал, что пролистнул и становится ли выбор точнее.",
-    has: (plan) => allows(plan, "calibration"),
+  language: {
+    title: "Перевод на свой язык",
+    what: "Выпуск приходит на выбранном языке. На бесплатном заголовки и описания остаются на языке источника.",
+    has: (plan) => allows(plan, "language"),
   },
   delivery: {
     title: "Выпуск на читалку",
     what: "Выпуск приходит книгой на Kindle — читать с электронных чернил, без телефона.",
     has: (plan) => allows(plan, "delivery"),
+  },
+  posts: {
+    title: "Своё мнение",
+    what: "Из любой новости выпуска — готовый пост твоим голосом: лента читает твои каналы, запоминает, как ты пишешь, и даёт черновик под каждую твою сеть.",
+    has: (plan) => allows(plan, "posts"),
   },
   x: {
     title: "Посты из X",
@@ -200,6 +226,11 @@ export const FEATURES: Record<FeatureId, Feature> = {
     title: "Темы",
     what: "О чём тебе интересно читать — например, ИИ или дизайн. Выпуск делится между темами, чтобы одна не заняла всё.",
     has: (plan) => plan.maxTopics > PLANS.free.maxTopics,
+  },
+  cadence: {
+    title: "Как часто приходит",
+    what: "На платных тарифах выпуск приходит каждую ночь, на бесплатном — через день.",
+    has: (plan) => plan.everyDays <= 1,
   },
   digest: {
     title: "Новостей в выпуске",
@@ -213,12 +244,30 @@ export const FEATURES: Record<FeatureId, Feature> = {
   },
 };
 
+/**
+ * Выпуск этой ночью или нет.
+ *
+ * День считается от даты, а не от прошлого выпуска: прогон могут запустить
+ * дважды за сутки или пропустить ночь, и отсчёт «от прошлого раза» тогда
+ * съезжает навсегда. Номер читателя в формуле разносит бесплатных по разным
+ * ночам — иначе половина ленты просыпается в один день.
+ */
+export function issuesToday(plan: Plan, readerId: number, day: string | Date): boolean {
+  if (plan.everyDays <= 1) return true;
+  const epochDay = Math.floor(new Date(day).getTime() / 86_400_000);
+  return (epochDay + readerId) % plan.everyDays === 0;
+}
+
 /** Самый дешёвый тариф, на котором возможность есть. */
 export const cheapestFor = (id: FeatureId): Plan =>
   PLAN_IDS.map((planId) => PLANS[planId]).find((plan) => FEATURES[id].has(plan)) ?? PLANS.pro;
 
 /**
- * Кого опрашивать в этом прогоне.
+ * Что из выбранного читателем опрашивать в этом прогоне.
+ *
+ * На вход идёт его собственный набор (`readerSources`), а не каталог:
+ * каталог общий, чтобы один фид опрашивался один раз на всех, но чей это
+ * выпуск — решает личный выбор.
  *
  * Порядок — по id: при понижении тарифа остаются те, что заведены раньше,
  * и набор не пляшет от прогона к прогону. Запрещённый вид отсекается до
@@ -227,7 +276,7 @@ export const cheapestFor = (id: FeatureId): Plan =>
  */
 export function sourcesForPlan(sources: Source[], plan: Plan): Source[] {
   return sources
-    .filter((source) => source.active && plan.kinds.includes(source.kind))
+    .filter((source) => plan.kinds.includes(source.kind))
     .sort((a, b) => a.id - b.id)
     .slice(0, plan.maxSources);
 }
