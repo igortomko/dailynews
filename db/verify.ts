@@ -89,6 +89,7 @@ async function main() {
 
   // Импорт после DATABASE_URL: модуль db.ts читает его на загрузке.
   const { sql } = await import("../src/lib/db");
+
   const queries = await import("../src/lib/queries");
   const readers = await import("../src/lib/readers");
   const { markDuplicates } = await import("../pipeline/dedup");
