@@ -67,8 +67,6 @@ async function denyBySection(section: Gated): Promise<{ error: string } | null> 
 
 export async function savePersonalization(formData: FormData) {
   const readerId = await currentReaderId();
-  const denied = await denyBySection("personalization");
-  if (denied) return denied;
 
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
   const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
@@ -199,6 +197,9 @@ export async function saveInterests(formData: FormData) {
  * и прочитанный как пустой обнулил бы доставку при нажатии «Сохранить».
  */
 export async function saveKindleDigest(formData: FormData) {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   // Флажок приходит только когда включён: выключенный checkbox формы
   // не отправляется вовсе, и `null` здесь значит «выключен», а не «не трогали».
@@ -220,6 +221,9 @@ export async function saveKindleDigest(formData: FormData) {
  * кто проходит настройку заново.
  */
 export async function saveKindleAddress(formData: FormData) {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
   if (!address) return { error: "Впиши адрес читалки" };
@@ -246,6 +250,9 @@ export async function saveKindleAddress(formData: FormData) {
  * С этого момента обратный адрес заморожен: в Amazon записан именно он.
  */
 export async function approveKindleSender() {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   await sql`
     update dailynews.readers
@@ -269,6 +276,9 @@ export async function approveKindleSender() {
  * в том, чтобы одобрить в Amazon заново, а значит и отправителя можно менять.
  */
 export async function resetKindleSetup() {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
   const readerId = await currentReaderId();
   await sql`
     update dailynews.readers

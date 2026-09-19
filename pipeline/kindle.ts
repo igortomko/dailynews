@@ -11,6 +11,8 @@
  * ponytail: HTML вместо EPUB — если понадобится обложка и точное
  * разбиение на главы, здесь появится сборка zip.
  */
+import { FEATURES } from "../src/lib/plans";
+import { effectivePlan } from "../src/lib/lemon";
 /** Домен отправителя. Переменная старше константы: она уже есть
  *  в окружении, и константа рядом с ней — настройка, которой никто
  *  не управляет. Пустая строка — это «не задано», а не пустой домен. */
@@ -107,6 +109,11 @@ type KindleTarget = {
   kindle_address: string | null;
   kindle_sender: string | null;
   kindle_digest: boolean;
+  // Тариф целиком, а не признак: действующий считается из статуса и даты,
+  // и второй способ его вычислить разошёлся бы с первым.
+  plan: string;
+  subscription_status: string | null;
+  plan_ends_at: string | null;
 };
 
 /**
@@ -122,9 +129,13 @@ type KindleTarget = {
  */
 export type KindleVerdict =
   | { send: true; to: string; sender: string }
-  | { send: false; reason: "no-address" | "no-sender" | "switched-off" };
+  | { send: false; reason: "no-address" | "no-sender" | "switched-off" | "plan" };
 
 export function kindleDigestVerdict(reader: KindleTarget): KindleVerdict {
+  // Тариф проверяется и здесь, а не только в форме: переключатель мог
+  // остаться включённым с прежнего тарифа, а письмо — это чужой лимит
+  // у Amazon и счёт у Resend.
+  if (!FEATURES.delivery.has(effectivePlan(reader as never))) return { send: false, reason: "plan" };
   if (!reader.kindle_address) return { send: false, reason: "no-address" };
   if (!reader.kindle_sender) return { send: false, reason: "no-sender" };
   if (!reader.kindle_digest) return { send: false, reason: "switched-off" };

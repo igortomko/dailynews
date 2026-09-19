@@ -10,8 +10,7 @@ import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
 import { maxDigestOf, PLANS, type Plan } from "@/lib/plans";
-import { usePaywall } from "@/components/paywall";
-import { CrownIcon } from "lucide-react";
+import { usePaywall, PaywallCrown } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { topUpDigest, type ChipInput } from "@/lib/actions";
@@ -146,7 +145,12 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        <FieldLabel htmlFor="digest_size">Количество новостей</FieldLabel>
+        <FieldLabel htmlFor="digest_size" className="flex items-center gap-1.5">
+          Количество новостей
+          {maxDigestOf(plan) < maxDigestOf(PLANS.pro) ? (
+            <PaywallCrown feature="digest" plan={plan} />
+          ) : null}
+        </FieldLabel>
         {/* Пять значений видны сразу: за списком они прячутся по одному,
             и «сколько читать» превращается в два действия вместо одного.
             Шаг в двадцать — заметная разница, «37» такой разницы не несёт.
@@ -167,14 +171,21 @@ export function TopicChips({
           }}
           variant="outline"
         >
-          {sizes.map((size) => (
-            <ToggleGroupItem key={size} value={String(size)}>
-              {size}
-              {size > maxDigestOf(plan) ? (
-                <CrownIcon className="ml-1 size-3 text-amber-500" aria-label="на платном тарифе" />
-              ) : null}
-            </ToggleGroupItem>
-          ))}
+          {sizes.map((size) => {
+            const beyond = size > maxDigestOf(plan);
+            return (
+              // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
+              // читателю, почему она погасла, становится нечем.
+              <ToggleGroupItem
+                key={size}
+                value={String(size)}
+                aria-disabled={beyond || undefined}
+                className={beyond ? "text-muted-foreground/50" : undefined}
+              >
+                {size}
+              </ToggleGroupItem>
+            );
+          })}
         </ToggleGroup>
         {digestPaywall.dialog}
         <input type="hidden" name="digest_size" value={total} />
@@ -335,11 +346,7 @@ export function TopicChips({
             variant="outline"
             onClick={() => (full ? topicsPaywall.open() : add(draft))}
           >
-            {full ? (
-              <CrownIcon data-icon="inline-start" className="text-amber-500" />
-            ) : (
-              <PlusIcon data-icon="inline-start" />
-            )}
+            <PlusIcon data-icon="inline-start" />
             Добавить
           </Button>
         </div>

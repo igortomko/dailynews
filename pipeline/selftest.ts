@@ -631,17 +631,14 @@ assert.equal(
   "и предел в форме обязан считать по тому же правилу",
 );
 
-import { GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
+import { FEATURES, GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
 
 assert.equal(topicsWord(1), "интерес", "единственное число");
 assert.equal(topicsWord(2), "интереса", "два-четыре");
 assert.equal(topicsWord(5), "интересов", "пять и больше");
 assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
-assert.ok(
-  !allows(PLANS.free, "personalization") && !allows(PLANS.free, "calibration"),
-  "бесплатный тариф не открывает платных разделов",
-);
+assert.ok(!allows(PLANS.free, "calibration"), "бесплатный тариф не открывает платных разделов");
 // Подписка открыта всем и тарифом не закрывается вовсе: закрыть её значит
 // показать кнопку «подписаться» только тем, кто уже подписан. Поэтому её
 // и нет среди разделов, которые тариф может закрыть.
@@ -650,9 +647,19 @@ assert.ok(
   "раздел подписки не должен закрываться тарифом",
 );
 assert.ok(
-  allows(PLANS.plus, "personalization") && allows(PLANS.pro, "personalization"),
+  allows(PLANS.plus, "calibration") && allows(PLANS.pro, "calibration"),
   "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
 );
+// Персонализация не стоит ни одного лишнего токена, поэтому тарифом
+// не закрывается вовсе: держать её за деньгами значит ухудшать бесплатный
+// выпуск без причины.
+assert.ok(
+  !(GATED as readonly string[]).includes("personalization"),
+  "язык и подача не должны закрываться тарифом",
+);
+for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
+  assert.ok(FEATURES.personalization.has(plan), `язык и подача доступны на ${plan.id}`);
+}
 for (const section of GATED) {
   // Заглушка зовёт cheapestWith и печатает его подпись: раздел, которого
   // нет ни в одном тарифе, показал бы «на тарифе Pro» и никогда не открылся.
@@ -679,7 +686,10 @@ for (const file of ["0019_plan", "0020_readers"]) {
 // отдельной статьи, поэтому выключенный выпуск не требует стереть адрес —
 // и не должен молча уходить при выключенном переключателе.
 {
-  const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
+  const full = {
+    kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true,
+    plan: "pro", subscription_status: "active", plan_ends_at: null,
+  };
   const ok = kindleDigestVerdict(full);
   assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
   assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
@@ -697,6 +707,18 @@ for (const file of ["0019_plan", "0020_readers"]) {
     kindleDigestVerdict({ ...full, kindle_sender: null }),
     { send: false, reason: "no-sender" },
     "вписанный адрес без обратного — сбой, о нём сообщают в лог",
+  );
+  // Переключатель мог остаться включённым с прежнего тарифа, а письмо —
+  // это чужой лимит у Amazon и счёт у Resend.
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, plan: "plus" }),
+    { send: false, reason: "plan" },
+    "на тарифе без читалки выпуск книгой не уходит",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, subscription_status: "expired", plan_ends_at: null }),
+    { send: false, reason: "plan" },
+    "истёкшая подписка перестаёт слать на читалку в ту же секунду",
   );
 }
 
@@ -1169,4 +1191,4 @@ assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкш�
 assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
 assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
 
-console.log("Самопроверка пройдена: 331 утверждение");
+console.log("Самопроверка пройдена: 337 утверждений");
