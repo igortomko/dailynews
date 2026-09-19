@@ -280,6 +280,20 @@ async function main() {
     assert.equal(best[0].total, 100, "внутри темы первым должен идти лучший по скору");
     console.log(`  бюджет тем: ${budget.map((b) => b.target).join("-")} — выполнен точно`);
 
+    // Выключенная тема не должна уносить свой прежний бюджет: оценки,
+    // сделанные до выключения, живут ещё двое суток, и всё это время
+    // убранная из ленты тема забирала бы одиннадцать мест из двадцати.
+    await sql`update dailynews.topics set active = false where id = ${budget[0].topic.id}`;
+    const afterOff = await selectSurvivors(sql, 20);
+    const offCount = afterOff.filter((s) => s.topic_label === budget[0].topic.label).length;
+    assert.ok(
+      offCount <= 2,
+      `выключенная тема взяла ${offCount} мест — бюджет должен гаснуть вместе с темой`,
+    );
+    assert.ok(offCount > 0, "материалы выключенной темы не выбрасываются совсем");
+    await sql`update dailynews.topics set active = true where id = ${budget[0].topic.id}`;
+    console.log(`  выключенная тема: ${offCount} мест вместо ${budget[0].target}`);
+
     console.log("  вес темы: ноль запрещён ограничением");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

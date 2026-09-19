@@ -28,7 +28,7 @@ update dailynews.topics t
          (select p.digest_size::numeric from dailynews.profile p where p.id = 1)
          / greatest((select count(*) from dailynews.topics where active), 1)
        ))
- where t.weight <= 1;
+ where t.weight <= 1 and t.active;
 
 alter table dailynews.topics drop constraint if exists topics_weight_positive;
 alter table dailynews.topics add constraint topics_weight_positive check (weight > 0);
