@@ -78,7 +78,14 @@ export async function getSourceHealth(): Promise<SourceHealth[]> {
       left join dailynews.scores sc on sc.item_id = i.id
       left join digested g on g.item_id = i.id
      group by s.id
-     order by s.kind, s.label
+     -- Порядок по вниманию, а не по алфавиту: в списке из тридцати строк
+     -- сломанное обязано быть сверху. По kind наверх всплывали десять
+     -- сабреддитов подряд, а источник с ошибкой лежал где-то в середине.
+     order by s.active desc,
+              (s.last_error is not null) desc,
+              (s.silent_since is not null) desc,
+              count(i.id) desc,
+              s.label
   `;
 }
 

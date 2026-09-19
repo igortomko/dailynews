@@ -409,6 +409,52 @@ async function main() {
     );
     console.log(`  отдача источника: ${used.items} → ${used.in_digest} в дайджесте, скор ${used.mean_score}`);
 
+    // --- порядок списка: сломанное сверху --------------------------------------
+    // В каталоге из тридцати строк источник с ошибкой, лежащий в середине,
+    // не будет найден никогда. Порядок задаёт запрос, поэтому проверяется он.
+    const broken = health.find((row) => row.id !== source.id && row.id !== empty.id)!;
+    await sql`update dailynews.sources set last_error = 'HTTP 500' where id = ${broken.id}`;
+    // Отметку тишины снимаем: она стоит в порядке выше отдачи, и с ней
+    // сравнение по числу материалов ничего не проверяет.
+    await sql`update dailynews.sources set silent_since = null where id = ${empty.id}`;
+    const ordered = await queries.getSourceHealth();
+    assert.equal(ordered[0].id, broken.id, "источник с ошибкой должен быть первым");
+    assert.ok(
+      ordered.findIndex((row) => row.id === source.id) <
+        ordered.findIndex((row) => row.id === empty.id),
+      "при прочих равных давший материалы стоит выше пустого",
+    );
+    // Выключенные уходят вниз сплошным хвостом: вперемешку с рабочими они
+    // выглядят рабочими, а прогон их не читает.
+    await sql`update dailynews.sources set active = false where id = ${broken.id}`;
+    const withOff = await queries.getSourceHealth();
+    const firstOff = withOff.findIndex((row) => !row.active);
+    assert.ok(firstOff > 0, "выключенные не должны начинать список");
+    assert.ok(
+      withOff.slice(firstOff).every((row) => !row.active),
+      "после первого выключенного включённых быть не должно, даже с ошибкой",
+    );
+    await sql`update dailynews.sources set last_error = null, active = true where id = ${broken.id}`;
+
+    // --- «добавлен» против «уже был» -------------------------------------------
+    // xmax = 0 у настоящей вставки и ненулевой у обновления по конфликту.
+    // Приём неочевидный: сломается — интерфейс начнёт врать, что источник
+    // добавлен, когда он лишь обновлён.
+    const insertTwice = async () => {
+      const [row] = await sql<{ created: boolean }[]>`
+        insert into dailynews.sources (kind, label, url, input_url)
+        values ('rss', 'проба', 'https://twice.example.com/feed', null)
+        on conflict (kind, url) do update
+          set active = true, label = excluded.label, input_url = excluded.input_url
+        returning (xmax = 0) as created
+      `;
+      return row.created;
+    };
+    assert.equal(await insertTwice(), true, "первая вставка — новый источник");
+    assert.equal(await insertTwice(), false, "вторая — обновление, а не добавление");
+    await sql`delete from dailynews.sources where url = 'https://twice.example.com/feed'`;
+    console.log("  список: сломанное сверху, выключенное снизу, повтор отличим от вставки");
+
     // --- новые виды источников ------------------------------------------------
     // Ограничение переименовано намеренно: переопределение под прежним именем
     // проверка формы схемы не видит, и 0018 уже проскочил так молча.

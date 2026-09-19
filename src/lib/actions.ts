@@ -366,14 +366,19 @@ export async function addSource(formData: FormData) {
 
   const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
-  await sql`
+  // xmax = 0 у настоящей вставки и ненулевой у обновления по конфликту.
+  // Без этого «Источник добавлен» говорилось и тогда, когда он уже был
+  // в списке, — сообщение врало ровно в том случае, когда человеку важно
+  // знать правду.
+  const [row] = await sql<{ created: boolean }[]>`
     insert into dailynews.sources (kind, label, url, input_url)
     values (${kind}, ${label}, ${url}, ${inputUrl})
     on conflict (kind, url) do update
       set active = true, label = excluded.label, input_url = excluded.input_url
+    returning (xmax = 0) as created
   `;
   revalidatePath("/settings/sources");
-  return { ok: true as const, label };
+  return { ok: true as const, label, created: row?.created ?? true };
 }
 
 
