@@ -81,7 +81,7 @@
 ```bash
 npm run dev          # интерфейс
 npm run pipeline     # прогон вручную (нужен .env)
-npm test             # 138 утверждений, без сети и базы
+npm test             # 307 утверждений, без сети и базы
 npm run verify:db    # схема и все запросы на Postgres в процессе (PGlite)
 npm run migrate      # накатить миграции (нужен SUPABASE_DB_URL, роль postgres)
 npm run dry-run      # живой сбор и дедуп, без Jev и без общей базы
