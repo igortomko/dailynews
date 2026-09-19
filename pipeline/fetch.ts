@@ -1,3 +1,5 @@
+import { lookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import { XMLParser } from "fast-xml-parser";
 import type { RawItem, Source } from "../src/lib/types";
 import { fetchLetters } from "./mail";
@@ -5,29 +7,123 @@ import { fetchLetters } from "./mail";
 const UA = "dailynews/2.0 (+https://github.com/igortomko/dailynews)";
 const MAX_BYTES = 5_000_000;
 
+const INTERNAL = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8],
+  // 169.254.169.254 — метаданные облака, самая ценная цель из всех.
+  ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.168.0.0", 16], ["224.0.0.0", 4],
+  // Служебные и зарезервированные: в чужой сети они бывают маршрутизируемы,
+  // а фида за ними нет ни одного.
+  ["192.0.0.0", 24], ["192.0.2.0", 24], ["198.18.0.0", 15], ["198.51.100.0", 24],
+  ["203.0.113.0", 24], ["240.0.0.0", 4], ["255.255.255.255", 32],
+  ["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
+  ["2001:db8::", 32],
+] as const) {
+  INTERNAL.addSubnet(network, prefix, isIP(network) === 6 ? "ipv6" : "ipv4");
+}
+
 /**
- * Источники настраиваются пользователем, то есть адрес приходит извне.
- * Поэтому: только http(s), свой таймаут и потолок на размер ответа —
- * иначе один зависший фид держит весь прогон.
+ * Ведёт ли адрес внутрь сети. BlockList, а не свои префиксы: он сам приводит
+ * v4 внутри v6 к общему виду, а проверка по префиксам ловила «::ffff:127.0.0.1»
+ * и пропускала ровно тот же адрес шестнадцатеричной записью — «::ffff:7f00:1».
+ */
+export function isInternal(ip: string): boolean {
+  const plain = ip.replace(/^\[|\]$/g, "");
+  const type = isIP(plain);
+  // Нераспознанное — не адрес: пропускать такое наружу незачем.
+  if (type === 0) return true;
+  return INTERNAL.check(plain, type === 6 ? "ipv6" : "ipv4");
+}
+
+async function assertPublic(url: URL): Promise<void> {
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const addresses = isIP(host)
+    ? [host]
+    : (await lookup(host, { all: true })).map((entry) => entry.address);
+  if (addresses.length === 0) throw new Error("имя не разрешается в адрес");
+  const internal = addresses.find(isInternal);
+  if (internal) throw new Error(`адрес ведёт во внутреннюю сеть (${internal})`);
+}
+
+/** Сколько перенаправлений готовы пройти, проверяя каждое. */
+const MAX_REDIRECTS = 5;
+
+/**
+ * Запрос по внешнему адресу.
+ *
+ * Адрес источника вводит человек, а машина общая: рядом в той же сети живут
+ * чужие контейнеры. Без проверки адреса форма добавления — готовый сканер
+ * внутренней сети, где «HTTP 401» на внутреннем адресе уже ответ. Поэтому имя
+ * разрешается в адрес до запроса, а каждое перенаправление проверяется заново:
+ * публичный хост умеет увести на 127.0.0.1, и на этом смысл проверки кончился
+ * бы. От подмены DNS между проверкой и соединением это не защищает —
+ * закрепление адреса потребовало бы своего диспетчера, и это отдельное
+ * решение, а не заодно.
+ *
+ * Потолок на размер стоит у вызывающего: страницу og-картинки читают
+ * по кускам и бросают на середине.
+ */
+export async function requestPublic(
+  url: string,
+  options: { timeoutMs?: number; accept?: string } = {},
+): Promise<Response> {
+  const deadline = Date.now() + (options.timeoutMs ?? 20_000);
+  let current = new URL(url);
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (current.protocol !== "http:" && current.protocol !== "https:") {
+      throw new Error(`протокол не поддерживается: ${current.protocol}`);
+    }
+    await assertPublic(current);
+
+    const res = await fetch(current, {
+      headers: { "user-agent": UA, accept: options.accept ?? "*/*" },
+      signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      // Не "follow": перенаправление — это новый адрес, и его нужно
+      // проверить тем же порядком, что и первый.
+      redirect: "manual",
+    });
+    if (res.status < 300 || res.status >= 400) return res;
+
+    // Тело перенаправления никто не читает, а непрочитанное держит сокет:
+    // пять переходов подряд — и соединения кончаются на ровном месте.
+    const location = res.headers.get("location");
+    await res.body?.cancel().catch(() => {});
+    if (!location) throw new Error(`HTTP ${res.status} без адреса перехода`);
+    current = new URL(location, current);
+  }
+  throw new Error(`больше ${MAX_REDIRECTS} перенаправлений`);
+}
+
+/**
+ * Текст по внешнему адресу: свой таймаут на всю цепочку и потолок на размер —
+ * иначе один зависший или бесконечный фид держит весь прогон.
  */
 export async function fetchText(url: string, timeoutMs = 20_000): Promise<string> {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`протокол не поддерживается: ${parsed.protocol}`);
-  }
-  const res = await fetch(url, {
-    headers: { "user-agent": UA, accept: "*/*" },
-    signal: AbortSignal.timeout(timeoutMs),
-    redirect: "follow",
-  });
+  const res = await requestPublic(url, { timeoutMs });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const length = Number(res.headers.get("content-length") ?? 0);
   if (length > MAX_BYTES) throw new Error(`ответ ${length} байт, больше потолка`);
 
-  const body = await res.text();
-  if (body.length > MAX_BYTES) throw new Error("ответ больше потолка");
-  return body;
+  // Читаем по кускам и считаем байты: res.text() сначала соберёт в памяти
+  // весь ответ и только потом даст его измерить, а длина строки — это
+  // символы, а не байты, и на кириллице потолок расходится вдвое.
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw new Error("ответ больше потолка");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function getJson<T>(url: string, timeoutMs = 20_000): Promise<T> {

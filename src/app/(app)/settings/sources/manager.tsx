@@ -2,20 +2,70 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { TrashIcon, PlusIcon, ExternalLinkIcon } from "lucide-react";
-import { addSource, deleteSource, discoverSource, setSourceActive } from "@/lib/actions";
+import { TrashIcon, PlusIcon, ExternalLinkIcon, GlobeIcon } from "lucide-react";
+import { addSource, deleteSource, discoverSource } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
 import type { Found } from "../../../../../pipeline/discover";
+
+/**
+ * Значок источника: Telegram своим знаком, остальные — своим favicon.
+ *
+ * Favicon берётся с домена самого источника, а не через чужой сервис вроде
+ * s2/favicons: иначе список того, что читает человек, уезжает третьей стороне
+ * просто ради картинок.
+ */
+function faviconOf(kind: Source["kind"], url: string): string | null {
+  const host =
+    kind === "hackernews" ? "news.ycombinator.com"
+    : kind === "x" ? "x.com"
+    : kind === "reddit" ? "www.reddit.com"
+    : kind === "email" ? url.split("@")[1]
+    : (() => {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return null;
+        }
+      })();
+  return host ? `https://${host}/favicon.ico` : null;
+}
+
+function TelegramIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+    </svg>
+  );
+}
+
+/**
+ * Значок с запасным вариантом: favicon лежит по /favicon.ico далеко не
+ * у всех, и битая картинка вместо значка хуже отсутствия значка.
+ */
+function SourceIcon({
+  kind,
+  url,
+  className = "size-4",
+}: { kind: Source["kind"]; url: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (kind === "telegram") return <TelegramIcon className={className} />;
+  const src = faviconOf(kind, url);
+  if (!src || failed) return <GlobeIcon className={`${className} text-muted-foreground`} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" className={`${className} shrink-0 rounded-sm`} onError={() => setFailed(true)} />
+  );
+}
 
 /**
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
@@ -112,22 +162,53 @@ export function SourcesManager({
               показывало то же самое второй раз.
             */}
             <CardHeader>
-              <Input
-                name="label"
-                defaultValue={found.label}
-                key={found.url}
-                aria-label="Название источника"
-                className="font-heading h-auto border-transparent bg-transparent px-2 py-1 text-lg leading-snug font-medium hover:border-input"
-              />
-              <CardDescription className="flex flex-wrap items-center gap-2 px-2">
-                <Badge variant="outline">{found.kind}</Badge>
-                <span>{found.via} · свежих {found.fresh} из {found.entries}</span>
-              </CardDescription>
+              {/*
+                Значок стоит перед названием, как в любом списке: он отвечает
+                на «что это», а название — на «что именно», и в обратном
+                порядке читать приходится дважды.
+              */}
+              <div className="flex items-start gap-2.5">
+                <SourceIcon kind={found.kind} url={found.url} className="mt-2.5 size-5" />
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <Input
+                    name="label"
+                    defaultValue={found.label}
+                    key={found.url}
+                    aria-label="Название источника"
+                    className="font-heading h-auto border-transparent bg-transparent px-2 py-1 text-2xl leading-tight font-semibold hover:border-input"
+                  />
+                  <CardDescription className="px-2">
+                    {found.via} · свежих {found.fresh} из {found.entries}
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent className="flex flex-col gap-5">
               <input type="hidden" name="kind" value={found.kind} />
               <input type="hidden" name="url" value={found.url} />
               <input type="hidden" name="input_url" value={found.input_url} />
+
+              {/*
+                Доказательство, что источник живой, стоит над кнопками:
+                на него смотрят, чтобы решить, жать ли «Добавить», а после
+                кнопок его уже никто не читает.
+              */}
+              <div className="flex flex-col gap-1">
+                <a
+                  href={found.sample_url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm"
+                >
+                  <ExternalLinkIcon className="size-3.5 shrink-0" />
+                  <span className="truncate">последняя запись: {found.sample}</span>
+                </a>
+                {found.fresh === 0 ? (
+                  <span className="text-muted-foreground text-xs">
+                    Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
+                  </span>
+                ) : null}
+              </div>
 
               <div className="flex items-center gap-2">
                 <Button type="submit" disabled={pending}>
@@ -142,27 +223,6 @@ export function SourcesManager({
                   Отмена
                 </Button>
               </div>
-
-              {/*
-                Доказательство, что источник живой, — одной строкой и внизу.
-                Само по себе «Это прекрасно))))» читается как непонятно что:
-                строка подписана и открывается, чтобы убедиться можно было
-                самому, а не поверить на слово.
-              */}
-              <a
-                href={found.sample_url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs"
-              >
-                <ExternalLinkIcon className="size-3.5 shrink-0" />
-                <span className="truncate">последняя запись: {found.sample}</span>
-              </a>
-              {found.fresh === 0 ? (
-                <span className="text-muted-foreground -mt-2 text-xs">
-                  Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
-                </span>
-              ) : null}
             </CardContent>
           </form>
         ) : (
@@ -240,16 +300,12 @@ export function SourcesManager({
             <div key={source.id}>
               {index > 0 ? <Separator className="my-1" /> : null}
               <div className="flex items-center gap-3 py-1.5">
-                <Switch
-                  checked={source.active}
-                  disabled={!editable}
-                  onCheckedChange={(checked: boolean) =>
-                    startTransition(async () => {
-                      const result = await setSourceActive(source.id, checked);
-                      if (result && "error" in result) toast.error(result.error);
-                    })
-                  }
-                />
+                {/*
+                  Переключателя нет: источник либо есть, либо его удалили.
+                  Третье состояние требовало решения на каждой строке, а решений
+                  здесь ровно два — завести и убрать.
+                */}
+                <SourceIcon kind={source.kind} url={source.url} />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium">{source.label}</span>
                   <span className="truncate text-xs text-muted-foreground">
@@ -260,7 +316,14 @@ export function SourcesManager({
                   </span>
                   <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
                 </div>
-                <Badge variant="outline">{source.kind}</Badge>
+                {/*
+                  Выключенные остались с тех пор, когда переключатель был.
+                  Молча оставить их в списке нельзя: выглядят работающими,
+                  а прогон их не опрашивает.
+                */}
+                {!source.active ? (
+                  <Badge variant="outline" className="text-muted-foreground">не опрашивается</Badge>
+                ) : null}
                 {source.last_error ? (
                   <Badge variant="destructive" title={source.last_error}>ошибка</Badge>
                 ) : (source.silent_days ?? 0) >= 1 ? (
