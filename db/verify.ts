@@ -21,7 +21,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { freePort } from "./free-port";
+import { assertOwn, startLocalPg } from "./free-port";
 
 
 
@@ -68,10 +68,10 @@ async function main() {
   assert.equal(role.limit, 10, "лимит соединений роли должен быть 10");
   console.log(`  роль: search_path прибит, лимит ${role.limit}`);
 
-  const port = await freePort();
-  const server = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
-  await server.start();
-  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${port}/postgres`;
+  // Метка проверяется после подключения: свободный порт успевает занять
+  // соседняя проверка из другого worktree, и клиент уходит к её базе.
+  const local = await startLocalPg(db, (port) => new PGLiteSocketServer({ db, port, host: "127.0.0.1" }));
+  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${local.port}/postgres`;
   process.env.DB_POOL_MAX = "1";
 
   // queries.ts помечен server-only, чтобы не уехать в клиентский бандл.
@@ -89,6 +89,9 @@ async function main() {
 
   // Импорт после DATABASE_URL: модуль db.ts читает его на загрузке.
   const { sql } = await import("../src/lib/db");
+  // Своим же соединением: сокет PGlite обслуживает одно подключение,
+  // и пробное рядом с рабочим оставляет сервер отдающим пустоту.
+  await assertOwn(local, async (text) => (await sql.unsafe(text))[0] as { token?: string });
   const queries = await import("../src/lib/queries");
   const readers = await import("../src/lib/readers");
   const { markDuplicates } = await import("../pipeline/dedup");
@@ -545,22 +548,26 @@ async function main() {
     const [ownerNow] = await sql<(typeof owner)[]>`select * from dailynews.readers where owner`;
     assert.ok(ownerNow?.owner, "владелец должен найтись");
 
-    // Платный вид на бесплатном тарифе раньше проверялся тем же addByLink
-    // на владельце с plan: "free". Так больше нельзя: тариф владельца стал
-    // правилом, а не платежом, и «владелец на бесплатном» — состояние,
-    // которого не бывает. Проверка молча меряла не то: владелец получал Pro,
-    // разбор уходил в платную выдачу X и падал на незаданном ключе.
+    // Платный вид на бесплатном тарифе проверяется не через addByLink:
+    // разбор ушёл бы в платную выдачу X и упал на незаданном ключе, то есть
+    // проверка меряла бы ключ, а не тариф. Спрашиваем оба правила порознь —
+    // они и решают.
     //
-    // Отсюда следствие, которое стоит назвать вслух: пока каталог правит
-    // один владелец, а его тариф всегда Pro, отсечка по виду источника
-    // в addByLink недостижима вовсе. Поэтому спрашиваем оба правила
-    // порознь — они и решают.
+    // У владельца тариф считается по колонке: подписки он у себя самого
+    // не покупает, и проверять её статус не по чему. Купленное «pro» так
+    // у него и стояло — и гасло проверкой на подписку, которой нет, отчего
+    // выпуск собирался бесплатным размером.
     const { effectivePlan } = await import("../src/lib/lemon");
     const { kindDenial, PLANS } = await import("../src/lib/plans");
     assert.equal(
-      effectivePlan({ ...ownerNow, plan: "free" }).id,
+      effectivePlan({ ...ownerNow, plan: "pro", subscription_status: null, plan_ends_at: null }).id,
       "pro",
-      "тариф владельца — правило: бесплатный в колонке его не понижает",
+      "у владельца купленное работает без подписки",
+    );
+    assert.equal(
+      effectivePlan({ ...ownerNow, plan: "free" }).id,
+      "free",
+      "и бесплатный тоже: иначе владелец не увидит продукт глазами бесплатного читателя",
     );
     assert.match(
       kindDenial(PLANS.free, "x") ?? "",
@@ -568,7 +575,7 @@ async function main() {
       "на бесплатном тарифе отказ по виду называет тариф, который его открывает",
     );
     await sql`delete from dailynews.readers where id = ${stranger.id}`;
-    console.log("  ссылка боту: посторонний отсекается до запроса наружу, тариф владельца — правило");
+    console.log("  ссылка боту: посторонний отсекается до запроса наружу, тариф владельца — из колонки");
 
     // --- новые виды источников ------------------------------------------------
     // Ограничение переименовано намеренно: переопределение под прежним именем
@@ -592,7 +599,20 @@ async function main() {
     // Ограничение, переопределённое под тем же именем, по имени неотличимо
     // от применённого: 0018 так и проскочил. Теперь сверяется и содержимое.
     const { schemaGaps } = await import("./schema-gap");
-    assert.deepEqual(await schemaGaps(sql), [], "на полной схеме расхождений быть не должно");
+    const gaps = await schemaGaps(sql);
+    if (gaps.length > 0) {
+      // Расхождение «в базе нет ни одной таблицы» означает не сломанную
+      // схему, а разговор не с той базой. Разница видна только отсюда,
+      // поэтому она называется вслух, а не оставляется на догадки.
+      const [seen] = await sql<{ n: number }[]>`
+        select count(*)::int as n from information_schema.tables where table_schema = 'dailynews'
+      `;
+      const [mark] = await sql<{ token: string }[]>`select token from public.pg_owner_token`;
+      console.error(
+        `  таблиц видно ${seen.n}, метка базы ${mark?.token === local.token ? "своя" : `чужая (${mark?.token})`}`,
+      );
+    }
+    assert.deepEqual(gaps, [], "на полной схеме расхождений быть не должно");
 
     // Откатываем ограничение к версии 0025 — как если бы 0026 не применили.
     await sql`delete from dailynews.sources where kind = 'email'`;
@@ -777,10 +797,29 @@ async function main() {
       console.log("  «дочитал?»: запрос выполняется и находит заголовок");
     }
 
+    // Расшифровка шла только по свежевставленным материалам: первая
+    // неудача — провайдер ответил 401 — и ролик оставался с описанием
+    // из фида навсегда, потому что новым он больше никогда не будет.
+    const [video] = await sql<{ id: number }[]>`
+      insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+      select id, 'https://www.youtube.com/watch?v=abcdefghijk',
+             'youtube.com/watch?v=abcdefghijk', 'Ролик', 'ролик', 'описание из фида'
+        from dailynews.sources limit 1
+      returning id
+    `;
+    const waiting = async () => (await sql<{ id: number }[]>`
+      select id from dailynews.items
+       where transcribed_at is null and url like '%youtube.com/watch%'
+    `).length;
+    assert.equal(await waiting(), 1, "ролик без отметки ждёт расшифровки");
+    await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
+    assert.equal(await waiting(), 0, "с отметкой за ним больше не ходят");
+    console.log("  расшифровка: неудачная попытка повторяется, удачная — нет");
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});
-    await server.stop();
+    await local.stop();
     await db.close();
   }
 }
