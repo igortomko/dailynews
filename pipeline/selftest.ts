@@ -14,7 +14,7 @@ import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
-import { digestHtml } from "./kindle";
+import { digestHtml, sendsDigestToKindle } from "./kindle";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
@@ -598,4 +598,24 @@ for (const file of ["0019_plan", "0020_readers"]) {
   }
 }
 
-console.log("Самопроверка пройдена: 138 утверждений");
+// Переключатель выпуска на читалку. Адрес обслуживает и ручную отправку
+// отдельной статьи, поэтому выключенный выпуск не должен требовать стереть
+// адрес — и не должен молча слаться при выключённом переключателе.
+{
+  const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
+  assert.equal(sendsDigestToKindle(full), true, "адрес, отправитель и переключатель — шлём");
+  assert.equal(
+    sendsDigestToKindle({ ...full, kindle_digest: false }), false,
+    "выключенный переключатель отменяет выпуск, хотя адрес на месте",
+  );
+  assert.equal(
+    sendsDigestToKindle({ ...full, kindle_address: null }), false,
+    "без адреса слать некуда",
+  );
+  assert.equal(
+    sendsDigestToKindle({ ...full, kindle_sender: null }), false,
+    "без обратного адреса Amazon отбросит письмо молча",
+  );
+}
+
+console.log("Самопроверка пройдена: 142 утверждения");

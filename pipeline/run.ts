@@ -8,7 +8,7 @@ import { composite, scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
 import { notify } from "../src/lib/telegram";
-import { sendToKindle } from "./kindle";
+import { sendToKindle, sendsDigestToKindle } from "./kindle";
 import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
@@ -261,7 +261,7 @@ async function deliver(
     }
   }
 
-  if (!reader.kindle_address || !reader.kindle_sender) return;
+  if (!sendsDigestToKindle(reader)) return;
   try {
     const sent = await sendToKindle({
       to: reader.kindle_address,

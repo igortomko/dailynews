@@ -93,3 +93,24 @@ export async function sendToKindle(options: {
   }
   return true;
 }
+
+/**
+ * Уходит ли выпуск этому читателю на читалку.
+ *
+ * Три условия, и каждое выключает по своей причине: нет адреса — слать
+ * некуда; нет обратного адреса — Amazon отбросит письмо молча; выключен
+ * переключатель — читатель просил не слать выпуск, но адрес оставил
+ * для отправки отдельных статей. Раньше третьего не было, и «не присылай
+ * выпуск» делалось стиранием адреса, заодно выключая ручную отправку.
+ */
+type KindleTarget = {
+  kindle_address: string | null;
+  kindle_sender: string | null;
+  kindle_digest: boolean;
+};
+
+export function sendsDigestToKindle<T extends KindleTarget>(
+  reader: T,
+): reader is T & { kindle_address: string; kindle_sender: string } {
+  return Boolean(reader.kindle_address && reader.kindle_sender && reader.kindle_digest);
+}

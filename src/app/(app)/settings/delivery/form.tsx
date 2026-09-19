@@ -5,21 +5,29 @@ import { toast } from "sonner";
 import { saveKindle } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const DOMAIN = "kindle.tomko.io";
 
+// Точка входа «Manage Your Content and Devices». Ссылка ведёт на настоящий
+// раздел Amazon, а не на угаданный якорь внутри него: адрес личного
+// документа лежит там же, а хеш-маршруты этой страницы меняются.
+const AMAZON_SETTINGS = "https://www.amazon.com/hz/mycd/myx";
+
 export function DeliveryForm({
   connected,
   username,
   kindleAddress,
+  kindleDigest,
   sender,
 }: {
   connected: boolean;
   username: string | null;
   kindleAddress: string;
+  kindleDigest: boolean;
   sender: string | null;
 }) {
   const [pending, startTransition] = useTransition();
@@ -31,9 +39,8 @@ export function DeliveryForm({
         <CardHeader>
           <CardTitle>Telegram</CardTitle>
           <CardDescription>
-            Каждое утро туда приходит ссылка на свежий выпуск. Оттуда же приходит вход:
-            читать нужно в вебе, иначе калибровке неоткуда узнать, что было прочитано,
-            а что пролистано.
+            Каждое утро в твой Telegram приходит ссылка на свежий выпуск твоих
+            персональных новостей.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
@@ -46,9 +53,21 @@ export function DeliveryForm({
       <Card>
         <CardHeader>
           <CardTitle>Kindle</CardTitle>
-          <CardDescription>
-            Выпуск уходит книгой на читалку. Адрес вида имя@kindle.com лежит
-            в настройках Amazon, в «Manage Your Content and Devices».
+          <CardDescription className="flex flex-col gap-2">
+            <span>Ты можешь автоматически получать выпуск на свой Kindle.</span>
+            <span>
+              Добавь свой персональный адрес имя@kindle.com. Он лежит в настройках
+              Amazon, в{" "}
+              <a
+                href={AMAZON_SETTINGS}
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-4"
+              >
+                «Manage Your Content and Devices»
+              </a>
+              .
+            </span>
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -88,8 +107,22 @@ export function DeliveryForm({
                   aria-invalid={error ? true : undefined}
                 />
                 <FieldDescription>
-                  {error ?? "Пустое поле выключает отправку на Kindle."}
+                  {error ?? "Пустой адрес выключает отправку на читалку целиком."}
                 </FieldDescription>
+              </Field>
+
+              <Field orientation="horizontal">
+                <Switch
+                  id="kindle_digest"
+                  name="kindle_digest"
+                  defaultChecked={kindleDigest}
+                />
+                <FieldLabel htmlFor="kindle_digest" className="font-normal">
+                  Присылать выпуск на читалку
+                  <FieldDescription>
+                    Выключено — адрес остаётся для отправки отдельных статей.
+                  </FieldDescription>
+                </FieldLabel>
               </Field>
               <Button type="submit" disabled={pending} className="self-start">
                 Сохранить

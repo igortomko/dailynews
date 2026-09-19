@@ -232,9 +232,15 @@ export async function saveKindle(formData: FormData) {
     return { error: "Адрес должен заканчиваться на @kindle.com" };
   }
 
+  // Флажок приходит только когда включён: выключенный checkbox формы
+  // не отправляется вовсе, и `null` здесь значит «выключен», а не «не трогали».
+  const digest = formData.get("kindle_digest") !== null;
+
   await sql`
     update dailynews.readers
-       set kindle_address = ${address || null}, updated_at = now()
+       set kindle_address = ${address || null},
+           kindle_digest = ${digest},
+           updated_at = now()
      where id = ${readerId}
   `;
   revalidatePath("/settings/delivery");
