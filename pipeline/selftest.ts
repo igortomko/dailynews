@@ -38,6 +38,8 @@ import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
+import { parseFeed } from "./fetch";
+import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
 import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
 import {
   channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
@@ -892,6 +894,14 @@ assert.deepEqual(
 // рисуется по тому же FEATURES.has, и предлагать ему нечего.
 assert.ok(FEATURES.language.has(PLANS.plus), "у Plus перевод уже есть, короны не будет");
 
+// Темы всех читателей уходят в вопрос Jev одним списком, и каждая удлиняет
+// его на каждом материале потока. Предел персонален, цена — общая, поэтому
+// бесплатный тариф не должен открывать столько же, сколько платный.
+assert.ok(
+  PLANS.free.maxTopics < PLANS.plus.maxTopics && PLANS.plus.maxTopics < PLANS.pro.maxTopics,
+  "предел по интересам растёт с тарифом",
+);
+
 // Перевод платный, а язык источника — законное значение, а не пустота:
 // оно уходит в промпт и означает «оставь как в источнике».
 assert.ok(!FEATURES.language.has(PLANS.free), "на бесплатном перевода нет");
@@ -1417,6 +1427,19 @@ assert.equal(
   "истёкшая подписка не даёт платного выпуска",
 );
 assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
+
+// Владелец не покупает подписку у себя самого: платёж через Lemon Squeezy
+// из кармана в карман — это комиссия за перевод денег самому себе.
+assert.equal(
+  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  "pro",
+  "у владельца тариф правилом, а не платежом",
+);
+assert.equal(
+  effectivePlan(paid({ plan: "free", owner: false })).id,
+  "free",
+  "остальным тариф по-прежнему даёт только подписка",
+);
 assert.ok(endingAt(paid({ plan_ends_at: new Date(Date.now() + DAY).toISOString() })), "дата конца видна интерфейсу");
 assert.equal(endingAt(paid()), null, "у активной подписки конца нет");
 
@@ -1619,5 +1642,109 @@ for (const id of PLAN_IDS) {
     `на тарифе «${p.label}» ни одна тема не остаётся с нулём`,
   );
 }
+
+// --- YouTube: ролик приезжает с содержанием, а не одним заголовком ------------
+// Описание ролика лежит в media:group/media:description: своего <description>
+// в Atom у YouTube нет вовсе, и без этой ветки канал приезжал одними
+// заголовками — Jev оценивал по заголовку, дайджест писал по нему же,
+// а выглядело это как обычный материал.
+const ytFeed = parseFeed(readFileSync("pipeline/fixtures/youtube-feed.xml", "utf8"));
+assert.equal(ytFeed.title, "Veritasium", "название канала читается");
+assert.ok(ytFeed.items.length >= 2, "записи фида разобраны");
+assert.ok(
+  ytFeed.items.every((item) => item.excerpt.length > 0),
+  "у каждой записи есть описание: пустой excerpt — это ролик без содержания",
+);
+assert.ok(
+  ytFeed.items.some((item) => item.excerpt.includes("Smith Chart")),
+  "описание берётся из media:description, а не из заголовка",
+);
+assert.ok(
+  ytFeed.items.every((item) => videoIdOf(item.url) !== null),
+  "адрес каждой записи опознаётся как ролик",
+);
+
+// Номер ролика приходит тремя формами, и короткий метраж — отдельная:
+// /shorts/<id> приезжает тем же фидом, что и обычные ролики.
+assert.equal(videoIdOf("https://www.youtube.com/watch?v=O3a99HNskNk"), "O3a99HNskNk", "watch?v=");
+assert.equal(videoIdOf("https://youtu.be/O3a99HNskNk?t=42"), "O3a99HNskNk", "короткая ссылка");
+assert.equal(videoIdOf("https://www.youtube.com/shorts/O3a99HNskNk"), "O3a99HNskNk", "короткий метраж");
+assert.equal(videoIdOf("https://www.youtube.com/@veritasium"), null, "канал роликом не является");
+assert.equal(videoIdOf("https://example.com/watch?v=O3a99HNskNk"), null, "чужой хост — не YouTube");
+assert.equal(videoIdOf("не адрес"), null, "строка без адреса");
+
+// Разбор ответа timedtext идёт по сохранённому куску настоящего ответа:
+// это чужая разметка, и сломается она молча.
+const timed = parseTimedText(readFileSync("pipeline/fixtures/youtube-timedtext.xml", "utf8"));
+assert.ok(timed.startsWith("This is the scariest chart in electrical"), "реплики склеены по порядку");
+assert.ok(timed.length > 400, "расшифровка не обрывается на первой реплике");
+assert.ok(!timed.includes("&amp;"), "двойные сущности разворачиваются до текста");
+assert.ok(!timed.includes("<text"), "разметка не доезжает до текста");
+assert.equal(
+  parseTimedText('<transcript><text start="0" dur="1">[Music] hello [Applause] world</text></transcript>'),
+  "hello world",
+  "пометки звукорежиссёра выбрасываются: в конспекте от них ничего, а в счёте они есть",
+);
+assert.equal(parseTimedText("<transcript></transcript>"), "", "ролик без реплик — пустая расшифровка");
+
+// Дорожка выбирается по звуку ролика. У канала с переводами они лежат
+// в одном списке с оригиналом, и «первая человеческая» давала арабские
+// субтитры английской лекции: конспект выходил арабским, и ни одной
+// ошибки при этом не было.
+assert.equal(
+  pickTrack({
+    captionTracks: [{ baseUrl: "ar", languageCode: "ar" }, { baseUrl: "en", languageCode: "en" }],
+    audioTracks: [{ defaultCaptionTrackIndex: 1 }],
+    defaultAudioTrackIndex: 0,
+  })?.baseUrl,
+  "en",
+  "дорожка основного звука важнее первой в списке",
+);
+assert.equal(
+  pickTrack({ captionTracks: [{ baseUrl: "a", kind: "asr" }, { baseUrl: "b" }] })?.baseUrl,
+  "b",
+  "без пометки — написанная человеком важнее машинной",
+);
+assert.equal(
+  pickTrack({ captionTracks: [{ baseUrl: "a", kind: "asr" }], audioTracks: [{}] })?.baseUrl,
+  "a",
+  "машинная, когда другой нет",
+);
+assert.equal(pickTrack({}), null, "дорожек нет — читать нечего");
+
+// Пересказ для читалки идёт в items.body, который читает тот же разбор,
+// что и полный текст статьи из фида, — а он ждёт HTML. Markdown как есть
+// потерялся бы в defuddle, и отправка пошла бы качать страницу ролика,
+// где текста нет вовсе.
+const html = articleHtml("## Раздел\n\nАбзац с числом 42.");
+assert.ok(html.includes("<h2>") && html.includes("<p>"), "разметка пересказа превращается в HTML");
+assert.equal(articleHtml(""), "", "пустой пересказ остаётся пустым, а не <article></article>");
+
+// --- шапка ленты: key на элементах, уезжающих пропом -------------------------
+// FeedTabs ставит left и right соседями в одном родителе. Элемент, приехавший
+// в клиентский компонент полезной нагрузкой сервера, теряет пометку «детей
+// ровно столько, сколько написано»: React считает пару списком и просит ключ.
+// В консоли это выглядит настоящей ошибкой ленты и прячет собой те, что ошибки
+// и есть, — а увидеть его можно только глазами, предупреждение живёт лишь
+// в dev-сборке React. Поэтому проверка тут текстовая: она ловит не причину,
+// а её след в исходнике — ровно тот, который теряется при перекладке шапки.
+const feedSource = readFileSync("src/app/(app)/page.tsx", "utf8");
+const feedPage = feedSource.slice(feedSource.indexOf("<FeedTabs"));
+// Переименовали компонент — проверка обязана упасть, а не замолчать на пустом
+// срезе: тест, ничего не нашедший, зелёный ровно так же, как тест успешный.
+assert.ok(feedPage.startsWith("<FeedTabs"), "ленту рисует FeedTabs");
+for (const prop of ["left", "right"]) {
+  const at = feedPage.indexOf(`${prop}={`);
+  assert.ok(at >= 0, `${prop} должен передаваться в FeedTabs`);
+  const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
+  assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
+}
+// А требование key держится на том, что они соседи. Разведут по разным
+// родителям — проверка выше станет суеверием, и упасть она должна здесь.
+assert.match(
+  readFileSync("src/components/feed-tabs.tsx", "utf8"),
+  /\{left\}\s*\{right\}/,
+  "left и right стоят соседями — иначе key им не нужен",
+);
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

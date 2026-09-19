@@ -355,6 +355,19 @@ async function main() {
              (${owner.id}, ${ids[0]}, 'outbound', 120, 0.8),
              (${second.id}, ${ids[3]}, 'opened', 60, 0.8)
     `;
+    // Граница «досюда дочитал» держится на этом поле: материал, попадавшийся
+    // на глаза, отмечен, остальные нет. Если запрос начнёт отдавать true всем
+    // подряд, граница уедет в начало ленты и будет врать молча.
+    const seenFlags = (await queries.getFeed(owner.id, today)).map((item) => item.seen);
+    assert.deepEqual(seenFlags, [false, false], "до события seen ни один материал не отмечен");
+    await sql`
+      insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+      values (${owner.id}, ${ids[0]}, 'seen', 120, 0.8)
+    `;
+    const withSeen = await queries.getFeed(owner.id, today);
+    assert.equal(withSeen[0].seen, true, "показанный материал должен быть отмечен");
+    assert.equal(withSeen[1].seen, false, "чужой строке события seen взяться неоткуда");
+
     const afterRead = await queries.getFeed(owner.id, today);
     assert.equal(afterRead[0].read_count, 2, "счётчик чтений должен вырасти");
 
@@ -554,9 +567,23 @@ async function main() {
     // читателя — тогда проверка меряла бы не то, что думает.
     const [ownerNow] = await sql<(typeof owner)[]>`select * from dailynews.readers where owner`;
     assert.ok(ownerNow?.owner, "владелец должен найтись");
-    const paid = await addByLink({ ...ownerNow, plan: "free" }, "from:karpathy OR from:sama");
-    assert.equal(paid.ok, false, "X на бесплатном тарифе не заводится");
-    assert.match((paid as { error: string }).error, /Pro/, "отказ называет тариф, который его открывает");
+    // Платный вид на бесплатном тарифе раньше проверялся тем же addByLink
+    // на владельце с plan: "free". Так больше нельзя: тариф владельца стал
+    // правилом, а не платежом, и «владелец на бесплатном» — состояние,
+    // которого не бывает. Проверка молча меряла не то: владелец получал Pro,
+    // разбор уходил в платную выдачу X и падал на незаданном ключе.
+    const { effectivePlan } = await import("../src/lib/lemon");
+    const { kindDenial, PLANS } = await import("../src/lib/plans");
+    assert.equal(
+      effectivePlan({ ...ownerNow, plan: "free" }).id,
+      "pro",
+      "тариф владельца — правило: бесплатный в колонке его не понижает",
+    );
+    assert.match(
+      kindDenial(PLANS.free, "x") ?? "",
+      /Pro/,
+      "на бесплатном тарифе отказ по виду называет тариф, который его открывает",
+    );
 
     // Предел считается по своему набору, а не по каталогу: иначе пятый
     // источник, заведённый кем угодно, закрывал бы добавление всем
@@ -564,14 +591,21 @@ async function main() {
     const { denyForKind } = await import("../src/lib/sources");
     const fresh = (await readers.getReader(second.id))!;
     assert.equal(
-      await denyForKind({ ...fresh, plan: "free" }, "rss"), null,
+      await denyForKind(fresh, "rss"), null,
       "у читателя без источников место есть, сколько бы их ни было в каталоге",
     );
+    // А у того, кто набрал свой предел, места нет. Считается его набор:
+    // до reader_sources предел мерили по каталогу, и пятый источник,
+    // заведённый кем угодно, закрывал добавление всем бесплатным разом.
+    for (const row of sources.slice(0, PLANS.free.maxSources)) {
+      await readers.addReaderSource(second.id, row.id);
+    }
     assert.ok(
-      await denyForKind({ ...ownerNow, plan: "free" }, "rss"),
-      "а у того, кто выбрал больше предела, — нет",
+      await denyForKind(fresh, "rss"),
+      "набравший предел упирается в него",
     );
-    console.log("  предел тарифа считается по своему набору, платный вид отсекается до сети");
+    await sql`delete from dailynews.reader_sources where reader_id = ${second.id}`;
+    console.log("  предел тарифа считается по своему набору, а не по каталогу");
 
     // --- первый заход ----------------------------------------------------------
     // Шаг онбординга считается по данным, а не хранится колонкой: колонка
@@ -590,7 +624,6 @@ async function main() {
 
     // Подборка под интересы: стартовый список отвечает за темы без истории,
     // каталог — за то, чтобы предложения взрослели сами.
-    const { PLANS } = await import("../src/lib/plans");
     const offered = await suggestSources(newcomer.id, ["energy"], PLANS.free);
     assert.ok(offered.length > 0, "под выбранный интерес должно найтись, что предложить");
     assert.equal(
@@ -657,6 +690,34 @@ async function main() {
       values ('email', 'рассылка', 'letters@example-letter.test')
     `;
     console.log("  виды источников: telegram и email приняты, выдуманный отвергнут");
+
+    // --- этапы расхода ---------------------------------------------------------
+    // Этап, которого нет в ограничении, роняет запись о расходе целиком:
+    // вызов оплачен, а в model_calls его нет, и дневной потолок считает
+    // не те деньги. Так уже ломалось дважды — с переводом статьи и
+    // с расшифровкой ролика, — и оба раза список закрывали тем, что знали
+    // в своей ветке.
+    // Список — объединение по всем веткам, а не по этой: ограничение общее,
+    // и каждая ветка пересоздаёт его под тем же именем. Взявшая только свои
+    // значения стирает чужие вместе с их строками.
+    const stages = [
+      "score", "digest", "summary", "translate", "translation-quality",
+      "video", "voice", "post", "post-quality", "interests",
+    ];
+    for (const stage of stages) {
+      await readers.recordCall({
+        readerId: owner.id, stage: stage as never, model: "проба", tokensIn: 1, costUsd: 0,
+      });
+    }
+    await assert.rejects(
+      readers.recordCall({
+        readerId: owner.id, stage: "выдуманный" as never, model: "проба", tokensIn: 1, costUsd: 0,
+      }),
+      /model_calls_stage_check/,
+      "незнакомый этап отвергается ограничением, а не пишется молча",
+    );
+    await sql`delete from dailynews.model_calls where model = 'проба'`;
+    console.log("  этапы расхода: все известные пишутся, выдуманный отвергнут");
 
     // --- сверка формы схемы видит переопределение ------------------------------
     // Ограничение, переопределённое под тем же именем, по имени неотличимо

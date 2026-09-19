@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { cn } from "@/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
 import type { Plan } from "@/lib/plans";
-import { FieldDescription, FieldGroup } from "@/components/ui/field";
+import { FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function InterestsForm({
@@ -55,7 +56,13 @@ export function InterestsForm({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           Интересы
-          <span aria-live="polite" className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+          <span
+            aria-live="polite"
+            className={cn(
+              "flex items-center gap-1 text-xs font-normal",
+              saved && !pending ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+            )}
+          >
             {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
           </span>
         </CardTitle>
@@ -71,7 +78,7 @@ export function InterestsForm({
               plan={plan}
               onChange={schedule}
             />
-            {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
+            {error ? <FieldError>{error}</FieldError> : null}
           </FieldGroup>
         </form>
       </CardContent>

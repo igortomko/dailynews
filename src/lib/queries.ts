@@ -33,6 +33,12 @@ export type FeedItem = {
    */
   published_at: Date;
   read_count: number;
+  /**
+   * Попадался ли материал на глаза до этого захода. Лента идёт по убыванию
+   * скора, а читают её сверху вниз — значит виденное лежит подряд с начала,
+   * и граница между ним и остальным отвечает на «докуда я вчера дочитал».
+   */
+  seen: boolean;
 };
 
 export async function getSources(): Promise<Source[]> {
@@ -134,7 +140,10 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
            coalesce(i.published_at, i.collected_at) as published_at,
            (select count(*)::int from dailynews.reads r
              where r.item_id = i.id and r.reader_id = ${readerId}
-               and r.event in ('opened', 'outbound')) as read_count
+               and r.event in ('opened', 'outbound')) as read_count,
+           exists (select 1 from dailynews.reads r
+                    where r.item_id = i.id and r.reader_id = ${readerId}
+                      and r.event = 'seen') as seen
       from dailynews.digests d
       join dailynews.digest_items di on di.digest_id = d.id
       join dailynews.items i on i.id = di.item_id

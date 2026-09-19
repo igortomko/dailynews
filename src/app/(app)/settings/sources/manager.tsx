@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -103,6 +103,37 @@ function listOf(names: string[], limit = 3): string {
  * на нём приучает её не замечать.
  */
 const SILENT_DAYS = 5;
+
+/**
+ * Куда ведёт источник, если по нему щёлкнуть.
+ *
+ * Адресом фида url бывает не у всех: у Hacker News там листинг, у Telegram —
+ * имя канала, у почты — адрес отправителя. Ссылка на «topstories» вела бы
+ * в никуда, поэтому адрес собирается по виду источника, а где открывать
+ * нечего — ссылки нет вовсе.
+ */
+function openUrlOf(source: SourceHealth): string | null {
+  switch (source.kind) {
+    case "rss":
+      return /^https?:\/\//.test(source.url) ? source.url : null;
+    case "hackernews":
+      return source.url === "newstories"
+        ? "https://news.ycombinator.com/newest"
+        : source.url === "beststories"
+          ? "https://news.ycombinator.com/best"
+          : "https://news.ycombinator.com/";
+    case "telegram":
+      return `https://t.me/${source.url}`;
+    case "reddit":
+      return `https://www.reddit.com/r/${source.url}`;
+    case "x":
+      return `https://x.com/search?q=${encodeURIComponent(source.url)}`;
+    // У почты открывать нечего: адрес отправителя — не страница, а щелчок
+    // по нему запускал бы почтовую программу, чего никто не просил.
+    case "email":
+      return null;
+  }
+}
 
 /**
  * Что с источником не так, или null, когда всё в порядке.
@@ -350,11 +381,21 @@ export function SourcesManager({
                       {pending ? "Проверяю…" : "Добавить"}
                     </Button>
                   </div>
-                  <FieldDescription>
-                    {error ??
-                      "Поддерживается: новостные сайты, блоги, YouTube, GitHub, " +
-                        "открытый Telegram-канал и т. д."}
-                  </FieldDescription>
+                  {/*
+                    Отказ и подсказка — разные вещи, и выглядеть одинаково
+                    они не имеют права: серая строка на месте серой строки
+                    читается как продолжение подсказки, а не как «не вышло».
+                    FieldError к тому же объявляет себя role="alert",
+                    и экранный диктор произносит отказ сам.
+                  */}
+                  {error ? (
+                    <FieldError>{error}</FieldError>
+                  ) : (
+                    <FieldDescription>
+                      Поддерживается: новостные сайты, блоги, YouTube, GitHub,
+                      открытый Telegram-канал и т. д.
+                    </FieldDescription>
+                  )}
                 </Field>
 
                 {found && !plan.kinds.includes(found.kind) ? (
@@ -413,12 +454,31 @@ export function SourcesManager({
                   <SourceIcon kind={source.kind} url={source.url} className="mt-0.5 size-4" />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-medium">{source.label}</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {source.url}
-                      {source.input_url && source.input_url !== source.url
-                        ? ` ← ${source.input_url}`
-                        : ""}
-                    </span>
+                    {/*
+                      Адрес открывается в соседнем окне: увидеть, что за
+                      источником, — обычное желание, а копировать ссылку
+                      руками ради этого незачем.
+                    */}
+                    {openUrlOf(source) ? (
+                      <a
+                        href={openUrlOf(source)!}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="truncate text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        {source.url}
+                        {source.input_url && source.input_url !== source.url
+                          ? ` ← ${source.input_url}`
+                          : ""}
+                      </a>
+                    ) : (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {source.url}
+                        {source.input_url && source.input_url !== source.url
+                          ? ` ← ${source.input_url}`
+                          : ""}
+                      </span>
+                    )}
                     {troubleOf(source) ? (
                       <span className="truncate text-xs text-muted-foreground">
                         {troubleOf(source)}
@@ -433,13 +493,17 @@ export function SourcesManager({
                   её иногда хочется у любого.
                 */}
                 {source.last_error ? (
+                  // Своя подсказка вместо title — та же, что у всех иконок
+                  // в приложении. Текст ошибки продублирован в предупреждении
+                  // наверху страницы, поэтому наведение здесь — короткий путь,
+                  // а не единственный.
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="destructive" />}>ошибка</TooltipTrigger>
+                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>ошибка</TooltipTrigger>
                     <TooltipContent>{source.last_error}</TooltipContent>
                   </Tooltip>
                 ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="destructive" />}>
+                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>
                       молчит {source.silent_days} дн.
                     </TooltipTrigger>
                     <TooltipContent>
@@ -447,8 +511,20 @@ export function SourcesManager({
                     </TooltipContent>
                   </Tooltip>
                 ) : source.last_count !== null ? (
+                  // Одно число без подписи — загадка: рядом уже стоит отдача
+                  // за тридцать дней, и какое из двух что значит, неоткуда
+                  // узнать, кроме как навести. Подпись нужна и диктору:
+                  // подсказка достаётся курсору, а он её не видит.
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="secondary" />}>
+                    <TooltipTrigger
+                      render={
+                        <Badge
+                          variant="secondary"
+                          className="cursor-help"
+                          aria-label={`Последний прогон дал ${source.last_count} свежих материалов`}
+                        />
+                      }
+                    >
                       {source.last_count}
                     </TooltipTrigger>
                     <TooltipContent>
