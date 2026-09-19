@@ -2,7 +2,7 @@ import { CheckIcon, CrownIcon, MinusIcon, SproutIcon, ZapIcon } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { checkoutUrl, endingAt } from "@/lib/lemon";
 import { maxDigestOf, FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
@@ -47,6 +47,7 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
   const paying = Boolean(reader.subscription_id);
 
   return (
+    <TooltipProvider>
     <Card>
       <CardHeader>
         <CardTitle>Тарифы</CardTitle>
@@ -90,16 +91,23 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
               <dl className="flex flex-col gap-1.5 text-sm">
                 {ROWS.map(({ feature, value }) => (
                   <div key={feature} className="flex items-start justify-between gap-3">
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <dt className="min-w-0 cursor-help text-left text-muted-foreground underline decoration-dotted decoration-muted-foreground/40 underline-offset-4" />
-                        }
-                      >
-                        {FEATURES[feature].title}
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-64">{FEATURES[feature].what}</TooltipContent>
-                    </Tooltip>
+                    <dt className="min-w-0">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              className="cursor-help text-left text-muted-foreground underline decoration-dotted decoration-muted-foreground/50 underline-offset-4 hover:text-foreground"
+                            />
+                          }
+                        >
+                          {FEATURES[feature].title}
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-64">
+                          {FEATURES[feature].what}
+                        </TooltipContent>
+                      </Tooltip>
+                    </dt>
                     <dd className="shrink-0 whitespace-nowrap tabular-nums">
                       <Value value={value(plan)} />
                     </dd>
@@ -109,11 +117,25 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
 
               {/* Кнопка появляется только там, где ей есть куда вести:
                   «перейти» без настроенной оплаты — обещание без продукта. */}
-              {buy ? (
-                <Button size="sm" className="mt-auto" render={<a href={buy} />}>
-                  Перейти на «{plan.label}»
+              {mine ? (
+                <Button size="sm" variant="outline" className="mt-auto" disabled>
+                  Твой тариф
                 </Button>
-              ) : null}
+              ) : plan.price > current.price ? (
+                buy ? (
+                  <Button size="sm" className="mt-auto" render={<a href={buy} />}>
+                    Перейти на «{plan.label}»
+                  </Button>
+                ) : (
+                  <Button size="sm" className="mt-auto" disabled>
+                    Перейти на «{plan.label}»
+                  </Button>
+                )
+              ) : (
+                <Button size="sm" variant="outline" className="mt-auto" disabled>
+                  Ниже твоего
+                </Button>
+              )}
             </div>
           );
         })}
@@ -138,5 +160,6 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
         </CardContent>
       ) : null}
     </Card>
+    </TooltipProvider>
   );
 }
