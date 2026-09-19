@@ -231,6 +231,38 @@ assert.equal(
   "настоящая связь через глагол помечаться не должна",
 );
 
+// --- что миграции обещают базе -------------------------------------------------
+// Проверка схемы читает миграции регулярками. Забудет про drop — начнёт
+// требовать колонки, которые сама же миграция и убрала, и ей перестанут
+// верить на второй день.
+import { promised } from "../db/schema-gap";
+const promise = promised("db/migrations");
+const columnNames = promise.columns.map((entry) => `${entry.table}.${entry.column}`);
+assert.ok(columnNames.includes("digests.reader_id"), "добавленная колонка должна попасть в список");
+assert.ok(
+  !columnNames.includes("profile.digest_hour"),
+  "снятая следующей миграцией колонка требоваться не должна",
+);
+assert.ok(
+  promise.tables.some((entry) => entry.table === "readers"),
+  "заведённая таблица должна попасть в список",
+);
+// Увезённая таблица уносит и обещания своих колонок: 0019 забрала profile
+// целиком, и требовать profile.complexity после неё значит показывать
+// расхождение там, где всё правильно, — а такой проверке перестают верить.
+assert.ok(
+  !promise.tables.some((entry) => entry.table === "profile"),
+  "увезённая таблица требоваться не должна",
+);
+assert.ok(
+  !columnNames.some((name) => name.startsWith("profile.")),
+  "колонки увезённой таблицы требоваться не должны",
+);
+assert.ok(
+  promise.constraints.some((entry) => entry.name === "topics_weight_positive"),
+  "именованное ограничение должно попасть в список",
+);
+
 // --- список размеров против ограничения базы -----------------------------------
 // Форма предлагает список, база держит check. Разъедутся — читатель выберет
 // число, которое база отвергнет, и виноватым будет выглядеть он.
@@ -461,7 +493,7 @@ assert.ok(!book.includes("<тег>"), "сырой тег из источника
 // --- цена вызова --------------------------------------------------------------
 // Без верной цены событие о расходе — выдумка, а дневной потолок читателя
 // не срабатывает никогда.
-const million = { input: 1e6, output: 0 };
+const million = { input: 1e6, output: 0, cached: 0, reasoning: 0, requests: 1 };
 delete process.env.LLM_INPUT_PRICE;
 assert.equal(llmCost(million), 0.3, "без переменной берётся цена по умолчанию");
 process.env.LLM_INPUT_PRICE = "";
@@ -482,4 +514,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 113 утверждений");
+console.log("Самопроверка пройдена: 119 утверждений");

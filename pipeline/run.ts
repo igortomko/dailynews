@@ -153,6 +153,15 @@ async function runForReader(reader: Reader, day: string, shared: {
         complexity: reader.complexity,
         words_per_sentence: Number(perSentence.toFixed(1)),
         long_word_share: Number(longShare.toFixed(3)),
+        // Что на самом деле ушло в провайдера: модель выводит writeDigest,
+        // своя копия резолюции разошлась бы с ней на пустой строке.
+        digest_model: digest.model,
+        digest_input_tokens: digest.usage.input,
+        digest_cached_tokens: digest.usage.cached,
+        digest_output_tokens: digest.usage.output,
+        digest_reasoning_tokens: digest.usage.reasoning,
+        digest_reasoning_effort: digest.reasoningEffort,
+        jev_input_tokens: quality.inputTokens,
         cost_usd: Number((digestCost + qualityCost).toFixed(5)),
         // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
         // строку, и stats->>'cost_usd' молча возвращает null.
@@ -192,6 +201,13 @@ async function runForReader(reader: Reader, day: string, shared: {
     `  ${name}: ${survivors.length} материалов, качество ${meanQuality.toFixed(0)} из 85, ` +
     `${perSentence.toFixed(1)} слов в предложении (ползунок ${reader.complexity} из 5), ` +
     `$${(digestCost + qualityCost).toFixed(4)}`,
+  );
+  // Рассуждение тарифицируется как выход и в ответ не попадает: без этой
+  // строки главная статья счёта выглядит как длинный текст.
+  log(
+    `    ${digest.usage.requests} запроса, ${digest.usage.input} вх ` +
+    `(${digest.usage.cached} из кэша), ${digest.usage.output} вых ` +
+    `(${digest.usage.reasoning} рассуждение)`,
   );
 
   await deliver(reader, day, digest.intro, survivors, writtenById, name);

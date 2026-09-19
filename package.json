@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx pipeline/selftest.ts",
     "verify:db": "tsx db/verify.ts",
+    "migrate": "tsx --env-file=.env db/migrate.ts",
     "dry-run": "tsx --env-file=.env pipeline/dry-run.ts",
     "ping": "tsx --env-file=.env db/ping.ts",
     "bot:webhook": "tsx --env-file=.env scripts/set-webhook.ts",

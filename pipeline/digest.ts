@@ -21,16 +21,23 @@ export type Written = {
   summary: string;
 };
 
-export type Usage = { input: number; output: number };
+export type Usage = {
+  input: number; output: number; cached: number; reasoning: number; requests: number;
+};
 
 export type DigestResult = {
   intro: string;
   items: Written[];
   flagged?: number;
-  /** Токены и модель уходят в dailynews.model_calls: без строки на вызов
-   *  дневной потолок читателя нечем проверять. */
   usage: Usage;
+  /**
+   * Что на самом деле ушло в провайдера. Вызывающий не выводит это заново:
+   * своя копия резолюции разойдётся с `resolve` на пустой строке — Actions
+   * подставляет её вместо отсутствующего секрета, — и в статистику попадёт
+   * модель, которая не работала. Колонка, ради которой всё и заводилось.
+   */
   model: string;
+  reasoningEffort: string | null;
 };
 
 /** Сколько материалов уходит в модель одним запросом. */
@@ -83,7 +90,9 @@ function voiceRules(voice: Voice): string {
   ].join("\n\n");
 }
 
-export type LlmConfig = { base_url?: string; model?: string; api_key?: string };
+export type LlmConfig = {
+  base_url?: string; model?: string; api_key?: string; reasoning_effort?: string;
+};
 
 /**
  * Окружение старше настройки в базе: ключ, заданный переменной, не должен
@@ -105,6 +114,12 @@ function resolve(config: LlmConfig) {
       "https://generativelanguage.googleapis.com/v1beta/openai",
     model: firstSet(process.env.LLM_MODEL, config.model) ?? "gemini-2.5-flash",
     apiKey: firstSet(process.env.LLM_API_KEY, config.api_key) ?? "",
+    // Рассуждение тарифицируется как выход и занимало 80% ответа:
+    // 12411 токенов из 15494 на шестнадцати описаниях. Значение по
+    // умолчанию у провайдера — «high», то есть самое дорогое, и молча.
+    // Пусто — не шлём параметр вовсе: провайдер, который его не знает,
+    // отвечает 400 на весь запрос.
+    reasoningEffort: firstSet(process.env.LLM_REASONING_EFFORT, config.reasoning_effort),
   };
 }
 
@@ -119,14 +134,15 @@ export async function writeDigest(
   voice: Voice = DEFAULT_VOICE,
 ): Promise<DigestResult> {
   const language = voice.language || "русском";
-  const { baseUrl, model, apiKey } = resolve(config);
+  const { baseUrl, model, apiKey, reasoningEffort } = resolve(config);
   if (!apiKey) {
     // Без ключа дайджест всё равно собирается — просто исходными заголовками.
     return {
       intro: "",
       flagged: 0,
-      usage: { input: 0, output: 0 },
-      model: "",
+      usage: { input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 },
+      model,
+      reasoningEffort: reasoningEffort ?? null,
       items: survivors.map((s) => ({
         id: s.id,
         title_ru: s.title,
@@ -254,8 +270,6 @@ ${blockOf(list)}
 Ответь только валидным JSON, без markdown:
 {${askIntro ? '"intro": "...", ' : ""}"items": [{"id": <число>, "title_ru": "...", "summary": "..."}]}`;
 
-  const usage: Usage = { input: 0, output: 0 };
-
   const ask = async (list: Survivor[], askIntro: boolean) => {
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -268,6 +282,7 @@ ${blockOf(list)}
       // из двадцати, и дайджест внешне собрался — просто девятнадцать
       // заголовков остались на языке источника.
       max_tokens: 32000,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       response_format: { type: "json_object" },
       messages: [{ role: "user", content: promptFor(list, askIntro) }],
     }),
@@ -283,11 +298,24 @@ ${blockOf(list)}
     const match = json.match(/\{[\s\S]*\}/);
     if (!match) throw new Error(`LLM вернул не JSON: ${text.slice(0, 200)}`);
 
-    usage.input += Number(payload.usage?.prompt_tokens ?? 0);
-    usage.output += Number(payload.usage?.completion_tokens ?? 0);
-
     const parsed = parseDigest(match[0]);
-    return { parsed, finish: payload.choices?.[0]?.finish_reason as string | undefined };
+    return {
+      parsed,
+      finish: payload.choices?.[0]?.finish_reason as string | undefined,
+      // Главная статья расхода — именно этот ответ, и до сих пор она
+      // нигде не измерялась: в stats попадала только цена Jev, вдесятеро
+      // меньшая. Цену не считаем здесь: у провайдеров она меняется
+      // и зависит от часа суток, а токены — факт.
+      usage: payload.usage as
+        | {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            prompt_cache_hit_tokens?: number;
+            prompt_tokens_details?: { cached_tokens?: number };
+            completion_tokens_details?: { reasoning_tokens?: number };
+          }
+        | undefined,
+    };
   };
 
   // Кусками, а не одной простынёй: потолок ответа делится с рассуждением
@@ -298,12 +326,27 @@ ${blockOf(list)}
   const fromModel: Written[] = [];
   let intro = "";
   let finish: string | undefined;
+  const usage: Usage = { input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 };
   for (let at = 0; at < survivors.length; at += CHUNK) {
     const chunk = survivors.slice(at, at + CHUNK);
     const answer = await ask(chunk, at === 0);
     fromModel.push(...(answer.parsed.items ?? []));
     if (at === 0) intro = answer.parsed.intro ?? "";
     finish = answer.finish;
+    usage.input += answer.usage?.prompt_tokens ?? 0;
+    usage.output += answer.usage?.completion_tokens ?? 0;
+    // Имя поля у провайдеров разное: DeepSeek отдаёт prompt_cache_hit_tokens,
+    // OpenAI-совместимые (Gemini в их числе) — prompt_tokens_details.cached_tokens.
+    // Читать одно — получить честный ноль на другом провайдере и решить,
+    // что кэш не работает.
+    usage.cached +=
+      answer.usage?.prompt_cache_hit_tokens ??
+      answer.usage?.prompt_tokens_details?.cached_tokens ??
+      0;
+    // Рассуждение тарифицируется как выход и в ответ не попадает:
+    // без этой строки главная статья счёта выглядит как длинный текст.
+    usage.reasoning += answer.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+    usage.requests++;
   }
 
   const { items: written, missing } = matchWritten(survivors, fromModel);
@@ -333,7 +376,7 @@ ${blockOf(list)}
   }
   if (flagged > 0) console.error(`  ~ помечено ${flagged} из ${written.length}`);
 
-  return { intro, items: written, flagged, usage, model };
+  return { intro, items: written, flagged, usage, model, reasoningEffort: reasoningEffort ?? null };
 }
 
 /**

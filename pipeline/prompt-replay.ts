@@ -110,7 +110,9 @@ async function main() {
     `Сложность ${voice.complexity} из 5, манера «${voice.style}».\n`,
   );
 
+  const started = Date.now();
   const digest = await writeDigest(survivors, profile.reader_context, profile.llm ?? {}, voice);
+  const seconds = Math.round((Date.now() - started) / 1000);
   const fresh = await scoreSummaries(
     digest.items.map((item) => ({
       id: Number(item.id),
@@ -131,6 +133,14 @@ async function main() {
   console.log("");
   report("было", old.scored);
   report("стало", fresh.scored);
+  // Качество без цены — половина сравнения: модель, выигравшая балл
+  // за вчетверо больший счёт, проигрывает.
+  console.log(
+    `\nмодель ${digest.model}, рассуждение ${digest.reasoningEffort ?? "по умолчанию"}: ` +
+    `${digest.usage.input} вх (${digest.usage.cached} из кэша), ` +
+    `${digest.usage.output} вых (${digest.usage.reasoning} рассуждение), ` +
+    `${digest.usage.requests} запроса, ${seconds} с`,
+  );
 
   const before = stored.map((row) => readability(row.summary));
   const after = digest.items.map((item) => readability(item.summary));

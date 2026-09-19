@@ -24,6 +24,16 @@ export const JEV_INPUT_PRICE = 0.042;
 
 export const jevCost = (inputTokens: number) => (inputTokens / 1e6) * JEV_INPUT_PRICE;
 
+/**
+ * Рассуждение уже входит в `output`: провайдер считает его выходом, и
+ * прибавлять его отдельно значило бы посчитать дважды.
+ *
+ * Кэшированный вход тарифицируется дешевле, но насколько — зависит
+ * от провайдера, и выдуманный коэффициент был бы хуже завышенной оценки:
+ * потолок сработает чуть раньше, а не чуть позже.
+ * ponytail: появится провайдер с известной ценой кэша — здесь добавится
+ * третье слагаемое по usage.cached.
+ */
 export const llmCost = (usage: Usage) =>
   (usage.input / 1e6) * price("LLM_INPUT_PRICE", 0.3) +
   (usage.output / 1e6) * price("LLM_OUTPUT_PRICE", 2.5);

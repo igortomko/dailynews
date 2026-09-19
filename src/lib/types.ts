@@ -101,5 +101,5 @@ export type Reader = {
   kindle_sender: string | null;
   daily_cap_usd: number;
   onboarded_at: string | null;
-  llm: { base_url?: string; model?: string; api_key?: string };
+  llm: { base_url?: string; model?: string; api_key?: string; reasoning_effort?: string };
 };
