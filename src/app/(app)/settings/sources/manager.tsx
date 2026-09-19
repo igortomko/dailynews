@@ -2,32 +2,19 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { TrashIcon, PlusIcon } from "lucide-react";
+import { TrashIcon, PlusIcon, ExternalLinkIcon } from "lucide-react";
 import { addSource, deleteSource, discoverSource, setSourceActive } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
 import type { Found } from "../../../../../pipeline/discover";
-
-/**
- * Один ли это источник, если снять оформление адреса. Нужно ровно затем,
- * чтобы не показывать «вставлено: @имя» рядом с «имя»: разрешённый адрес
- * стоит видеть, когда он и правда другой — youtube.com/@канал превращается
- * в feeds/videos.xml?channel_id=…, — а не когда отличается собачкой.
- */
-function sameSource(input: string, resolved: string): boolean {
-  const bare = (value: string) =>
-    value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "")
-      .replace(/^@/, "").replace(/\/+$/, "");
-  return bare(input) === bare(resolved) || bare(input).endsWith(`/${bare(resolved)}`);
-}
 
 /**
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
@@ -101,86 +88,82 @@ export function SourcesManager({
       {editable ? (
       <Card>
         {found && plan.kinds.includes(found.kind) ? (
-          <>
+          <form
+            action={(formData) =>
+              startTransition(async () => {
+                const result = await addSource(formData);
+                if (result?.error) {
+                  setError(result.error);
+                  setFound(null);
+                  return;
+                }
+                setError(null);
+                setFound(null);
+                setInput("");
+                toast.success("Источник добавлен");
+              })
+            }
+          >
             {/*
-              Разобранный источник занимает место формы, а не приписывается
-              под ней: решение здесь одно — тот ли это источник, — и держать
-              рядом поле ввода значит предлагать два решения сразу.
+              Разобранный источник занимает место формы: решение здесь одно —
+              тот ли это источник, — и поле ввода рядом предлагало бы два сразу.
+              Название правится прямо в заголовке: отдельное поле под ним
+              показывало то же самое второй раз.
             */}
             <CardHeader>
-              <CardTitle>{found.label}</CardTitle>
-              <CardDescription>
-                {found.via} · свежих {found.fresh} из {found.entries}
+              <Input
+                name="label"
+                defaultValue={found.label}
+                key={found.url}
+                aria-label="Название источника"
+                className="font-heading h-auto border-transparent bg-transparent px-2 py-1 text-lg leading-snug font-medium hover:border-input"
+              />
+              <CardDescription className="flex flex-wrap items-center gap-2 px-2">
+                <Badge variant="outline">{found.kind}</Badge>
+                <span>{found.via} · свежих {found.fresh} из {found.entries}</span>
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <form
-                action={(formData) =>
-                  startTransition(async () => {
-                    const result = await addSource(formData);
-                    if (result?.error) {
-                      setError(result.error);
-                      setFound(null);
-                      return;
-                    }
-                    setError(null);
-                    setFound(null);
-                    setInput("");
-                    toast.success("Источник добавлен");
-                  })
-                }
+            <CardContent className="flex flex-col gap-4">
+              <input type="hidden" name="kind" value={found.kind} />
+              <input type="hidden" name="url" value={found.url} />
+              <input type="hidden" name="input_url" value={found.input_url} />
+
+              <div className="flex items-center gap-2">
+                <Button type="submit" disabled={pending}>
+                  <PlusIcon data-icon="inline-start" />
+                  Добавить
+                </Button>
+                {/*
+                  Выход обязателен: без него разобранная не та ссылка запирает
+                  карточку до перезагрузки страницы.
+                */}
+                <Button type="button" variant="ghost" onClick={() => setFound(null)}>
+                  Отмена
+                </Button>
+              </div>
+
+              {/*
+                Доказательство, что источник живой, — одной строкой и внизу.
+                Само по себе «Это прекрасно))))» читается как непонятно что:
+                строка подписана и открывается, чтобы убедиться можно было
+                самому, а не поверить на слово.
+              */}
+              <a
+                href={found.sample_url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs"
               >
-                <input type="hidden" name="kind" value={found.kind} />
-                <input type="hidden" name="url" value={found.url} />
-                <input type="hidden" name="input_url" value={found.input_url} />
-
-                <FieldGroup>
-                  <div className="flex flex-col gap-1.5 rounded-md border p-3 text-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">{found.kind}</Badge>
-                      <span className="truncate text-muted-foreground">{found.url}</span>
-                    </div>
-                    {/*
-                      Вставленная ссылка показывается, только если она и правда
-                      другая: youtube.com/@канал превращается в feeds/videos.xml,
-                      и это стоит увидеть, а «@имя» против «имя» — шум.
-                    */}
-                    {sameSource(found.input_url, found.url) ? null : (
-                      <span className="truncate text-xs text-muted-foreground">
-                        вставлено: {found.input_url}
-                      </span>
-                    )}
-                    <span className="truncate">{found.sample}</span>
-                    {found.fresh === 0 ? (
-                      <span className="text-muted-foreground text-xs">
-                        Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <Field>
-                    <FieldLabel htmlFor="label">Название</FieldLabel>
-                    <Input id="label" name="label" defaultValue={found.label} key={found.url} />
-                    <FieldDescription>Взято из источника, можно переписать.</FieldDescription>
-                  </Field>
-
-                  <div className="flex items-center gap-2">
-                    <Button type="submit" disabled={pending}>
-                      <PlusIcon data-icon="inline-start" />
-                      Добавить
-                    </Button>
-                    {/*
-                      Выход обязателен: без него разобранная не та ссылка
-                      запирает карточку до перезагрузки страницы.
-                    */}
-                    <Button type="button" variant="ghost" onClick={() => setFound(null)}>
-                      Другая ссылка
-                    </Button>
-                  </div>
-                </FieldGroup>
-              </form>
+                <ExternalLinkIcon className="size-3.5 shrink-0" />
+                <span className="truncate">последняя запись: {found.sample}</span>
+              </a>
+              {found.fresh === 0 ? (
+                <span className="text-muted-foreground -mt-2 text-xs">
+                  Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
+                </span>
+              ) : null}
             </CardContent>
-          </>
+          </form>
         ) : (
           <>
             <CardHeader>

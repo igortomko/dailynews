@@ -260,7 +260,10 @@ export type Found = {
   /** Записей в фиде всего и сколько из них прошло отсечку свежести прогона. */
   entries: number;
   fresh: number;
+  /** Заголовок свежей записи — доказательство, что источник и правда ответил. */
   sample: string;
+  /** Её адрес: строку с доказательством можно открыть и убедиться самому. */
+  sample_url: string;
   via: string;
 };
 
@@ -330,6 +333,7 @@ async function tryCandidates(
           entries: items.length,
           fresh: fresh.length,
           sample: (fresh[0] ?? items[0]).title.slice(0, 200),
+          sample_url: (fresh[0] ?? items[0]).url,
           via: candidate.via,
         },
       };
@@ -391,6 +395,7 @@ export async function discover(input: string): Promise<Discovery> {
           entries: doc.items.length,
           fresh: fresh.length,
           sample: (fresh[0] ?? doc.items[0]).title.slice(0, 200),
+          sample_url: (fresh[0] ?? doc.items[0]).url,
           via: candidate.via,
         },
       };
