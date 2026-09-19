@@ -64,6 +64,22 @@ assert.notEqual(
   normalizeTitle("Anthropic ships Claude"),
   "разные новости не должны совпадать",
 );
+// Найдено сухим прогоном: два релиза одного проекта сходились к голому
+// названию, потому что номер версии рассыпался и терялся целиком.
+assert.notEqual(
+  normalizeTitle("datasette 1.0a40"),
+  normalizeTitle("datasette 0.65.5"),
+  "разные версии одного проекта — не перепечатка",
+);
+assert.notEqual(
+  normalizeTitle("GPT 5 released"),
+  normalizeTitle("GPT 6 released"),
+  "одна цифра может быть единственным отличием",
+);
+assert.ok(
+  normalizeTitle("datasette 1.0a40").includes("10a40"),
+  "номер версии должен пережить нормализацию одним токеном",
+);
 
 // --- составной скор --------------------------------------------------------
 const fact = composite(axes(), weights, 1);
@@ -97,4 +113,4 @@ assert.ok(
   "вес темы должен влиять на скор",
 );
 
-console.log("Самопроверка пройдена: 15 утверждений");
+console.log("Самопроверка пройдена: 18 утверждений");

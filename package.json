@@ -10,7 +10,8 @@
     "pipeline": "tsx pipeline/run.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx pipeline/selftest.ts",
-    "verify:db": "tsx db/verify.ts"
+    "verify:db": "tsx db/verify.ts",
+    "dry-run": "tsx pipeline/dry-run.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -14,7 +14,7 @@ const SCORE_WINDOW_DAYS = 2;
 
 const log = (msg: string) => console.log(msg);
 
-async function collect(sources: Source[]): Promise<number[]> {
+export async function collect(sources: Source[]): Promise<number[]> {
   const inserted: number[] = [];
 
   const results = await fetchAllSources(sources, (result) => {
@@ -179,8 +179,11 @@ async function main() {
   await sql.end();
 }
 
-main().catch(async (error) => {
-  console.error(error);
-  await sql.end({ timeout: 5 }).catch(() => {});
-  process.exit(1);
-});
+// Сухой прогон импортирует только collect(), поэтому main() не запускается.
+if (process.env.DAILYNEWS_DRY_RUN !== "1") {
+  main().catch(async (error) => {
+    console.error(error);
+    await sql.end({ timeout: 5 }).catch(() => {});
+    process.exit(1);
+  });
+}

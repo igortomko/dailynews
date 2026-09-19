@@ -46,9 +46,15 @@ export function normalizeTitle(title: string): string {
   const words = title
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, " ")
+    // Точка внутри номера версии убирается до общей чистки пунктуации,
+    // иначе «1.0a40» рассыпается на «1» и «0a40», а «0.65.5» — на «0», «65»
+    // и «5», и два разных релиза сходятся к одному голому названию.
+    .replace(/(\d)\.(?=\d)/g, "$1")
     .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .split(/\s+/)
-    .filter((word) => word.length > 1 && !STOP.has(word));
+    // Односимвольные токены выбрасываются как мусор, но только буквенные:
+    // в «GPT 5» и «GPT 6» вся разница именно в отброшенной цифре.
+    .filter((word) => (word.length > 1 || /\d/.test(word)) && !STOP.has(word));
 
   return [...new Set(words)].sort().join(" ");
 }
