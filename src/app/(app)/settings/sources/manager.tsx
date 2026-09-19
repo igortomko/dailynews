@@ -15,7 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
-import type { Plan } from "@/lib/plans";
+import { PLANS, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
 import type { Found } from "../../../../../pipeline/discover";
 
@@ -145,12 +145,16 @@ function openUrlOf(source: SourceHealth): string | null {
 function troubleOf(source: SourceHealth): string | null {
   // Прогон его ещё не видел: ни удачи, ни ошибки.
   if (!source.last_ok_at && !source.last_error) {
-    return "добавлен — первый сбор в ближайшем прогоне";
+    return "добавлен — первые новости придут ночью";
   }
-  if (source.items === 0) return "за 30 дней — ни одного материала";
-  // Материалы даёт, но ни один не переживает отбор: источник есть, толку нет,
+  // Про ошибку уже сказал бейдж и подсказка под ним. Добавить сюда «за 30
+  // дней ни одной новости» значит сказать рядом с «не отвечает», что
+  // источник отвечает и молчит, — две разные беды одной строкой.
+  if (source.last_error) return null;
+  if (source.items === 0) return "за 30 дней ни одной новости";
+  // Новости даёт, но ни одна не доходит до выпуска: источник есть, толку нет,
   // и по одному числу последнего прогона этого не увидеть.
-  if (source.in_digest === 0) return "за 30 дней ни один материал не дошёл до выпуска";
+  if (source.in_digest === 0) return "за 30 дней ни одна новость не дошла до выпуска";
   return null;
 }
 
@@ -162,12 +166,14 @@ function yieldOf(source: SourceHealth): string {
   // Прогон его ещё не видел: ни удачи, ни ошибки. Написать такому «за 30 дней
   // ни одного материала» — той же фразой, что и заброшенному, — значит
   // сообщить, что он бесполезен, через минуту после того, как его завели.
-  if (!source.last_ok_at && !source.last_error) return "добавлен — первый сбор в ближайшем прогоне";
-  if (source.items === 0) return "за 30 дней — ни одного материала";
+  if (!source.last_ok_at && !source.last_error) return "добавлен — первые новости придут ночью";
+  if (source.items === 0) return "за 30 дней ни одной новости";
   const parts = [`за 30 дней: ${source.items} → ${source.in_digest} в выпусках`];
-  if (source.mean_score !== null) parts.push(`скор ${source.mean_score}`);
+  if (source.mean_score !== null) {
+    parts.push(`оценка ${String(source.mean_score).replace(".", ",")}`);
+  }
   if (source.duplicates > 0) {
-    parts.push(`дублей ${Math.round((source.duplicates / source.items) * 100)}%`);
+    parts.push(`повторов ${Math.round((source.duplicates / source.items) * 100)}%`);
   }
   return parts.join(" · ");
 }
@@ -325,7 +331,7 @@ export function SourcesManager({
                 </a>
                 {found.fresh === 0 ? (
                   <span className="text-muted-foreground text-xs">
-                    Записи есть, но ни одной за окно свежести — источник, похоже, заброшен.
+                    Новости есть, но все старые — похоже, источник забросили.
                   </span>
                 ) : null}
               </div>
@@ -392,8 +398,7 @@ export function SourcesManager({
                     <FieldError>{error}</FieldError>
                   ) : (
                     <FieldDescription>
-                      Поддерживается: новостные сайты, блоги, YouTube, GitHub,
-                      открытый Telegram-канал и т. д.
+                      Сайт, блог, канал на YouTube или в Telegram — вставь ссылку
                     </FieldDescription>
                   )}
                 </Field>
@@ -401,12 +406,12 @@ export function SourcesManager({
                 {found && !plan.kinds.includes(found.kind) ? (
                   <Alert>
                     <AlertTitle className="flex items-center gap-1.5">
-                      Посты из X — на платном тарифе
+                      Посты из X — только на тарифе «{PLANS.pro.label}»
                       <PaywallCrown feature="x" plan={plan} />
                     </AlertTitle>
                     <AlertDescription>
-                      Ссылка разобралась: {found.label}. Твиты попадают в выпуск наравне
-                      с новостями сайтов, но X берёт за доступ отдельно.
+                      Нашли: {found.label}. X берёт деньги за доступ к постам,
+                      поэтому они только на Pro.
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -521,14 +526,14 @@ export function SourcesManager({
                         <Badge
                           variant="secondary"
                           className="cursor-help"
-                          aria-label={`Последний прогон дал ${source.last_count} свежих материалов`}
+                          aria-label={`Прошлой ночью отсюда пришло новостей: ${source.last_count}`}
                         />
                       }
                     >
                       {source.last_count}
                     </TooltipTrigger>
                     <TooltipContent>
-                      Свежих материалов в последнем прогоне · {yieldOf(source)}
+                      Пришло прошлой ночью · {yieldOf(source)}
                     </TooltipContent>
                   </Tooltip>
                 ) : null}

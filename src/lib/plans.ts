@@ -123,6 +123,22 @@ export function planOf(id: string | null | undefined): Plan {
 }
 
 /**
+ * Как вид источника называется для читателя.
+ *
+ * Без словаря в строку отказа уходил ключ из базы: «Источники x есть только
+ * на тарифе «Pro»», а для остальных вышло бы «Источники rss…». Ключ отвечает
+ * на вопрос, каким кодом это заведено, — читатель такого не спрашивал.
+ */
+const KIND_NAME: Record<Source["kind"], string> = {
+  rss: "Сайты и блоги",
+  hackernews: "Hacker News",
+  telegram: "Каналы Telegram",
+  email: "Рассылки на почту",
+  reddit: "Reddit",
+  x: "Посты из X",
+};
+
+/**
  * Почему этот вид источника тарифу не положен, или null, если положен.
  *
  * Отдельной функцией, потому что спросить надо дважды и в разных местах:
@@ -133,11 +149,23 @@ export function kindDenial(plan: Plan, kind: Source["kind"]): string | null {
   if (plan.kinds.includes(kind)) return null;
   const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
   return where.length
-    ? `Источники ${kind} есть только на тарифе «${where.join("», «")}»`
-    : `Источники ${kind} недоступны`;
+    ? `${KIND_NAME[kind]} — только на тарифе «${where.join("», «")}»`
+    : `${KIND_NAME[kind]} сейчас недоступны`;
 }
 
 export const maxDigestOf = (plan: Plan) => plan.digestSizes[plan.digestSizes.length - 1];
+
+/**
+ * Сколько новостей реально придёт: выбранное читателем, прижатое потолком
+ * тарифа. Понижение тарифа не трогает `digest_size` в базе, и сохранённая
+ * сотня там переживает переход на бесплатный.
+ *
+ * Одной функцией, потому что считать это надо в трёх местах — в прогоне,
+ * в догрузке и на странице «О проекте», — и три копии одного `Math.min`
+ * разойдутся молча ровно так же, как таблица тарифов, переписанная руками.
+ */
+export const digestCap = (digestSize: number, plan: Plan) =>
+  Math.min(digestSize, maxDigestOf(plan));
 
 export const allows = (plan: Plan, section: Gated) => plan.sections.includes(section);
 

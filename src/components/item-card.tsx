@@ -28,6 +28,7 @@ import { usePaywall } from "@/components/paywall";
 import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedItem } from "@/lib/queries";
+import { HORIZON, KIND } from "@/lib/axis-labels";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
 const SEEN_MS = 1500;
@@ -61,20 +62,6 @@ function report(
     .catch(() => new Promise((resolve) => setTimeout(resolve, 1500)).then(send))
     .catch((error) => console.warn(`событие «${body.event}» не доехало:`, error));
 }
-
-const KIND: Record<string, string> = {
-  fact: "факт",
-  forecast: "прогноз",
-  opinion: "мнение",
-  announcement: "анонс",
-  reprint: "перепечатка",
-};
-
-const HORIZON: Record<string, string> = {
-  years: "годы",
-  months: "месяцы",
-  noise: "шум дня",
-};
 
 /**
  * Полная дата для подсказки. «4д» отвечает на «давно ли», но не на «какого
@@ -195,16 +182,16 @@ export function ItemCard({
         body: JSON.stringify({ item_id: item.id }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? `ошибка ${res.status}`);
+      if (!res.ok) throw new Error(body?.error ?? "Не отправилось на Kindle — попробуй ещё раз");
       setKindle("sent");
       // Честно про время: статья забирается и переводится целиком. Обещать
       // мгновенность — значит получить второй тап через десять секунд.
-      toast.success("Уехала на Kindle", {
-        description: "Перевод и сборка занимают около минуты",
+      toast.success("Статья ушла на Kindle", {
+        description: "Придёт примерно через минуту",
       });
     } catch (error) {
       setKindle("idle");
-      toast.error(error instanceof Error ? error.message : "Не отправилось");
+      toast.error(error instanceof Error ? error.message : "Не отправилось на Kindle — попробуй ещё раз");
     }
   };
 

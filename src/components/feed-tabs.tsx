@@ -222,7 +222,7 @@ export function FeedTabs({
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>Пока пусто</EmptyTitle>
-                  <EmptyDescription>В этом выпуске по теме ничего не прошло отбор.</EmptyDescription>
+                  <EmptyDescription>В этот выпуск по этой теме ничего не попало</EmptyDescription>
                 </EmptyHeader>
                 {/* Выход обязателен: пустая вкладка без единой ссылки — это
                     тупик, из которого остаётся только кнопка «назад». */}

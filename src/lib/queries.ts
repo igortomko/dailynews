@@ -305,6 +305,29 @@ export async function getCalibration(readerId: number): Promise<{
 }
 
 /**
+ * Сколько вышло за сутки у источников этого читателя — число для картинки
+ * на «О проекте».
+ *
+ * Настоящее, а не круглое: «около трёхсот» рядом с реальными двенадцатью —
+ * это иллюстрация, и в день, когда поток просел вдвое, она врёт молча.
+ *
+ * Сбор общий на всех, а опрашивается по тарифу лишь часть каталога
+ * (`sourcesForPlan`), поэтому список источников передаётся снаружи: счёт
+ * по всему каталогу завысил бы число у всякого, кто не на Pro, — и подпись
+ * «у твоих источников» стала бы неправдой.
+ */
+export async function getCollectedLast24h(sourceIds: number[]): Promise<number> {
+  if (sourceIds.length === 0) return 0;
+  const [row] = await sql<{ n: number }[]>`
+    select count(*)::int as n
+      from dailynews.items
+     where collected_at >= now() - interval '24 hours'
+       and source_id = any(${sourceIds}::bigint[])
+  `;
+  return row?.n ?? 0;
+}
+
+/**
  * Чужие источники, которые уже кормят эти темы.
  *
  * Считается по собранному: сколько материалов источник дал по этим темам

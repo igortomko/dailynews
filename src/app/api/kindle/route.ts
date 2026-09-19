@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
      limit 1
   `;
   if (!mine) {
-    return NextResponse.json({ error: "этого материала нет в твоих выпусках" }, { status: 404 });
+    return NextResponse.json({ error: "Этой новости нет в твоих выпусках" }, { status: 404 });
   }
 
   const reader = await getReader(readerId);

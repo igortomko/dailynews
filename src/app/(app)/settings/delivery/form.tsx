@@ -188,7 +188,7 @@ export function DeliveryForm({
                   {error ? (
                     <FieldError>{error}</FieldError>
                   ) : (
-                    <FieldDescription>Заканчивается на @kindle.com.</FieldDescription>
+                    <FieldDescription>Заканчивается на @kindle.com</FieldDescription>
                   )}
                 </Field>
                 <Button type="submit" disabled={pending || locked} className="self-start">

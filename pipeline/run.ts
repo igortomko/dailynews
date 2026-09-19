@@ -18,7 +18,7 @@ import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoI
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { issuesToday, maxDigestOf, sourcesForPlan } from "../src/lib/plans";
+import { digestCap, issuesToday, sourcesForPlan } from "../src/lib/plans";
 import { effectivePlan } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
 
@@ -235,7 +235,7 @@ async function runForReader(
   // Потолок тарифа поверх ползунка: digest_size мог остаться от прежнего
   // тарифа, а платит за письмо описаний владелец ключа. Тот же потолок
   // стоит на догрузке из интерфейса — иначе он обходился бы кнопкой.
-  const digestSize = Math.min(reader.digest_size, maxDigestOf(plan));
+  const digestSize = digestCap(reader.digest_size, plan);
 
   // Сколько уже лежит в сегодняшнем выпуске. Состав дописывается, а не
   // заменяется: прочитанное утром не должно исчезать из ленты. Но без этого

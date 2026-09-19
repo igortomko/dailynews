@@ -69,7 +69,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          {first ? "Настрой ленту" : "Персонализация"}
+          {first ? "Настрой ленту" : "Язык и подача"}
           {/* Зелёный только у «сохранено»: это единственное состояние,
               которое сообщает, что всё в порядке. «Сохраняю…» ничего
               не обещает и красится как обычная подпись. */}
@@ -85,7 +85,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         </CardTitle>
         {first ? (
           <CardDescription>
-            По этим направлениям будут собираться новости, и по ним же раскладываться вкладки.
+            Скажи, на каком языке и как писать новости. Интересы выберешь следующим шагом.
           </CardDescription>
         ) : null}
       </CardHeader>
@@ -202,13 +202,13 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="reader_context">Кто читает</FieldLabel>
+              <FieldLabel htmlFor="reader_context">О себе</FieldLabel>
               <Textarea
                 id="reader_context"
                 name="reader_context"
                 rows={5}
                 defaultValue={profile?.reader_context ?? ""}
-                placeholder="Чем занимаешься, какой стек, что за продукт, где живёшь"
+                placeholder="Чем занимаешься, что за продукт, где живёшь"
               />
               <FieldDescription>
                 Расскажи о себе: это влияет и на то, как написаны описания,

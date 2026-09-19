@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
+import { CollectNow } from "@/components/collect-now";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,11 @@ export default async function FeedPage({
             ) : null}
           </EmptyDescription>
         </EmptyHeader>
+        {/* Ждать до ночи необязательно: сбор и оценка общие на всех
+            и уже прошли, не хватает только письма описаний. Кнопка зовёт
+            ту же догрузку, что и смена числа новостей, — и так же не умеет
+            обойти ни потолок тарифа, ни дневной предел. */}
+        <CollectNow />
       </Empty>
     );
   }

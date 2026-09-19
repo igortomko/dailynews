@@ -24,8 +24,8 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, FEATURES, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
-  type Gated,
+  allows, cheapestWith, digestCap, FEATURES, kindDenial, maxDigestOf, sourcesForPlan,
+  topicsWord, type Gated,
 } from "./plans";
 import { effectivePlan } from "./lemon";
 import { SOURCE_LANGUAGE } from "./voice";
@@ -41,12 +41,12 @@ import { resolveSuggestions } from "./onboarding";
 export async function login(_prev: unknown, formData: FormData) {
   const password = String(formData.get("password") ?? "");
   if (!(await checkPassword(password))) {
-    return { error: "Не подходит" };
+    return { error: "Пароль не подходит" };
   }
   const [owner] = await sql<{ id: number }[]>`
     select id::int as id from dailynews.readers where owner
   `;
-  if (!owner) return { error: "Владелец не заведён" };
+  if (!owner) return { error: "Такого входа сейчас нет — войди через бота" };
 
   const session = await issueSession(owner.id);
   (await cookies()).set(session.name, session.value, session.options);
@@ -122,7 +122,7 @@ export async function saveInterests(formData: FormData) {
   if (chips.length > plan.maxTopics) {
     return {
       error:
-        `Тариф «${plan.label}» держит ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
+        `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
         `а выбрано ${chips.length}`,
     };
   }
@@ -133,7 +133,7 @@ export async function saveInterests(formData: FormData) {
   // и цель первой темы теряется. Сумма целей молча перестаёт равняться
   // размеру дайджеста — полоса показывает одно, приходит другое.
   if (new Set(slugs).size !== slugs.length) {
-    return { error: "Два интереса совпадают после упрощения названия — переименуй один" };
+    return { error: "Такой интерес уже есть — назови иначе" };
   }
   const digestSize = Math.min(
     maxDigestOf(plan),
@@ -368,8 +368,8 @@ export async function addSource(formData: FormData) {
   const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
   const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
-  if (!isKnownKind(kind)) return { error: "Сначала разбери ссылку" };
-  if (!url) return { error: "Пустой адрес" };
+  if (!isKnownKind(kind)) return { error: "Сначала проверь ссылку" };
+  if (!url) return { error: "Вставь ссылку" };
 
   // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
   // чем сходить за фидом и отказать после.
@@ -446,35 +446,31 @@ export async function topUpDigest() {
  * на ленту — мимо экрана, ради которого всё и собиралось.
  */
 async function fillDigest(reader: Reader) {
-  const [existing] = await sql<{ id: number; day: string; taken: number }[]>`
-    select d.id::int as id, d.day::text as day,
-           (select count(*)::int from dailynews.digest_items di where di.digest_id = d.id) as taken
+  // Только сколько уже набрано: сама строка выпуска заводится в самом конце,
+  // после письма описаний. Заведённая здесь, она пережила бы любой отказ ниже —
+  // исчерпанный дневной предел, пустой отбор, оборванный ответ модели, —
+  // и в базе остался бы пустой выпуск за сегодня. Лента перестала бы
+  // предлагать сбор (день-то уже есть), а калибровка посчитала бы выпуск,
+  // которого читатель не получал. Ночной прогон делает так же.
+  const [existing] = await sql<{ taken: number }[]>`
+    select (select count(*)::int from dailynews.digest_items di where di.digest_id = d.id) as taken
       from dailynews.digests d
      where d.reader_id = ${reader.id}
      order by d.day desc limit 1
   `;
-  // Первого выпуска ещё нет — заводим сегодняшний. Раньше здесь стоял отказ
-  // «дождись прогона», и новый читатель заканчивал настройку обещанием:
-  // поток-то уже собран и оценён, ему нужен только отбор и описания.
-  const digest = existing ?? (await sql<{ id: number; day: string; taken: number }[]>`
-    insert into dailynews.digests (reader_id, day)
-    values (${reader.id}, current_date)
-    on conflict (reader_id, day) do update set reader_id = excluded.reader_id
-    returning id::int as id, day::text as day, 0 as taken
-  `)[0];
 
   // Через догрузку предел тарифа обходится так же, как через ползунок:
   // digest_size мог остаться от прежнего тарифа, а платит за письмо
   // описаний владелец ключа. Потолок один и тот же, что и в прогоне.
-  const target = Math.min(reader.digest_size, maxDigestOf(effectivePlan(reader)));
-  const missing = target - digest.taken;
+  const target = digestCap(reader.digest_size, effectivePlan(reader));
+  const missing = target - (existing?.taken ?? 0);
   if (missing <= 0) return { ok: true as const, added: 0 };
 
   // Тот же потолок, что и в ночном прогоне: кнопка «догрузить» тратит
   // те же деньги, и обходить его ей незачем.
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+    return { error: "Сегодня больше добавить нельзя — завтра лимит обнулится" };
   }
 
   // selectSurvivors сам исключает всё, что уже попало в выпуски этого
@@ -487,7 +483,15 @@ async function fillDigest(reader: Reader) {
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
   if (survivors.length === 0) {
-    return { ok: true as const, added: 0, note: "Свежих материалов больше нет" };
+    // Первому выпуску и догрузке нужны разные слова: «больше нет» в ответ
+    // на «собрать сейчас» звучит так, будто что-то уже приходило.
+    return {
+      ok: true as const,
+      added: 0,
+      note: existing
+        ? "Больше свежих новостей нет"
+        : "Свежих новостей пока нет — первые придут ночью",
+    };
   }
 
   const needImage = await sql<{ id: number; url: string }[]>`
@@ -525,25 +529,77 @@ async function fillDigest(reader: Reader) {
   const writtenById = new Map(written.items.map((item) => [String(item.id), item]));
   const qualityById = new Map(quality.scored.map((row) => [String(row.item_id), row]));
 
-  // Дописываем только то, чего в выпуске ещё нет: два одновременных нажатия
-  // иначе положили бы один материал дважды.
-  for (const [index, survivor] of survivors.entries()) {
-    const text = writtenById.get(String(survivor.id));
-    const scored = qualityById.get(String(survivor.id));
-    await sql`
-      insert into dailynews.digest_items
-        (digest_id, item_id, total, position, title, summary, summary_axes, summary_score)
-      values (
-        ${digest.id}, ${survivor.id}, ${survivor.total}, ${digest.taken + index + 1},
-        ${text?.title_ru ?? survivor.title}, ${text?.summary ?? ""},
-        ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
-        ${scored?.total ?? null}
-      )
-      on conflict (digest_id, item_id) do nothing
-    `;
-  }
+  /*
+    Всё письмо в базу — одной транзакцией. Врозь оно коммитится по шагу,
+    и падение на любом из них (материал удалён между отбором и вставкой —
+    и внешний ключ не пускает) оставляет заведённый выпуск и часть строк:
+    лента и разбор попаданий посчитают его наравне с настоящим.
 
-  return { ok: true as const, added: survivors.length };
+    Выпуск перечитывается здесь, а не берётся из `existing`: тот прочитан
+    до письма описаний, и за минуты письма ночной прогон успевает собрать
+    новый день. `for update` держит саму строку от чужой записи в неё,
+    но вставку прогоном нового дня не задерживает — у новой строки другой
+    ключ. Остаётся окно в несколько минут, в которое материалы лягут
+    во вчерашний выпуск; закрыть его по-настоящему можно только общим
+    замком с прогоном, а он пишет выпуск вне транзакции.
+  */
+  const added = await sql.begin(async (tx) => {
+    const [current] = await tx<{ id: number }[]>`
+      select id::int as id from dailynews.digests
+       where reader_id = ${reader.id}
+       order by day desc limit 1
+       for update
+    `;
+    let digestId = current?.id;
+    if (digestId === undefined) {
+      // `on conflict` — про гонку с ночным прогоном: он мог завести
+      // сегодняшний выпуск между этим select и вставкой. Интро уже написано
+      // и оплачено этим же вызовом: не сохранить его значило бы отличаться
+      // от ночного выпуска молча.
+      const [row] = await tx<{ id: number }[]>`
+        insert into dailynews.digests (reader_id, day, intro)
+        values (${reader.id}, current_date, ${written.intro})
+        on conflict (reader_id, day) do update set reader_id = excluded.reader_id
+        returning id::int as id
+      `;
+      digestId = row.id;
+    }
+
+    const [{ taken }] = await tx<{ taken: number }[]>`
+      select count(*)::int as taken from dailynews.digest_items where digest_id = ${digestId}
+    `;
+
+    // Обрезаем по настоящему остатку: выпуск, набитый поверх чужой работы,
+    // пробил бы потолок тарифа — и это были бы уже настоящие деньги.
+    const fitting = survivors.slice(0, Math.max(0, target - taken));
+
+    // Дописываем только то, чего в выпуске ещё нет: два одновременных нажатия
+    // иначе положили бы один материал дважды.
+    let rows = 0;
+    for (const [index, survivor] of fitting.entries()) {
+      const text = writtenById.get(String(survivor.id));
+      const scored = qualityById.get(String(survivor.id));
+      const inserted = await tx<{ id: number }[]>`
+        insert into dailynews.digest_items
+          (digest_id, item_id, total, position, title, summary, summary_axes, summary_score)
+        values (
+          ${digestId}, ${survivor.id}, ${survivor.total}, ${taken + index + 1},
+          ${text?.title_ru ?? survivor.title}, ${text?.summary ?? ""},
+          ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
+          ${scored?.total ?? null}
+        )
+        on conflict (digest_id, item_id) do nothing
+        returning id::int as id
+      `;
+      rows += inserted.length;
+    }
+    return rows;
+  });
+
+  // Считаем вставленное, а не отобранное: при двух наложившихся нажатиях
+  // `do nothing` отбрасывает часть строк молча, и «Добавлено: 5» на трёх
+  // добавленных — отказ, выглядящий как успех.
+  return { ok: true as const, added };
 }
 
 // ---------------------------------------------------------------------------
@@ -773,7 +829,7 @@ export async function saveOnboardingInterests(slugs: string[], custom: string[])
   if (chips.length > plan.maxTopics) {
     return {
       error:
-        `Тариф «${plan.label}» держит ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
+        `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
         `а выбрано ${chips.length}`,
     };
   }

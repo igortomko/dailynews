@@ -39,8 +39,8 @@ export function PlanGate({
         <p className="text-sm text-muted-foreground">
           Сейчас у тебя «{plan.label}»: {plan.maxTopics} {topicsWord(plan.maxTopics)},{" "}
           {plan.maxSources} источников, до {plan.digestSizes[plan.digestSizes.length - 1]} новостей
-          в выпуске. На «{needed.label}» — {needed.maxTopics} и {needed.maxSources}, ${needed.price}{" "}
-          в месяц.
+          в выпуске. На «{needed.label}» — {needed.maxTopics} {topicsWord(needed.maxTopics)} и{" "}
+          {needed.maxSources} источников, ${needed.price} в месяц.
         </p>
         <Button size="sm" className="self-start" render={<a href="/settings/subscription" />}>
           Перейти на «{needed.label}»
