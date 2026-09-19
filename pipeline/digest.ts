@@ -89,33 +89,48 @@ ${block}
   if (!match) throw new Error(`LLM вернул не JSON: ${text.slice(0, 200)}`);
 
   const parsed = JSON.parse(match[0]) as { intro?: string; items?: Written[] };
-  // Number с обеих сторон. Драйвер отдаёт bigint строкой, чтобы не терять
-  // точность, а модель возвращает id числом: "136" !== 136, и без приведения
-  // не совпадает ни один материал — весь дайджест уходит в подстановку.
-  // Приводим здесь, а не глобальной подменой типов в драйвере: та меняет
-  // и сериализацию, заставляя слать int8 в колонки int.
-  const known = new Map(survivors.map((s) => [Number(s.id), s]));
-
-  // id приводим к числу: модель возвращает их то числом, то строкой, и при
-  // строгом сравнении не совпадает ни один — тогда весь дайджест молча
-  // заполняется подстановкой и выглядит как успешный.
-  const written = (parsed.items ?? [])
-    .map((item) => ({ ...item, id: Number(item.id) }))
-    .filter((item) => known.has(item.id));
-
-  const missing = survivors.filter((s) => !written.some((w) => w.id === s.id));
-  for (const survivor of missing) {
-    written.push({ id: survivor.id, title_ru: survivor.title, summary: survivor.excerpt.slice(0, 300) });
-  }
+  const { items: written, missing } = matchWritten(survivors, parsed.items ?? []);
 
   // Подстановка обязана быть заметной. Заголовок на языке источника вместо
   // перевода выглядит как работающий дайджест, и разница видна только глазами.
-  if (missing.length > 0) {
+  if (missing > 0) {
     console.error(
-      `  ! модель вернула ${written.length - missing.length} из ${survivors.length}; ` +
-      `${missing.length} осталось без перевода (finish_reason: ${payload.choices?.[0]?.finish_reason})`,
+      `  ! модель перевела ${survivors.length - missing} из ${survivors.length}; ` +
+      `${missing} осталось без перевода (обрыв: ${payload.choices?.[0]?.finish_reason})`,
     );
   }
 
   return { intro: parsed.intro ?? "", items: written };
+}
+
+/**
+ * Сопоставляет ответ модели с отобранными материалами.
+ *
+ * Вынесено отдельно и без сети, потому что ломалось дважды: драйвер отдаёт
+ * bigint строкой, модель возвращает id числом, и строгое сравнение не
+ * совпадает ни разу. Оба раза это выглядело как плохой перевод, а не как
+ * ошибка сопоставления — заголовок на языке источника внешне неотличим от
+ * работающего дайджеста.
+ */
+export function matchWritten(
+  survivors: Pick<Survivor, "id" | "title" | "excerpt">[],
+  fromModel: Written[],
+): { items: Written[]; missing: number } {
+  const byId = new Map(survivors.map((s) => [Number(s.id), s]));
+  const items: Written[] = [];
+  const seen = new Set<number>();
+
+  for (const item of fromModel) {
+    const id = Number(item.id);
+    if (!byId.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    items.push({ id, title_ru: item.title_ru, summary: item.summary });
+  }
+
+  for (const [id, survivor] of byId) {
+    if (seen.has(id)) continue;
+    items.push({ id, title_ru: survivor.title, summary: survivor.excerpt.slice(0, 300) });
+  }
+
+  return { items, missing: byId.size - seen.size };
 }

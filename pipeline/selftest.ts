@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
+import { matchWritten } from "./digest";
 import type { Axes, Weights } from "../src/lib/types";
 
 const weights: Weights = {
@@ -113,6 +114,33 @@ assert.ok(
   "вес темы должен влиять на скор",
 );
 
+// --- сопоставление ответа модели с материалами --------------------------------
+// Ломалось дважды и оба раза выглядело как плохой перевод, а не как ошибка кода.
+const survivors = [
+  { id: "136" as unknown as number, title: "A", excerpt: "aaa" },
+  { id: "78" as unknown as number, title: "B", excerpt: "bbb" },
+];
+
+// Драйвер отдаёт id строкой, модель — числом.
+const both = matchWritten(survivors, [
+  { id: 136, title_ru: "Первый", summary: "раз" },
+  { id: 78, title_ru: "Второй", summary: "два" },
+]);
+assert.equal(both.missing, 0, "числовой id модели должен совпасть со строковым из базы");
+assert.equal(both.items.length, 2, "подстановка не должна дублировать переведённое");
+assert.equal(both.items.find((i) => i.id === 136)?.title_ru, "Первый");
+
+// Пропущенный материал подставляется, но считается пропущенным.
+const partial = matchWritten(survivors, [{ id: "136" as unknown as number, title_ru: "Первый", summary: "раз" }]);
+assert.equal(partial.missing, 1, "непереведённый материал должен быть посчитан");
+assert.equal(partial.items.length, 2, "в дайджест попадают все материалы");
+assert.equal(partial.items.find((i) => i.id === 78)?.title_ru, "B", "подстановка берёт исходный заголовок");
+
+// Чужой id из ответа модели не должен ничего добавлять.
+const stray = matchWritten(survivors, [{ id: 999, title_ru: "Чужой", summary: "—" }]);
+assert.equal(stray.items.length, 2, "лишний id модели не должен попадать в дайджест");
+assert.equal(stray.missing, 2, "оба материала остались без перевода");
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -121,4 +149,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 20 утверждений");
+console.log("Самопроверка пройдена: 28 утверждений");
