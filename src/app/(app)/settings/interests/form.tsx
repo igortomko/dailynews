@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { CheckIcon } from "lucide-react";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
@@ -14,7 +13,6 @@ export function InterestsForm({ chips, total }: { chips: ChipInput[]; total: num
   const [saved, setSaved] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const router = useRouter();
 
   const schedule = () => {
     setSaved(false);
@@ -30,7 +28,6 @@ export function InterestsForm({ chips, total }: { chips: ChipInput[]; total: num
         }
         setError(null);
         setSaved(true);
-        router.refresh();
       });
     }, 900);
   };
