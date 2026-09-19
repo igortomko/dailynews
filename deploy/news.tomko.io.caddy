@@ -1,0 +1,17 @@
+news.tomko.io {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Лента личная и в поиске ей делать нечего.
+		X-Robots-Tag "noindex, nofollow"
+	}
+
+	handle /_next/static/* {
+		header Cache-Control "public, max-age=31536000, immutable"
+		reverse_proxy 127.0.0.1:8085
+	}
+
+	reverse_proxy 127.0.0.1:8085
+}

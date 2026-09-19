@@ -19,8 +19,19 @@ export type Written = {
 
 export type DigestResult = { intro: string; items: Written[] };
 
-const BASE_URL = process.env.LLM_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta/openai";
-const MODEL = process.env.LLM_MODEL ?? "gemini-2.5-flash";
+export type LlmConfig = { base_url?: string; model?: string; api_key?: string };
+
+/**
+ * Окружение старше настройки в базе: ключ, заданный переменной, не должен
+ * молча подменяться тем, что кто-то вписал в интерфейсе.
+ */
+function resolve(config: LlmConfig) {
+  return {
+    baseUrl: process.env.LLM_BASE_URL ?? config.base_url ?? "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: process.env.LLM_MODEL ?? config.model ?? "gemini-2.5-flash",
+    apiKey: process.env.LLM_API_KEY ?? config.api_key ?? "",
+  };
+}
 
 /**
  * Дорогая модель видит только выживших — пятнадцать материалов вместо трёхсот.
@@ -29,8 +40,9 @@ const MODEL = process.env.LLM_MODEL ?? "gemini-2.5-flash";
 export async function writeDigest(
   survivors: Survivor[],
   readerContext: string,
+  config: LlmConfig = {},
 ): Promise<DigestResult> {
-  const apiKey = process.env.LLM_API_KEY;
+  const { baseUrl, model, apiKey } = resolve(config);
   if (!apiKey) {
     // Без ключа дайджест всё равно собирается — просто исходными заголовками.
     return {
@@ -55,11 +67,35 @@ export async function writeDigest(
 
   const prompt = `${readerContext}
 
-Ниже ${survivors.length} материалов, уже отобранных по интересам читателя. Для каждого дай:
-1. "title_ru" — заголовок по-русски: живой, не дословный перевод.
-2. "summary" — 2–3 предложения: что произошло, почему это важно именно этому читателю. Информативно, без восторгов и без воды. Если в материале есть цифры — они должны быть в саммари.
+Ниже ${survivors.length} материалов, уже отобранных по интересам читателя.
 
-И ещё "intro" — одно-два предложения обо всей подборке: что сегодня главное и есть ли связь между материалами. Без приветствий.
+Для каждого дай "title_ru" — заголовок по-русски: живой, не дословный перевод.
+
+И "summary" — текст, после которого материал можно не открывать.
+
+Что в нём должно быть:
+— первым предложением: что именно произошло, с цифрами и именами;
+— дальше: что это меняет — появилась возможность, сдвинулась цена, закрылась дверь;
+— в конце: чем это касается читателя. Только если связь настоящая: нет связи —
+  закончи фактом, выдумывать не надо.
+
+Чего в нём быть не должно:
+— пересказа заголовка первой строкой: заголовок уже стоит над текстом;
+— оценок вместо фактов: «важный», «ключевой», «уникальный», «прорывной», «революционный»;
+— зачинов: «стоит отметить», «важно понимать», «давайте разберёмся», «в современном мире»,
+  «не секрет, что»;
+— ссылок на безымянных: «эксперты считают», «исследования показывают» — назови, кто именно;
+— оборотов «является инструментом для», «позволяет осуществлять», «выступает в роли» —
+  глагол справляется сам;
+— больше одного тире на весь текст;
+— итогов: «таким образом», «подводя итог», «в заключение».
+
+Длина — сколько нужно, чтобы материал можно было не открывать; обычно два-четыре
+предложения. Цифры из источника должны попасть в текст. Детали чужой реализации —
+только если читателю с ними что-то делать.
+
+И ещё "intro" — одно-два предложения обо всей подборке: что сегодня главное и есть ли
+связь между материалами. Без приветствий. Связи нет — так и скажи.
 
 Материалы:
 ${block}
@@ -67,11 +103,11 @@ ${block}
 Ответь только валидным JSON, без markdown:
 {"intro": "...", "items": [{"id": <число>, "title_ru": "...", "summary": "..."}]}`;
 
-  const res = await fetch(`${BASE_URL.replace(/\/$/, "")}/chat/completions`, {
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       max_tokens: 16000,
       response_format: { type: "json_object" },
       messages: [{ role: "user", content: prompt }],

@@ -65,4 +65,5 @@ export type Profile = {
   digest_size: number;
   weights: Weights;
   onboarded_at: string | null;
+  llm: { base_url?: string; model?: string; api_key?: string };
 };

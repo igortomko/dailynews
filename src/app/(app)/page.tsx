@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function FeedPage() {
   const profile = await getProfile();
-  if (!profile?.onboarded_at) redirect("/interests");
+  if (!profile?.onboarded_at) redirect("/settings/interests");
 
   const [topics, items] = await Promise.all([getTopics(), getFeed()]);
 

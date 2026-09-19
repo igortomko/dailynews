@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ThumbsUpIcon, ThumbsDownIcon, UndoIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
 import type { FeedItem } from "@/lib/queries";
@@ -150,9 +149,24 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                 <span>{item.topic_label}</span>
               </>
             ) : null}
-            {kind ? <Badge variant="secondary">{kind}</Badge> : null}
-            {horizon ? <Badge variant="secondary">{horizon}</Badge> : null}
-            {clickbait ? <Badge variant="destructive">кликбейт</Badge> : null}
+            {/* Тип и горизонт — справка, а не предупреждение: в покое они
+                соперничали с заголовком, хотя нужны, только когда уже
+                присматриваешься. Кликбейт остаётся на виду — он меняет
+                решение читать, и узнать о нём надо до чтения. */}
+            {kind || horizon ? (
+              <span className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                <span aria-hidden>·</span>
+                {kind}
+                {kind && horizon ? <span aria-hidden>·</span> : null}
+                {horizon}
+              </span>
+            ) : null}
+            {clickbait ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="text-destructive">кликбейт</span>
+              </>
+            ) : null}
 
             {/* Появляются по наведению: в покое они спорили с заголовком
                 за внимание, а нужны раз на десяток материалов. Место под

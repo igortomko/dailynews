@@ -10,7 +10,9 @@ import { SESSION_COOKIE, verifySession } from "@/lib/auth";
  * не тайна, а вот запись интересов и событий чтения — да: посторонние
  * события чтения ломают калибровку тише, чем что угодно другое.
  */
-const PUBLIC = ["/login", "/auth", "/_next", "/favicon.ico"];
+// /api/version открыт намеренно: он нужен развёртыванию до входа
+// и не отдаёт ничего, кроме хеша коммита.
+const PUBLIC = ["/login", "/auth", "/api/version", "/_next", "/favicon.ico"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

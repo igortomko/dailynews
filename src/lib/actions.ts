@@ -108,6 +108,38 @@ export async function saveInterests(formData: FormData) {
   return { ok: true as const };
 }
 
+export async function saveLlm(formData: FormData) {
+  const provider = String(formData.get("base_url") ?? "").trim();
+  const model = String(formData.get("model") ?? "").trim();
+  const apiKey = String(formData.get("api_key") ?? "").trim();
+
+  if (provider && !/^https:\/\//.test(provider)) {
+    return { error: "Адрес должен начинаться с https://" };
+  }
+
+  // Пустой ключ означает «не менять»: иначе форма стирала бы сохранённый
+  // ключ каждый раз, когда её открывают посмотреть остальные поля.
+  await sql`
+    update dailynews.profile
+       set llm = jsonb_strip_nulls(
+             llm
+             || jsonb_build_object('base_url', nullif(${provider}, ''))
+             || jsonb_build_object('model', nullif(${model}, ''))
+             || case when ${apiKey} = '' then '{}'::jsonb
+                     else jsonb_build_object('api_key', ${apiKey}) end
+           ),
+           updated_at = now()
+     where id = 1
+  `;
+  revalidatePath("/settings/subscription");
+  return { ok: true as const };
+}
+
+export async function clearLlmKey() {
+  await sql`update dailynews.profile set llm = llm - 'api_key' where id = 1`;
+  revalidatePath("/settings/subscription");
+}
+
 export async function addSource(formData: FormData) {
   const kind = String(formData.get("kind") ?? "rss") as "rss" | "reddit" | "hackernews" | "x";
   const url = String(formData.get("url") ?? "").trim();
@@ -126,16 +158,16 @@ export async function addSource(formData: FormData) {
     values (${kind}, ${label}, ${url})
     on conflict (kind, url) do update set active = true, label = excluded.label
   `;
-  revalidatePath("/sources");
+  revalidatePath("/settings/sources");
   return { ok: true as const };
 }
 
 export async function setSourceActive(id: number, active: boolean) {
   await sql`update dailynews.sources set active = ${active} where id = ${id}`;
-  revalidatePath("/sources");
+  revalidatePath("/settings/sources");
 }
 
 export async function deleteSource(id: number) {
   await sql`delete from dailynews.sources where id = ${id}`;
-  revalidatePath("/sources");
+  revalidatePath("/settings/sources");
 }

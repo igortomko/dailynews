@@ -174,7 +174,7 @@ async function main() {
   log(`   иллюстраций найдено: ${withImages} из ${survivors.length}`);
 
   log(`5. Дайджест: модель видит ${survivors.length} материалов вместо ${pending.length}`);
-  const digest = await writeDigest(survivors, profile.reader_context);
+  const digest = await writeDigest(survivors, profile.reader_context, profile.llm ?? {});
   for (const item of digest.items) {
     await sql`
       update dailynews.items
