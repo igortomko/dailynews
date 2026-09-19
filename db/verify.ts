@@ -8,8 +8,9 @@
  *
  *   npx tsx db/verify.ts
  *
- * Чего проверка НЕ покрывает: гранты и роли из 0001 — их нет в PGlite,
- * и по инфра-документу их положено читать из каталога живого инстанса.
+ * Чего проверка НЕ покрывает: сами гранты. Роль и её настройки здесь
+ * заводятся, но выданные права по инфра-документу положено читать из
+ * каталога живого инстанса, а не из текста миграции.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,20 +23,36 @@ const PORT = 55432;
 async function main() {
   const db = await PGlite.create({ extensions: { pg_trgm } });
 
-  // То, что на Supabase уже есть или заводится миграцией 0001.
-  await db.exec(`
-    create schema if not exists extensions;
-    create extension if not exists pg_trgm with schema extensions;
-    create schema if not exists dailynews;
-    create table if not exists dailynews.migrations (
-      name text primary key, applied_at timestamptz not null default now()
-    );
-  `);
+  // Схема extensions и роль products_reader на Supabase уже есть.
+  // Без них 0001 спотыкается не на своей ошибке.
+  await db.exec(`create schema if not exists extensions; create role products_reader;`);
 
-  for (const file of ["0002_tables.sql", "0003_seed.sql"]) {
-    await db.exec(readFileSync(`db/migrations/${file}`, "utf8"));
-    console.log(`  применено ${file}`);
-  }
+  const migrations = ["0001_schema_and_role.sql", "0002_tables.sql", "0003_seed.sql"];
+  const sqlText = migrations
+    .map((file) => readFileSync(`db/migrations/${file}`, "utf8"))
+    .join("\n");
+
+  // Склейкой, а не по файлам: именно так они применяются в SQL Editor
+  // одной вставкой, и проверять надо ровно то, что уходит в базу.
+  await db.exec(sqlText);
+  console.log(`  применено: ${migrations.join(", ")}`);
+
+  // Повторный прогон не должен ни падать, ни задваивать каталог:
+  // миграции написаны идемпотентными, и это единственное, что доказуемо.
+  await db.exec(sqlText);
+  const [{ count }] = (await db.query<{ count: number }>(
+    "select count(*)::int as count from dailynews.sources",
+  )).rows;
+  assert.equal(count, 27, `после повторного прогона источников ${count}, ожидалось 27`);
+  console.log("  повторный прогон не задваивает");
+
+  const [role] = (await db.query<{ search_path: string; limit: number }>(
+    `select rolconfig::text as search_path, rolconnlimit as "limit"
+       from pg_roles where rolname = 'dailynews_bot'`,
+  )).rows;
+  assert.ok(role.search_path.includes("dailynews"), "search_path роли должен быть прибит к схеме");
+  assert.equal(role.limit, 10, "лимит соединений роли должен быть 10");
+  console.log(`  роль: search_path прибит, лимит ${role.limit}`);
 
   const server = new PGLiteSocketServer({ db, port: PORT, host: "127.0.0.1" });
   await server.start();
