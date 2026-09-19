@@ -106,6 +106,11 @@ export function TopicBudgetBar({
             className={cn(
               "h-full cursor-pointer rounded-full transition-opacity focus-visible:outline-none",
               active !== null && active !== index && "opacity-40",
+              // У выбранного куска края под ручками распрямляются: скруглённый
+              // цветной торец рядом с ручкой читается как зазор, и граница
+              // выглядит не на своём месте.
+              active === index && index > 0 && "rounded-l-none",
+              active === index && index < counts.length - 1 && "rounded-r-none",
             )}
             style={{ flexGrow: count, flexBasis: 0, backgroundColor: colorAt(index) }}
           />
@@ -128,7 +133,9 @@ export function TopicBudgetBar({
               if (event.key === "Escape") setActive(null);
             }}
             style={{ left: `${(upTo(boundary) / total) * 100}%` }}
-            className="absolute top-1/2 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-col-resize rounded-full border border-background bg-foreground/70 shadow-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            // Белая, а не тёмная: тёмная ручка на цветной полосе читается
+            // как ещё один кусок, только чёрный.
+            className="absolute top-1/2 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-col-resize rounded-full border border-foreground/15 bg-background shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
           />
         ))}
       </div>

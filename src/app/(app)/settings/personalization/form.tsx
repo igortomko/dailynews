@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CheckIcon } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Select,
   SelectContent,
@@ -44,7 +45,6 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
     startTransition(async () => {
       await savePersonalization(new FormData(node));
       setSaved(true);
-      router.refresh();
     });
   };
 
@@ -126,7 +126,7 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
                   Скрытое поле держит значение для FormData. */}
               <Field>
                 <FieldLabel htmlFor="complexity">Сложность языка</FieldLabel>
-                <div className="flex items-center gap-3">
+                <div className="flex h-8 items-center">
                   <Slider
                     id="complexity"
                     min={1}
@@ -142,7 +142,6 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
                     }}
                     aria-label="Сложность языка"
                   />
-                  <span className="w-32 shrink-0 text-sm">{complexityAt(complexity).label}</span>
                 </div>
                 <input type="hidden" name="complexity" value={complexity} />
                 <FieldDescription>{complexityAt(complexity).hint}</FieldDescription>
@@ -151,25 +150,24 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
 
             <Field>
               <FieldLabel htmlFor="style">Манера</FieldLabel>
-              <Select
-                value={style}
-                onValueChange={(value: string | null) => {
-                  if (!value) return;
-                  setStyle(value);
+              {/* Четыре варианта видны сразу: за списком они прячутся по одному,
+                  и выбрать манеру нельзя, не открыв его и не сравнив. */}
+              <ToggleGroup
+                value={[style]}
+                onValueChange={(value: string[]) => {
+                  if (!value[0]) return;
+                  setStyle(value[0]);
                   schedule();
                 }}
+                variant="outline"
+                className="flex-wrap"
               >
-                <SelectTrigger id="style" className="max-w-64">
-                  <SelectValue>{styleOf(style).label}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {STYLES.map((entry) => (
-                    <SelectItem key={entry.key} value={entry.key}>
-                      {entry.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {STYLES.map((entry) => (
+                  <ToggleGroupItem key={entry.key} value={entry.key}>
+                    {entry.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
               <input type="hidden" name="style" value={style} />
               <FieldDescription>{styleOf(style).hint}</FieldDescription>
             </Field>

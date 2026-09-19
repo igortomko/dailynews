@@ -8,13 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { DIGEST_SIZES, MAX_DIGEST, MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import type { ChipInput } from "@/lib/actions";
 
@@ -103,24 +97,22 @@ export function TopicChips({
 
       <Field>
         <FieldLabel htmlFor="digest_size">Количество новостей</FieldLabel>
-        {/* Список, а не поле ввода: шаг в двадцать — заметная разница в том,
-            сколько читать, а «37» такой разницы не несёт. Значение вне списка
-            (например, прежние 12) остаётся выбранным, пока его не сменили. */}
-        <Select
-          value={String(total)}
-          onValueChange={(value: string | null) => value && setTotal(Number(value))}
+        {/* Пять значений видны сразу: за списком они прячутся по одному,
+            и «сколько читать» превращается в два действия вместо одного.
+            Шаг в двадцать — заметная разница, «37» такой разницы не несёт.
+            Значение вне списка (например, прежние 12) остаётся первым
+            вариантом, пока его не сменили. */}
+        <ToggleGroup
+          value={[String(total)]}
+          onValueChange={(value: string[]) => value[0] && setTotal(Number(value[0]))}
+          variant="outline"
         >
-          <SelectTrigger id="digest_size" className="max-w-28">
-            <SelectValue>{total}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {(DIGEST_SIZES.includes(total) ? DIGEST_SIZES : [total, ...DIGEST_SIZES]).map((size) => (
-              <SelectItem key={size} value={String(size)}>
-                {size}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          {(DIGEST_SIZES.includes(total) ? DIGEST_SIZES : [total, ...DIGEST_SIZES]).map((size) => (
+            <ToggleGroupItem key={size} value={String(size)}>
+              {size}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
         <input type="hidden" name="digest_size" value={total} />
       </Field>
 
