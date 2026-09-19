@@ -7,10 +7,10 @@ import { FEATURES, type FeatureId, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
 
 const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
-  { href: "/settings/personalization", label: "Персонализация", feature: "personalization" },
+  { href: "/settings/personalization", label: "Персонализация" },
   { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/sources", label: "Источники" },
-  { href: "/settings/delivery", label: "Доставка" },
+  { href: "/settings/delivery", label: "Доставка", feature: "delivery" },
   { href: "/settings/calibration", label: "Калибровка", feature: "calibration" },
   { href: "/settings/subscription", label: "Подписка" },
   { href: "/settings/about", label: "О проекте" },

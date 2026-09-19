@@ -16,10 +16,15 @@ export const PLAN_IDS = ["free", "plus", "pro"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 /**
- * Разделы настроек, которые тариф может закрыть. Лента, интересы
- * и источники не закрываются никогда: без них продукта нет.
+ * Разделы настроек, которые тариф может закрыть.
+ *
+ * Список короткий намеренно. Закрывать имеет смысл то, что стоит денег:
+ * лишний источник и лишняя сотня описаний — это счёт за модель. Язык,
+ * сложность и манера не стоят ничего: тот же вызов, другой промпт, —
+ * и держать их за тарифом значит ухудшать бесплатный выпуск без причины,
+ * ради ощущения, что платное что-то даёт.
  */
-export const GATED = ["personalization", "calibration"] as const;
+export const GATED = ["calibration", "delivery"] as const;
 export type Gated = (typeof GATED)[number];
 
 export type Plan = {
@@ -65,7 +70,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxTopics: 5,
     digestSizes: [20, 40],
     kinds: FREE_KINDS,
-    sections: ["personalization", "calibration"],
+    sections: ["calibration"],
   },
   pro: {
     id: "pro",
@@ -77,7 +82,7 @@ export const PLANS: Record<PlanId, Plan> = {
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
-    sections: ["personalization", "calibration"],
+    sections: ["calibration", "delivery"],
   },
 };
 
@@ -132,7 +137,7 @@ export const cheapestWith = (section: Gated): Plan =>
  * и оба случая на глаз незаметны.
  */
 export type FeatureId =
-  | "personalization" | "calibration" | "x" | "topics" | "digest" | "sources";
+  | "personalization" | "calibration" | "delivery" | "x" | "topics" | "digest" | "sources";
 
 export type Feature = {
   title: string;
@@ -144,13 +149,19 @@ export type Feature = {
 export const FEATURES: Record<FeatureId, Feature> = {
   personalization: {
     title: "Язык и подача",
-    what: "На каком языке приходит выпуск и как он написан: попроще или как специалисту, суховато или живее.",
-    has: (plan) => allows(plan, "personalization"),
+    what: "На каком языке приходит выпуск и как он написан: попроще или как специалисту, суховато или живее. Есть на любом тарифе.",
+    // Доступна всем: промпт от неё не дорожает ни на токен.
+    has: () => true,
   },
   calibration: {
     title: "Отчёт о попаданиях",
     what: "Видно, угадывает ли лента: что ты открывал, что пролистнул и становится ли выбор точнее.",
     has: (plan) => allows(plan, "calibration"),
+  },
+  delivery: {
+    title: "Выпуск на читалку",
+    what: "Выпуск приходит книгой на Kindle — читать с электронных чернил, без телефона.",
+    has: (plan) => allows(plan, "delivery"),
   },
   x: {
     title: "Посты из X",
