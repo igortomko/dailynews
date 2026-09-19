@@ -14,8 +14,21 @@ const SUGGESTIONS = [
   "Психотерапия и mental health", "Дизайн и продукт",
 ];
 
-export function TopicChips({ initial }: { initial: ChipInput[] }) {
-  const [chips, setChips] = useState<ChipInput[]>(initial);
+export function TopicChips({
+  initial,
+  onChange,
+}: {
+  initial: ChipInput[];
+  onChange?: () => void;
+}) {
+  const [chips, setChipsState] = useState<ChipInput[]>(initial);
+
+  // Скрытое поле меняется без события формы, поэтому о правке чипов
+  // сообщаем сами: иначе автосохранение их не заметит.
+  const setChips = (next: ChipInput[]) => {
+    setChipsState(next);
+    onChange?.();
+  };
   const [draft, setDraft] = useState("");
   const [dragging, setDragging] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);

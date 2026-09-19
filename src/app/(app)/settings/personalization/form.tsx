@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
 import { Button } from "@/components/ui/button";
+import { CheckIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -22,14 +22,56 @@ const LANGUAGES = [
 export function PersonalizationForm({ profile, chips }: { profile: Profile; chips: ChipInput[] }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [language, setLanguage] = useState(profile?.language ?? "ru");
+  const form = useRef<HTMLFormElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
   const first = !profile?.onboarded_at;
+
+  const save = () => {
+    const node = form.current;
+    if (!node) return;
+    startTransition(async () => {
+      const result = await saveInterests(new FormData(node));
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
+      setSaved(true);
+      router.refresh();
+    });
+  };
+
+  // Сохраняем сами, с паузой после последней правки: кнопка заставляет
+  // помнить, что изменения не применены, и наказывает за уход со страницы.
+  // Пауза нужна, чтобы не слать запрос на каждую букву в текстовом поле.
+  const schedule = () => {
+    setSaved(false);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(save, 900);
+  };
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    if (!saved) return;
+    const hide = setTimeout(() => setSaved(false), 2000);
+    return () => clearTimeout(hide);
+  }, [saved]);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{first ? "Настрой ленту" : "Персонализация"}</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          {first ? "Настрой ленту" : "Персонализация"}
+          <span
+            aria-live="polite"
+            className="flex items-center gap-1 text-xs font-normal text-muted-foreground"
+          >
+            {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
+          </span>
+        </CardTitle>
         <CardDescription>
           {first
             ? "По этим направлениям будут собираться новости, и по ним же раскладываться вкладки."
@@ -37,21 +79,7 @@ export function PersonalizationForm({ profile, chips }: { profile: Profile; chip
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form
-          action={(formData) =>
-            startTransition(async () => {
-              const result = await saveInterests(formData);
-              if (result?.error) {
-                setError(result.error);
-                return;
-              }
-              setError(null);
-              toast.success("Сохранено");
-              if (first) router.push("/");
-              else router.refresh();
-            })
-          }
-        >
+        <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
           {/* Порядок от общего к частному: сколько и на каком языке — решения
               на один раз; кто читает влияет на отбор сильнее списка тем,
               поэтому стоит перед ним; интересы меняются чаще всего и потому
@@ -74,7 +102,11 @@ export function PersonalizationForm({ profile, chips }: { profile: Profile; chip
               <FieldLabel>Язык</FieldLabel>
               <ToggleGroup
                 value={[language]}
-                onValueChange={(value: string[]) => value[0] && setLanguage(value[0] as typeof language)}
+                onValueChange={(value: string[]) => {
+                  if (!value[0]) return;
+                  setLanguage(value[0] as typeof language);
+                  schedule();
+                }}
                 variant="outline"
               >
                 {LANGUAGES.map((entry) => (
@@ -104,13 +136,26 @@ export function PersonalizationForm({ profile, chips }: { profile: Profile; chip
               </FieldDescription>
             </Field>
 
-            <TopicChips initial={chips} />
+            <TopicChips initial={chips} onChange={schedule} />
 
             {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
 
-            <Button type="submit" disabled={pending} className="self-start">
-              {first ? "Готово" : "Сохранить"}
-            </Button>
+            {/* Кнопка остаётся только в онбординге: там она не сохраняет,
+                а заканчивает настройку и уводит в ленту. */}
+            {first ? (
+              <Button
+                type="button"
+                disabled={pending}
+                className="self-start"
+                onClick={() => {
+                  clearTimeout(timer.current);
+                  save();
+                  router.push("/");
+                }}
+              >
+                Готово
+              </Button>
+            ) : null}
           </FieldGroup>
         </form>
       </CardContent>

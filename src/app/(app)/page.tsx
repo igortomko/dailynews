@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
 import { getDigestDays, getFeed, getProfile, getTopics } from "@/lib/queries";
 import { FeedTabs } from "@/components/feed-tabs";
+import Link from "next/link";
+import { SettingsIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { DateNav } from "@/components/date-nav";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
@@ -41,7 +44,20 @@ export default async function FeedPage({
 
   return (
     <div className="flex flex-col gap-3">
-      <DateNav day={day} days={days} />
+      {/* Дата и шестерёнка в одной строке: две отдельные шапки отнимали
+          у первого заголовка лишний ряд. */}
+      <div className="flex items-center justify-between">
+        <DateNav day={day} days={days} />
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Настройки"
+          className="text-muted-foreground/40 transition-colors hover:text-foreground focus-visible:text-foreground [@media(hover:none)]:text-muted-foreground"
+          render={<Link href="/settings/personalization" />}
+        >
+          <SettingsIcon />
+        </Button>
+      </div>
       <FeedTabs topics={topics} items={items} />
     </div>
   );
