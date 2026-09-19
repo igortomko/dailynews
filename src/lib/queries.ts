@@ -87,6 +87,38 @@ export async function getFeed(day: string): Promise<FeedItem[]> {
   }));
 }
 
+export type SummaryQualityRow = {
+  day: string;
+  items: number;
+  mean: number;
+  repeats: number;
+  relevant: number;
+  evaluative: number;
+};
+
+/**
+ * Качество описаний по дням. Смысл не в отдельном числе, а в ряду:
+ * правка промпта либо двигает его, либо нет, и на глаз это не видно —
+ * двенадцать описаний в день всегда читаются нормально.
+ */
+export async function getSummaryQuality(): Promise<SummaryQualityRow[]> {
+  return sql<SummaryQualityRow[]>`
+    select d.day::text as day,
+           count(*)::int as items,
+           round(avg(i.summary_score)::numeric, 1)::float as mean,
+           count(*) filter (where (i.summary_axes->'repeats_headline'->>'noul')::float > 0.5)::int as repeats,
+           count(*) filter (where (i.summary_axes->'reader_relevance'->>'noul')::float > 0.5)::int as relevant,
+           count(*) filter (where (i.summary_axes->'evaluative'->>'noul')::float > 0.5)::int as evaluative
+      from dailynews.digests d
+      cross join lateral unnest(d.item_ids) as u(item_id)
+      join dailynews.items i on i.id = u.item_id
+     where i.summary_score is not null
+     group by d.day
+     order by d.day desc
+     limit 21
+  `;
+}
+
 export type CalibrationRow = {
   bucket: string;
   shown: number;

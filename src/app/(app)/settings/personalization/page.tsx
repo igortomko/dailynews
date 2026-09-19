@@ -1,12 +1,12 @@
 import { getAllTopics, getProfile } from "@/lib/queries";
-import { InterestsForm } from "./form";
+import { PersonalizationForm } from "./form";
 
 export const dynamic = "force-dynamic";
 
-export default async function InterestsPage() {
+export default async function PersonalizationPage() {
   const [profile, topics] = await Promise.all([getProfile(), getAllTopics()]);
   return (
-    <InterestsForm
+    <PersonalizationForm
       profile={profile}
       chips={topics
         .filter((topic) => topic.active)

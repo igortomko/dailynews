@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const SECTIONS = [
-  { href: "/settings/interests", label: "Интересы" },
+  { href: "/settings/personalization", label: "Персонализация" },
   { href: "/settings/sources", label: "Источники" },
   { href: "/settings/calibration", label: "Калибровка" },
   { href: "/settings/subscription", label: "Подписка" },

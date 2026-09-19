@@ -7,6 +7,7 @@ import { scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { notify } from "./telegram";
 import { enrichImages } from "./og";
+import { scoreSummaries } from "./summary-quality";
 
 /** Цена Jev, $ за миллион токенов. Выход не тарифицируется. */
 const JEV_INPUT_PRICE = 0.042;
@@ -174,7 +175,12 @@ async function main() {
   log(`   иллюстраций найдено: ${withImages} из ${survivors.length}`);
 
   log(`5. Дайджест: модель видит ${survivors.length} материалов вместо ${pending.length}`);
-  const digest = await writeDigest(survivors, profile.reader_context, profile.llm ?? {});
+  const digest = await writeDigest(
+    survivors,
+    profile.reader_context,
+    profile.llm ?? {},
+    profile.language ?? "ru",
+  );
   for (const item of digest.items) {
     await sql`
       update dailynews.items
@@ -182,6 +188,29 @@ async function main() {
        where id = ${item.id}
     `;
   }
+
+  // Вторая петля Jev: тот же инструмент оценивает не входящий поток,
+  // а собственный выход. Правка промпта либо улучшает ряд чисел, либо нет —
+  // на глаз двенадцать описаний в день всегда читаются нормально.
+  const quality = await scoreSummaries(
+    digest.items.map((item) => {
+      const survivor = survivors.find((s) => Number(s.id) === Number(item.id));
+      return { id: Number(item.id), title: item.title_ru, summary: item.summary };
+    }),
+    profile.reader_context,
+  );
+  for (const row of quality.scored) {
+    await sql`
+      update dailynews.items
+         set summary_axes = ${sql.json(row.axes as unknown as Parameters<typeof sql.json>[0])},
+             summary_score = ${row.total}
+       where id = ${row.item_id}
+    `;
+  }
+  const meanQuality = quality.scored.length
+    ? quality.scored.reduce((sum, row) => sum + row.total, 0) / quality.scored.length
+    : 0;
+  log(`   качество описаний: ${meanQuality.toFixed(0)} из 85 по ${quality.scored.length}`);
 
   const order = survivors.map((s) => s.id);
   await sql`
@@ -195,6 +224,7 @@ async function main() {
         jev_input_tokens: usage.input,
         jev_cost_usd: Number(jevCost.toFixed(5)),
         flagged: digest.flagged ?? 0,
+        summary_quality: Number(meanQuality.toFixed(1)),
         seconds: Math.round((Date.now() - started) / 1000),
         // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
         // строку, и stats->>'jev_cost_usd' молча возвращает null.

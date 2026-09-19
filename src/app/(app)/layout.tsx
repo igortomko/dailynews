@@ -16,7 +16,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           size="icon-sm"
           aria-label="Настройки"
           className="text-muted-foreground/40 transition-colors hover:text-foreground focus-visible:text-foreground [@media(hover:none)]:text-muted-foreground"
-          render={<Link href="/settings/interests" />}
+          render={<Link href="/settings/personalization" />}
         >
           <SettingsIcon />
         </Button>

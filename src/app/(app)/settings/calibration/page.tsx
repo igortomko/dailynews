@@ -1,4 +1,4 @@
-import { getCalibration } from "@/lib/queries";
+import { getCalibration, getSummaryQuality } from "@/lib/queries";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -24,7 +24,10 @@ function Row({ label, shown, opened, rate }: { label: string; shown: number; ope
 }
 
 export default async function CalibrationPage() {
-  const { byScore, byConfidence, byAxis, totals } = await getCalibration();
+  const [{ byScore, byConfidence, byAxis, totals }, quality] = await Promise.all([
+    getCalibration(),
+    getSummaryQuality(),
+  ]);
 
   if (totals.shown === 0) {
     return (
@@ -60,6 +63,36 @@ export default async function CalibrationPage() {
             менять по ним веса не стоит.
           </AlertDescription>
         </Alert>
+      ) : null}
+
+      {quality.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Качество описаний</CardTitle>
+            <CardDescription>
+              Те же вопросы, но о собственном выходе. Смысл не в отдельном числе,
+              а в ряду: правка формулировок либо двигает его, либо нет.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-1.5 text-sm">
+            <div className="flex gap-3 text-xs text-muted-foreground">
+              <span className="w-20 shrink-0">день</span>
+              <span className="w-12 text-right">среднее</span>
+              <span className="w-24 text-right">пересказ</span>
+              <span className="w-24 text-right">связь с тобой</span>
+              <span className="w-20 text-right">оценки</span>
+            </div>
+            {quality.map((row) => (
+              <div key={row.day} className="flex gap-3 tabular-nums">
+                <span className="w-20 shrink-0 text-muted-foreground">{row.day.slice(5)}</span>
+                <span className="w-12 text-right font-medium">{row.mean}</span>
+                <span className="w-24 text-right text-muted-foreground">{row.repeats} из {row.items}</span>
+                <span className="w-24 text-right text-muted-foreground">{row.relevant} из {row.items}</span>
+                <span className="w-20 text-right text-muted-foreground">{row.evaluative}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       ) : null}
 
       <Card>

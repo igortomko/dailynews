@@ -12,7 +12,7 @@ export default async function FeedPage({
   searchParams: Promise<{ day?: string }>;
 }) {
   const profile = await getProfile();
-  if (!profile?.onboarded_at) redirect("/settings/interests");
+  if (!profile?.onboarded_at) redirect("/settings/personalization");
 
   const [{ day: requested }, days, topics] = await Promise.all([
     searchParams,

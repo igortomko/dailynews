@@ -63,6 +63,7 @@ export type Profile = {
   id: number;
   reader_context: string;
   digest_size: number;
+  language: "ru" | "en" | "pt";
   weights: Weights;
   onboarded_at: string | null;
   llm: { base_url?: string; model?: string; api_key?: string };

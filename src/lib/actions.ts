@@ -71,6 +71,8 @@ function toSlug(label: string): string {
 }
 
 export async function saveInterests(formData: FormData) {
+  const language = String(formData.get("language") ?? "ru");
+  if (!["ru", "en", "pt"].includes(language)) return { error: "Неизвестный язык" };
   const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
   const digestSize = Math.min(50, Math.max(3, Number(formData.get("digest_size") ?? 12)));
@@ -98,6 +100,7 @@ export async function saveInterests(formData: FormData) {
       update dailynews.profile
          set reader_context = ${readerContext},
              digest_size = ${digestSize},
+             language = ${language},
              onboarded_at = coalesce(onboarded_at, now()),
              updated_at = now()
        where id = 1
