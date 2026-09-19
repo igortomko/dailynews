@@ -92,6 +92,21 @@ export function planOf(id: string | null | undefined): Plan {
   return PLANS[(id ?? "") as PlanId] ?? PLANS.free;
 }
 
+/**
+ * Почему этот вид источника тарифу не положен, или null, если положен.
+ *
+ * Отдельной функцией, потому что спросить надо дважды и в разных местах:
+ * при сохранении и до разбора ссылки. X — платный, у него счёт
+ * за прочитанные посты, и разбор сам по себе уже стоит денег.
+ */
+export function kindDenial(plan: Plan, kind: Source["kind"]): string | null {
+  if (plan.kinds.includes(kind)) return null;
+  const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
+  return where.length
+    ? `Источники ${kind} есть только на тарифе «${where.join("», «")}»`
+    : `Источники ${kind} недоступны`;
+}
+
 export const maxDigestOf = (plan: Plan) => plan.digestSizes[plan.digestSizes.length - 1];
 
 export const allows = (plan: Plan, section: Gated) => plan.sections.includes(section);
