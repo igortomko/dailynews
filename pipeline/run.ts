@@ -1,8 +1,8 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
 import {
-  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks, recordCall,
-  spentToday, topicsInUse, wakeReader,
+  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks,
+  readerSources, recordCall, spentToday, topicsInUse, wakeReader,
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -163,7 +163,6 @@ export async function transcribeVideos(itemIds: number[]): Promise<{ done: numbe
 async function runForReader(
   reader: Reader,
   day: string,
-  allSources: Source[],
   shared: { collected: number; duplicates: number; scored: number },
 ): Promise<number> {
   const name = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
@@ -239,7 +238,7 @@ async function runForReader(
     return 0;
   }
 
-  const mySources = sourcesForPlan(allSources, plan).map((source) => source.id);
+  const mySources = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
   const survivors = await selectSurvivors(
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
@@ -498,11 +497,13 @@ async function main() {
   // бесплатный читал бы платный источник за чужой счёт.
   const allowed = new Map<number, Source>();
   for (const reader of readers) {
-    for (const source of sourcesForPlan(all, effectivePlan(reader))) allowed.set(source.id, source);
+    for (const source of sourcesForPlan(await readerSources(reader.id), effectivePlan(reader))) {
+      allowed.set(source.id, source);
+    }
   }
   const sources = [...allowed.values()].sort((a, b) => a.id - b.id);
   if (sources.length < all.length) {
-    log(`   тарифы читателей: опрашиваем ${sources.length} из ${all.length} включённых`);
+    log(`   выбор читателей и их тарифы: опрашиваем ${sources.length} из ${all.length} в каталоге`);
   }
 
   if (topics.length === 0) {
@@ -582,7 +583,7 @@ async function main() {
   let personal = 0;
   for (const reader of readers) {
     try {
-      personal += await runForReader(reader, day, all, {
+      personal += await runForReader(reader, day, {
         collected: collected.length, duplicates, scored: scored.length,
       });
       await askAboutYesterday(reader);

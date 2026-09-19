@@ -112,6 +112,13 @@ export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]>
   const liveTables = await sql<{ table_name: string }[]>`
     select table_name from information_schema.tables where table_schema = 'dailynews'
   `;
+  // Пустой ответ здесь означает не «схемы нет», а «прочитать не вышло»:
+  // сверка тогда объявляет недостающим весь список разом, и это читается
+  // как «ни одна миграция не применена». Развёртывание на таком ответе
+  // останавливается с ложной причиной, и искать её идут не там.
+  if (liveTables.length === 0) {
+    throw new Error("живая схема dailynews прочиталась пустой — сверять не с чем");
+  }
   const hasTable = new Set(liveTables.map((row) => row.table_name));
 
   const live = await sql<{ table_name: string; column_name: string }[]>`

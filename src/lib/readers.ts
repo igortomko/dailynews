@@ -1,5 +1,5 @@
 import { sql } from "./db";
-import type { Reader, ReaderTopic, Topic } from "./types";
+import type { Reader, ReaderTopic, Source, Topic } from "./types";
 import { kindleSenderName } from "./kindle-setup";
 
 /**
@@ -13,7 +13,8 @@ const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
   reader_context, digest_size, weights, language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved,
-  plan, daily_cap_usd, onboarded_at
+  plan, daily_cap_usd, onboarded_at,
+  bio, suggested_topics, channel_checked_at::text as channel_checked_at
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -147,7 +148,9 @@ export async function spentToday(readerId: number): Promise<number> {
 
 export type CallRecord = {
   readerId: number | null;
-  stage: "score" | "digest" | "summary" | "translate" | "translation-quality" | "video";
+  stage:
+    | "score" | "digest" | "summary" | "translate" | "translation-quality"
+    | "video" | "interests";
   model: string;
   tokensIn: number;
   tokensOut?: number;
@@ -293,4 +296,85 @@ export async function lastActivityAt(readerId: number): Promise<string | null> {
      where d.reader_id = ${readerId}
   `;
   return row?.at ?? null;
+}
+
+/**
+ * Описание из Telegram и порядок стартовых интересов под него.
+ *
+ * Пишется один раз при заведении, пока читатель подписывается на канал.
+ * Считать это при открытии первого экрана значило бы показать ему спиннер
+ * ровно там, где он решает, стоит ли продолжать.
+ */
+export async function saveSuggestions(
+  readerId: number,
+  bio: string | null,
+  slugs: string[],
+): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set bio = ${bio}, suggested_topics = ${slugs}, updated_at = now()
+     where id = ${readerId}
+  `;
+}
+
+/** Проверку подписки на канал прошёл. Гейт стоит на входе и только там. */
+export async function markChannelChecked(readerId: number): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set channel_checked_at = now(), updated_at = now()
+     where id = ${readerId} and channel_checked_at is null
+  `;
+}
+
+/**
+ * Источники этого читателя.
+ *
+ * Каталог общий, выбор личный. До reader_sources «источники тарифа»
+ * означали первые N строк каталога по id — один и тот же набор у всех,
+ * и у второго читателя выпуск собирался из чужих источников: вовремя,
+ * без ошибок и не из того, что он выбирал.
+ *
+ * Порядок по id: при понижении тарифа остаются заведённые раньше,
+ * и набор не пляшет от прогона к прогону.
+ */
+export async function readerSources(readerId: number): Promise<Source[]> {
+  return sql<Source[]>`
+    select s.* from dailynews.sources s
+      join dailynews.reader_sources rs on rs.source_id = s.id
+     where rs.reader_id = ${readerId} and s.deleted_at is null
+     order by s.id
+  `;
+}
+
+/** Сколько источников у читателя сейчас: предел тарифа считается по ним. */
+export async function countReaderSources(readerId: number): Promise<number> {
+  const [row] = await sql<{ n: number }[]>`
+    select count(*)::int as n
+      from dailynews.reader_sources rs
+      join dailynews.sources s on s.id = rs.source_id
+     where rs.reader_id = ${readerId} and s.deleted_at is null
+  `;
+  return row?.n ?? 0;
+}
+
+/** Взять источник в свою ленту. Повторное добавление — не ошибка. */
+export async function addReaderSource(readerId: number, sourceId: number): Promise<void> {
+  await sql`
+    insert into dailynews.reader_sources (reader_id, source_id)
+    values (${readerId}, ${sourceId})
+    on conflict (reader_id, source_id) do nothing
+  `;
+}
+
+/**
+ * Убрать источник из своей ленты.
+ *
+ * Строка связки, а не sources.deleted_at: каталог общий, и удаление
+ * источника у себя не должно уносить его у соседа вместе с его историей.
+ */
+export async function removeReaderSource(readerId: number, sourceId: number): Promise<void> {
+  await sql`
+    delete from dailynews.reader_sources
+     where reader_id = ${readerId} and source_id = ${sourceId}
+  `;
 }

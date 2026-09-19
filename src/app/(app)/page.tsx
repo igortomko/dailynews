@@ -20,7 +20,8 @@ export default async function FeedPage({
 }) {
   // Чья это лента, решает подписанная кука и ничто другое.
   const reader = await currentReader();
-  if (!reader.onboarded_at) redirect("/settings/personalization");
+  // Первый заход идёт своим путём: интересы, источники, первый выпуск.
+  if (!reader.onboarded_at) redirect("/welcome");
 
   const [{ day: requested }, days, topics] = await Promise.all([
     searchParams,
