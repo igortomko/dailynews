@@ -7,7 +7,7 @@ import type { FeedItem } from "@/lib/queries";
 import type { Topic } from "@/lib/types";
 
 export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[] }) {
-  // «Прочее» показывается вкладкой только если туда что-то попало: пустая
+  // «Прочее» показывается вкладкой, только если туда что-то попало: пустая
   // вкладка сообщает о системе, а не о новостях.
   const hasOther = items.some((item) => !item.topic_slug);
   const tabs = [
@@ -17,7 +17,9 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
       label: topic.label,
       count: items.filter((item) => item.topic_slug === topic.slug).length,
     })),
-    ...(hasOther ? [{ slug: "other", label: "Прочее", count: items.filter((i) => !i.topic_slug).length }] : []),
+    ...(hasOther
+      ? [{ slug: "other", label: "Прочее", count: items.filter((item) => !item.topic_slug).length }]
+      : []),
   ];
 
   const forTab = (slug: string) =>
@@ -28,17 +30,22 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
         : items.filter((item) => item.topic_slug === slug);
 
   return (
-    <Tabs defaultValue="all" className="flex flex-col gap-4 overflow-x-hidden">
-      {/* Полоса вкладок выходит за колонку текста и скроллится: семь тем
-          по-русски в 768 пикселей не помещаются, а перенос второй строкой
-          уводит последние темы на середину экрана. Края растушёваны, иначе
-          обрезанная вкладка читается как поломка, а не как «есть ещё». */}
-      <div className="-mx-4 [mask-image:linear-gradient(to_right,transparent,black_1rem,black_calc(100%-1rem),transparent)]">
-        <TabsList className="w-max justify-start px-4 text-[0.8125rem]">
+    <Tabs defaultValue="all" className="flex flex-col gap-2 overflow-x-hidden">
+      {/* Вкладки как в Google News: подчёркивание вместо плашки. Плашка
+          обводит каждую тему рамкой и превращает ряд в набор кнопок;
+          подчёркивание отмечает одну, остальные оставляет текстом.
+          Полоса выходит за колонку и растушёвана: семь тем по-русски
+          не помещаются, а обрезанный край должен читаться как «есть ещё». */}
+      <div className="-mx-4 border-b [mask-image:linear-gradient(to_right,transparent,black_1rem,black_calc(100%-1rem),transparent)]">
+        <TabsList className="h-auto w-max justify-start gap-1 rounded-none border-0 bg-transparent p-0 px-4">
           {tabs.map((tab) => (
-            <TabsTrigger key={tab.slug} value={tab.slug} className="whitespace-nowrap">
+            <TabsTrigger
+              key={tab.slug}
+              value={tab.slug}
+              className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-2 pb-2.5 text-[0.8125rem] whitespace-nowrap text-muted-foreground shadow-none data-[selected]:border-foreground data-[selected]:font-medium data-[selected]:text-foreground data-[state=active]:border-foreground data-[state=active]:font-medium data-[state=active]:text-foreground"
+            >
               {tab.label}
-              <span className="ml-1.5 text-muted-foreground">{tab.count}</span>
+              <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>
             </TabsTrigger>
           ))}
         </TabsList>
@@ -52,9 +59,7 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>Пока пусто</EmptyTitle>
-                  <EmptyDescription>
-                    По этой теме за последние две недели ничего не прошло отбор.
-                  </EmptyDescription>
+                  <EmptyDescription>В этом выпуске по теме ничего не прошло отбор.</EmptyDescription>
                 </EmptyHeader>
               </Empty>
             ) : (

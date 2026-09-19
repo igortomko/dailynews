@@ -2,9 +2,6 @@ import "server-only";
 import { sql } from "./db";
 import type { Axes, Profile, Source, Topic } from "./types";
 
-/** Сколько дней ленты показывать во вкладках. */
-const FEED_DAYS = 14;
-
 export type FeedItem = {
   id: number;
   url: string;
@@ -44,7 +41,15 @@ export async function getSources(): Promise<Source[]> {
  * в items — он нужен калибровке и дедупу, но показывать его незачем,
  * иначе отбор теряет смысл.
  */
-export async function getFeed(): Promise<FeedItem[]> {
+/** Дни, за которые есть дайджест, от свежего к старому. */
+export async function getDigestDays(): Promise<string[]> {
+  const rows = await sql<{ day: string }[]>`
+    select day::text as day from dailynews.digests order by day desc limit 90
+  `;
+  return rows.map((row) => row.day);
+}
+
+export async function getFeed(day: string): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
     select i.id, i.url, i.title, i.title_ru, i.summary, i.image_url,
            s.label as source_label,
@@ -61,7 +66,9 @@ export async function getFeed(): Promise<FeedItem[]> {
  left join dailynews.topics t on t.id = sc.topic_id
      -- Каст обязателен: у нетипизированного параметра Postgres выбирает
      -- date - date -> integer вместо date - integer -> date.
-     where d.day > current_date - ${FEED_DAYS}::int
+     -- Один день, а не окно: лента листается датами, и смешивать выпуски
+     -- значит показывать вчерашнее как сегодняшнее.
+     where d.day = ${day}::date
        -- Скрытое рукой не возвращается: иначе палец вниз означал бы
        -- «скрыть до перезагрузки страницы».
        and not exists (

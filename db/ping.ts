@@ -28,7 +28,8 @@ async function main() {
   const profile = await getProfile();
   const topics = await getTopics();
   const sources = await getSources();
-  const feed = await getFeed();
+  const [latestDay] = await (await import("../src/lib/queries")).getDigestDays();
+  const feed = latestDay ? await getFeed(latestDay) : [];
   console.log(`профиль: дайджест ${profile.digest_size}, онбординг ${profile.onboarded_at ?? "не пройден"}`);
   console.log(`темы: ${topics.map((t) => t.slug).join(", ")}`);
   console.log(`источники: ${sources.length} (включено ${sources.filter((s) => s.active).length})`);

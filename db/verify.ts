@@ -166,7 +166,8 @@ async function main() {
     `;
 
     // --- лента ---------------------------------------------------------------
-    const feed = await queries.getFeed();
+    const today = new Date().toISOString().slice(0, 10);
+    const feed = await queries.getFeed(today);
     assert.equal(feed.length, 3, `в ленте ${feed.length}, ожидалось 3`);
     assert.equal(feed[0].total, 120, "лента должна идти по убыванию скора");
     assert.ok(feed[0].topic_slug === "ai-infra");
@@ -192,7 +193,7 @@ async function main() {
       insert into dailynews.reads (item_id, event, score_snap, conf_snap)
       values (${ids[0]}, 'opened', 120, 0.8), (${ids[0]}, 'outbound', 120, 0.8)
     `;
-    const afterRead = await queries.getFeed();
+    const afterRead = await queries.getFeed(today);
     assert.equal(afterRead[0].read_count, 2, "счётчик чтений должен вырасти");
 
     const calibration = await queries.getCalibration();
