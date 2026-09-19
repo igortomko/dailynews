@@ -51,6 +51,28 @@ if [ -n "${LIVE:-}" ] && [ "$LIVE" != "$COMMIT" ] && ! git merge-base --is-ances
   echo "  Рядом развёртывается другая ветка; сейчас её код будет заменён." >&2
 fi
 
+# Переменные модели жили только у прогона в Actions, а веб зовёт ту же модель
+# из догрузки выпуска, отправки статьи на читалку и блогерских постов. На проде
+# их не было, и отказ выглядел как успех: догрузка молча отдавала описания
+# на языке источника, потому что writeDigest без ключа возвращает исходные
+# заголовки. Поэтому окружение контейнера сверяется так же, как схема базы.
+echo "→ проверка: есть ли у контейнера всё, что зовёт веб"
+NEEDED="DATABASE_URL APP_SECRET APP_URL TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET \
+LLM_API_KEY LLM_BASE_URL LLM_MODEL TYPESAFE_API_KEY RESEND_API_KEY KINDLE_FROM_DOMAIN"
+MISSING=$(ssh "$HOST" "for key in $NEEDED; do grep -qs \"^\$key=.\" $DIR/.env.production || echo \$key; done")
+if [ -n "$MISSING" ]; then
+  echo "! в $DIR/.env.production нет: $(echo $MISSING)" >&2
+  echo "  Без них веб не падает, а тихо отдаёт результат без модели." >&2
+  exit 1
+fi
+# Рассуждение провайдера по умолчанию «high», и это вчетверо дороже на том же
+# запросе (замер 19 сентября 2026: $0.0045 против $0.0011). Не отказ — выбор,
+# но выбор должен быть сделан вслух.
+if ! ssh "$HOST" "grep -qs '^LLM_REASONING_EFFORT=.' $DIR/.env.production"; then
+  echo "  ~ LLM_REASONING_EFFORT не задан: провайдер рассуждает по умолчанию," >&2
+  echo "    и каждый вызов из веба стоит вчетверо дороже" >&2
+fi
+
 echo "→ отправка файлов"
 rsync -az --delete \
   --exclude '.git' \
