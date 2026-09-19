@@ -26,9 +26,12 @@ export function SettingsNav() {
             aria-current={active ? "page" : undefined}
             className={cn(
               "shrink-0 rounded-md px-2 py-1.5 text-sm whitespace-nowrap transition-colors",
+              // Полупрозрачный тон вместо сплошной заливки: сплошная на сером
+              // фоне читается как отдельный светлый блок поверх страницы,
+              // а не как выделение внутри неё.
               active
-                ? "bg-muted font-medium text-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                ? "bg-foreground/[0.06] font-medium text-foreground"
+                : "text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground",
             )}
           >
             {section.label}
