@@ -153,136 +153,140 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
       ref={article}
       className="group border-b py-5 transition-opacity duration-150 last:border-0"
     >
+      {/* В покое остаётся только источник. Время, тема и метки нужны,
+          когда уже присматриваешься к материалу, а в списке они тянут
+          строку и спорят с заголовком. Место под них держится всегда,
+          поэтому строка не дёргается при наведении.
+          Разделитель — запятая: точки с пробелами по бокам растягивали
+          ряд сильнее, чем несли смысла.
+
+          Шапка во всю ширину карточки, а не внутри текстовой колонки:
+          там её правый край упирался в картинку, и кнопки у карточек
+          с иллюстрацией и без неё стояли в разных местах. Теперь они
+          всегда в правом верхнем углу, а картинка начинается под ними. */}
+      <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        <span className="flex min-w-0 items-baseline gap-1">
+          {site ? (
+            <a
+              href={site}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
+            >
+              {item.source_label}
+            </a>
+          ) : (
+            <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
+              {item.source_label}
+            </span>
+          )}
+          {/* Метка стоит вплотную к источнику, а не за метаданными:
+              место под время и тему держится всегда, чтобы строка
+              не дёргалась при наведении, — и «кликбейт» за этим местом
+              висел в пустоте, оторванный от того, к чему относится. */}
+          {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
+          <span className="truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+            {[
+              relativeTime(item.published_at),
+              showTopic ? item.topic_label : null,
+              kind,
+              horizon,
+            ]
+              .filter(Boolean)
+              .join(", ")}
+          </span>
+        </span>
+
+        {/* Оценка тоже по наведению: нужна раз на десяток материалов,
+            а в покое спорит с заголовком. Поднятый палец виден всегда,
+            иначе выставленная оценка исчезает вместе с курсором. */}
+        <div
+          className={cn(
+            "ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",
+            "group-hover:opacity-100 group-focus-within:opacity-100",
+            "[@media(hover:none)]:opacity-100",
+            vote === "up" && "opacity-100",
+          )}
+        >
+          {/* Иконка без подписи опознаётся только по догадке. Подпись
+              для экранного диктора у них была и раньше; всплывающая
+              говорит то же самое глазами — на курсоре и на фокусе. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Отправить на Kindle"
+                  disabled={kindle !== "idle"}
+                  onClick={sendToKindle}
+                  className={cn(
+                    "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                    kindle === "idle"
+                      ? "cursor-pointer text-muted-foreground/50"
+                      : "text-foreground",
+                  )}
+                />
+              }
+            >
+              {kindle === "sending" ? (
+                <Spinner className="size-3.5" />
+              ) : kindle === "sent" ? (
+                <CheckIcon className="size-3.5" />
+              ) : (
+                <BookOpenIcon className="size-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>Отправить статью на читалку</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Больше такого"
+                  aria-pressed={vote === "up"}
+                  onClick={() => {
+                    setVote(vote === "up" ? null : "up");
+                    if (vote !== "up") report({ item_id: item.id, event: "up" });
+                  }}
+                  className={cn(
+                    "flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                    vote === "up" ? "text-foreground" : "text-muted-foreground/50",
+                  )}
+                />
+              }
+            >
+              <ThumbsUpIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>Больше такого в следующих выпусках</TooltipContent>
+          </Tooltip>
+
+          {/* Палец вниз убирает материал из ленты — единственное здесь
+              действие, которое что-то отнимает. Красный по наведению
+              отличает его от соседних двух до нажатия, а не после. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Скрыть и меньше такого"
+                  onClick={() => {
+                    setVote("down");
+                    report({ item_id: item.id, event: "down" });
+                  }}
+                  className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                />
+              }
+            >
+              <ThumbsDownIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>Скрыть и меньше такого</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
-          {/* В покое остаётся только источник. Время, тема и метки нужны,
-              когда уже присматриваешься к материалу, а в списке они тянут
-              строку и спорят с заголовком. Место под них держится всегда,
-              поэтому строка не дёргается при наведении.
-              Разделитель — запятая: точки с пробелами по бокам растягивали
-              ряд сильнее, чем несли смысла. */}
-          <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
-            <span className="flex min-w-0 items-baseline gap-1">
-              {site ? (
-                <a
-                  href={site}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
-                >
-                  {item.source_label}
-                </a>
-              ) : (
-                <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
-                  {item.source_label}
-                </span>
-              )}
-              {/* Метка стоит вплотную к источнику, а не за метаданными:
-                  место под время и тему держится всегда, чтобы строка
-                  не дёргалась при наведении, — и «кликбейт» за этим местом
-                  висел в пустоте, оторванный от того, к чему относится. */}
-              {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
-              <span className="truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-                {[
-                  relativeTime(item.published_at),
-                  showTopic ? item.topic_label : null,
-                  kind,
-                  horizon,
-                ]
-                  .filter(Boolean)
-                  .join(", ")}
-              </span>
-            </span>
-
-            {/* Оценка тоже по наведению: нужна раз на десяток материалов,
-                а в покое спорит с заголовком. Поднятый палец виден всегда,
-                иначе выставленная оценка исчезает вместе с курсором. */}
-            <div
-              className={cn(
-                "ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",
-                "group-hover:opacity-100 group-focus-within:opacity-100",
-                "[@media(hover:none)]:opacity-100",
-                vote === "up" && "opacity-100",
-              )}
-            >
-              {/* Иконка без подписи опознаётся только по догадке. Подпись
-                  для экранного диктора у них была и раньше; всплывающая
-                  говорит то же самое глазами — на курсоре и на фокусе. */}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Отправить на Kindle"
-                      disabled={kindle !== "idle"}
-                      onClick={sendToKindle}
-                      className={cn(
-                        "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
-                        kindle === "idle"
-                          ? "cursor-pointer text-muted-foreground/50"
-                          : "text-foreground",
-                      )}
-                    />
-                  }
-                >
-                  {kindle === "sending" ? (
-                    <Spinner className="size-3.5" />
-                  ) : kindle === "sent" ? (
-                    <CheckIcon className="size-3.5" />
-                  ) : (
-                    <BookOpenIcon className="size-3.5" />
-                  )}
-                </TooltipTrigger>
-                <TooltipContent>Отправить статью на читалку</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Больше такого"
-                      aria-pressed={vote === "up"}
-                      onClick={() => {
-                        setVote(vote === "up" ? null : "up");
-                        if (vote !== "up") report({ item_id: item.id, event: "up" });
-                      }}
-                      className={cn(
-                        "flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
-                        vote === "up" ? "text-foreground" : "text-muted-foreground/50",
-                      )}
-                    />
-                  }
-                >
-                  <ThumbsUpIcon className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>Больше такого в следующих выпусках</TooltipContent>
-              </Tooltip>
-
-              {/* Палец вниз убирает материал из ленты — единственное здесь
-                  действие, которое что-то отнимает. Красный по наведению
-                  отличает его от соседних двух до нажатия, а не после. */}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Скрыть и меньше такого"
-                      onClick={() => {
-                        setVote("down");
-                        report({ item_id: item.id, event: "down" });
-                      }}
-                      className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                    />
-                  }
-                >
-                  <ThumbsDownIcon className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>Скрыть и меньше такого</TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-
           {/* Вес 600. Пятисотый на двадцати пикселях отличался от описания
               под ним слишком слабо, чтобы глаз цеплялся за заголовок как
               за якорь: список читался сплошным полотном, и на каждую карточку
@@ -330,7 +334,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
             href={item.url}
             target="_blank"
             rel="noreferrer noopener"
-            className="mt-6 hidden shrink-0 sm:block"
+            className="mt-1.5 hidden shrink-0 sm:block"
             onClick={() => report({ item_id: item.id, event: "outbound" })}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
