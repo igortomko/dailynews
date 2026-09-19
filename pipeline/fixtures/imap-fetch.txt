@@ -1,0 +1,43 @@
+* 1 FETCH (UID 41 BODY[] {1357}
+Return-Path: <bounce@example-letter.test>
+From: "Уран и SMR" <letters@example-letter.test>
+Subject: =?UTF-8?B?0JLRi9C/0YPRgdC6IDE0Mjog0YfQtdC8INC60L7QvdGH0LjQu9Cw0YHRjCDQuNGB0YLQvtGA0LjRjyDRgSDRhtC10L3QsNC80Lgg0L3QsCDRg9GA0LDQvQ==?=
+Date: Thu, 18 Sep 2026 07:02:11 +0000
+Message-ID: <0000019a-4f21-7c3d-9b55-aa1c2d3e4f50
+ @mail.example-letter.test>
+List-Archive: <https://example-letter.test/archive>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b=_42abc"
+
+--b=_42abc
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Цена спот-контракта на уран выросла до 142 долларов за фунт =E2=80=94 на 18%=
+ за квартал.
+
+Читать в браузере: https://example-letter.test/issues/142
+--b=_42abc
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PGltZyBzcmM9Imh0dHBzOi8vdHJhY2suZXhhbXBsZS1sZXR0ZXIudGVzdC9v
+cGVuL2FiYzEyMy5naWYiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjxwPtCm0LXQvdCwINGB0L/QvtGC
+LdC60L7QvdGC0YDQsNC60YLQsCDQvdCwINGD0YDQsNC9INCy0YvRgNC+0YHQu9CwINC00L4gMTQy
+INC00L7Qu9C70LDRgNC+0LIg0LfQsCDRhNGD0L3Rgi48L3A+PHA+PGEgaHJlZj0iaHR0cHM6Ly9l
+eGFtcGxlLWxldHRlci50ZXN0L2lzc3Vlcy8xNDIiPtCn0LjRgtCw0YLRjCDQsiDQsdGA0LDRg9C3
+0LXRgNC1PC9hPjwvcD48L2JvZHk+PC9odG1sPg==
+--b=_42abc--
+)
+* 2 FETCH (UID 42 BODY[] {372}
+From: "Уран и SMR" <letters@example-letter.test>
+Subject: Короткий выпуск
+Date: Fri, 19 Sep 2026 06:00:00 +0000
+Message-ID: <second@mail.example-letter.test>
+Content-Type: text/plain; charset="utf-8"
+
+Читатель прислал вопрос про формат:
+d4 OK FETCH completed
+Отвечаем в следующем выпуске.
+)
+d4 OK FETCH completed
