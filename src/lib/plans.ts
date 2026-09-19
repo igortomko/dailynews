@@ -25,7 +25,7 @@ export type PlanId = (typeof PLAN_IDS)[number];
  * и держать их за тарифом значит ухудшать бесплатный выпуск без причины,
  * ради ощущения, что платное что-то даёт.
  */
-export const GATED = ["delivery", "language"] as const;
+export const GATED = ["delivery", "language", "posts"] as const;
 export type Gated = (typeof GATED)[number];
 
 export type Plan = {
@@ -82,18 +82,23 @@ export const PLANS: Record<PlanId, Plan> = {
   plus: {
     id: "plus",
     label: "Plus",
-    price: 1.99,
+    price: 3.99,
     maxSources: 40,
     maxTopics: 15,
     digestSizes: [20, 40],
     everyDays: 1,
     kinds: FREE_KINDS,
-    sections: ["language"],
+    // Читалка переехала сюда с Pro: Plus — тариф для того, кто читает,
+    // и книга на Kindle — самое читательское, что в продукте есть.
+    // Расход при этом ступенька, а не наклон: у Resend бесплатны 3 000 писем
+    // в месяц и 100 в день, то есть до сотни ежедневных выпусков это $0,
+    // а дальше $20 в месяц на всех.
+    sections: ["language", "delivery"],
   },
   pro: {
     id: "pro",
     label: "Pro",
-    price: 4.99,
+    price: 9.99,
     maxSources: 100,
     maxTopics: 30,
     digestSizes: [20, 40, 60, 80, 100],
@@ -101,7 +106,10 @@ export const PLANS: Record<PlanId, Plan> = {
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
-    sections: ["delivery", "language"],
+    // Своё мнение — то, чем Pro отличается от Plus. Стоит оно $0.0007
+    // за нажатие (замер 19 сентября 2026), то есть 6% себестоимости тарифа:
+    // цена здесь за пользу, а не за расход.
+    sections: ["delivery", "language", "posts"],
   },
 };
 
@@ -149,7 +157,7 @@ export const cheapestWith = (section: Gated): Plan =>
  * и оба случая на глаз незаметны.
  */
 export type FeatureId =
-  | "personalization" | "delivery" | "language" | "x"
+  | "personalization" | "delivery" | "language" | "x" | "posts"
   | "topics" | "digest" | "sources" | "cadence";
 
 export type Feature = {
@@ -175,6 +183,11 @@ export const FEATURES: Record<FeatureId, Feature> = {
     title: "Выпуск на читалку",
     what: "Выпуск приходит книгой на Kindle — читать с электронных чернил, без телефона.",
     has: (plan) => allows(plan, "delivery"),
+  },
+  posts: {
+    title: "Своё мнение",
+    what: "Из любой новости выпуска — готовый пост твоим голосом: лента читает твои каналы, запоминает, как ты пишешь, и даёт черновик под каждую твою сеть.",
+    has: (plan) => allows(plan, "posts"),
   },
   x: {
     title: "Посты из X",

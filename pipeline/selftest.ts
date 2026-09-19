@@ -61,7 +61,12 @@ import { toSlug } from "../src/lib/slug";
 import { STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
-import { explain, parseTelegram } from "./fetch";
+import { countOf, explain, parseTelegram } from "./fetch";
+import {
+  NETWORK_IDS, NETWORKS, overLimit, postLength, readableOf, tabsOf,
+} from "../src/lib/networks";
+import { parseDrafts, unverifiedNumbers } from "./post";
+import { cardBlock, cardFromVoice, corpusOf, medianViews, parseCard } from "./voice-card";
 import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 
 const weights: Weights = {
@@ -883,8 +888,8 @@ assert.deepEqual(
 );
 assert.deepEqual(
   offersFor("delivery", PLANS.free).map((p) => p.id),
-  ["pro"],
-  "читалка есть только на Pro — предлагать Plus было бы враньём",
+  ["plus", "pro"],
+  "читалка переехала на Plus: тариф для того, кто читает",
 );
 assert.deepEqual(
   offersFor("delivery", PLANS.plus).map((p) => p.id),
@@ -909,9 +914,22 @@ assert.ok(!FEATURES.language.has(PLANS.free), "на бесплатном пер�
 assert.ok(FEATURES.language.has(PLANS.plus), "перевод есть с Plus");
 assert.ok(LANGUAGES.includes(SOURCE_LANGUAGE), "язык источника — вариант списка, а не особый случай");
 
-// Читалка — Pro: это чужой лимит у Amazon и счёт у Resend.
-assert.ok(!FEATURES.delivery.has(PLANS.plus), "на Plus читалки нет");
-assert.ok(FEATURES.delivery.has(PLANS.pro), "читалка — признак Pro");
+// Читалка — с Plus: это тариф для того, кто читает. Расход у Resend
+// ступенькой, а не наклоном: 3 000 писем в месяц и 100 в день бесплатны,
+// то есть до сотни ежедневных выпусков книга не стоит ничего.
+assert.ok(!FEATURES.delivery.has(PLANS.free), "на бесплатном читалки нет");
+assert.ok(FEATURES.delivery.has(PLANS.plus), "читалка есть с Plus");
+assert.ok(FEATURES.delivery.has(PLANS.pro), "то, что открыл Plus, открыто и на Pro");
+
+// Своё мнение — то, чем Pro отличается от Plus. Замерено $0.0007
+// за нажатие: цена тарифа здесь за пользу, а не за расход.
+assert.ok(!FEATURES.posts.has(PLANS.plus), "на Plus своего мнения нет");
+assert.ok(FEATURES.posts.has(PLANS.pro), "своё мнение — признак Pro");
+assert.deepEqual(
+  offersFor("posts", PLANS.plus).map((p) => p.id),
+  ["pro"],
+  "за своим мнением с Plus предлагается ровно Pro",
+);
 // Подписка открыта всем и тарифом не закрывается вовсе: закрыть её значит
 // показать кнопку «подписаться» только тем, кто уже подписан. Поэтому её
 // и нет среди разделов, которые тариф может закрыть.
@@ -961,7 +979,7 @@ for (const file of ["0019_plan", "0020_readers"]) {
 {
   const full = {
     kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true,
-    plan: "pro", subscription_status: "active", plan_ends_at: null,
+    plan: "pro", subscription_id: "sub_1", subscription_status: "active", plan_ends_at: null,
   };
   const ok = kindleDigestVerdict(full);
   assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
@@ -984,7 +1002,7 @@ for (const file of ["0019_plan", "0020_readers"]) {
   // Переключатель мог остаться включённым с прежнего тарифа, а письмо —
   // это чужой лимит у Amazon и счёт у Resend.
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, plan: "plus" }),
+    kindleDigestVerdict({ ...full, plan: "free" }),
     { send: false, reason: "plan" },
     "на тарифе без читалки выпуск книгой не уходит",
   );
@@ -1505,6 +1523,185 @@ assert.ok(!looksLikeSource("uranium OR SMR min_faves:100"), "запрос X в �
 assert.ok(!looksLikeSource("/help"), "команда не источник");
 assert.ok(!looksLikeSource(""), "пустая строка не источник");
 
+// Тариф без подписки — это тариф, выставленный руками: pro владельца стоит
+// в колонке с самой первой миграции, а подписки у него нет и не будет.
+// Спрашивать у отсутствующей подписки, действует ли она, — значит гасить
+// владельцу его же возможности, оставив в базе правильный plan.
+{
+  const manual = { plan: "pro", subscription_id: null, subscription_status: null,
+    plan_ends_at: null } as Reader;
+  assert.equal(effectivePlan(manual).id, "pro", "тариф без подписки действует как выставленный");
+  const expired = { ...manual, subscription_id: "sub_1", subscription_status: "expired" };
+  assert.equal(effectivePlan(expired).id, "free", "истёкшая подписка гаснет в ту же секунду");
+  const cancelled = {
+    ...manual, subscription_id: "sub_1", subscription_status: "cancelled",
+    plan_ends_at: new Date(Date.now() + 86_400_000).toISOString(),
+  };
+  assert.equal(effectivePlan(cancelled).id, "pro", "отменённая дочитывает оплаченный месяц");
+}
+
+// ---------------------------------------------------------------------------
+// Блогерский Pro: голос, каркас и пост под чужим именем.
+//
+// Здесь проверяется то, чей отказ выглядит как успех: пост приходит, он даже
+// читается нормально — просто с выдуманным числом, длиной не для этой сети
+// или не тем голосом.
+// ---------------------------------------------------------------------------
+
+// Ссылка в X съедает 23 символа, какой бы длины ни была. Считать text.length
+// значит отдать читателю пост, который X не примет, — и узнает он сам.
+{
+  const link = `https://example.com/${"a".repeat(300)}`;
+  assert.equal(
+    postLength(NETWORKS.x, `Коротко. ${link}`),
+    "Коротко. ".length + 23,
+    "в X ссылка считается за 23 символа",
+  );
+  assert.ok(!overLimit(NETWORKS.x, `Коротко. ${link}`), "длинная ссылка не выносит за предел");
+  assert.ok(overLimit(NETWORKS.x, "я".repeat(281)), "281 символ в X — за пределом");
+  assert.ok(!overLimit(NETWORKS.blog, "я".repeat(5000)), "у блога предела нет");
+}
+
+// У каждого таба должно быть своё требование в промпте: таб без требования
+// молча отдаёт текст чужой длины, и на глаз это незаметно.
+for (const id of NETWORK_IDS) {
+  const network = NETWORKS[id];
+  if (!network.tab) continue;
+  assert.ok(network.rule.includes(`${id}:`), `${id}: требование для промпта названо своим именем`);
+  assert.ok(network.limit > 0, `${id}: у таба есть предел длины`);
+}
+assert.deepEqual(
+  tabsOf(["blog", "x", "telegram"]).map((network) => network.id),
+  ["telegram", "x"],
+  "блог — источник голоса, а не таб: в мотатке его нет",
+);
+assert.deepEqual(readableOf(["linkedin", "threads"]).map((n) => n.id), [],
+  "из LinkedIn и Threads читать нечего: они наружу не отдают ничего");
+
+// Выдуманное число под его именем — самая дорогая ошибка этой возможности,
+// и запрет в промпте на неё протекает (проверено живым прогоном).
+{
+  const source = "INEOS starts storing up to 400,000 tonnes of CO2 a year, aiming at 4-8 million.";
+  assert.deepEqual(
+    unverifiedNumbers("Берут 400 тыс. т в год, целятся в 4–8 млн", source),
+    [],
+    "то же число другой записью выдумкой не считается",
+  );
+  assert.deepEqual(
+    unverifiedNumbers("Это меньше, чем выбрасывает завод на 12 тыс. тонн", source),
+    ["12"],
+    "число, которого в материале нет, называется",
+  );
+  assert.deepEqual(
+    unverifiedNumbers("В 2026 г. запустили 1 полигон", source),
+    [],
+    "год и однозначное число не ловятся: ложная тревога на каждом посте — это выключенная тревога",
+  );
+}
+
+// Разбор ответа модели: два варианта на сеть, и одна строка вместо массива —
+// законный ответ, а не повод уронить нажатие.
+{
+  const item = {
+    id: 1, title: "Хранилище CO2 в Дании", summary: "400 тыс. т в год",
+    excerpt: "", url: "https://example.com/a", source_label: "oilprice",
+  };
+  const parsed = parseDrafts(
+    JSON.stringify({
+      telegram: ["первый вариант поста", "второй вариант поста"],
+      x: "один вариант",
+      added: ["сравнение с цементным заводом"],
+    }),
+    item,
+    [NETWORKS.telegram, NETWORKS.x],
+  );
+  assert.equal(parsed.drafts.filter((d) => d.network === "telegram").length, 2, "два варианта на сеть");
+  assert.deepEqual(
+    parsed.drafts.filter((d) => d.network === "x").map((d) => d.variant),
+    [1],
+    "одна строка вместо массива читается как единственный вариант",
+  );
+  assert.deepEqual(parsed.added, ["сравнение с цементным заводом"], "добавленное моделью доходит до читателя");
+  assert.equal(
+    parseDrafts(JSON.stringify({ telegram: ["текст"] }), item, [NETWORKS.telegram]).added.length,
+    0,
+    "нет поля added — пустой список, а не отказ",
+  );
+}
+
+// Карточка автора. Пустой голос — это отказ, и он обязан быть слышен:
+// карточка без пунктов выглядит настроенной, а посты по ней пишутся ничьим
+// голосом.
+{
+  const meta = { built_from: 20, sources: ["telegram"], ranked: true };
+  const card = parseCard('{"voice":["короткие фразы"],"frame":["в верхних есть число"],"taboo":["без хэштегов"]}', meta);
+  assert.deepEqual(card.voice, ["короткие фразы"], "голос разобран");
+  assert.equal(card.ranked, true, "статистика была — каркас оставлен");
+  assert.throws(
+    () => parseCard('{"voice":[],"frame":["что-то"]}', meta),
+    /ни одного пункта про голос/,
+    "карточка без голоса не сохраняется молча",
+  );
+  assert.deepEqual(
+    parseCard('{"voice":["а"],"frame":["выдуманный каркас"]}', { ...meta, ranked: false }).frame,
+    [],
+    "без просмотров каркас отбрасывается: догадка, выданная за наблюдение, хуже пустоты",
+  );
+  // Кривой JSON поймался на живом канале: провайдер не экранировал кавычку
+  // внутри цитаты, и JSON.parse падал на середине. Уронить всю карточку
+  // из-за одной строки — потерять и то, что доехало целым.
+  const broken = parseCard(
+    '{"voice":["короткие фразы","цитирует так: "вот так" и ломает JSON"],"frame":["в верхних есть число"],"taboo":[]}',
+    meta,
+  );
+  assert.ok(broken.voice.length >= 1, "из кривого JSON спасается то, что закрылось");
+  assert.deepEqual(broken.frame, ["в верхних есть число"], "соседний ключ от поломки не страдает");
+  // Обрыв на середине массива — то же самое: закрывшиеся строки остаются.
+  const cut = parseCard('{"voice":["первый пункт","второй пункт","третий недо', meta);
+  assert.deepEqual(cut.voice, ["первый пункт", "второй пункт"], "обрыв не уносит целые пункты");
+}
+
+// Запасная карточка из настроек подачи. built_from = 0 — то самое, по чему
+// мотатка говорит «голос ещё не собран»: без этой подписи блогер прочтёт
+// общий черновик и решит, что возможность не работает.
+{
+  const fallback = cardFromVoice({ language: "русском", complexity: 5, style: "телеграфный" });
+  assert.equal(fallback.built_from, 0, "запасная карточка ни на чём не собрана, и это видно");
+  assert.deepEqual(fallback.frame, [], "каркаса в запасной карточке нет");
+  assert.ok(cardBlock(fallback).includes("Каркаса нет"), "промпт честно говорит, что каркаса нет");
+  assert.ok(
+    cardBlock({ voice: ["а"], frame: ["б"], taboo: [], built_from: 9, sources: [], ranked: true })
+      .includes("его же постов между собой"),
+    "каркас в промпте назван тем, чем он является: сравнением его постов",
+  );
+}
+
+// Медиана и зрелость. Просмотры добираются двое суток, и без поправки
+// «верхние по просмотрам» означало бы «самые старые».
+{
+  const old = (views: number, daysAgo: number) => ({
+    text: "я".repeat(50), views, where: "telegram" as const,
+    at: new Date(Date.now() - daysAgo * 86_400_000),
+  });
+  const posts = [10, 20, 30, 40, 50, 60, 70, 80].map((v, i) => old(v * 1000, i + 3));
+  assert.equal(medianViews(posts), 50_000, "медиана считается по зрелым постам");
+  const corpus = corpusOf([...posts, old(1, 0)]);
+  assert.ok(corpus.ranked, "статистика есть — каркас считается");
+  assert.ok(!corpus.text.includes("просмотров 1 "), "пост, которому нет двух суток, в корпус не идёт");
+  assert.ok(corpus.text.includes("выше медианы"), "каждый пост помечен относительно медианы");
+  assert.equal(
+    corpusOf([{ text: "я".repeat(50), views: null, at: null, where: "blog" }]).ranked,
+    false,
+    "у вставленного текста просмотров нет — каркас не считается",
+  );
+}
+
+// «49.3K» — это 49 300, а пусто — это null, а не ноль: ноль означал бы
+// «никто не читал», и каркас решил бы, что удачных постов у него нет вовсе.
+assert.equal(countOf("49.3K"), 49_300, "сокращение тысяч разворачивается");
+assert.equal(countOf("1.74M"), 1_740_000, "сокращение миллионов разворачивается");
+assert.equal(countOf("812"), 812, "число без сокращения читается как есть");
+assert.equal(countOf(undefined), null, "нет просмотров — null, а не ноль");
 
 // --- число и слово рядом -------------------------------------------------------
 // «1 материалов» — не опечатка, а признак числа, подставленного в готовую

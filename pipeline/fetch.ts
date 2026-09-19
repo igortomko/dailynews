@@ -463,6 +463,7 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
         excerpt: text.slice(0, 1200),
         points: tweet.likeCount ?? null,
         comments: tweet.retweetCount ?? null,
+        views: tweet.viewCount ?? null,
         published_at: Number.isNaN(published.getTime()) ? null : published,
       });
     }
@@ -491,6 +492,20 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
  * без текста — их там хватает, одни картинки — сдвинул бы все даты на один,
  * и каждая новость получила бы чужое время. Выглядело бы это нормально.
  */
+/**
+ * «49.3K», «1.74M», «812» — Telegram печатает просмотры сокращённо.
+ * Пусто и нераспознанное — null, а не ноль: ноль означает «никто не читал»,
+ * и на нём карточка автора решила бы, что удачных постов у него нет вовсе.
+ */
+export function countOf(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const digits = Number(raw.replace(/,/g, "").replace(/[KM]$/, ""));
+  if (!Number.isFinite(digits)) return null;
+  if (raw.endsWith("K")) return Math.round(digits * 1000);
+  if (raw.endsWith("M")) return Math.round(digits * 1e6);
+  return Math.round(digits);
+}
+
 export function parseTelegram(html: string, channel: string): FeedDoc {
   const title = stripHtml(
     html.match(/<meta property="og:title" content="([^"]*)"/)?.[1] ?? "",
@@ -530,6 +545,9 @@ export function parseTelegram(html: string, channel: string): FeedDoc {
     const published = when ? new Date(when) : null;
     items.push({
       url: `https://t.me/${mark[1]}`,
+      // «49.3K» и «1.74M» — так их печатает сама страница. Нужны только
+      // карточке автора: по ним видно, какие его посты заходят.
+      views: countOf(chunk.match(/tgme_widget_message_views">([\d.,KM]+)</)?.[1]),
       // У поста нет заголовка, как и у твита: первая строка работает
       // заголовком, потому что Jev и дайджест ждут его отдельно от текста.
       title: (text.split("\n").find((line) => line.trim()) ?? text).trim().slice(0, 200),

@@ -8,6 +8,8 @@ import {
   BookOpenIcon,
   CheckIcon,
   EllipsisIcon,
+  PenLineIcon,
+  CrownIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
@@ -21,6 +23,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
+import { FEATURES, type Plan } from "@/lib/plans";
+import { usePaywall } from "@/components/paywall";
+import { OpinionDialog } from "@/components/opinion-dialog";
+import type { NetworkId } from "@/lib/networks";
 import type { FeedItem } from "@/lib/queries";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
@@ -105,8 +111,20 @@ function siteOf(url: string): string | null {
   }
 }
 
-export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boolean }) {
+export function ItemCard({
+  item,
+  showTopic,
+  plan,
+  networks,
+}: {
+  item: FeedItem;
+  showTopic: boolean;
+  plan: Plan;
+  /** Сети, отмеченные в «Моих площадках»: сколько их — столько табов. */
+  networks: NetworkId[];
+}) {
   const [expanded, setExpanded] = useState(false);
+  const [opinion, setOpinion] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [vote, setVote] = useState<"up" | "down" | null>(null);
   // Состояние живёт в карточке, а не в ленте: отправка идёт минуту,
@@ -185,6 +203,9 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
       toast.error(error instanceof Error ? error.message : "Не отправилось");
     }
   };
+
+  const canPost = FEATURES.posts.has(plan);
+  const paywall = usePaywall("posts", plan);
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
@@ -319,6 +340,29 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                 как из шести. Подписи здесь короткие и заданы в коде,
                 так что max-content не разъедется. */}
             <DropdownMenuContent align="end" className="min-w-max">
+              {/* На тапе действия живут только здесь, поэтому «Своё мнение»
+                  обязано быть и в меню: кнопка, существующая лишь под курсором,
+                  на телефоне не существует вовсе. Первым пунктом по той же
+                  причине, по какой первой стоит иконка в ряду. */}
+              <DropdownMenuItem
+                onClick={() => {
+                  if (!canPost) {
+                    paywall.open();
+                    return;
+                  }
+                  if (networks.length === 0) {
+                    toast.info("Сначала отметь, где ты публикуешь", {
+                      description: "Настройки → Мои площадки",
+                    });
+                    return;
+                  }
+                  setOpinion(true);
+                }}
+              >
+                <PenLineIcon />
+                Своё мнение
+                {canPost ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
+              </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={kindle !== "idle"}
                 onClick={kindle === "idle" ? sendToKindle : undefined}
@@ -370,6 +414,40 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
           {/* Иконка без подписи опознаётся только по догадке. Подпись
               для экранного диктора у них была и раньше; всплывающая
               говорит то же самое глазами — на курсоре и на фокусе. */}
+          {/* «Своё мнение» стоит первым среди действий: это то, за что Pro
+              и берут деньги, и искать его в конце ряда пришлось бы глазами.
+              Не положено тарифом — та же иконка с короной, а не спрятанная
+              кнопка: спрятанное не даёт понять, за что предлагают платить. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Своё мнение: готовый пост твоим голосом"
+                  onClick={() => {
+                    if (!canPost) {
+                      paywall.open();
+                      return;
+                    }
+                    if (networks.length === 0) {
+                      toast.info("Сначала отметь, где ты публикуешь", {
+                        description: "Настройки → Мои площадки",
+                      });
+                      return;
+                    }
+                    setOpinion(true);
+                  }}
+                  className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                />
+              }
+            >
+              <PenLineIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>
+              {canPost ? "Пост твоим голосом для твоих сетей" : "Своё мнение — на тарифе «Pro»"}
+            </TooltipContent>
+          </Tooltip>
+
           <Tooltip>
             <TooltipTrigger
               render={
@@ -521,6 +599,19 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
         ) : null}
       </div>
 
+      {paywall.dialog}
+      {/* Мотатка монтируется только после нажатия: она пишет пост при открытии,
+          и держать её на каждой карточке значило бы сорок запросов на ленту. */}
+      {opinion ? (
+        <OpinionDialog
+          itemId={item.id}
+          title={title}
+          url={item.url}
+          networks={networks}
+          open={opinion}
+          onOpenChange={setOpinion}
+        />
+      ) : null}
     </article>
   );
 }
