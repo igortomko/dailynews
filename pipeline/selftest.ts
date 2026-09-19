@@ -15,6 +15,7 @@ import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget"
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
+import { kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
@@ -645,4 +646,26 @@ for (const file of ["0019_plan", "0020_readers"]) {
   );
 }
 
-console.log("Самопроверка пройдена: 149 утверждений");
+// Порядок шагов настройки Kindle. Перепутанные условия дали бы экран,
+// на котором просят одобрить отправителя, которого ещё не выдали.
+assert.equal(
+  kindleSetupStep({ kindle_address: null, kindle_approved: false }), "address",
+  "адреса нет — первый шаг",
+);
+assert.equal(
+  kindleSetupStep({ kindle_address: "a@kindle.com", kindle_approved: false }), "sender",
+  "адрес есть, отправитель не одобрен — второй шаг",
+);
+assert.equal(
+  kindleSetupStep({ kindle_address: "a@kindle.com", kindle_approved: true }), "done",
+  "одобрено — обычные настройки",
+);
+// Подтверждение весомее адреса: стёртое поле в настройках выключает отправку,
+// но не отправляет читателя проходить настройку заново. Сброс снимает и то,
+// и другое — иначе экран и база считали бы шаг по-разному.
+assert.equal(
+  kindleSetupStep({ kindle_address: null, kindle_approved: true }), "done",
+  "подтверждение держит экран настроек даже без адреса",
+);
+
+console.log("Самопроверка пройдена: 153 утверждений");
