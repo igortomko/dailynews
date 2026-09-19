@@ -989,4 +989,64 @@ assert.equal(kindleSenderName(7, null), "reader7", "без привязанно�
 assert.equal(kindleSenderName(7, ""), "reader7", "пустая строка именем не становится");
 assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем не становится");
 
-console.log("Самопроверка пройдена: 253 утверждений");
+// --- отправка статьи на читалку ------------------------------------------------
+import { splitBlocks, chunkBlocks, chunkProblem, alreadyIn } from "./translate";
+import { samplePairs } from "./translation-quality";
+import { articleBlocker } from "./kindle";
+import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
+import type { Reader } from "../src/lib/types";
+
+// Модель на длинном тексте возвращает пересказ вместо перевода. Книга при
+// этом приходит, текст на русском, абзацы на месте — просто их меньше.
+// Эти проверки и есть единственное, что отличает такой отказ от успеха.
+const src = ["Первый абзац достаточной длины.", "Второй абзац той же длины."];
+assert.ok(chunkProblem(src, ["Раз.", "Два."]).startsWith("короче"), "пересказ ловится по длине");
+assert.ok(chunkProblem(src, ["Один длинный блок вместо двух."]).startsWith("блоков"), "потерянный блок ловится по счёту");
+assert.equal(chunkProblem(src, src), "", "перевод той же длины и числа блоков проходит");
+
+// Отступ слева обязан пережить нарезку: по нему узнаётся листинг без
+// заборчика из обратных кавычек. Общий trim его съедал, и такой код
+// молча уходил в перевод.
+assert.ok(splitBlocks("Текст\n\n    int main() {}")[1].startsWith("    "), "отступ листинга сохраняется");
+assert.equal(splitBlocks("Текст  \n\nЕщё")[0], "Текст", "хвостовые пробелы убираются");
+assert.equal(splitBlocks("\n\n  \n\n").length, 0, "пустой текст не даёт блоков-призраков");
+assert.equal(chunkBlocks(["одинокий блок длиннее потолка"], 5).length, 1, "блок длиннее потолка не выбрасывается");
+
+// Оценка перевода смотрит на прозу, а не на листинги и заголовки:
+// они одинаково хороши в любом переводе и разбавили бы ряд.
+const long = (mark: string) => mark + "я".repeat(250);
+const pairs = samplePairs(
+  ["```int main(){}```", long("а"), "## Заголовок", long("б")],
+  ["```int main(){}```", long("а"), "## Заголовок", long("б")],
+);
+assert.ok(pairs.every((pair) => !pair.from.startsWith("```")), "листинги в выборку не попадают");
+assert.ok(pairs.every((pair) => !pair.from.startsWith("##")), "заголовки в выборку не попадают");
+assert.equal(samplePairs([], []).length, 0, "пустая статья не ломает выборку");
+
+// Три причины отказа, и каждая выключает по своей.
+const base = { id: 1, daily_cap_usd: 1, kindle_address: "a@kindle.com", kindle_sender: "52308619", kindle_approved: true } as Reader;
+assert.ok(articleBlocker({ ...base, kindle_address: null }, 0).includes("адрес читалки"), "без адреса читалки отправки нет");
+assert.ok(articleBlocker({ ...base, kindle_sender: null }, 0).includes("обратный адрес"), "без обратного адреса отправки нет");
+assert.ok(articleBlocker({ ...base, kindle_approved: false }, 0).includes("Amazon"), "неодобренный отправитель останавливает отправку: письмо исчезло бы молча");
+assert.ok(articleBlocker(base, 1).includes("потолок"), "исчерпанный потолок останавливает отправку");
+assert.equal(articleBlocker(base, 0.5), "", "настроенная отправка не блокируется");
+
+// Нажатие кнопки приходит не сообщением, а callback_query. Без этой ветки
+// оно проваливалось в ignore: часики на кнопке крутились, ответ терялся.
+const tap = parseBotUpdate({ callback_query: { id: "c1", data: "fin:42:1", from: { id: 7 } } });
+assert.equal(tap.kind, "finished", "нажатие кнопки разбирается");
+assert.equal(tap.kind === "finished" && tap.itemId, 42, "id материала достаётся из нагрузки");
+assert.equal(tap.kind === "finished" && tap.finished, true, "единица значит «дочитал»");
+assert.equal(parseBotUpdate({ callback_query: { id: "c1", data: "fin:42:0", from: { id: 7 } } }).kind, "finished", "ноль тоже ответ, а не мусор");
+assert.equal(parseBotUpdate({ callback_query: { id: "c1", data: "чужое:1:1", from: { id: 7 } } }).kind, "ignore", "чужая нагрузка игнорируется");
+assert.equal(parseBotUpdate({ callback_query: { id: "c1", data: "fin:42:1", from: { id: 7, is_bot: true } } }).kind, "ignore", "нажатие от бота игнорируется");
+
+// Русский текст русскому читателю переводить нечего. Без этой проверки
+// он уходил в модель, возвращался почти собой же и стоил как перевод.
+assert.ok(alreadyIn("Совет директоров одобрил сделку в среду вечером.", "русском"), "русский текст узнаётся");
+assert.ok(!alreadyIn("The board approved the deal on Wednesday evening.", "русском"), "английский не принимается за русский");
+assert.ok(!alreadyIn("Совет директоров одобрил сделку.", "английском"), "для английского читателя проверка молчит");
+assert.ok(!alreadyIn("", "русском"), "пустой текст не делит на ноль");
+assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержку swap на узлах.", "русском"), "латинские термины внутри русского не сбивают счёт");
+
+console.log("Самопроверка пройдена: 271 утверждений");

@@ -130,3 +130,83 @@ export function kindleDigestVerdict(reader: KindleTarget): KindleVerdict {
   if (!reader.kindle_digest) return { send: false, reason: "switched-off" };
   return { send: true, to: reader.kindle_address, sender: reader.kindle_sender };
 }
+
+/**
+ * Отдельная статья книгой. Отличается от выпуска не только содержимым:
+ * выпуск уходит HTML, а статья — EPUB.
+ *
+ * Причина в картинках и в метаданных. У HTML, присланного письмом, Amazon
+ * вытаскивает текст сам и на этом спотыкается — код E015, «Web Extraction
+ * Error»: «empty, protected, or contains incompatible elements». Картинки
+ * по внешним ссылкам он не забирает, а в библиотеке читалки книга
+ * называется так, как написано в метаданных, которых у голого HTML нет.
+ * Для выпуска это неважно — там заголовки и описания без картинок.
+ */
+export async function sendArticleToKindle(options: {
+  to: string;
+  sender: string;
+  title: string;
+  epub: Buffer;
+}): Promise<void> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error("нет RESEND_API_KEY: отправлять нечем");
+
+  // Amazon: 50 МБ на письмо, base64 раздувает на треть. Статья столько
+  // не наберёт, книга с сотней несжатых картинок — запросто, и упереться
+  // лучше здесь, с понятной ошибкой, чем в их код E007.
+  if (options.epub.length > 20 * 1024 * 1024) {
+    throw new Error(`книга ${(options.epub.length / 1024 / 1024).toFixed(1)} МБ, потолок 20 МБ`);
+  }
+
+  // Имя файла видно в библиотеке, если метаданные не прочитались.
+  // Кириллица и пробелы в нём до читалки доезжают плохо.
+  const name =
+    options.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) ||
+    "article";
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      from: `Лента <${senderAddress(options.sender)}>`,
+      to: [options.to],
+      subject: options.title,
+      text: options.title,
+      attachments: [{ filename: `${name}.epub`, content: options.epub.toString("base64") }],
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    throw new Error(`Resend HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+}
+
+/**
+ * Почему отправка статьи невозможна прямо сейчас. Пустая строка — можно.
+ *
+ * Отдельно от самой отправки и без импорта базы: это чистая функция,
+ * и у неё есть проверка в npm test, который не ходит ни в базу, ни в сеть.
+ */
+export function articleBlocker(
+  reader: {
+    kindle_address: string | null;
+    kindle_sender: string | null;
+    kindle_approved: boolean;
+    daily_cap_usd: number;
+  },
+  spent: number,
+): string {
+  if (!reader.kindle_address) return "адрес читалки не задан в настройках";
+  if (!reader.kindle_sender) return "обратный адрес не выдан — напиши, это наша поломка";
+  // Пока отправитель не одобрен у Amazon, письмо уходит и исчезает: код
+  // E014, уведомление владельцу читалки, тишина в нашу сторону. Отказать
+  // здесь дешевле, чем потратить минуту и цент на книгу, которую Amazon
+  // выбросит, — и честнее, чем показать «отправлено».
+  if (!reader.kindle_approved) return "отправитель ещё не одобрен у Amazon — доделай настройку";
+  // Потолок проверяется до вызовов, а не после: узнать о перерасходе
+  // постфактум можно и из счёта.
+  if (spent >= reader.daily_cap_usd) {
+    return `дневной потолок $${reader.daily_cap_usd} исчерпан ($${spent.toFixed(3)})`;
+  }
+  return "";
+}

@@ -47,6 +47,12 @@ export type RawItem = {
   canon?: string;
   title: string;
   excerpt: string;
+  /**
+   * Полный текст, если фид его отдал (content:encoded у Substack
+   * и WordPress). HTML как есть: чистит его тот же defuddle, что и
+   * скачанную страницу. Пусто — статью придётся забирать по ссылке.
+   */
+  body?: string;
   points: number | null;
   comments: number | null;
   published_at: Date | null;
