@@ -1,45 +1,140 @@
-# Morning Edition
+# Лента
 
-A daily auto-generated editorial magazine curated from Hacker News, personalized for AI tools, dev tools, privacy, health/longevity, and indie startups.
+Персональная новостная лента: собирает весь поток, оценивает каждый материал
+по собственным осям, отбирает кодом, пишет дайджест только из выживших и
+присылает уведомление в Telegram. Читается в вебе — там же собирается
+статистика, по которой отбор калибруется.
 
-## How it works
+## Как устроен отбор
 
-1. **`generate.py`** fetches the HN front page, scores stories against your interest profile, picks the top 10, and renders a full-bleed editorial HTML magazine
-2. **GitHub Actions** runs daily at 7:00 AM BRT (10:00 UTC), commits the issue, and deploys to GitHub Pages
-3. **Telegram bot** sends you the link every morning
+Четыре каскада, и дорогая модель работает только на последнем:
 
-## Setup
+| | что происходит | чем |
+|---|---|---|
+| 1 | сбор всего потока без фильтрации, сотни материалов | RSS, Hacker News, Reddit, X |
+| 2 | восемь типизированных вопросов на каждый материал | [Jev](https://docs.typesafe.ai) |
+| 3 | сортировка по составному скору, отсечка top-N | код, `pipeline/score.ts` |
+| 4 | дайджест из выживших | любой OpenAI-совместимый провайдер |
 
-### 1. Enable GitHub Pages
+Второй каскад стоит около $0.003 в день на триста материалов — настолько
+дёшево, что прогоняется весь поток, а не выборка. Четвёртый видит
+пятнадцать материалов вместо трёхсот.
 
-Go to **Settings → Pages → Source** and select **GitHub Actions**.
+### Восемь осей
 
-### 2. Add repository secrets
+Не «важность вообще», а различения, по которым решаешь — открыть или пролистать:
 
-In **Settings → Secrets and variables → Actions**, add:
+- **тема** — выбор из интересов, заданных в онбординге, плюс «прочее»
+- **тип** — факт, прогноз, мнение, анонс, перепечатка
+- **новизна** — событие или пережёвывание известного
+- **конкретика** — цифры, названный источник, первичные данные
+- **горизонт** — шум дня, месяцы, годы
+- **actionability** — требует ли действия сейчас
+- **кликбейт** — обещает ли заголовок больше, чем даёт текст
+- **самодостаточность** — есть ли за материалом работа
 
-| Secret | Value |
-|--------|-------|
-| `LLM_API_KEY` | Z.ai API key (or any OpenAI-compatible provider) |
-| `LLM_BASE_URL` | Optional. Default: `https://api.z.ai/v1`. Set to `https://api.openai.com/v1` for OpenAI, etc. |
-| `LLM_MODEL` | Optional. Default: `claude-sonnet-4-20250514`. Any model your provider supports. |
-| `TELEGRAM_BOT_TOKEN` | Your Telegram bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Your Telegram chat ID (send `/start` to your bot, then check `https://api.telegram.org/bot<TOKEN>/getUpdates`) |
+Веса живут в `dailynews.profile.weights` и меняются без правки кода.
+Дедупликация осями не занимается: она в `pipeline/dedup.ts` — канонический
+адрес плюс нечёткое сравнение заголовков через `pg_trgm`.
 
-### 3. First run
+### Калибровка
 
-Trigger manually: **Actions → Morning Edition → Run workflow**
+Каждое открытие карточки пишется в `dailynews.reads` со снимком скора и
+уверенности на тот момент. Страница `/calibration` показывает, растёт ли
+доля открытий с ростом скора. Если не растёт — отбор угадывает. Если высокая
+уверенность не совпадает с открытиями, неверно подобраны сами оси.
 
-## Live URL
+Поэтому же в Telegram уходит только уведомление без ссылок на источники:
+там пролистывание неотличимо от чтения.
+
+## Установка
+
+### 1. База
+
+Проект Supabase `brasil-products`, схема `dailynews`. Миграции применяются
+ролью `postgres` через SQL Editor или Supabase MCP, по порядку:
 
 ```
-https://igortomko.github.io/dailynews/latest.html
+db/migrations/0001_schema_and_role.sql
+db/migrations/0002_tables.sql
+db/migrations/0003_seed.sql
 ```
 
-## Local dev
+После первой миграции — поставить пароль роли `dailynews_bot` и проверить,
+что схема `dailynews` **не отмечена** в Exposed schemas: она появляется там
+невыбранной, в одном клике от публичности.
+
+### 2. Ключи
+
+Скопировать `.env.example` в `.env` и заполнить. Обязательные —
+`DATABASE_URL`, `TYPESAFE_API_KEY`, `APP_PASSWORD`, `APP_SECRET`.
+
+`DATABASE_URL` — строка **пулера**, не прямого хоста: у `db.<ref>.supabase.co`
+только IPv6, и ни Vercel, ни раннеры GitHub по нему не ходят. Симптом при
+ошибке выглядит как неверный пароль, а не как отсутствие маршрута.
+
+Reddit бесплатен, но требует ключей: [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps),
+тип `script`. Без них анонимные запросы получают 429 уже на втором сабреддите —
+это проверено, увеличение пауз не помогает.
+
+X платный, около $0.15 за 1000 постов. Без `X_API_KEY` источники этого типа
+просто показывают ошибку в настройках.
+
+### 3. Запуск
 
 ```bash
-export LLM_API_KEY=your-z-ai-key
-python generate.py
-open magazines/$(date +%Y-%m-%d).html
+npm install
+npm run dev         # интерфейс
+npm run pipeline    # прогон вручную
+npm test            # канонизация, нормализация, формула скора
+npm run verify:db   # схема и все запросы на Postgres в процессе (PGlite)
+npm run dry-run     # настоящий сбор и дедуп, без Jev и без общей базы
+npm run ping        # живое подключение: роль, профиль, темы, источники
+npm run env:set KEY # вписать ключ в .env, не открывая файл редактором
 ```
+
+`env:set` появился не от хорошей жизни: редактор держит копию файла и при
+сохранении возвращает её целиком — один раз так потерялась строка подключения.
+
+`dry-run` отвечает на вопрос, который локальными тестами не закрыть: живы
+ли источники каталога и сколько они дают на самом деле. Ключ Jev не тратит,
+в Telegram ничего не шлёт, в общую базу не пишет.
+
+`verify:db` поднимает настоящий Postgres внутри процесса, применяет
+миграции 0002 и 0003, заполняет их выдуманными данными и прогоняет все
+запросы приложения. Гранты и роли из 0001 он не покрывает: их в PGlite
+нет, и по инфра-документу их положено читать из каталога живого инстанса.
+Запускать перед любым изменением схемы — общая база не место для проверки DDL.
+
+Ежедневный прогон — `.github/workflows/digest.yml`, 07:00 BRT.
+Интерфейс: **https://dailynews-pi.vercel.app** (Vercel, проект `dailynews`).
+
+Веб-приложению нужны только `DATABASE_URL`, `APP_SECRET` и `APP_PASSWORD`;
+ключи моделей и источников читает один пайплайн.
+
+Вход — одна подписанная кука, без Supabase Auth: продуктовые схемы не
+экспонируются в PostgREST, поэтому клиентской сессии Supabase не с чем
+работать. Файл `src/middleware.ts` обязан лежать именно в `src/` — в корне
+Next его не ищет, и страницы отдаются без входа молча.
+
+## Что где
+
+```
+pipeline/
+  run.ts            оркестратор: сбор → дедуп → скоринг → отбор → дайджест → Telegram
+  fetch.ts          адаптеры источников, ограничение по хосту и свежести
+  normalize.ts      канонический адрес и нормализованный заголовок
+  dedup.ts          пометка дублей через pg_trgm
+  score.ts          восемь вопросов Jev и формула составного скора
+  digest.ts         письмо дайджеста по выжившим
+  telegram.ts       уведомление
+  check-sources.ts  проверка фида живым запросом
+  dry-run.ts        сбор и дедуп на живых источниках, база в процессе
+src/app/            интерфейс: лента с вкладками, интересы, источники, калибровка
+db/migrations/      схема, роль, таблицы, стартовый каталог
+db/verify.ts        прогон схемы и запросов на Postgres в процессе
+legacy/             прежний генератор HTML-журналов
+```
+
+Архив из 314 выпусков остался в `magazines/`, прежние воркфлоу сняты с
+расписания, но запускаются вручную.

@@ -1,0 +1,43 @@
+name: Daily digest
+
+on:
+  schedule:
+    # Полночь по Сан-Паулу (UTC−3). Выпуск готов к утру.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: digest
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Собрать, оценить, отправить
+        env:
+          # Строка пулера: у прямого хоста Supabase только IPv6,
+          # а раннеры GitHub ходят по IPv4.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          APP_URL: ${{ vars.APP_URL }}
+          DB_POOL_MAX: '5'
+        run: npx tsx pipeline/run.ts

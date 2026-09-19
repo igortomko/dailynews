@@ -1,9 +1,8 @@
 name: Psych Edition
 
 on:
-  schedule:
-    # 7:30 AM BRT = 10:30 UTC (30 min after Morning Edition)
-    - cron: '30 10 * * *'
+  # Снято с расписания: дайджест собирает pipeline/run.ts (digest.yml).
+  # Оставлено запускаемым вручную, пока архив magazines/ не перенесён.
   workflow_dispatch: # manual trigger
 
 permissions:

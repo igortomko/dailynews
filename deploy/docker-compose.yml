@@ -1,0 +1,46 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Без этого ARG в Dockerfile остаётся своим значением по умолчанию,
+        # и проверка после переключения сравнивает коммит с «unknown».
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    container_name: dailynews
+    restart: unless-stopped
+    # Только на петлю: наружу выходит один Caddy на хосте.
+    ports:
+      - "127.0.0.1:8085:3000"
+    env_file:
+      - .env.production
+    # Ограничения ставятся при заведении, а не когда понадобятся:
+    # забытый лимит памяти кладёт всю машину, а на ней живут соседи.
+    mem_limit: 512m
+    cpus: 0.50
+    pids_limit: 128
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Next.js пишет только кэш и временные файлы — им хватает tmpfs,
+    # остальная файловая система остаётся только на чтение.
+    tmpfs:
+      - /tmp:size=64m
+      - /app/.next/cache:size=128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [dailynews]
+
+networks:
+  dailynews:
+    name: dailynews

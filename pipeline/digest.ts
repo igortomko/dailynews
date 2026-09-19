@@ -1,0 +1,243 @@
+import type { Axes } from "../src/lib/types";
+import { checkLexicon, repeatsHeadline } from "./lexicon";
+
+export type Survivor = {
+  id: number;
+  title: string;
+  excerpt: string;
+  url: string;
+  source_label: string;
+  topic_label: string;
+  total: number;
+  axes: Axes;
+};
+
+export type Written = {
+  id: number;
+  title_ru: string;
+  summary: string;
+};
+
+export type DigestResult = { intro: string; items: Written[]; flagged?: number };
+
+/**
+ * Запретные списки есть только для языков, которые проверены глазами.
+ * Для остальных уходят принципы без перечня слов: список, придуманный
+ * для непроверенного языка, ловил бы не те слова и звучал бы уверенно.
+ */
+const BANNED: Record<string, string> = {
+  русском: `— оценок вместо фактов: «важный», «ключевой», «уникальный», «прорывной», «революционный»;
+— зачинов: «стоит отметить», «важно понимать», «давайте разберёмся», «в современном мире»,
+  «не секрет, что»;
+— ссылок на безымянных: «эксперты считают», «исследования показывают» — назови, кто именно;
+— оборотов «является инструментом для», «позволяет осуществлять», «выступает в роли» —
+  глагол справляется сам;
+— итогов: «таким образом», «подводя итог», «в заключение»`,
+  английском: `— evaluation instead of fact: "key", "pivotal", "game changer", "transformative", "robust";
+— throat-clearing: "it's worth noting", "in today's fast-changing world", "here's the thing";
+— weasel attribution: "experts agree", "studies show" — name who;
+— padded verbs: "serves as", "acts as a catalyst", "enables the ability to" — the verb alone;
+— recap endings: "ultimately", "in conclusion", "in summary"`,
+  португальском: `— avaliação no lugar do fato: "fundamental", "inovador", "revolucionário", "robusto";
+— aberturas vazias: "vale destacar", "é importante ressaltar", "em um mundo cada vez mais";
+— atribuição vaga: "especialistas afirmam", "estudos mostram" — diga quem;
+— verbos inchados: "atua como", "possibilita", "viabiliza" — o verbo sozinho;
+— fechos de resumo: "em suma", "por fim", "concluindo"`,
+};
+
+/** Общие правила, когда перечня для языка нет. */
+const BANNED_FALLBACK = `— оценок вместо фактов: слов вроде «важный», «прорывной», «уникальный»;
+— зачинов, которые ничего не сообщают, и итогов в конце;
+— ссылок на безымянных: «эксперты», «исследования» — называй, кто именно;
+— раздутых глаголов там, где хватает простого`;
+
+function bannedFor(language: string): string {
+  const key = Object.keys(BANNED).find((name) => language.toLowerCase().includes(name));
+  return key ? BANNED[key] : BANNED_FALLBACK;
+}
+
+export type LlmConfig = { base_url?: string; model?: string; api_key?: string };
+
+/**
+ * Окружение старше настройки в базе: ключ, заданный переменной, не должен
+ * молча подменяться тем, что кто-то вписал в интерфейсе.
+ */
+function resolve(config: LlmConfig) {
+  return {
+    baseUrl: process.env.LLM_BASE_URL ?? config.base_url ?? "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: process.env.LLM_MODEL ?? config.model ?? "gemini-2.5-flash",
+    apiKey: process.env.LLM_API_KEY ?? config.api_key ?? "",
+  };
+}
+
+/**
+ * Дорогая модель видит только выживших — пятнадцать материалов вместо трёхсот.
+ * Отбор уже сделан кодом по оценкам Jev, здесь только письмо.
+ */
+export async function writeDigest(
+  survivors: Survivor[],
+  readerContext: string,
+  config: LlmConfig = {},
+  language = "русском",
+): Promise<DigestResult> {
+  const { baseUrl, model, apiKey } = resolve(config);
+  if (!apiKey) {
+    // Без ключа дайджест всё равно собирается — просто исходными заголовками.
+    return {
+      intro: "",
+      flagged: 0,
+      items: survivors.map((s) => ({
+        id: s.id,
+        title_ru: s.title,
+        summary: s.excerpt.slice(0, 300),
+      })),
+    };
+  }
+
+  const block = survivors
+    .map((s) => [
+      `--- id: ${s.id}`,
+      `ЗАГОЛОВОК: ${s.title}`,
+      `ИСТОЧНИК: ${s.source_label} · тема: ${s.topic_label}`,
+      `ТИП: ${s.axes.kind.choice} · горизонт: ${s.axes.horizon.choice}`,
+      `ТЕКСТ: ${s.excerpt.slice(0, 900) || "(нет)"}`,
+    ].join("\n"))
+    .join("\n\n");
+
+  const prompt = `${readerContext}
+
+Ниже ${survivors.length} материалов, уже отобранных по интересам читателя.
+
+Для каждого дай "title_ru" — заголовок на ${language} языке: живой, не дословный перевод.
+
+И "summary" — текст, после которого материал можно не открывать.
+
+Заголовок и описание делят работу. Заголовок называет, что изменилось.
+Описание пишется на том же языке и начинается там, где заголовок закончил, и никогда не пересказывает
+его первым предложением — читатель только что это прочёл.
+
+    заголовок:  Антидепрессанты не перестраивают мозг: 8 700 сканов
+    плохо:      Исследование почти 8 700 МРТ показало, что структурные отличия…
+                (то же самое во второй раз)
+    хорошо:     Структурные отличия у людей на антидепрессантах объясняются
+                тяжестью состояния и возрастом, а не самими препаратами.
+
+Что в описании должно быть:
+— первым предложением: доказательство или механизм — откуда это известно,
+  за счёт чего получилось, какие числа за этим стоят. Число идёт вместе
+  со смыслом, а не голым: не «705 809», а «705 809 против 2,03 млн в 1974-м»,
+  иначе читатель не поймёт, рост это или падение;
+— дальше: что это меняет — появилась возможность, сдвинулась цена, закрылась дверь;
+— в конце: чем это касается читателя. Ищи связь всерьёз: читатель не абстрактный,
+  у него есть продукт, стек и решения, и почти у каждой новости из его тем связь
+  найдётся — через инструмент, цену, риск или чужой опыт, который можно повторить.
+  Выдумывать нельзя, но и отделываться нечем: если после двух попыток связи
+  действительно нет, закончи фактом. Обобщение вместо связи не годится:
+  «самая наглядная иллюстрация демографического сжатия развитых экономик» —
+  это красивые слова, а не ответ, зачем читателю эта новость.
+
+Чего в нём быть не должно:
+${bannedFor(language)};
+— больше одного тире на весь текст.
+
+Единицы пишутся сокращённо: км, мин, с, кг, г, млн, тыс., %, г. для года.
+«27 минут» → «27 мин», «2019 года» → «2019 г.». Прилагательное от единицы
+не сокращается, а разворачивается в оборот: не «10-километровые петли»
+и не «10-км петли», а «петли на 5 и 10 км».
+
+Длина — сколько нужно, чтобы материал можно было не открывать; обычно два-четыре
+предложения. Цифры из источника должны попасть в текст. Детали чужой реализации —
+только если читателю с ними что-то делать.
+
+И ещё "intro" — одно-два предложения обо всей подборке: что сегодня главное и есть ли
+связь между материалами. Без приветствий. Связи нет — так и скажи.
+
+Материалы:
+${block}
+
+Ответь только валидным JSON, без markdown:
+{"intro": "...", "items": [{"id": <число>, "title_ru": "...", "summary": "..."}]}`;
+
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      max_tokens: 16000,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: prompt }],
+    }),
+    // Рассуждающие модели тратят на дайджест по несколько минут; потолок
+    // должен быть выше их худшего случая, иначе прогон падает молча.
+    signal: AbortSignal.timeout(600_000),
+  });
+  if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+
+  const payload = await res.json();
+  const text: string = payload.choices?.[0]?.message?.content ?? "";
+  const json = text.replace(/```(?:json)?/g, "").trim();
+  const match = json.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error(`LLM вернул не JSON: ${text.slice(0, 200)}`);
+
+  const parsed = JSON.parse(match[0]) as { intro?: string; items?: Written[] };
+  const { items: written, missing } = matchWritten(survivors, parsed.items ?? []);
+
+  // Подстановка обязана быть заметной. Заголовок на языке источника вместо
+  // перевода выглядит как работающий дайджест, и разница видна только глазами.
+  if (missing > 0) {
+    console.error(
+      `  ! модель перевела ${survivors.length - missing} из ${survivors.length}; ` +
+      `${missing} осталось без перевода (обрыв: ${payload.choices?.[0]?.finish_reason})`,
+    );
+  }
+
+  // Словарь сообщает, но не отбрасывает: одно слово не повод лишить
+  // читателя новости. Растущее число попаданий — повод чинить промпт.
+  let flagged = 0;
+  for (const item of written) {
+    const hits = checkLexicon(`${item.title_ru} ${item.summary}`);
+    const echo = repeatsHeadline(item.title_ru, item.summary);
+    if (hits.length === 0 && !echo) continue;
+    flagged++;
+    const what = [
+      ...hits.map((hit) => `«${hit.term}» (${hit.reason})`),
+      ...(echo ? ["первое предложение пересказывает заголовок"] : []),
+    ].join(", ");
+    console.error(`  ~ ${item.title_ru.slice(0, 48)}: ${what}`);
+  }
+  if (flagged > 0) console.error(`  ~ помечено ${flagged} из ${written.length}`);
+
+  return { intro: parsed.intro ?? "", items: written, flagged };
+}
+
+/**
+ * Сопоставляет ответ модели с отобранными материалами.
+ *
+ * Вынесено отдельно и без сети, потому что ломалось дважды: драйвер отдаёт
+ * bigint строкой, модель возвращает id числом, и строгое сравнение не
+ * совпадает ни разу. Оба раза это выглядело как плохой перевод, а не как
+ * ошибка сопоставления — заголовок на языке источника внешне неотличим от
+ * работающего дайджеста.
+ */
+export function matchWritten(
+  survivors: Pick<Survivor, "id" | "title" | "excerpt">[],
+  fromModel: Written[],
+): { items: Written[]; missing: number } {
+  const byId = new Map(survivors.map((s) => [Number(s.id), s]));
+  const items: Written[] = [];
+  const seen = new Set<number>();
+
+  for (const item of fromModel) {
+    const id = Number(item.id);
+    if (!byId.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    items.push({ id, title_ru: item.title_ru, summary: item.summary });
+  }
+
+  for (const [id, survivor] of byId) {
+    if (seen.has(id)) continue;
+    items.push({ id, title_ru: survivor.title, summary: survivor.excerpt.slice(0, 300) });
+  }
+
+  return { items, missing: byId.size - seen.size };
+}
