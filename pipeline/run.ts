@@ -151,7 +151,7 @@ async function runForReader(
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const digest = await writeDigest(survivors, reader.reader_context, reader.llm ?? {}, {
+  const digest = await writeDigest(survivors, reader.reader_context, {
     language: reader.language,
     complexity: reader.complexity,
     style: reader.style,

@@ -111,7 +111,7 @@ async function main() {
   );
 
   const started = Date.now();
-  const digest = await writeDigest(survivors, profile.reader_context, profile.llm ?? {}, voice);
+  const digest = await writeDigest(survivors, profile.reader_context, voice);
   const seconds = Math.round((Date.now() - started) / 1000);
   const fresh = await scoreSummaries(
     digest.items.map((item) => ({

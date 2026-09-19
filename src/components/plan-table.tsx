@@ -32,7 +32,6 @@ const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = 
   { feature: "x", value: (plan) => plan.kinds.includes("x") },
   { feature: "personalization", value: (plan) => plan.sections.includes("personalization") },
   { feature: "calibration", value: (plan) => plan.sections.includes("calibration") },
-  { feature: "subscription", value: (plan) => plan.sections.includes("subscription") },
 ];
 
 function Value({ value }: { value: string | boolean }) {

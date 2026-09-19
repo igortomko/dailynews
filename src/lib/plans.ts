@@ -19,7 +19,7 @@ export type PlanId = (typeof PLAN_IDS)[number];
  * Разделы настроек, которые тариф может закрыть. Лента, интересы
  * и источники не закрываются никогда: без них продукта нет.
  */
-export const GATED = ["personalization", "calibration", "subscription"] as const;
+export const GATED = ["personalization", "calibration"] as const;
 export type Gated = (typeof GATED)[number];
 
 export type Plan = {
@@ -77,9 +77,7 @@ export const PLANS: Record<PlanId, Plan> = {
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
-    // Свой ключ и своя модель — Pro: на них держится и цена дайджеста,
-    // и возможность увести расход за пределы тарифа.
-    sections: ["personalization", "calibration", "subscription"],
+    sections: ["personalization", "calibration"],
   },
 };
 
@@ -134,7 +132,7 @@ export const cheapestWith = (section: Gated): Plan =>
  * и оба случая на глаз незаметны.
  */
 export type FeatureId =
-  | "personalization" | "calibration" | "subscription" | "x" | "topics" | "digest" | "sources";
+  | "personalization" | "calibration" | "x" | "topics" | "digest" | "sources";
 
 export type Feature = {
   title: string;
@@ -153,11 +151,6 @@ export const FEATURES: Record<FeatureId, Feature> = {
     title: "Отчёт о попаданиях",
     what: "Видно, угадывает ли лента: что ты открывал, что пролистнул и становится ли выбор точнее.",
     has: (plan) => allows(plan, "calibration"),
-  },
-  subscription: {
-    title: "Своя модель",
-    what: "Подключить свою модель, если хочется другую. По умолчанию выпуск пишет модель Ленты.",
-    has: (plan) => allows(plan, "subscription"),
   },
   x: {
     title: "Посты из X",

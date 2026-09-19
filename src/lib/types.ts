@@ -141,5 +141,4 @@ export type Reader = {
   /** Их страница управления: смена карты, отмена, возобновление. */
   portal_url: string | null;
   onboarded_at: string | null;
-  llm: { base_url?: string; model?: string; api_key?: string; reasoning_effort?: string };
 };

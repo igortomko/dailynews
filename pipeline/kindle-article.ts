@@ -78,7 +78,7 @@ export async function runArticleSend(
     if (body) {
       console.log("  перевод взят из кэша");
     } else {
-      const translated = await translateArticle(article.markdown, reader.language, reader.llm ?? {});
+      const translated = await translateArticle(article.markdown, reader.language);
       body = translated.markdown;
       await recordCall({
         readerId: reader.id, stage: "translate", model: translated.model,
