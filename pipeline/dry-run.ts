@@ -19,9 +19,10 @@ import { createRequire } from "node:module";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { freePort } from "../db/free-port";
 import type { Source } from "../src/lib/types";
 
-const PORT = 55434;
+
 
 async function main() {
   process.env.DAILYNEWS_DRY_RUN = "1";
@@ -35,9 +36,10 @@ async function main() {
     await db.exec(readFileSync(`db/migrations/${file}`, "utf8"));
   }
 
-  const server = new PGLiteSocketServer({ db, port: PORT, host: "127.0.0.1" });
+  const port = await freePort();
+  const server = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
   await server.start();
-  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${PORT}/postgres`;
+  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${port}/postgres`;
   process.env.DB_POOL_MAX = "1";
 
   const require_ = createRequire(import.meta.url);

@@ -154,6 +154,47 @@ export type CallRecord = {
   costUsd: number;
 };
 
+/**
+ * Статьи, про которые ещё не спросили. Отдельной функцией, чтобы запрос
+ * проверялся на настоящем Postgres (`npm run verify:db`): прошлая его
+ * версия спрашивала несуществующую колонку и падала каждую ночь, а прогон
+ * при этом отчитывался успехом.
+ */
+export async function pendingKindleAsks(readerId: number) {
+  // Заголовок берётся из выпуска этого читателя, а не из общей items:
+  // колонки items.title_ru не существует с тех пор, как тексты дайджеста
+  // стали персональными, и запрос падал каждую ночь строкой в логе —
+  // «дочитал?» не спрашивалось ни разу, а прогон при этом отчитывался
+  // успехом. Своего заголовка в выпуске нет (статью отправили не из него) —
+  // остаётся исходный.
+  const pending = await sql<{ item_id: number; title: string }[]>`
+    select ks.item_id,
+           coalesce(
+             (select di.title
+                from dailynews.digest_items di
+                join dailynews.digests d on d.id = di.digest_id
+               where d.reader_id = ks.reader_id and di.item_id = ks.item_id
+               order by d.day desc
+               limit 1),
+             i.title
+           ) as title
+      from dailynews.kindle_sends ks
+      join dailynews.items i on i.id = ks.item_id
+     where ks.reader_id = ${readerId}
+       and ks.status = 'sent'
+       and ks.at < now() - interval '12 hours'
+       and ks.at > now() - interval '7 days'
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.reader_id = ks.reader_id and r.item_id = ks.item_id
+            and r.event in ('finished', 'unfinished')
+       )
+     order by ks.at
+     limit 3
+  `;
+  return pending;
+}
+
 /** Строка на каждый вызов модели. Без неё потолок нечем проверять,
  *  а перерасход виден только в счёте в конце месяца. */
 export async function recordCall(call: CallRecord): Promise<void> {

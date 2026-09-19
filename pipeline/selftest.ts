@@ -1424,15 +1424,21 @@ assert.equal(
 );
 assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
 
-// Владелец не покупает подписку у себя самого: платёж через Lemon Squeezy
-// из кармана в карман — это комиссия за перевод денег самому себе.
+// Владелец не покупает подписку у себя самого, и проверять её статус
+// не по чему: у него действует то, что стоит в колонке. Так там и стояло
+// «pro» — и гасло проверкой на подписку, которой нет.
 assert.equal(
-  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  effectivePlan(paid({ plan: "pro", owner: true, subscription_status: null, plan_ends_at: null })).id,
   "pro",
-  "у владельца тариф правилом, а не платежом",
+  "у владельца работает купленное без подписки",
 );
 assert.equal(
-  effectivePlan(paid({ plan: "free", owner: false })).id,
+  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  "free",
+  "и бесплатный тоже: иначе владелец не увидит продукт глазами бесплатного читателя",
+);
+assert.equal(
+  effectivePlan(paid({ plan: "pro", owner: false, subscription_status: null, plan_ends_at: null })).id,
   "free",
   "остальным тариф по-прежнему даёт только подписка",
 );
@@ -1570,5 +1576,32 @@ assert.equal(pickTrack({}), null, "дорожек нет — читать неч
 const html = articleHtml("## Раздел\n\nАбзац с числом 42.");
 assert.ok(html.includes("<h2>") && html.includes("<p>"), "разметка пересказа превращается в HTML");
 assert.equal(articleHtml(""), "", "пустой пересказ остаётся пустым, а не <article></article>");
+
+// --- шапка ленты: key на элементах, уезжающих пропом -------------------------
+// FeedTabs ставит left и right соседями в одном родителе. Элемент, приехавший
+// в клиентский компонент полезной нагрузкой сервера, теряет пометку «детей
+// ровно столько, сколько написано»: React считает пару списком и просит ключ.
+// В консоли это выглядит настоящей ошибкой ленты и прячет собой те, что ошибки
+// и есть, — а увидеть его можно только глазами, предупреждение живёт лишь
+// в dev-сборке React. Поэтому проверка тут текстовая: она ловит не причину,
+// а её след в исходнике — ровно тот, который теряется при перекладке шапки.
+const feedSource = readFileSync("src/app/(app)/page.tsx", "utf8");
+const feedPage = feedSource.slice(feedSource.indexOf("<FeedTabs"));
+// Переименовали компонент — проверка обязана упасть, а не замолчать на пустом
+// срезе: тест, ничего не нашедший, зелёный ровно так же, как тест успешный.
+assert.ok(feedPage.startsWith("<FeedTabs"), "ленту рисует FeedTabs");
+for (const prop of ["left", "right"]) {
+  const at = feedPage.indexOf(`${prop}={`);
+  assert.ok(at >= 0, `${prop} должен передаваться в FeedTabs`);
+  const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
+  assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
+}
+// А требование key держится на том, что они соседи. Разведут по разным
+// родителям — проверка выше станет суеверием, и упасть она должна здесь.
+assert.match(
+  readFileSync("src/components/feed-tabs.tsx", "utf8"),
+  /\{left\}\s*\{right\}/,
+  "left и right стоят соседями — иначе key им не нужен",
+);
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
