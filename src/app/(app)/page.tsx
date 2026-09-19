@@ -6,6 +6,7 @@ import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -57,7 +58,11 @@ export default async function FeedPage({
       // ошибка в ленте и прячет собой те, что ошибки и есть.
       left={<DateNav key="date" day={day} days={days} />}
       right={
-        <Tooltip key="settings">
+        // Тема и настройки — одна пара: и то и другое про то, как выглядит
+        // и работает лента, а не про сам выпуск.
+        <div key="actions" className="flex items-center gap-0.5">
+        <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
+        <Tooltip>
           <TooltipTrigger
             render={
               <Button
@@ -74,6 +79,7 @@ export default async function FeedPage({
           </TooltipTrigger>
           <TooltipContent>Настройки: интересы, источники, доставка</TooltipContent>
         </Tooltip>
+        </div>
       }
     />
   );

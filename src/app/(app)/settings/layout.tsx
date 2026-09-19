@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeftIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { logout } from "@/lib/actions";
@@ -53,11 +54,17 @@ export default async function SettingsLayout({ children }: { children: React.Rea
         // занимало целую строку ради одной кнопки. В шапке справа место уже
         // есть и пустует. На широком экране выход остаётся внизу колонки.
         right={
-          <form action={logout} className="sm:hidden">
-            <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">
-              Выйти
-            </Button>
-          </form>
+          <div className="flex items-center gap-1">
+            {/* Переключатель темы стоит на обеих страницах: уйти в настройки
+                и не найти его там, где он только что был, — это заставить
+                вернуться за ним в ленту. */}
+            <ThemeToggle className="size-10 sm:size-8" />
+            <form action={logout} className="sm:hidden">
+              <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">
+                Выйти
+              </Button>
+            </form>
+          </div>
         }
       />
 

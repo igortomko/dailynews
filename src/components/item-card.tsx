@@ -12,6 +12,13 @@ import {
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
 import type { FeedItem } from "@/lib/queries";
@@ -94,8 +101,6 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
   // перезагрузки оно теряется — повторный тап ловит 409 от частичного
   // индекса и честно об этом говорит.
   const [kindle, setKindle] = useState<"idle" | "sending" | "sent">("idle");
-  // Раскрыт ли ряд действий. Нужен только там, где нет наведения.
-  const [actions, setActions] = useState(false);
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
@@ -273,23 +278,80 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
             за одну кнопку — те же действия, но по своей воле, а не в каждой
             строке ленты. */}
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            aria-label={actions ? "Скрыть действия" : "Действия с материалом"}
-            aria-expanded={actions}
-            onClick={() => setActions((open) => !open)}
-            className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 [@media(hover:none)]:flex"
-          >
-            <EllipsisIcon className="size-4" />
-          </button>
+          {/* На тапе действия живут в меню, а не раскрываются рядом: три
+              голые иконки на узком экране нечем объяснить, а строка меню
+              называет себя словами. На мыши меню было бы лишним щелчком —
+              там ряд по-прежнему появляется под курсором. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Действия с материалом"
+                  className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground [@media(hover:none)]:flex"
+                />
+              }
+            >
+              {/* Поднятый палец виден и с закрытым меню: оценка, которую
+                  видно только внутри меню, — это оценка, которую нечем
+                  проверить, не открыв его. */}
+              {vote === "up" ? (
+                <ThumbsUpIcon className="size-4 text-foreground" />
+              ) : (
+                <EllipsisIcon className="size-4" />
+              )}
+            </DropdownMenuTrigger>
+            {/* Ширина по самой длинной строке: иначе меню жмётся к кнопке
+                и пункты переносятся — список из трёх строк читается
+                как из шести. Подписи здесь короткие и заданы в коде,
+                так что max-content не разъедется. */}
+            <DropdownMenuContent align="end" className="min-w-max">
+              <DropdownMenuItem
+                disabled={kindle !== "idle"}
+                onClick={kindle === "idle" ? sendToKindle : undefined}
+              >
+                {kindle === "sending" ? (
+                  <Spinner />
+                ) : kindle === "sent" ? (
+                  <CheckIcon />
+                ) : (
+                  <BookOpenIcon />
+                )}
+                {kindle === "sending"
+                  ? "Отправляю…"
+                  : kindle === "sent"
+                    ? "Уже на читалке"
+                    : "Отправить на читалку"}
+              </DropdownMenuItem>
+              <DropdownMenuCheckboxItem
+                checked={vote === "up"}
+                onCheckedChange={(next: boolean) => {
+                  setVote(next ? "up" : null);
+                  if (next) report({ item_id: item.id, event: "up" });
+                }}
+              >
+                <ThumbsUpIcon />
+                Больше такого
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => {
+                  setVote("down");
+                  report({ item_id: item.id, event: "down" });
+                }}
+              >
+                <ThumbsDownIcon />
+                Скрыть и меньше такого
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         <div
           className={cn(
             "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",
             "group-hover:opacity-100 group-focus-within:opacity-100",
             vote === "up" && "opacity-100",
-            actions || vote === "up"
-              ? "[@media(hover:none)]:opacity-100"
-              : "[@media(hover:none)]:hidden",
+            // На тапе этого ряда нет вовсе — там меню.
+            "[@media(hover:none)]:hidden",
           )}
         >
           {/* Иконка без подписи опознаётся только по догадке. Подпись
