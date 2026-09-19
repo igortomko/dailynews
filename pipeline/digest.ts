@@ -62,11 +62,22 @@ export type LlmConfig = { base_url?: string; model?: string; api_key?: string };
  * Окружение старше настройки в базе: ключ, заданный переменной, не должен
  * молча подменяться тем, что кто-то вписал в интерфейсе.
  */
+/**
+ * Пустая строка — это «не задано», а не значение. GitHub Actions подставляет
+ * пустоту вместо несуществующего секрета, и `??` её пропускает: он
+ * откатывается только на null и undefined. Из-за этого адрес провайдера
+ * стал пустым, и fetch получил «/chat/completions».
+ */
+export const firstSet = (...values: (string | undefined)[]) =>
+  values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
+
 function resolve(config: LlmConfig) {
   return {
-    baseUrl: process.env.LLM_BASE_URL ?? config.base_url ?? "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: process.env.LLM_MODEL ?? config.model ?? "gemini-2.5-flash",
-    apiKey: process.env.LLM_API_KEY ?? config.api_key ?? "",
+    baseUrl:
+      firstSet(process.env.LLM_BASE_URL, config.base_url) ??
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: firstSet(process.env.LLM_MODEL, config.model) ?? "gemini-2.5-flash",
+    apiKey: firstSet(process.env.LLM_API_KEY, config.api_key) ?? "",
   };
 }
 

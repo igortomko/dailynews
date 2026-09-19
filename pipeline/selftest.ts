@@ -10,6 +10,7 @@ import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten } from "./digest";
 import { checkLexicon, repeatsHeadline } from "./lexicon";
+import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import type { Axes, Weights } from "../src/lib/types";
 
@@ -180,6 +181,14 @@ assert.equal(relativeTime(new Date(Date.now() - 5 * 60_000)), "5м", "минут
 assert.equal(relativeTime(new Date(Date.now() - 3 * 86_400_000)), "3д", "дни пишутся одной буквой");
 assert.ok(/[а-я]{3}/.test(relativeTime(new Date(Date.now() - 40 * 86_400_000))), "давнее пишется датой");
 
+// --- пустая строка не значение ------------------------------------------------
+// GitHub Actions подставляет пустоту вместо несуществующего секрета, и ?? её
+// пропускает: провайдер остался без адреса, fetch получил «/chat/completions».
+assert.equal(firstSet("", undefined, "b"), "b", "пустая строка должна пропускаться");
+assert.equal(firstSet("  ", "x"), "x", "пробелы — тоже пустота");
+assert.equal(firstSet(undefined, undefined), undefined, "нет значений — undefined");
+assert.equal(firstSet(" a ", "b"), "a", "значение обрезается по краям");
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -188,4 +197,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 41 утверждение");
+console.log("Самопроверка пройдена: 45 утверждений");
