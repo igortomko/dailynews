@@ -70,5 +70,5 @@ export type Profile = {
   style: string;
   weights: Weights;
   onboarded_at: string | null;
-  llm: { base_url?: string; model?: string; api_key?: string };
+  llm: { base_url?: string; model?: string; api_key?: string; reasoning_effort?: string };
 };
