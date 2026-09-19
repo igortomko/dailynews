@@ -1,6 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import { ArrowUpIcon } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -9,6 +12,58 @@ import type { FeedItem } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { NetworkId } from "@/lib/networks";
+
+/**
+ * Возврат к началу ленты.
+ *
+ * В выпуске бывает сто материалов, а управление лентой — даты и вкладки —
+ * живёт только в шапке. Докручивать до неё пальцем через весь выпуск
+ * означает не возвращаться вовсе.
+ *
+ * Появляется не сразу: кнопка «наверх», когда ты и так наверху, — это
+ * лишний предмет на экране. Порог в восемь сотен пикселей — примерно
+ * две карточки, то есть момент, когда шапка уже ушла.
+ */
+function ToTop() {
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShown(window.scrollY > 800);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Наверх"
+            aria-hidden={!shown}
+            tabIndex={shown ? 0 : -1}
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            className={cn(
+              "fixed right-4 bottom-4 z-20 flex size-10 cursor-pointer items-center justify-center",
+              // Обратная странице, как тост и подсказка: всё, что лежит
+              // поверх ленты, здесь выглядит одинаково. Светлый кружок
+              // на светлой странице держался на одной тени и читался как
+              // случайное пятно — кнопку было видно, только если знать,
+              // что она там.
+              "rounded-full bg-foreground text-background shadow-(--shadow-border)",
+              "transition-[opacity,scale] duration-200 active:scale-[0.96] hover:opacity-90",
+              shown ? "scale-100 opacity-100" : "pointer-events-none scale-90 opacity-0",
+            )}
+          />
+        }
+      >
+        <ArrowUpIcon className="size-4" />
+      </TooltipTrigger>
+      <TooltipContent>Наверх, к датам и вкладкам</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function FeedTabs({
   topics,
@@ -198,11 +253,26 @@ export function FeedTabs({
                 </Fragment>
               ))
             )}
+
+            {/* Клавиши есть, а узнать о них было неоткуда. Строка стоит
+                в конце списка, а не в шапке: там она попадалась бы на глаза
+                каждый раз, а нужна ровно однажды. Только на указателе —
+                на телефоне клавиатуры под рукой нет. */}
+            {list.length > 0 ? (
+              <p className="hidden py-5 text-center text-xs text-muted-foreground [@media(hover:hover)]:block">
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">j</kbd> и{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">k</kbd> —
+                между материалами,{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">o</kbd> —
+                открыть
+              </p>
+            ) : null}
           </TabsContent>
         );
       })}
         </div>
       </div>
+      <ToTop />
     </Tabs>
   );
 }

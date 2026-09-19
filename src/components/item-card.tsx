@@ -131,7 +131,11 @@ export function ItemCard({
   // и всё это время читатель обязан видеть, что она идёт. После
   // перезагрузки оно теряется — повторный тап ловит 409 от частичного
   // индекса и честно об этом говорит.
-  const [kindle, setKindle] = useState<"idle" | "sending" | "sent">("idle");
+  // Начальное состояние приходит из базы, а не всегда «ещё не отправляли»:
+  // отправка идёт минуту, и перезагрузка посреди неё стирала весь след.
+  const [kindle, setKindle] = useState<"idle" | "sending" | "sent">(
+    item.kindled ? "sent" : "idle",
+  );
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);

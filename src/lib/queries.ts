@@ -34,6 +34,13 @@ export type FeedItem = {
   published_at: Date;
   read_count: number;
   /**
+   * Уехал ли материал на читалку. Состояние жило только в карточке:
+   * перезагрузка теряла его, кнопка снова предлагала отправить, а повтор
+   * ловил 409 от частичного индекса — отказ там, где всё было сделано.
+   * Провалившуюся отправку сюда не считаем: её повторить можно и нужно.
+   */
+  kindled: boolean;
+  /**
    * Попадался ли материал на глаза до этого захода. Лента идёт по убыванию
    * скора, а читают её сверху вниз — значит виденное лежит подряд с начала,
    * и граница между ним и остальным отвечает на «докуда я вчера дочитал».
@@ -143,7 +150,10 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
                and r.event in ('opened', 'outbound')) as read_count,
            exists (select 1 from dailynews.reads r
                     where r.item_id = i.id and r.reader_id = ${readerId}
-                      and r.event = 'seen') as seen
+                      and r.event = 'seen') as seen,
+           exists (select 1 from dailynews.kindle_sends ks
+                    where ks.item_id = i.id and ks.reader_id = ${readerId}
+                      and ks.status in ('queued', 'sent')) as kindled
       from dailynews.digests d
       join dailynews.digest_items di on di.digest_id = d.id
       join dailynews.items i on i.id = di.item_id

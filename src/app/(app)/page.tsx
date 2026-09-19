@@ -40,10 +40,27 @@ export default async function FeedPage({
     return (
       <Empty className="mx-auto max-w-page">
         <EmptyHeader>
-          <EmptyTitle>Ещё ни одного выпуска</EmptyTitle>
+          <EmptyTitle>Первый выпуск придёт ночью</EmptyTitle>
           <EmptyDescription>
-            Прогон идёт раз в сутки. Собрать прямо сейчас:
-            <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">npm run pipeline</code>
+            {/* Читателю — когда ждать и чем занять это время. Команда
+                в терминал — инструкция разработчику, и показывать её всем
+                значит отвечать на вопрос «что делать» тем, чего человек
+                сделать не может. Владельцу она остаётся: он-то может. */}
+            Лента собирается раз в сутки, ночью. Пока можно{" "}
+            <Link href="/settings/interests" className="underline underline-offset-4">
+              поправить интересы
+            </Link>{" "}
+            или{" "}
+            <Link href="/settings/sources" className="underline underline-offset-4">
+              добавить источники
+            </Link>
+            .
+            {reader.owner ? (
+              <span className="mt-2 block">
+                Собрать прямо сейчас:
+                <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">npm run pipeline</code>
+              </span>
+            ) : null}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
