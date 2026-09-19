@@ -1,5 +1,6 @@
 import { sql } from "./db";
 import type { Reader, ReaderTopic, Topic } from "./types";
+import { kindleSenderName } from "./kindle-setup";
 
 /**
  * Всё, что знает о читателях. Живёт отдельно от queries.ts, потому что нужно
@@ -68,29 +69,30 @@ export async function catalogTopics(): Promise<Topic[]> {
  * означает молчаливую потерю доставки — в Amazon останется одобренным
  * прежний, а новый будет отбрасываться без единой ошибки.
  *
- * Отсюда и перевыдача: строка, перенесённая из profile, пришла без username,
- * и адрес достался запасной — `reader1`. Как только читатель привязывает
- * Telegram, имя появляется, и до одобрения адрес пересобирается из него.
+ * Отсюда и перевыдача: строка, перенесённая из profile, пришла без Telegram,
+ * и адрес достался запасной. Как только читатель привязывает аккаунт,
+ * появляется его id, и до одобрения адрес пересобирается из него.
  *
  * Зовётся при заведении через /start и при сохранении адреса читалки.
  * Только первого не хватало — читатель, вписавший адрес до того, как написал
  * боту, оставался без отправителя, и доставка тихо пропускалась.
  */
-export async function freezeKindleSender(id: number, username: string | null): Promise<void> {
-  const base = (username ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24);
-  // Второй кандидат содержит id читателя, поэтому занятым быть не может.
-  for (const candidate of [base || `reader${id}`, `${base || "reader"}-${id}`]) {
-    try {
-      await sql`
-        update dailynews.readers set kindle_sender = ${candidate}
-         where id = ${id}
-           and not kindle_approved
-           and kindle_sender is distinct from ${candidate}
-      `;
-      return;
-    } catch {
-      // unique_violation: имя занято соседом — берём вариант с номером.
-    }
+export async function freezeKindleSender(
+  id: number,
+  telegramId: string | number | null,
+): Promise<void> {
+  const candidate = kindleSenderName(id, telegramId);
+  try {
+    await sql`
+      update dailynews.readers set kindle_sender = ${candidate}
+       where id = ${id}
+         and not kindle_approved
+         and kindle_sender is distinct from ${candidate}
+    `;
+  } catch {
+    // Зовётся из входа через /start. Свалиться здесь значит не пустить
+    // читателя в ленту из-за адреса, который он ещё даже не видел:
+    // прежний адрес остаётся, и он рабочий.
   }
 }
 
@@ -125,7 +127,7 @@ export async function ensureReader(
   `;
 
   if (!reader.kindle_sender) {
-    await freezeKindleSender(reader.id, username);
+    await freezeKindleSender(reader.id, reader.telegram_id);
     return (await getReader(reader.id)) ?? reader;
   }
   return reader;
