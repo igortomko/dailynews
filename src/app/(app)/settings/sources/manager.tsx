@@ -89,18 +89,17 @@ export function SourcesManager({
       <Card>
         <CardHeader>
           <CardTitle>Добавить источник</CardTitle>
-          <CardDescription>
-            Вставь ссылку — тип, адрес фида и название определятся сами. Сохраняется только то,
-            что ответило хотя бы одной записью.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           <FieldGroup>
             <Field data-invalid={error ? true : undefined}>
-              <FieldLabel htmlFor="input">Ссылка</FieldLabel>
               <div className="flex gap-2">
                 <Input
                   id="input"
+                  // Подписи над полем нет, а имя у него быть обязано:
+                  // плейсхолдер исчезает при вводе и экранному диктору
+                  // именем не служит.
+                  aria-label="Ссылка на источник"
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={(event) => {
@@ -119,17 +118,9 @@ export function SourcesManager({
               </div>
               <FieldDescription>
                 {error ??
-                  "YouTube, GitHub, Substack, arXiv, Hacker News, аккаунт X, канал Telegram, " +
-                    "любой блог. Адрес отправителя — рассылка из выделенного ящика. " +
-                    "Без ссылки — поисковый запрос X."}
+                  "Поддерживается: новостные сайты, блоги, YouTube, GitHub, " +
+                    "открытый Telegram-канал и т. д."}
               </FieldDescription>
-              {error ? null : (
-                <FieldDescription>
-                  Telegram — только публичные каналы с открытым веб-просмотром: закрытые
-                  не читает ни бот, ни веб-страница. Почта — только выделенный ящик
-                  из IMAP_URL, и только на чтение.
-                </FieldDescription>
-              )}
             </Field>
 
             {found && !plan.kinds.includes(found.kind) ? (
