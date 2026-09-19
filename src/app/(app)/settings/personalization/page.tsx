@@ -1,4 +1,5 @@
 import { currentReader } from "@/lib/session";
+import { effectivePlan } from "@/lib/lemon";
 import { PersonalizationForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -9,5 +10,6 @@ export const dynamic = "force-dynamic";
  * за тарифом значило бы ухудшать бесплатный выпуск без причины.
  */
 export default async function PersonalizationPage() {
-  return <PersonalizationForm profile={await currentReader()} />;
+  const reader = await currentReader();
+  return <PersonalizationForm profile={reader} plan={effectivePlan(reader)} />;
 }

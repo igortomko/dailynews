@@ -20,7 +20,7 @@ import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -639,6 +639,16 @@ assert.equal(topicsWord(5), "интересов", "пять и больше");
 assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
 assert.ok(!allows(PLANS.free, "calibration"), "бесплатный тариф не открывает платных разделов");
+
+// Перевод платный, а язык источника — законное значение, а не пустота:
+// оно уходит в промпт и означает «оставь как в источнике».
+assert.ok(!FEATURES.language.has(PLANS.free), "на бесплатном перевода нет");
+assert.ok(FEATURES.language.has(PLANS.plus), "перевод есть с Plus");
+assert.ok(LANGUAGES.includes(SOURCE_LANGUAGE), "язык источника — вариант списка, а не особый случай");
+
+// Читалка — Pro: это чужой лимит у Amazon и счёт у Resend.
+assert.ok(!FEATURES.delivery.has(PLANS.plus), "на Plus читалки нет");
+assert.ok(FEATURES.delivery.has(PLANS.pro), "читалка — признак Pro");
 // Подписка открыта всем и тарифом не закрывается вовсе: закрыть её значит
 // показать кнопку «подписаться» только тем, кто уже подписан. Поэтому её
 // и нет среди разделов, которые тариф может закрыть.
@@ -1191,4 +1201,4 @@ assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкш�
 assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
 assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
 
-console.log("Самопроверка пройдена: 337 утверждений");
+console.log("Самопроверка пройдена: 342 утверждения");
