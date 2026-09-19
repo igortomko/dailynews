@@ -9,6 +9,7 @@ import { writeDigest, type Survivor } from "./digest";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
 import { notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
+import { askFinished } from "../src/lib/telegram";
 import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
@@ -45,10 +46,10 @@ export async function collect(sources: Source[]): Promise<number[]> {
       // повторного прогона в тот же день.
       const rows = await sql<{ id: number }[]>`
         insert into dailynews.items
-          (source_id, url, url_canon, title, title_norm, excerpt, points, comments, published_at)
+          (source_id, url, url_canon, title, title_norm, excerpt, body, points, comments, published_at)
         values (
           ${result.source.id}, ${item.url}, ${item.canon ?? canonUrl(item.url)}, ${item.title},
-          ${normalizeTitle(item.title)}, ${item.excerpt},
+          ${normalizeTitle(item.title)}, ${item.excerpt}, ${item.body ?? null},
           ${item.points}, ${item.comments}, ${item.published_at}
         )
         on conflict (url_canon) do nothing
@@ -329,6 +330,47 @@ async function deliver(
   }
 }
 
+/**
+ * Спросить про вчерашние отправки на читалку: дочитал или не пошло.
+ *
+ * Отправка — единственная часть продукта без петли измерения. Отбор
+ * калибруется открытиями, описания — шестью осями Jev, а про книгу
+ * на читалке никто не знает ничего: Amazon обратно не говорит и не может.
+ *
+ * Спрашиваем на следующий день, а не в тот же вечер: вечером он её
+ * и читает. Один вопрос на статью — повторно уже спрошенное не трогаем,
+ * иначе бот превращается в напоминалку, которую выключают.
+ */
+async function askAboutYesterday(reader: Reader): Promise<void> {
+  if (!reader.telegram_id) return;
+
+  const pending = await sql<{ item_id: number; title: string }[]>`
+    select ks.item_id, coalesce(i.title_ru, i.title) as title
+      from dailynews.kindle_sends ks
+      join dailynews.items i on i.id = ks.item_id
+     where ks.reader_id = ${reader.id}
+       and ks.status = 'sent'
+       and ks.at < now() - interval '12 hours'
+       and ks.at > now() - interval '7 days'
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.reader_id = ks.reader_id and r.item_id = ks.item_id
+            and r.event in ('finished', 'unfinished')
+       )
+     order by ks.at
+     limit 3
+  `;
+
+  for (const row of pending) {
+    try {
+      await askFinished(Number(reader.telegram_id), row.item_id, row.title);
+    } catch (error) {
+      // Заблокировавший бота читатель не должен ронять прогон остальных.
+      log(`  читатель ${reader.id}: вопрос о дочитывании — ${(error as Error).message}`);
+    }
+  }
+}
+
 async function main() {
   const started = Date.now();
   const day = new Date().toISOString().slice(0, 10);
@@ -429,6 +471,7 @@ async function main() {
       personal += await runForReader(reader, day, all, {
         collected: collected.length, duplicates, scored: scored.length,
       });
+      await askAboutYesterday(reader);
     } catch (error) {
       // Один упавший читатель не должен оставить без выпуска остальных.
       console.error(`  ! читатель ${reader.id}: ${(error as Error).message}`);

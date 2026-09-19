@@ -135,7 +135,7 @@ export async function spentToday(readerId: number): Promise<number> {
 
 export type CallRecord = {
   readerId: number | null;
-  stage: "score" | "digest" | "summary";
+  stage: "score" | "digest" | "summary" | "translate" | "translation-quality";
   model: string;
   tokensIn: number;
   tokensOut?: number;
@@ -151,5 +151,32 @@ export async function recordCall(call: CallRecord): Promise<void> {
       ${call.readerId}, ${call.stage}, ${call.model},
       ${call.tokensIn}, ${call.tokensOut ?? 0}, ${call.costUsd}
     )
+  `;
+}
+
+/**
+ * Ответ на «дочитал?» из бота.
+ *
+ * Пишется select-ом из собственной отправки, а не значениями из апдейта:
+ * нажатие приходит с telegram_id, и без этой связки чужой ответ лёг бы
+ * в чужую калибровку. Скор — снимок из выпуска этого читателя, как
+ * и у всех остальных событий чтения.
+ */
+export async function recordFinished(
+  telegramId: number,
+  itemId: number,
+  finished: boolean,
+): Promise<void> {
+  await sql`
+    insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+    select r.id, ${itemId}, ${finished ? "finished" : "unfinished"}, di.total, sc.confidence
+      from dailynews.readers r
+      join dailynews.kindle_sends ks on ks.reader_id = r.id and ks.item_id = ${itemId}
+      join dailynews.digest_items di on di.item_id = ks.item_id
+      join dailynews.digests d on d.id = di.digest_id and d.reader_id = r.id
+      join dailynews.scores sc on sc.item_id = ks.item_id
+     where r.telegram_id = ${telegramId}::bigint and ks.status = 'sent'
+     order by d.day desc
+     limit 1
   `;
 }

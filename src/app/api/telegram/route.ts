@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { issueLoginToken } from "@/lib/auth";
-import { ensureReader } from "@/lib/readers";
-import { checkSecret, loginLink, parseUpdate, sendMessage, SECRET_HEADER } from "@/lib/telegram";
+import { answerCallback, checkSecret, loginLink, parseUpdate, sendMessage, SECRET_HEADER } from "@/lib/telegram";
+import { ensureReader, recordFinished } from "@/lib/readers";
 
 /**
  * Вебхук бота. Поллинг здесь невозможен: отдельный постоянный процесс
@@ -30,6 +30,14 @@ export async function POST(request: NextRequest) {
   try {
     if (command.kind === "help") {
       await sendMessage(command.chatId, "Напиши /start — пришлю ссылку на ленту.");
+      return NextResponse.json({ ok: true });
+    }
+
+    if (command.kind === "finished") {
+      await recordFinished(command.telegramId, command.itemId, command.finished);
+      // Часики на кнопке гасим в любом случае: нажатие, на которое ничего
+      // не ответило, читатель повторяет — и второй раз тоже впустую.
+      await answerCallback(command.callbackId, command.finished ? "Записал" : "Учту");
       return NextResponse.json({ ok: true });
     }
 

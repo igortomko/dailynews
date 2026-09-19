@@ -32,6 +32,8 @@ export function checkSecret(header: string | null): boolean {
 export type BotCommand =
   | { kind: "start"; telegramId: number; chatId: number; username: string | null }
   | { kind: "help"; chatId: number }
+  /** Ответ на «дочитал?»: единственный сигнал о том, что уехало на читалку. */
+  | { kind: "finished"; telegramId: number; itemId: number; finished: boolean; callbackId: string }
   | { kind: "ignore" };
 
 type Update = {
@@ -40,7 +42,16 @@ type Update = {
     chat?: { id?: unknown; type?: unknown };
     from?: { id?: unknown; is_bot?: unknown; username?: unknown };
   };
+  callback_query?: {
+    id?: unknown;
+    data?: unknown;
+    from?: { id?: unknown; is_bot?: unknown };
+  };
 };
+
+/** Полезная нагрузка кнопки «дочитал». Telegram даёт под неё 64 байта,
+ *  поэтому id материала, а не заголовок. */
+export const FINISHED_PREFIX = "fin";
 
 const isId = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value);
@@ -53,6 +64,30 @@ const isId = (value: unknown): value is number =>
  * участникам разом, и выглядело бы это как обычный ответ бота.
  */
 export function parseUpdate(update: unknown): BotCommand {
+  // Нажатие кнопки приходит не сообщением, а callback_query, и до этой
+  // ветки апдейт молча проваливался в ignore: кнопка нажималась, часики
+  // на ней крутились вечно, ответ никуда не записывался.
+  const callback = (update as Update | null)?.callback_query;
+  if (callback) {
+    const from = callback.from?.id;
+    const data = typeof callback.data === "string" ? callback.data : "";
+    const id = typeof callback.id === "string" ? callback.id : "";
+    const parts = data.split(":");
+    if (
+      isId(from) && callback.from?.is_bot !== true && id &&
+      parts[0] === FINISHED_PREFIX && parts.length === 3 && /^\d+$/.test(parts[1])
+    ) {
+      return {
+        kind: "finished",
+        telegramId: from,
+        itemId: Number(parts[1]),
+        finished: parts[2] === "1",
+        callbackId: id,
+      };
+    }
+    return { kind: "ignore" };
+  }
+
   const message = (update as Update | null)?.message;
   if (!message || message.chat?.type !== "private") return { kind: "ignore" };
 
@@ -94,6 +129,38 @@ export async function sendMessage(chatId: number, text: string): Promise<void> {
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
   });
+}
+
+/**
+ * Спросить, дочитал ли он то, что уехало на читалку.
+ *
+ * Это единственная петля измерения вокруг отправки: Amazon обратно
+ * не говорит ничего и не может. Автор DropKind на тот же вопрос отвечает
+ * «процентов 80, это моя личная оценка» — у него голая ссылка и нечем
+ * мерить. У Ленты есть и что отправлено, и с каким скором.
+ *
+ * Одно сообщение на статью и только на следующий день: спросить вечером
+ * того же дня значит спросить до того, как он сел читать.
+ */
+export async function askFinished(chatId: number, itemId: number, title: string): Promise<void> {
+  await call("sendMessage", {
+    chat_id: chatId,
+    text: `Дочитал «${title.slice(0, 120)}»?`,
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "Дочитал", callback_data: `${FINISHED_PREFIX}:${itemId}:1` },
+        { text: "Не пошло", callback_data: `${FINISHED_PREFIX}:${itemId}:0` },
+      ]],
+    },
+  });
+}
+
+/**
+ * Погасить часики на кнопке. Без этого Telegram крутит их секунд тридцать,
+ * и нажатие выглядит как потерянное — притом что ответ уже записан.
+ */
+export async function answerCallback(callbackId: string, text: string): Promise<void> {
+  await call("answerCallbackQuery", { callback_query_id: callbackId, text });
 }
 
 export type Headline = { title: string; topic: string };

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ThumbsUpIcon, ThumbsDownIcon, UndoIcon } from "lucide-react";
+import { ThumbsUpIcon, ThumbsDownIcon, UndoIcon, BookOpenIcon, CheckIcon } from "lucide-react";
+import { toast } from "sonner";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/relative-time";
 import type { FeedItem } from "@/lib/queries";
@@ -46,6 +48,11 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
   const [expanded, setExpanded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [vote, setVote] = useState<"up" | "down" | null>(null);
+  // Состояние живёт в карточке, а не в ленте: отправка идёт минуту,
+  // и всё это время читатель обязан видеть, что она идёт. После
+  // перезагрузки оно теряется — повторный тап ловит 409 от частичного
+  // индекса и честно об этом говорит.
+  const [kindle, setKindle] = useState<"idle" | "sending" | "sent">("idle");
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
@@ -173,6 +180,44 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                 vote === "up" && "opacity-100",
               )}
             >
+              <button
+                type="button"
+                aria-label="Отправить на Kindle"
+                disabled={kindle !== "idle"}
+                onClick={async () => {
+                  setKindle("sending");
+                  try {
+                    const res = await fetch("/api/kindle", {
+                      method: "POST",
+                      body: JSON.stringify({ item_id: item.id }),
+                    });
+                    const body = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(body?.error ?? `ошибка ${res.status}`);
+                    setKindle("sent");
+                    // Честно про время: статья забирается и переводится
+                    // целиком. Обещать мгновенность — значит получить
+                    // второй тап через десять секунд.
+                    toast.success("Уехала на Kindle", {
+                      description: "Перевод и сборка занимают около минуты",
+                    });
+                  } catch (error) {
+                    setKindle("idle");
+                    toast.error(error instanceof Error ? error.message : "Не отправилось");
+                  }
+                }}
+                className={cn(
+                  "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                  kindle === "idle" ? "cursor-pointer text-muted-foreground/50" : "text-foreground",
+                )}
+              >
+                {kindle === "sending" ? (
+                  <Spinner className="size-3.5" />
+                ) : kindle === "sent" ? (
+                  <CheckIcon className="size-3.5" />
+                ) : (
+                  <BookOpenIcon className="size-3.5" />
+                )}
+              </button>
               <button
                 type="button"
                 aria-label="Больше такого"

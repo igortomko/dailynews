@@ -107,7 +107,9 @@ export type LlmConfig = {
 export const firstSet = (...values: (string | undefined)[]) =>
   values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
 
-function resolve(config: LlmConfig) {
+/** Экспортируется, чтобы перевод статьи решал провайдера тем же кодом:
+ *  вторая копия дефолтов разъезжается с первой молча. */
+export function resolve(config: LlmConfig) {
   return {
     baseUrl:
       firstSet(process.env.LLM_BASE_URL, config.base_url) ??
