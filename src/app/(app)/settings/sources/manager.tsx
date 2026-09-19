@@ -68,6 +68,15 @@ function SourceIcon({
 }
 
 /**
+ * Со скольких дней тишины источник считается сломанным.
+ *
+ * Тревога, которая горит на нормальном состоянии, перестаёт что-либо значить:
+ * день-другой без свежего — обычное дело у любого блога, и красная метка
+ * на нём приучает её не замечать.
+ */
+const SILENT_DAYS = 5;
+
+/**
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
  * не значит: важно, сколько из них дошло до выпусков и не перепечатки ли это.
  */
@@ -99,7 +108,7 @@ export function SourcesManager({
 
   const dead = sources.filter((source) => source.active && source.last_error);
   const silent = sources.filter(
-    (source) => source.active && !source.last_error && (source.silent_days ?? 0) >= 1,
+    (source) => source.active && !source.last_error && (source.silent_days ?? 0) >= SILENT_DAYS,
   );
 
   const parse = () =>
@@ -130,8 +139,8 @@ export function SourcesManager({
           <AlertTitle>Отвечают, но молчат: {silent.length}</AlertTitle>
           <AlertDescription>
             {silent.map((source) => `${source.label} (${source.silent_days} дн.)`).join(", ")} —
-            источник жив и отвечает, но за окно свежести не дал ни одного материала.
-            День-другой — обычное дело; неделя означает, что фид заброшен.
+            источник жив и отвечает, но {SILENT_DAYS} дней подряд не даёт ни одного свежего
+            материала. Обычно это значит, что его забросили.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -305,31 +314,39 @@ export function SourcesManager({
                   Третье состояние требовало решения на каждой строке, а решений
                   здесь ровно два — завести и убрать.
                 */}
-                <SourceIcon kind={source.kind} url={source.url} />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{source.label}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {source.url}
-                    {source.input_url && source.input_url !== source.url
-                      ? ` ← ${source.input_url}`
-                      : ""}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
-                </div>
                 {/*
-                  Выключенные остались с тех пор, когда переключатель был.
-                  Молча оставить их в списке нельзя: выглядят работающими,
-                  а прогон их не опрашивает.
+                  Значок держится строки названия, а не середины блока:
+                  под названием ещё две служебные строки, и по центру всего
+                  блока он оказывается напротив адреса, к которому отношения
+                  не имеет.
                 */}
-                {!source.active ? (
-                  <Badge variant="outline" className="text-muted-foreground">не опрашивается</Badge>
-                ) : null}
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <SourceIcon kind={source.kind} url={source.url} className="mt-0.5 size-4" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{source.label}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {source.url}
+                      {source.input_url && source.input_url !== source.url
+                        ? ` ← ${source.input_url}`
+                        : ""}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
+                  </div>
+                </div>
                 {source.last_error ? (
                   <Badge variant="destructive" title={source.last_error}>ошибка</Badge>
-                ) : (source.silent_days ?? 0) >= 1 ? (
+                ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
                   <Badge variant="destructive">молчит {source.silent_days} дн.</Badge>
                 ) : source.last_count !== null ? (
-                  <Badge variant="secondary">{source.last_count}</Badge>
+                  // Одно число без подписи — загадка: рядом уже стоит отдача
+                  // за тридцать дней, и какое из двух что значит, неоткуда
+                  // узнать, кроме как навести.
+                  <Badge
+                    variant="secondary"
+                    title={`Столько свежих материалов дал последний прогон (${source.last_count})`}
+                  >
+                    {source.last_count}
+                  </Badge>
                 ) : null}
                 {editable ? (
                   <Button
