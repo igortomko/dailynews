@@ -105,6 +105,25 @@ function listOf(names: string[], limit = 3): string {
 const SILENT_DAYS = 5;
 
 /**
+ * Что с источником не так, или null, когда всё в порядке.
+ *
+ * Строка отдачи под каждым источником — это тридцать строк служебного текста
+ * на экране из десяти. Читают её, только когда с источником что-то не то;
+ * в остальное время она есть в подсказке у числа последнего прогона.
+ */
+function troubleOf(source: SourceHealth): string | null {
+  // Прогон его ещё не видел: ни удачи, ни ошибки.
+  if (!source.last_ok_at && !source.last_error) {
+    return "добавлен — первый сбор в ближайшем прогоне";
+  }
+  if (source.items === 0) return "за 30 дней — ни одного материала";
+  // Материалы даёт, но ни один не переживает отбор: источник есть, толку нет,
+  // и по одному числу последнего прогона этого не увидеть.
+  if (source.in_digest === 0) return "за 30 дней ни один материал не дошёл до выпуска";
+  return null;
+}
+
+/**
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
  * не значит: важно, сколько из них дошло до выпусков и не перепечатки ли это.
  */
@@ -404,23 +423,42 @@ export function SourcesManager({
                         ? ` ← ${source.input_url}`
                         : ""}
                     </span>
-                    <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
+                    {troubleOf(source) ? (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {troubleOf(source)}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
+                {/*
+                  Одно число без подписи — загадка. Всплывающая подсказка
+                  говорит, что оно значит, и заодно держит отдачу за тридцать
+                  дней: в строке она стоит только у проблемных, а посмотреть
+                  её иногда хочется у любого.
+                */}
                 {source.last_error ? (
-                  <Badge variant="destructive" title={source.last_error}>ошибка</Badge>
+                  <Tooltip>
+                    <TooltipTrigger render={<Badge variant="destructive" />}>ошибка</TooltipTrigger>
+                    <TooltipContent>{source.last_error}</TooltipContent>
+                  </Tooltip>
                 ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
-                  <Badge variant="destructive">молчит {source.silent_days} дн.</Badge>
+                  <Tooltip>
+                    <TooltipTrigger render={<Badge variant="destructive" />}>
+                      молчит {source.silent_days} дн.
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Отвечает, но {SILENT_DAYS} дней подряд не даёт ничего свежего
+                    </TooltipContent>
+                  </Tooltip>
                 ) : source.last_count !== null ? (
-                  // Одно число без подписи — загадка: рядом уже стоит отдача
-                  // за тридцать дней, и какое из двух что значит, неоткуда
-                  // узнать, кроме как навести.
-                  <Badge
-                    variant="secondary"
-                    title={`Столько свежих материалов дал последний прогон (${source.last_count})`}
-                  >
-                    {source.last_count}
-                  </Badge>
+                  <Tooltip>
+                    <TooltipTrigger render={<Badge variant="secondary" />}>
+                      {source.last_count}
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Свежих материалов в последнем прогоне · {yieldOf(source)}
+                    </TooltipContent>
+                  </Tooltip>
                 ) : null}
                 {editable ? (
                   <Tooltip>
