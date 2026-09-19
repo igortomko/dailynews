@@ -11,5 +11,5 @@
 alter table dailynews.sources
   add column if not exists silent_since timestamptz;
 
-insert into dailynews.migrations (name) values ('0020_source_silence')
+insert into dailynews.migrations (name) values ('0024_source_silence')
   on conflict (name) do nothing;

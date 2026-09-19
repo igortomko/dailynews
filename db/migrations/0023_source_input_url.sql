@@ -9,5 +9,5 @@
 alter table dailynews.sources
   add column if not exists input_url text;
 
-insert into dailynews.migrations (name) values ('0019_source_input_url')
+insert into dailynews.migrations (name) values ('0023_source_input_url')
   on conflict (name) do nothing;

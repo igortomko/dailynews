@@ -415,7 +415,7 @@ async function main() {
     const { schemaGaps } = await import("./schema-gap");
     assert.deepEqual(await schemaGaps(sql), [], "на полной схеме расхождений быть не должно");
 
-    // Откатываем ограничение к версии 0021 — как если бы 0022 не применили.
+    // Откатываем ограничение к версии 0025 — как если бы 0026 не применили.
     await sql`delete from dailynews.sources where kind = 'email'`;
     await sql`alter table dailynews.sources drop constraint sources_kind_known`;
     await sql`

@@ -14,5 +14,5 @@ alter table dailynews.sources
   add constraint sources_kind_known
   check (kind in ('rss', 'hackernews', 'reddit', 'x', 'telegram'));
 
-insert into dailynews.migrations (name) values ('0021_source_telegram')
+insert into dailynews.migrations (name) values ('0025_source_telegram')
   on conflict (name) do nothing;
