@@ -51,9 +51,7 @@ export function InterestsForm({ chips, total }: { chips: ChipInput[]; total: num
             {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
           </span>
         </CardTitle>
-        <CardDescription>
-          Направления, по которым собираются новости, и сколько места занимает каждое.
-        </CardDescription>
+        <CardDescription>Направления, по которым собираются новости.</CardDescription>
       </CardHeader>
       <CardContent>
         <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>

@@ -95,7 +95,7 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        <FieldLabel htmlFor="digest_size">Новостей в день</FieldLabel>
+        <FieldLabel htmlFor="digest_size">Количество новостей</FieldLabel>
         <Input
           id="digest_size"
           name="digest_size"
@@ -104,7 +104,10 @@ export function TopicChips({
           max={50}
           value={total}
           onChange={(event) => setTotal(Number(event.target.value))}
-          className="w-24"
+          // Не w-24: Field задаёт детям width:100% через *:w-full, и она
+          // стоит в стилях после обычных утилит. Ширина проигрывает молча,
+          // поле остаётся во всю строку.
+          className="max-w-24"
         />
       </Field>
 

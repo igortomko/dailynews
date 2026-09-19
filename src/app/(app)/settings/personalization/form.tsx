@@ -94,7 +94,7 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
                 name="language"
                 defaultValue={profile?.language ?? "русском"}
                 placeholder="русском"
-                className="w-64"
+                className="max-w-64"
               />
             </Field>
 
@@ -135,7 +135,7 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
                   schedule();
                 }}
               >
-                <SelectTrigger id="style" className="w-64">
+                <SelectTrigger id="style" className="max-w-64">
                   <SelectValue>{styleOf(style).label}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
