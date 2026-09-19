@@ -1,25 +1,29 @@
-import { getAllTopics, getDigestDays, getFeed, getProfile } from "@/lib/queries";
+import { getDigestDays, getFeed } from "@/lib/queries";
+import { getReaderTopics } from "@/lib/readers";
+import { currentReader } from "@/lib/session";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
 
 export default async function InterestsPage() {
-  const [topics, profile, days] = await Promise.all([getAllTopics(), getProfile(), getDigestDays()]);
+  const reader = await currentReader();
+  const [topics, days] = await Promise.all([
+    getReaderTopics(reader.id),
+    getDigestDays(reader.id),
+  ]);
   // Сколько материалов в последнем выпуске: по нему решается, есть ли что
   // догружать после смены числа новостей.
-  const inToday = days[0] ? (await getFeed(days[0])).length : 0;
+  const inToday = days[0] ? (await getFeed(reader.id, days[0])).length : 0;
   return (
     <InterestsForm
-      total={profile.digest_size}
+      total={reader.digest_size}
       inToday={inToday}
-      chips={topics
-        .filter((topic) => topic.active)
-        .map((topic) => ({
-          slug: topic.slug,
-          label: topic.label,
-          hint: topic.hint,
-          count: topic.weight,
-        }))}
+      chips={topics.map((topic) => ({
+        slug: topic.slug,
+        label: topic.label,
+        hint: topic.hint,
+        count: topic.weight,
+      }))}
     />
   );
 }

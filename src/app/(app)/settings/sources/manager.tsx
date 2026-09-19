@@ -22,7 +22,16 @@ const KINDS = [
   { value: "hackernews", label: "Hacker News", placeholder: "topstories", hint: "topstories, newstories или beststories." },
 ] as const;
 
-export function SourcesManager({ sources }: { sources: Source[] }) {
+/**
+ * Каталог общий на всех читателей, поэтому правит его владелец: удаление
+ * источника уносит каскадом собранные материалы, и у такой кнопки не должно
+ * быть ста рук. Остальным он виден целиком — знать, откуда берётся лента,
+ * полезно и без права её менять.
+ */
+export function SourcesManager({
+  sources,
+  editable,
+}: { sources: Source[]; editable: boolean }) {
   const [kind, setKind] = useState<string>("rss");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +63,7 @@ export function SourcesManager({ sources }: { sources: Source[] }) {
         </Alert>
       ) : null}
 
+      {editable ? (
       <Card>
         <CardHeader>
           <CardTitle>Добавить источник</CardTitle>
@@ -109,6 +119,7 @@ export function SourcesManager({ sources }: { sources: Source[] }) {
           </form>
         </CardContent>
       </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -122,6 +133,7 @@ export function SourcesManager({ sources }: { sources: Source[] }) {
               <div className="flex items-center gap-3 py-1.5">
                 <Switch
                   checked={source.active}
+                  disabled={!editable}
                   onCheckedChange={(checked: boolean) =>
                     startTransition(() => setSourceActive(source.id, checked))
                   }
@@ -136,14 +148,16 @@ export function SourcesManager({ sources }: { sources: Source[] }) {
                 ) : source.last_count !== null ? (
                   <Badge variant="secondary">{source.last_count}</Badge>
                 ) : null}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Удалить ${source.label}`}
-                  onClick={() => startTransition(() => deleteSource(source.id))}
-                >
-                  <TrashIcon />
-                </Button>
+                {editable ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Удалить ${source.label}`}
+                    onClick={() => startTransition(() => deleteSource(source.id))}
+                  >
+                    <TrashIcon />
+                  </Button>
+                ) : null}
               </div>
             </div>
           ))}

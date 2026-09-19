@@ -8,6 +8,7 @@ const SECTIONS = [
   { href: "/settings/personalization", label: "Персонализация" },
   { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/sources", label: "Источники" },
+  { href: "/settings/delivery", label: "Доставка" },
   { href: "/settings/calibration", label: "Калибровка" },
   { href: "/settings/subscription", label: "Подписка" },
   { href: "/settings/about", label: "О проекте" },

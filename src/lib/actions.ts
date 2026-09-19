@@ -4,53 +4,36 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
-import { checkPassword, issueLoginToken, issueSession, SESSION_COOKIE } from "./auth";
+import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
+import { currentReader, currentReaderId } from "./session";
 import { checkFeed } from "../../pipeline/check-sources";
-import { selectSurvivors } from "../../pipeline/select";
+import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import type { Profile } from "./types";
+import { getReaderTopics, recordCall, spentToday } from "./readers";
+import { llmCost, jevCost } from "../../pipeline/cost";
 import { MAX_DIGEST, MIN_PER_TOPIC, normalize } from "./topic-budget";
-import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "./voice";
 import { toSlug } from "./slug";
 
+/**
+ * Запасной вход владельца. Читатели входят ссылкой из бота; пароль остаётся
+ * на случай, когда Telegram недоступен, и пускает ровно в ту строку, которая
+ * была перенесена из profile.
+ */
 export async function login(_prev: unknown, formData: FormData) {
   const password = String(formData.get("password") ?? "");
   if (!(await checkPassword(password))) {
     return { error: "Не подходит" };
   }
-  const session = await issueSession();
+  const [owner] = await sql<{ id: number }[]>`
+    select id::int as id from dailynews.readers where owner
+  `;
+  if (!owner) return { error: "Владелец не заведён" };
+
+  const session = await issueSession(owner.id);
   (await cookies()).set(session.name, session.value, session.options);
   redirect(String(formData.get("next") || "/"));
-}
-
-/**
- * Ссылка входа приходит в тот же чат, что и дайджест. Почта потребовала бы
- * отдельного провайдера и ещё одного ключа, а бот уже настроен и проверен.
- */
-export async function sendLoginLink() {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  const appUrl = process.env.APP_URL;
-  if (!token || !chatId || !appUrl) {
-    return { error: "Telegram или адрес приложения не настроены" };
-  }
-
-  const link = `${appUrl.replace(/\/$/, "")}/auth?token=${encodeURIComponent(await issueLoginToken())}`;
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: `<a href="${link}">Войти в ленту</a>\n\nСсылка действует 10 минут.`,
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-    }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) return { error: `Telegram ответил ${res.status}` };
-  return { ok: true as const };
 }
 
 export async function logout() {
@@ -58,7 +41,7 @@ export async function logout() {
   redirect("/login");
 }
 
-/** `count` — цель по числу новостей в день; в базе это `topics.weight`. */
+/** `count` — цель по числу новостей в день; в базе это `reader_topics.weight`. */
 export type ChipInput = { slug: string; label: string; hint: string; count: number };
 
 /**
@@ -66,6 +49,7 @@ export type ChipInput = { slug: string; label: string; hint: string; count: numb
  * с ветками «пришло ли поле» молча очищала бы то, чего в форме нет.
  */
 export async function savePersonalization(formData: FormData) {
+  const readerId = await currentReaderId();
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
   const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
@@ -76,14 +60,14 @@ export async function savePersonalization(formData: FormData) {
   const style = String(formData.get("style") ?? "").trim().slice(0, 40) || "нейтральный";
 
   await sql`
-    update dailynews.profile
+    update dailynews.readers
        set reader_context = ${readerContext},
            language = ${language},
            complexity = ${complexity},
            style = ${style},
            onboarded_at = coalesce(onboarded_at, now()),
            updated_at = now()
-     where id = 1
+     where id = ${readerId}
   `;
   revalidatePath("/", "layout");
   return { ok: true as const };
@@ -96,6 +80,7 @@ export async function savePersonalization(formData: FormData) {
  * вторая форма, где этого поля нет, молча вернёт его к минимуму.
  */
 export async function saveInterests(formData: FormData) {
+  const readerId = await currentReaderId();
   const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
   if (chips.length === 0) return { error: "Добавь хотя бы один интерес" };
 
@@ -116,32 +101,48 @@ export async function saveInterests(formData: FormData) {
   );
 
   await sql.begin(async (tx) => {
-    await tx`update dailynews.profile set digest_size = ${digestSize} where id = 1`;
-    // Темы, которые убрали, гасим, а не удаляем: на них ссылаются
-    // оценки уже собранных материалов, и калибровке они ещё пригодятся.
-    await tx`update dailynews.topics set active = false where slug <> all(${slugs})`;
+    await tx`
+      update dailynews.readers
+         set digest_size = ${digestSize},
+             onboarded_at = coalesce(onboarded_at, now()),
+             updated_at = now()
+       where id = ${readerId}
+    `;
 
+    const ids: number[] = [];
     for (const [index, chip] of chips.entries()) {
+      // Справочник общий: по нему Jev классифицирует поток один раз на всех.
+      // Название и подсказку существующей темы вторым читателем не
+      // переписываем — этим он менял бы критерий классификации всем, и
+      // заметить это можно было бы только по съехавшим темам чужих лент.
+      const [topic] = await tx<{ id: number }[]>`
+        insert into dailynews.topics (slug, label, hint, position)
+        values (${slugs[index]}, ${chip.label}, ${chip.hint ?? ""}, ${index + 1})
+        on conflict (slug) do update set slug = excluded.slug
+        returning id::int as id
+      `;
+      ids.push(topic.id);
+    }
+
+    // Убранная тема — удалённая строка связки, а не флаг: отбор сразу
+    // перестаёт считать её бюджет. Сама тема остаётся в справочнике,
+    // на неё ссылаются уже сделанные оценки.
+    await tx`
+      delete from dailynews.reader_topics
+       where reader_id = ${readerId} and topic_id <> all(${ids}::bigint[])
+    `;
+
+    for (const [index, topicId] of ids.entries()) {
       // Цель по числу новостей и есть вес темы: отбор делит номер материала
       // внутри темы на неё, и при сумме, равной размеру дайджеста, каждая
       // тема получает примерно столько, сколько здесь написано.
-      const weight = counts[index];
       await tx`
-        insert into dailynews.topics (slug, label, hint, weight, position, active)
-        values (${slugs[index]}, ${chip.label}, ${chip.hint ?? ""}, ${weight}, ${index + 1}, true)
-        on conflict (slug) do update
-          set label = excluded.label, hint = excluded.hint,
-              weight = excluded.weight,
-              position = excluded.position, active = true
+        insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+        values (${readerId}, ${topicId}, ${counts[index]}, ${index + 1})
+        on conflict (reader_id, topic_id) do update
+          set weight = excluded.weight, position = excluded.position
       `;
     }
-
-    // Онбординг считается пройденным по интересам: без них лента пуста.
-    await tx`
-      update dailynews.profile
-         set onboarded_at = coalesce(onboarded_at, now()), updated_at = now()
-       where id = 1
-    `;
   });
 
   revalidatePath("/", "layout");
@@ -149,6 +150,7 @@ export async function saveInterests(formData: FormData) {
 }
 
 export async function saveLlm(formData: FormData) {
+  const readerId = await currentReaderId();
   const provider = String(formData.get("base_url") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
   const apiKey = String(formData.get("api_key") ?? "").trim();
@@ -160,7 +162,7 @@ export async function saveLlm(formData: FormData) {
   // Пустой ключ означает «не менять»: иначе форма стирала бы сохранённый
   // ключ каждый раз, когда её открывают посмотреть остальные поля.
   await sql`
-    update dailynews.profile
+    update dailynews.readers
        set llm = jsonb_strip_nulls(
              llm
              || jsonb_build_object('base_url', nullif(${provider}, ''))
@@ -169,18 +171,53 @@ export async function saveLlm(formData: FormData) {
                      else jsonb_build_object('api_key', ${apiKey}) end
            ),
            updated_at = now()
-     where id = 1
+     where id = ${readerId}
   `;
   revalidatePath("/settings/subscription");
   return { ok: true as const };
 }
 
 export async function clearLlmKey() {
-  await sql`update dailynews.profile set llm = llm - 'api_key' where id = 1`;
+  const readerId = await currentReaderId();
+  await sql`update dailynews.readers set llm = llm - 'api_key' where id = ${readerId}`;
   revalidatePath("/settings/subscription");
 }
 
+/**
+ * Адрес Kindle. Обратный адрес не трогаем: он выдан один раз при заведении
+ * и заморожен — каждая его смена означает, что читатель заново проходит
+ * одобрение отправителя в настройках Amazon, а до тех пор выпуски молча
+ * не доходят.
+ */
+export async function saveKindle(formData: FormData) {
+  const readerId = await currentReaderId();
+  const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
+  if (address && !/^[^@\s]+@kindle\.com$/.test(address)) {
+    return { error: "Адрес должен заканчиваться на @kindle.com" };
+  }
+
+  await sql`
+    update dailynews.readers
+       set kindle_address = ${address || null}, updated_at = now()
+     where id = ${readerId}
+  `;
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Каталог источников общий, поэтому правит его владелец. Это не роли:
+ * удаление источника уносит каскадом собранные материалы, и у такой кнопки
+ * не должно быть ста рук.
+ */
+async function requireOwner() {
+  const reader = await currentReader();
+  if (!reader.owner) redirect("/settings/sources");
+  return reader;
+}
+
 export async function addSource(formData: FormData) {
+  await requireOwner();
   const kind = String(formData.get("kind") ?? "rss") as "rss" | "reddit" | "hackernews" | "x";
   const url = String(formData.get("url") ?? "").trim();
   const label = String(formData.get("label") ?? "").trim() || url;
@@ -203,11 +240,13 @@ export async function addSource(formData: FormData) {
 }
 
 export async function setSourceActive(id: number, active: boolean) {
+  await requireOwner();
   await sql`update dailynews.sources set active = ${active} where id = ${id}`;
   revalidatePath("/settings/sources");
 }
 
 export async function deleteSource(id: number) {
+  await requireOwner();
   await sql`delete from dailynews.sources where id = ${id}`;
   revalidatePath("/settings/sources");
 }
@@ -226,41 +265,54 @@ export async function deleteSource(id: number) {
  * Поэтому же она занимает минуты, а не секунды.
  */
 export async function topUpDigest() {
-  const [profile] = await sql<Profile[]>`select * from dailynews.profile where id = 1`;
-  const [digest] = await sql<{ day: string; item_ids: number[] }[]>`
-    select day::text as day, item_ids from dailynews.digests order by day desc limit 1
+  const reader = await currentReader();
+  const [digest] = await sql<{ id: number; day: string; taken: number }[]>`
+    select d.id::int as id, d.day::text as day,
+           (select count(*)::int from dailynews.digest_items di where di.digest_id = d.id) as taken
+      from dailynews.digests d
+     where d.reader_id = ${reader.id}
+     order by d.day desc limit 1
   `;
   if (!digest) return { error: "Ни одного выпуска ещё нет — дождись прогона" };
 
-  const missing = profile.digest_size - digest.item_ids.length;
+  const missing = reader.digest_size - digest.taken;
   if (missing <= 0) return { ok: true as const, added: 0 };
 
-  // selectSurvivors сам исключает всё, что уже попало в любой выпуск,
-  // поэтому повторная догрузка не выдаст те же материалы второй раз.
-  const survivors = await selectSurvivors(sql, missing);
+  // Тот же потолок, что и в ночном прогоне: кнопка «догрузить» тратит
+  // те же деньги, и обходить его ей незачем.
+  const spent = await spentToday(reader.id);
+  if (spent >= reader.daily_cap_usd) {
+    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+  }
+
+  // selectSurvivors сам исключает всё, что уже попало в выпуски этого
+  // читателя, поэтому повторная догрузка не выдаст те же материалы второй раз.
+  const topics = await getReaderTopics(reader.id);
+  const survivors = await selectSurvivors(
+    sql, reader.id, reader.weights, targetsOf(topics), missing,
+  );
   if (survivors.length === 0) {
     return { ok: true as const, added: 0, note: "Свежих материалов больше нет" };
   }
 
-  await enrichImages(
-    survivors.map((item) => ({ id: item.id, url: item.url })),
-    async (id, image) => {
-      await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
-    },
-  );
-
-  const written = await writeDigest(survivors, profile.reader_context, profile.llm ?? {}, {
-    language: profile.language ?? "русском",
-    complexity: profile.complexity ?? DEFAULT_COMPLEXITY,
-    style: profile.style ?? DEFAULT_STYLE,
+  const needImage = await sql<{ id: number; url: string }[]>`
+    select id, url from dailynews.items
+     where id = any(${survivors.map((item) => item.id)}::bigint[]) and image_url is null
+  `;
+  await enrichImages(needImage, async (id, image) => {
+    await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
-  for (const item of written.items) {
-    await sql`
-      update dailynews.items
-         set title_ru = ${item.title_ru}, summary = ${item.summary}
-       where id = ${item.id}
-    `;
-  }
+
+  const written = await writeDigest(survivors, reader.reader_context, reader.llm ?? {}, {
+    language: reader.language,
+    complexity: reader.complexity,
+    style: reader.style,
+  });
+  await recordCall({
+    readerId: reader.id, stage: "digest", model: written.model,
+    tokensIn: written.usage.input, tokensOut: written.usage.output,
+    costUsd: llmCost(written.usage),
+  });
 
   // Вторая петля измерения не пропускается: иначе догруженные описания
   // не попадут в ряд по дням, и ряд начнёт врать о том, что читатель видел.
@@ -268,28 +320,33 @@ export async function topUpDigest() {
     written.items.map((item) => ({
       id: Number(item.id), title: item.title_ru, summary: item.summary,
     })),
-    profile.reader_context,
+    reader.reader_context,
   );
-  for (const row of quality.scored) {
-    await sql`
-      update dailynews.items
-         set summary_axes = ${sql.json(row.axes as unknown as Parameters<typeof sql.json>[0])},
-             summary_score = ${row.total}
-       where id = ${row.item_id}
-    `;
-  }
+  await recordCall({
+    readerId: reader.id, stage: "summary", model: quality.model,
+    tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
+  });
+
+  const writtenById = new Map(written.items.map((item) => [String(item.id), item]));
+  const qualityById = new Map(quality.scored.map((row) => [String(row.item_id), row]));
 
   // Дописываем только то, чего в выпуске ещё нет: два одновременных нажатия
   // иначе положили бы один материал дважды.
-  await sql`
-    update dailynews.digests
-       set item_ids = item_ids || (
-             select coalesce(array_agg(id), '{}')
-               from unnest(${survivors.map((item) => item.id)}::bigint[]) as fresh(id)
-              where not (id = any(item_ids))
-           )
-     where day = ${digest.day}
-  `;
+  for (const [index, survivor] of survivors.entries()) {
+    const text = writtenById.get(String(survivor.id));
+    const scored = qualityById.get(String(survivor.id));
+    await sql`
+      insert into dailynews.digest_items
+        (digest_id, item_id, total, position, title, summary, summary_axes, summary_score)
+      values (
+        ${digest.id}, ${survivor.id}, ${survivor.total}, ${digest.taken + index + 1},
+        ${text?.title_ru ?? survivor.title}, ${text?.summary ?? ""},
+        ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
+        ${scored?.total ?? null}
+      )
+      on conflict (digest_id, item_id) do nothing
+    `;
+  }
 
   revalidatePath("/", "layout");
   return { ok: true as const, added: survivors.length };

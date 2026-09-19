@@ -1,20 +1,26 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useState } from "react";
 import { SendIcon } from "lucide-react";
-import { login, sendLoginLink } from "@/lib/actions";
+import { login } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export function LoginForm({ next, expired }: { next: string; expired: boolean }) {
+/**
+ * Вход один: ссылка из бота. Она несёт номер читателя, поэтому сессия
+ * достаётся тому, кому бот её прислал, а не тому, кто открыл адрес.
+ *
+ * Пароль остаётся запасным входом владельца и убран с глаз: если Telegram
+ * недоступен, дверь не должна захлопываться снаружи.
+ */
+export function LoginForm({
+  next,
+  expired,
+  bot,
+}: { next: string; expired: boolean; bot: string | null }) {
   const [state, action, pending] = useActionState(login, null);
-  const [sending, startSending] = useTransition();
-  const [sent, setSent] = useState(false);
-  const [linkError, setLinkError] = useState<string | null>(null);
-  // Пароль остаётся, но убран с глаз: если Telegram недоступен, дверь
-  // не должна захлопываться снаружи.
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -23,33 +29,23 @@ export function LoginForm({ next, expired }: { next: string; expired: boolean })
         <CardTitle>Лента</CardTitle>
         <CardDescription>
           {expired
-            ? "Ссылка истекла — запроси новую."
-            : "Ссылка придёт туда же, куда дайджест."}
+            ? "Ссылка истекла — попроси у бота новую."
+            : "Вход через бота: он же присылает выпуск каждое утро."}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <FieldGroup>
-          <Button
-            type="button"
-            disabled={sending || sent}
-            onClick={() =>
-              startSending(async () => {
-                const result = await sendLoginLink();
-                if (result?.error) {
-                  setLinkError(result.error);
-                  return;
-                }
-                setLinkError(null);
-                setSent(true);
-              })
-            }
-          >
-            <SendIcon data-icon="inline-start" />
-            {sent ? "Отправлено — проверь Telegram" : "Прислать ссылку в Telegram"}
-          </Button>
-          {linkError ? (
-            <FieldDescription className="text-destructive">{linkError}</FieldDescription>
-          ) : null}
+          {bot ? (
+            <Button render={<a href={`https://t.me/${bot}?start=login`} />}>
+              <SendIcon data-icon="inline-start" />
+              Написать боту /start
+            </Button>
+          ) : (
+            <FieldDescription>
+              Напиши боту <code className="font-mono">/start</code> — он пришлёт ссылку
+              на ленту. Ссылка действует 10 минут.
+            </FieldDescription>
+          )}
 
           {showPassword ? (
             <form action={action}>

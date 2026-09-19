@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
-import { getDigestDays, getFeed, getProfile, getTopics } from "@/lib/queries";
+import { getDigestDays, getFeed } from "@/lib/queries";
+import { getReaderTopics } from "@/lib/readers";
+import { currentReader } from "@/lib/session";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
@@ -14,13 +16,14 @@ export default async function FeedPage({
 }: {
   searchParams: Promise<{ day?: string }>;
 }) {
-  const profile = await getProfile();
-  if (!profile?.onboarded_at) redirect("/settings/personalization");
+  // Чья это лента, решает подписанная кука и ничто другое.
+  const reader = await currentReader();
+  if (!reader.onboarded_at) redirect("/settings/personalization");
 
   const [{ day: requested }, days, topics] = await Promise.all([
     searchParams,
-    getDigestDays(),
-    getTopics(),
+    getDigestDays(reader.id),
+    getReaderTopics(reader.id),
   ]);
 
   if (days.length === 0) {
@@ -40,7 +43,7 @@ export default async function FeedPage({
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
   const day = requested && days.includes(requested) ? requested : days[0];
-  const items = await getFeed(day);
+  const items = await getFeed(reader.id, day);
 
   return (
     <FeedTabs

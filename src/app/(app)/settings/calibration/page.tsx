@@ -1,4 +1,5 @@
 import { getCalibration, getSummaryQuality } from "@/lib/queries";
+import { currentReaderId } from "@/lib/session";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -24,9 +25,10 @@ function Row({ label, shown, opened, rate }: { label: string; shown: number; ope
 }
 
 export default async function CalibrationPage() {
+  const readerId = await currentReaderId();
   const [{ byScore, byConfidence, byAxis, totals }, quality] = await Promise.all([
-    getCalibration(),
-    getSummaryQuality(),
+    getCalibration(readerId),
+    getSummaryQuality(readerId),
   ]);
 
   if (totals.shown === 0) {

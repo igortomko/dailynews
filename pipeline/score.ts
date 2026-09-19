@@ -14,7 +14,6 @@ export type Scorable = {
 export type Scored = {
   item_id: number;
   topic_slug: string;
-  total: number;
   confidence: number;
   axes: Axes;
 };
@@ -39,7 +38,17 @@ const HORIZON_CRITERIA: Record<Horizon, string> = {
   years: "сигнал на годы: сдвиг тренда, технологии или рынка",
 };
 
-function buildQuestions(topics: Topic[], readerContext: string) {
+/**
+ * Вопросы не зависят от читателя. Семь осей — про сам материал, восьмая
+ * классифицирует его по общему справочнику тем. Поэтому поток оценивается
+ * один раз на всех: сто читателей стоят в Jev столько же, сколько один.
+ *
+ * Прежняя формулировка темы начиналась с «Читатель: <контекст>». В общей
+ * оценке её пришлось убрать: она делала бы результат персональным, а значит
+ * требовала бы прогонять Jev заново на каждого. Числа до и после этой правки
+ * сравнивать нельзя — вопрос стал другим.
+ */
+function buildQuestions(topics: Topic[]) {
   const topicCriteria: Record<string, string> = {};
   for (const topic of topics) {
     topicCriteria[topic.slug] = topic.hint || topic.label;
@@ -47,10 +56,7 @@ function buildQuestions(topics: Topic[], readerContext: string) {
   topicCriteria.other = "ни одна из перечисленных тем не подходит";
 
   return {
-    topic: choice(
-      `Читатель: ${readerContext}\n\nК какой из его тем относится материал?`,
-      topicCriteria,
-    ),
+    topic: choice("К какой из тем относится материал?", topicCriteria),
     kind: choice("Что это за материал по типу?", KIND_CRITERIA),
     horizon: choice("На какой горизонт это влияет?", HORIZON_CRITERIA),
     novelty: score("Насколько это новое, а не пережёвывание уже известного?", [
@@ -94,10 +100,14 @@ const HORIZON_WEIGHT: Record<Horizon, number> = { years: 1, months: 0.6, noise: 
 const noulConfidence = (p: number) => Math.abs(p - 0.5) * 2;
 
 /**
- * Скор — о материале, а не о теме. Вес темы сюда больше не входит: он
- * решает, сколько мест тема берёт в дайджесте (pipeline/select.ts), и,
- * умножая заодно скор, делал бы числа разных тем несравнимыми — корзины
- * на странице калибровки поехали бы от одной правки внимания.
+ * Скор — о материале, а не о теме. Вес темы сюда не входит: он решает,
+ * сколько мест тема берёт в дайджесте (pipeline/select.ts), и, умножая
+ * заодно скор, делал бы числа разных тем несравнимыми — корзины на странице
+ * калибровки поехали бы от одной правки внимания.
+ *
+ * Веса персональны, поэтому один и тот же материал имеет столько скоров,
+ * сколько читателей. Формула одна и живёт здесь: копия на SQL разъехалась
+ * бы с этой молча, и разошлись бы отбор и калибровка.
  */
 export function composite(axes: Axes, weights: Weights): number {
   const topicTerm = axes.topic.choice === "other"
@@ -127,12 +137,10 @@ export function composite(axes: Axes, weights: Weights): number {
 export async function scoreAll(
   items: Scorable[],
   topics: Topic[],
-  readerContext: string,
-  weights: Weights,
   onProgress?: (done: number, total: number) => void,
 ): Promise<{ scored: Scored[]; usage: { input: number; output: number }; model: string }> {
   const client = new TypeSafeClient();
-  const questions = buildQuestions(topics, readerContext);
+  const questions = buildQuestions(topics);
 
   const scored: Scored[] = [];
   const usage = { input: 0, output: 0 };
@@ -189,7 +197,6 @@ export async function scoreAll(
         scored.push({
           item_id: item.id,
           topic_slug: axes.topic.choice,
-          total: composite(axes, weights),
           confidence: confidences.reduce((a, b) => a + b, 0) / confidences.length,
           axes,
         });

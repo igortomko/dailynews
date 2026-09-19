@@ -16,7 +16,8 @@ async function main() {
   };
 
   const { sql } = await import("../src/lib/db");
-  const { getProfile, getTopics, getSources, getFeed } = await import("../src/lib/queries");
+  const { getSources, getDigestDays, getFeed } = await import("../src/lib/queries");
+  const { allReaders, getReaderTopics } = await import("../src/lib/readers");
 
   const [meta] = await sql<{ who: string; path: string }[]>`
     select current_user as who, current_setting('search_path') as path
@@ -24,16 +25,24 @@ async function main() {
   console.log(`роль: ${meta.who} · search_path: ${meta.path}`);
 
   // Последовательно, а не Promise.all: проверке спешить некуда, а веер
-  // из четырёх запросов на общий пулер иногда упирается в выдачу соединений.
-  const profile = await getProfile();
-  const topics = await getTopics();
+  // запросов на общий пулер иногда упирается в выдачу соединений.
+  const readers = await allReaders();
   const sources = await getSources();
-  const [latestDay] = await (await import("../src/lib/queries")).getDigestDays();
-  const feed = latestDay ? await getFeed(latestDay) : [];
-  console.log(`профиль: дайджест ${profile.digest_size}, онбординг ${profile.onboarded_at ?? "не пройден"}`);
-  console.log(`темы: ${topics.map((t) => t.slug).join(", ")}`);
   console.log(`источники: ${sources.length} (включено ${sources.filter((s) => s.active).length})`);
-  console.log(`лента: ${feed.length}`);
+  console.log(`читателей: ${readers.length}`);
+
+  for (const reader of readers) {
+    const topics = await getReaderTopics(reader.id);
+    const [latestDay] = await getDigestDays(reader.id);
+    const feed = latestDay ? await getFeed(reader.id, latestDay) : [];
+    const who = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
+    console.log(
+      `  ${who}${reader.owner ? " (владелец)" : ""}: дайджест ${reader.digest_size}, ` +
+      `онбординг ${reader.onboarded_at ?? "не пройден"}, ` +
+      `темы ${topics.map((t) => t.slug).join(", ") || "не заданы"}, ` +
+      `в последнем выпуске ${feed.length}`,
+    );
+  }
   await sql.end();
 }
 

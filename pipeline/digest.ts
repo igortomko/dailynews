@@ -21,7 +21,17 @@ export type Written = {
   summary: string;
 };
 
-export type DigestResult = { intro: string; items: Written[]; flagged?: number };
+export type Usage = { input: number; output: number };
+
+export type DigestResult = {
+  intro: string;
+  items: Written[];
+  flagged?: number;
+  /** Токены и модель уходят в dailynews.model_calls: без строки на вызов
+   *  дневной потолок читателя нечем проверять. */
+  usage: Usage;
+  model: string;
+};
 
 /** Сколько материалов уходит в модель одним запросом. */
 const CHUNK = 20;
@@ -115,6 +125,8 @@ export async function writeDigest(
     return {
       intro: "",
       flagged: 0,
+      usage: { input: 0, output: 0 },
+      model: "",
       items: survivors.map((s) => ({
         id: s.id,
         title_ru: s.title,
@@ -242,6 +254,8 @@ ${blockOf(list)}
 Ответь только валидным JSON, без markdown:
 {${askIntro ? '"intro": "...", ' : ""}"items": [{"id": <число>, "title_ru": "...", "summary": "..."}]}`;
 
+  const usage: Usage = { input: 0, output: 0 };
+
   const ask = async (list: Survivor[], askIntro: boolean) => {
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -268,6 +282,9 @@ ${blockOf(list)}
     const json = text.replace(/```(?:json)?/g, "").trim();
     const match = json.match(/\{[\s\S]*\}/);
     if (!match) throw new Error(`LLM вернул не JSON: ${text.slice(0, 200)}`);
+
+    usage.input += Number(payload.usage?.prompt_tokens ?? 0);
+    usage.output += Number(payload.usage?.completion_tokens ?? 0);
 
     const parsed = parseDigest(match[0]);
     return { parsed, finish: payload.choices?.[0]?.finish_reason as string | undefined };
@@ -316,7 +333,7 @@ ${blockOf(list)}
   }
   if (flagged > 0) console.error(`  ~ помечено ${flagged} из ${written.length}`);
 
-  return { intro, items: written, flagged };
+  return { intro, items: written, flagged, usage, model };
 }
 
 /**

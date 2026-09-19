@@ -12,11 +12,15 @@
  * Сравнение честное: те же материалы, те же шесть вопросов, а старые оценки
  * уже лежат в базе рядом со старым текстом. Меняется только формулировка.
  *
- * Ничего не пишет: ни в items, ни в digests, ни в Telegram. Стоит около
- * цента — один вызов дайджеста и по вопросу на описание.
+ * Ничего не пишет: ни в digest_items, ни в digests, ни в Telegram. Стоит
+ * около цента — один вызов дайджеста и по вопросу на описание.
+ *
+ * Читатель по умолчанию — владелец; другого берёт --reader <id>. Без явного
+ * читателя переписывать было бы нечего: язык, сложность и манера персональны.
  */
 import { sql } from "../src/lib/db";
-import type { Profile } from "../src/lib/types";
+import { getReader, allReaders } from "../src/lib/readers";
+import type { Reader } from "../src/lib/types";
 import { writeDigest, type Survivor } from "./digest";
 import { scoreSummaries, type SummaryQuality } from "./summary-quality";
 import { readability } from "./lexicon";
@@ -52,18 +56,29 @@ function report(label: string, scored: { total: number; axes: SummaryQuality["ax
 }
 
 async function main() {
-  const [profile] = await sql<Profile[]>`select * from dailynews.profile where id = 1`;
+  const askedReader = Number(flag("reader"));
+  const profile: Reader | undefined = Number.isInteger(askedReader) && askedReader > 0
+    ? await getReader(askedReader)
+    : (await allReaders()).find((reader) => reader.owner);
+  if (!profile) {
+    console.log("Читатель не найден — укажи --reader <id>.");
+    await sql.end();
+    return;
+  }
 
-  // Берём последний дайджест: у его материалов уже есть и текст, и оценки —
-  // это и есть база для сравнения, считать её заново незачем.
+  // Берём последний выпуск этого читателя: у его материалов уже есть
+  // и текст, и оценки — это и есть база для сравнения.
   const survivors = await sql<(Survivor & { day: string })[]>`
-    with last_day as (select day, item_ids from dailynews.digests order by day desc limit 1)
+    with last_day as (
+      select id, day from dailynews.digests
+       where reader_id = ${profile.id} order by day desc limit 1
+    )
     select i.id, i.title, i.excerpt, i.url, s.label as source_label,
-           coalesce(t.label, 'Прочее') as topic_label, sc.total, sc.axes,
-           (select day::text from last_day) as day
+           coalesce(t.label, 'Прочее') as topic_label, di.total, sc.axes,
+           last_day.day::text as day
       from last_day
-      cross join lateral unnest(last_day.item_ids) as u(item_id)
-      join dailynews.items i on i.id = u.item_id
+      join dailynews.digest_items di on di.digest_id = last_day.id
+      join dailynews.items i on i.id = di.item_id
       join dailynews.sources s on s.id = i.source_id
       join dailynews.scores sc on sc.item_id = i.id
  left join dailynews.topics t on t.id = sc.topic_id
@@ -74,10 +89,15 @@ async function main() {
     return;
   }
 
+  // Старый текст лежит в выпуске читателя, а не в items: он написан
+  // его языком, сложностью и манерой.
   const stored = await sql<Stored[]>`
-    select id, title_ru, summary
-      from dailynews.items
-     where id = any(${survivors.map((s) => s.id)}) and summary is not null
+    select di.item_id as id, di.title as title_ru, di.summary
+      from dailynews.digests d
+      join dailynews.digest_items di on di.digest_id = d.id
+     where d.reader_id = ${profile.id}
+       and d.day = ${survivors[0].day}::date
+       and di.summary is not null and di.summary <> ''
   `;
 
   const voice = {
