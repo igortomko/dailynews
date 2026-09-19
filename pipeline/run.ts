@@ -11,7 +11,7 @@ import { notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
 import { askFinished } from "../src/lib/telegram";
 import { enrichImages } from "./og";
-import { scoreSummaries } from "./summary-quality";
+import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
 import { maxDigestOf, sourcesForPlan } from "../src/lib/plans";
@@ -165,21 +165,33 @@ async function runForReader(
   // Вторая петля Jev: тот же инструмент оценивает не входящий поток,
   // а собственный выход. Правка промпта либо улучшает ряд чисел, либо нет —
   // на глаз двенадцать описаний в день всегда читаются нормально.
-  const quality = await scoreSummaries(
-    digest.items.map((item) => ({
-      id: Number(item.id), title: item.title_ru, summary: item.summary,
-    })),
-    reader.reader_context,
-  );
-  const qualityCost = jevCost(quality.inputTokens);
-  await recordCall({
-    readerId: reader.id, stage: "summary", model: quality.model,
-    tokensIn: quality.inputTokens, costUsd: qualityCost,
-  });
+  //
+  // Меряем у одного читателя и по выборке: промпт один на всех, и сотня
+  // описаний у каждого — это один и тот же ответ, оплаченный столько раз,
+  // сколько у нас читателей. Ряд по дням от этого не страдает, а вход
+  // петли дороже входа самого дайджеста: 3170 токенов на описание против 527.
+  const measuresQuality = reader.owner;
+  const quality = measuresQuality
+    ? await scoreSummaries(
+        qualitySample(digest.items).map((item: (typeof digest.items)[number]) => ({
+          id: Number(item.id), title: item.title_ru, summary: item.summary,
+        })),
+        reader.reader_context,
+      )
+    : null;
+  const qualityCost = quality ? jevCost(quality.inputTokens) : 0;
+  if (quality) {
+    await recordCall({
+      readerId: reader.id, stage: "summary", model: quality.model,
+      tokensIn: quality.inputTokens, costUsd: qualityCost,
+    });
+  }
 
-  const meanQuality = quality.scored.length
+  // Ноль сюда писать нельзя: он неотличим от настоящего нуля и утянул бы
+  // ряд вниз у всех, кому замер не делался.
+  const meanQuality = quality?.scored.length
     ? quality.scored.reduce((sum, row) => sum + row.total, 0) / quality.scored.length
-    : 0;
+    : null;
 
   // Ползунок сложности меняет промпт — а меняется ли текст, видно только
   // по ряду этих двух чисел рядом с положением ползунка.
@@ -196,7 +208,7 @@ async function runForReader(
       ${sql.json({
         ...shared,
         flagged: digest.flagged ?? 0,
-        summary_quality: Number(meanQuality.toFixed(1)),
+        summary_quality: meanQuality === null ? null : Number(meanQuality.toFixed(1)),
         complexity: reader.complexity,
         plan: plan.id,
         words_per_sentence: Number(perSentence.toFixed(1)),
@@ -209,7 +221,7 @@ async function runForReader(
         digest_output_tokens: digest.usage.output,
         digest_reasoning_tokens: digest.usage.reasoning,
         digest_reasoning_effort: digest.reasoningEffort,
-        jev_input_tokens: quality.inputTokens,
+        jev_input_tokens: quality?.inputTokens ?? 0,
         cost_usd: Number((digestCost + qualityCost).toFixed(5)),
         // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
         // строку, и stats->>'cost_usd' молча возвращает null.
@@ -224,7 +236,7 @@ async function runForReader(
   `;
 
   const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
-  const qualityById = new Map(quality.scored.map((q) => [String(q.item_id), q]));
+  const qualityById = new Map((quality?.scored ?? []).map((q) => [String(q.item_id), q]));
 
   for (const [index, survivor] of survivors.entries()) {
     const written = writtenById.get(String(survivor.id));
@@ -246,7 +258,10 @@ async function runForReader(
   }
 
   log(
-    `  ${name}: ${survivors.length} материалов, качество ${meanQuality.toFixed(0)} из 85, ` +
+    `  ${name}: ${survivors.length} материалов, ` +
+    (meanQuality === null
+      ? "качество не меряли (промпт один на всех), "
+      : `качество ${meanQuality.toFixed(0)} из 85 по ${quality?.scored.length} описаниям, `) +
     `${perSentence.toFixed(1)} слов в предложении (ползунок ${reader.complexity} из 5), ` +
     `$${(digestCost + qualityCost).toFixed(4)}`,
   );
