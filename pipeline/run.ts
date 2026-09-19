@@ -1,8 +1,8 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
 import {
-  allReaders, getReaderTopics, lastActivityAt, pauseReader, recordCall, spentToday,
-  topicsInUse, wakeReader,
+  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks, recordCall,
+  spentToday, topicsInUse, wakeReader,
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -468,23 +468,7 @@ async function deliver(
  */
 async function askAboutYesterday(reader: Reader): Promise<void> {
   if (!reader.telegram_id) return;
-
-  const pending = await sql<{ item_id: number; title: string }[]>`
-    select ks.item_id, coalesce(i.title_ru, i.title) as title
-      from dailynews.kindle_sends ks
-      join dailynews.items i on i.id = ks.item_id
-     where ks.reader_id = ${reader.id}
-       and ks.status = 'sent'
-       and ks.at < now() - interval '12 hours'
-       and ks.at > now() - interval '7 days'
-       and not exists (
-         select 1 from dailynews.reads r
-          where r.reader_id = ks.reader_id and r.item_id = ks.item_id
-            and r.event in ('finished', 'unfinished')
-       )
-     order by ks.at
-     limit 3
-  `;
+  const pending = await pendingKindleAsks(reader.id);
 
   for (const row of pending) {
     try {

@@ -1424,15 +1424,21 @@ assert.equal(
 );
 assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
 
-// Владелец не покупает подписку у себя самого: платёж через Lemon Squeezy
-// из кармана в карман — это комиссия за перевод денег самому себе.
+// Владелец не покупает подписку у себя самого, и проверять её статус
+// не по чему: у него действует то, что стоит в колонке. Так там и стояло
+// «pro» — и гасло проверкой на подписку, которой нет.
 assert.equal(
-  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  effectivePlan(paid({ plan: "pro", owner: true, subscription_status: null, plan_ends_at: null })).id,
   "pro",
-  "у владельца тариф правилом, а не платежом",
+  "у владельца работает купленное без подписки",
 );
 assert.equal(
-  effectivePlan(paid({ plan: "free", owner: false })).id,
+  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  "free",
+  "и бесплатный тоже: иначе владелец не увидит продукт глазами бесплатного читателя",
+);
+assert.equal(
+  effectivePlan(paid({ plan: "pro", owner: false, subscription_status: null, plan_ends_at: null })).id,
   "free",
   "остальным тариф по-прежнему даёт только подписка",
 );
