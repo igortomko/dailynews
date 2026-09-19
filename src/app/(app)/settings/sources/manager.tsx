@@ -12,9 +12,23 @@ import { Separator } from "@/components/ui/separator";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import type { Source } from "@/lib/types";
+import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
 import type { Found } from "../../../../../pipeline/discover";
+
+/**
+ * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
+ * не значит: важно, сколько из них дошло до выпусков и не перепечатки ли это.
+ */
+function yieldOf(source: SourceHealth): string {
+  if (source.items === 0) return "за 30 дней — ни одного материала";
+  const parts = [`за 30 дней: ${source.items} → ${source.in_digest} в выпусках`];
+  if (source.mean_score !== null) parts.push(`скор ${source.mean_score}`);
+  if (source.duplicates > 0) {
+    parts.push(`дублей ${Math.round((source.duplicates / source.items) * 100)}%`);
+  }
+  return parts.join(" · ");
+}
 
 /**
  * Каталог общий на всех читателей, поэтому правит его владелец: удаление
@@ -25,7 +39,7 @@ import type { Found } from "../../../../../pipeline/discover";
 export function SourcesManager({
   sources,
   editable,
-}: { sources: Source[]; plan: Plan; editable: boolean }) {
+}: { sources: SourceHealth[]; plan: Plan; editable: boolean }) {
   const [pending, startTransition] = useTransition();
   const [input, setInput] = useState("");
   const [found, setFound] = useState<Found | null>(null);
@@ -33,7 +47,7 @@ export function SourcesManager({
 
   const dead = sources.filter((source) => source.active && source.last_error);
   const silent = sources.filter(
-    (source) => source.active && !source.last_error && source.last_count === 0,
+    (source) => source.active && !source.last_error && (source.silent_days ?? 0) >= 1,
   );
 
   const parse = () =>
@@ -61,10 +75,11 @@ export function SourcesManager({
 
       {silent.length > 0 ? (
         <Alert>
-          <AlertTitle>Отвечают, но ничего свежего: {silent.length}</AlertTitle>
+          <AlertTitle>Отвечают, но молчат: {silent.length}</AlertTitle>
           <AlertDescription>
-            {silent.map((source) => source.label).join(", ")} — источник жив, но за окно свежести
-            не дал ни одного материала. Обычно это значит, что фид заброшен.
+            {silent.map((source) => `${source.label} (${source.silent_days} дн.)`).join(", ")} —
+            источник жив и отвечает, но за окно свежести не дал ни одного материала.
+            День-другой — обычное дело; неделя означает, что фид заброшен.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -204,11 +219,19 @@ export function SourcesManager({
                 />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium">{source.label}</span>
-                  <span className="truncate text-xs text-muted-foreground">{source.url}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {source.url}
+                    {source.input_url && source.input_url !== source.url
+                      ? ` ← ${source.input_url}`
+                      : ""}
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
                 </div>
                 <Badge variant="outline">{source.kind}</Badge>
                 {source.last_error ? (
-                  <Badge variant="destructive">ошибка</Badge>
+                  <Badge variant="destructive" title={source.last_error}>ошибка</Badge>
+                ) : (source.silent_days ?? 0) >= 1 ? (
+                  <Badge variant="destructive">молчит {source.silent_days} дн.</Badge>
                 ) : source.last_count !== null ? (
                   <Badge variant="secondary">{source.last_count}</Badge>
                 ) : null}

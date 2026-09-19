@@ -29,9 +29,14 @@ export async function collect(sources: Source[]): Promise<number[]> {
       await sql`update dailynews.sources set last_error = ${result.error} where id = ${result.source.id}`;
       continue;
     }
+    // Тишина отмечается временем, а не счётчиком: прогон могут запустить
+    // дважды за сутки, и счётчик посчитал бы два дня за один. Снимается
+    // первой же записью.
     await sql`
       update dailynews.sources
-         set last_ok_at = now(), last_count = ${result.items.length}, last_error = null
+         set last_ok_at = now(), last_count = ${result.items.length}, last_error = null,
+             silent_since = case when ${result.items.length} > 0 then null
+                                 else coalesce(silent_since, now()) end
        where id = ${result.source.id}
     `;
 
@@ -52,6 +57,20 @@ export async function collect(sources: Source[]): Promise<number[]> {
       if (rows[0]) inserted.push(rows[0].id);
     }
   }
+
+  // Источник, отвечающий 200 и отдающий ноль, — самая незаметная поломка
+  // в ленте: ошибки нет, дайджест приходит, просто одного голоса в нём
+  // больше не слышно. Поэтому тишина называется вслух в каждом прогоне.
+  const silent = await sql<{ label: string; days: number }[]>`
+    select label, (current_date - silent_since::date)::int as days
+      from dailynews.sources
+     where active and silent_since is not null
+     order by silent_since
+  `;
+  if (silent.length > 0) {
+    log(`  молчат: ${silent.map((row) => `${row.label} (${row.days} дн.)`).join(", ")}`);
+  }
+
   return inserted;
 }
 

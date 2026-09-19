@@ -410,6 +410,55 @@ export function freshest(items: RawItem[], source: Source): RawItem[] {
     .slice(0, cap);
 }
 
+/**
+ * Почему источник не ответил — словами, а не кодом драйвера.
+ *
+ * Node отдаёт наверх «fetch failed» на всё сразу: и на несуществующий домен,
+ * и на просроченный сертификат, и на оборванное соединение, — а настоящую
+ * причину прячет в error.cause. В списке источников это одинаковая строка,
+ * по которой нельзя решить, чинить адрес, подождать или выбросить источник.
+ */
+export function explain(error: unknown): string {
+  const err = (error ?? {}) as {
+    name?: string;
+    message?: string;
+    code?: string;
+    cause?: { code?: string; message?: string };
+  };
+  const message = String(err.message ?? error ?? "");
+  const code = err.cause?.code ?? err.code ?? "";
+
+  if (err.name === "TimeoutError" || /timed out|aborted/i.test(message)) {
+    return "не ответил за отведённое время";
+  }
+
+  const byCode: Record<string, string> = {
+    ENOTFOUND: "домен не существует",
+    EAI_AGAIN: "домен не разрешается",
+    ECONNREFUSED: "хост отказал в соединении",
+    ECONNRESET: "соединение оборвано на полпути",
+    EHOSTUNREACH: "хост недоступен",
+    ETIMEDOUT: "не ответил за отведённое время",
+    CERT_HAS_EXPIRED: "просроченный сертификат",
+    ERR_TLS_CERT_ALTNAME_INVALID: "сертификат выдан другому домену",
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: "сертификат не проверяется",
+    DEPTH_ZERO_SELF_SIGNED_CERT: "самоподписанный сертификат",
+  };
+  if (byCode[code]) return byCode[code];
+
+  const status = Number(message.match(/^HTTP (\d{3})/)?.[1] ?? 0);
+  // 402 приходит от перепродавца X, когда кончился баланс. «Источник ответил
+  // 402» звучит как поломка источника, а чинить надо счёт.
+  if (status === 402) return "нужна оплата (402) — у провайдера кончился баланс";
+  if (status === 401 || status === 403) return `источник закрылся от робота (${status})`;
+  if (status === 404 || status === 410) return `адрес больше не существует (${status})`;
+  if (status === 429) return "источник просит реже (429)";
+  if (status >= 500) return `сервер источника не в порядке (${status})`;
+  if (status) return `источник ответил ${status}`;
+
+  return message.slice(0, 300) || "не ответил без объяснений";
+}
+
 export type SourceResult =
   | { source: Source; ok: true; items: RawItem[] }
   | { source: Source; ok: false; error: string };
@@ -438,7 +487,7 @@ export async function fetchAllSources(
         try {
           result = { source, ok: true, items: freshest(await fetchSource(source), source) };
         } catch (error) {
-          result = { source, ok: false, error: (error as Error).message.slice(0, 500) };
+          result = { source, ok: false, error: explain(error).slice(0, 500) };
         }
         results.push(result);
         onResult?.(result);

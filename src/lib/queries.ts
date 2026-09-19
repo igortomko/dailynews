@@ -31,6 +31,57 @@ export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`select * from dailynews.sources order by kind, label`;
 }
 
+
+export type SourceHealth = Source & {
+  /** Сколько дней подряд отвечает и не даёт ни одной свежей записи. */
+  silent_days: number | null;
+  /** Отдача за тридцать дней. Новых данных не нужно — всё уже собрано. */
+  items: number;
+  duplicates: number;
+  in_digest: number;
+  mean_score: number | null;
+};
+
+/**
+ * Источники вместе с тем, что от них было толку.
+ *
+ * last_count отвечает только на вопрос «сколько дал вчера». Полезен ли
+ * источник вообще — видно лишь в ряду: сколько материалов дал, сколько
+ * из них дошло до выпусков, какой у них средний скор и какая доля оказалась
+ * перепечатками. Всё это уже лежит в items, scores и digest_items.
+ *
+ * Окно в тридцать дней, иначе источник, заведённый вчера, выглядит хуже
+ * того, что живёт в каталоге полгода. Условие по свежести стоит в join,
+ * а не в where: иначе источник без единого материала выпал бы из списка
+ * вместо того, чтобы показать ноль.
+ */
+export async function getSourceHealth(): Promise<SourceHealth[]> {
+  return sql<SourceHealth[]>`
+    with digested as (
+      -- Состав выпуска переехал из массива digests.item_ids в digest_items,
+      -- и материал может стоять в выпусках нескольких читателей: distinct,
+      -- иначе популярный источник считался бы тем полезнее, чем больше
+      -- у ленты читателей.
+      select distinct item_id from dailynews.digest_items
+    )
+    select s.*,
+           case when s.silent_since is null then null
+                else (current_date - s.silent_since::date)::int end as silent_days,
+           count(i.id)::int as items,
+           count(i.id) filter (where i.dup_of is not null)::int as duplicates,
+           count(g.item_id)::int as in_digest,
+           round(avg(sc.total)::numeric, 1)::float as mean_score
+      from dailynews.sources s
+      left join dailynews.items i
+             on i.source_id = s.id
+            and i.collected_at > now() - interval '30 days'
+      left join dailynews.scores sc on sc.item_id = i.id
+      left join digested g on g.item_id = i.id
+     group by s.id
+     order by s.kind, s.label
+  `;
+}
+
 /** Дни, за которые у этого читателя есть выпуск, от свежего к старому. */
 export async function getDigestDays(readerId: number): Promise<string[]> {
   const rows = await sql<{ day: string }[]>`

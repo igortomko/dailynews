@@ -12,6 +12,7 @@ import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
+import { explain } from "./fetch";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -640,6 +641,37 @@ assert.equal(
   "у живой страницы причины нет — значит, фида и правда нет",
 );
 
+// --- почему источник не ответил -----------------------------------------------
+// Node отдаёт «fetch failed» и на несуществующий домен, и на просроченный
+// сертификат, и на оборванное соединение, а настоящую причину прячет в cause.
+// Одинаковая строка в списке источников не даёт решить, чинить адрес, ждать
+// или выбрасывать источник.
+const failed = (code: string) =>
+  Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("x"), { code }) });
+
+assert.equal(explain(failed("ENOTFOUND")), "домен не существует", "несуществующий домен назван");
+assert.equal(explain(failed("CERT_HAS_EXPIRED")), "просроченный сертификат", "сертификат назван");
+assert.equal(explain(failed("ECONNREFUSED")), "хост отказал в соединении", "отказ в соединении назван");
+assert.notEqual(explain(failed("ENOTFOUND")), explain(failed("ECONNRESET")), "разные причины — разный текст");
+assert.equal(
+  explain(new Error("HTTP 402")),
+  "нужна оплата (402) — у провайдера кончился баланс",
+  "402 от перепродавца X — это счёт, а не поломка источника",
+);
+assert.equal(explain(new Error("HTTP 403")), "источник закрылся от робота (403)", "403 — это не поломка адреса");
+assert.equal(explain(new Error("HTTP 404")), "адрес больше не существует (404)", "404 назван");
+assert.equal(explain(new Error("HTTP 429")), "источник просит реже (429)", "429 назван");
+assert.equal(explain(new Error("HTTP 503")), "сервер источника не в порядке (503)", "пятисотые назван");
+assert.equal(
+  explain(Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" })),
+  "не ответил за отведённое время",
+  "таймаут назван",
+);
+// Незнакомую ошибку нельзя проглатывать: лучше сырой текст, чем ровное
+// «что-то пошло не так» на всё подряд.
+assert.equal(explain(new Error("не похоже на RSS или Atom")), "не похоже на RSS или Atom", "незнакомое доходит как есть");
+assert.equal(explain(undefined), "не ответил без объяснений", "пустая ошибка не даёт пустую строку");
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -648,4 +680,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 153 утверждений");
+console.log("Самопроверка пройдена: 165 утверждений");

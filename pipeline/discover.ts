@@ -17,7 +17,7 @@
  * уже нельзя. Поэтому сохраняется только то, что действительно ответило,
  * а «фида нет», «страница собирается в браузере» и «пейволл» называются вслух.
  */
-import { fetchText, fetchSource, freshest, parseFeed, type FeedDoc } from "./fetch";
+import { explain, fetchText, fetchSource, freshest, parseFeed, type FeedDoc } from "./fetch";
 import type { Source } from "../src/lib/types";
 
 export type Candidate = {
@@ -242,6 +242,7 @@ const probe = (candidate: Candidate): Source => ({
   last_ok_at: null,
   last_count: null,
   last_error: null,
+  silent_since: null,
 });
 
 function labelFor(doc: FeedDoc | null, candidate: Candidate): string {
@@ -304,7 +305,7 @@ async function tryCandidates(
         },
       };
     } catch (error) {
-      lastError = (error as Error).message.slice(0, 200);
+      lastError = explain(error).slice(0, 200);
     }
   }
   return { ok: false, error: lastError || "ни один адрес не ответил" };
@@ -343,7 +344,7 @@ export async function discover(input: string): Promise<Discovery> {
   try {
     page = await fetchText(base);
   } catch (error) {
-    return { ok: false, error: `Адрес не отвечает: ${(error as Error).message.slice(0, 200)}` };
+    return { ok: false, error: `Адрес не отвечает: ${explain(error).slice(0, 200)}` };
   }
 
   if (looksLikeFeed(page)) {

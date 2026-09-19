@@ -365,6 +365,32 @@ async function main() {
     );
     console.log("  отбор: своё не повторяется, чужое остаётся доступным");
 
+    // --- здоровье источников --------------------------------------------------
+    // Источник, отвечающий 200 и отдающий ноль, — самая незаметная поломка
+    // в ленте. Отдача считается из items, scores и digests, и считать её надо
+    // ровно здесь: один неверный join — и полезный источник выглядит пустым.
+    const health = await queries.getSourceHealth();
+    assert.equal(health.length, sources.length, "в отдаче должны быть все источники, включая пустые");
+    const used = health.find((row) => row.id === source.id)!;
+    assert.equal(used.items, 4, `материалов ${used.items}, вставлено 4`);
+    assert.equal(used.duplicates, 1, "перепечатка должна попасть в долю дублей");
+    assert.equal(used.in_digest, 3, `в дайджест дошло ${used.in_digest}, ожидалось 3`);
+    assert.equal(used.mean_score, 91.7, `средний скор ${used.mean_score}, ожидалось 91.7`);
+    const empty = health.find((row) => row.id !== source.id)!;
+    assert.equal(empty.items, 0, "источник без материалов показывает ноль, а не выпадает из списка");
+    assert.equal(empty.silent_days, null, "без отметки тишины дней тишины нет");
+
+    // Тишина отмечается временем: прогон могут запустить дважды за сутки,
+    // и счётчик посчитал бы два дня за один.
+    await sql`update dailynews.sources set silent_since = now() - interval '4 days' where id = ${empty.id}`;
+    const afterSilence = await queries.getSourceHealth();
+    assert.equal(
+      afterSilence.find((row) => row.id === empty.id)!.silent_days,
+      4,
+      "дни тишины считаются от отметки",
+    );
+    console.log(`  отдача источника: ${used.items} → ${used.in_digest} в дайджесте, скор ${used.mean_score}`);
+
     // --- бюджет тем -----------------------------------------------------------
     // Круг по темам раздавал места строго поровну: у живого дайджеста на
     // двадцать материалов выходило 3-3-3-3-3-3, и тема в фокусе получала

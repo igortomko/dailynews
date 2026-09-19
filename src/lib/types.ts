@@ -32,6 +32,8 @@ export type Source = {
   last_ok_at: string | null;
   last_count: number | null;
   last_error: string | null;
+  /** С какого момента источник отвечает и не даёт ни одной свежей записи. */
+  silent_since: string | null;
 };
 
 /** Сырой материал до скоринга. */
