@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten } from "./digest";
+import { checkLexicon, repeatsHeadline } from "./lexicon";
+import { relativeTime } from "../src/lib/relative-time";
 import type { Axes, Weights } from "../src/lib/types";
 
 const weights: Weights = {
@@ -141,6 +143,40 @@ const stray = matchWritten(survivors, [{ id: 999, title_ru: "Чужой", summar
 assert.equal(stray.items.length, 2, "лишний id модели не должен попадать в дайджест");
 assert.equal(stray.missing, 2, "оба материала остались без перевода");
 
+// --- словарь машинного текста ------------------------------------------------
+// «Ключевой» стояло в запрете промпта прямым текстом и всё равно прошло
+// в дайджест: запрет полагается на память модели, словарь — нет.
+assert.equal(checkLexicon("Для продуктов на LLM это ключевой вопрос").length, 1, "«ключевой» должен ловиться");
+assert.equal(checkLexicon("Стоит отметить, что цена выросла").length, 1, "зачин должен ловиться");
+assert.equal(checkLexicon("Исследования показывают рост").length, 1, "безымянная ссылка должна ловиться");
+assert.equal(
+  checkLexicon("Рождаемость упала втрое: 705 809 детей против 2,03 млн в 1974-м").length,
+  0,
+  "обычный текст с цифрами трогать нельзя",
+);
+
+assert.ok(
+  repeatsHeadline(
+    "HYPE взял $90,92 после запуска ручных займов на Hyperliquid",
+    "Hyperliquid разрешил занимать под залог HYPE, и токен обновил максимум на $90,92.",
+  ),
+  "пересказ заголовка должен ловиться",
+);
+assert.ok(
+  !repeatsHeadline(
+    "Антидепрессанты не перестраивают мозг: 8 700 сканов",
+    "Структурные отличия объясняются тяжестью состояния и возрастом, а не препаратами.",
+  ),
+  "продолжение мысли пересказом считаться не должно",
+);
+
+// --- сокращённое время -------------------------------------------------------
+const hourAgo = new Date(Date.now() - 2 * 3_600_000);
+assert.equal(relativeTime(hourAgo), "2ч", "часы пишутся одной буквой");
+assert.equal(relativeTime(new Date(Date.now() - 5 * 60_000)), "5м", "минуты пишутся одной буквой");
+assert.equal(relativeTime(new Date(Date.now() - 3 * 86_400_000)), "3д", "дни пишутся одной буквой");
+assert.ok(/[а-я]{3}/.test(relativeTime(new Date(Date.now() - 40 * 86_400_000))), "давнее пишется датой");
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -149,4 +185,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 28 утверждений");
+console.log("Самопроверка пройдена: 38 утверждений");

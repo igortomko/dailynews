@@ -126,52 +126,45 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
     >
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
-          {/* Источник мелким и с весом, остальное — приглушённым.
-              Размеры взяты с Google News: 12px/500 на источник, 13px на время. */}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8125rem] text-muted-foreground">
-            {site ? (
-              <a
-                href={site}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-[0.75rem] font-medium text-foreground/75 hover:underline"
-              >
-                {item.source_label}
-              </a>
-            ) : (
-              <span className="text-[0.75rem] font-medium text-foreground/75">{item.source_label}</span>
-            )}
-            <span aria-hidden>·</span>
-            <span>{relativeTime(item.day)}</span>
-            {showTopic && item.topic_label ? (
-              <>
-                <span aria-hidden>·</span>
-                <span>{item.topic_label}</span>
-              </>
-            ) : null}
-            {/* Тип и горизонт — справка, а не предупреждение: в покое они
-                соперничали с заголовком, хотя нужны, только когда уже
-                присматриваешься. Кликбейт остаётся на виду — он меняет
-                решение читать, и узнать о нём надо до чтения. */}
-            {kind || horizon ? (
-              <span className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-                <span aria-hidden>·</span>
-                {kind}
-                {kind && horizon ? <span aria-hidden>·</span> : null}
-                {horizon}
+          {/* В покое остаётся только источник. Время, тема и метки нужны,
+              когда уже присматриваешься к материалу, а в списке они тянут
+              строку и спорят с заголовком. Место под них держится всегда,
+              поэтому строка не дёргается при наведении.
+              Разделитель — запятая: точки с пробелами по бокам растягивали
+              ряд сильнее, чем несли смысла. */}
+          <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+            <span className="flex min-w-0 items-baseline gap-1">
+              {site ? (
+                <a
+                  href={site}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
+                >
+                  {item.source_label}
+                </a>
+              ) : (
+                <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
+                  {item.source_label}
+                </span>
+              )}
+              <span className="truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+                {[
+                  relativeTime(item.day),
+                  showTopic ? item.topic_label : null,
+                  kind,
+                  horizon,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
               </span>
-            ) : null}
-            {clickbait ? (
-              <>
-                <span aria-hidden>·</span>
-                <span className="text-destructive">кликбейт</span>
-              </>
-            ) : null}
+            </span>
 
-            {/* Появляются по наведению: в покое они спорили с заголовком
-                за внимание, а нужны раз на десяток материалов. Место под
-                них держится всегда, поэтому строка не дёргается. На тач-
-                устройствах наведения нет — там показываем сразу. */}
+            {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
+
+            {/* Оценка тоже по наведению: нужна раз на десяток материалов,
+                а в покое спорит с заголовком. Поднятый палец виден всегда,
+                иначе выставленная оценка исчезает вместе с курсором. */}
             <div
               className={cn(
                 "ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",

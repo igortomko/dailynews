@@ -194,6 +194,7 @@ async function main() {
         scored: scored.length,
         jev_input_tokens: usage.input,
         jev_cost_usd: Number(jevCost.toFixed(5)),
+        flagged: digest.flagged ?? 0,
         seconds: Math.round((Date.now() - started) / 1000),
         // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
         // строку, и stats->>'jev_cost_usd' молча возвращает null.

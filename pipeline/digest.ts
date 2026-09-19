@@ -1,4 +1,5 @@
 import type { Axes } from "../src/lib/types";
+import { checkLexicon, repeatsHeadline } from "./lexicon";
 
 export type Survivor = {
   id: number;
@@ -17,7 +18,7 @@ export type Written = {
   summary: string;
 };
 
-export type DigestResult = { intro: string; items: Written[] };
+export type DigestResult = { intro: string; items: Written[]; flagged?: number };
 
 export type LlmConfig = { base_url?: string; model?: string; api_key?: string };
 
@@ -47,6 +48,7 @@ export async function writeDigest(
     // Без ключа дайджест всё равно собирается — просто исходными заголовками.
     return {
       intro: "",
+      flagged: 0,
       items: survivors.map((s) => ({
         id: s.id,
         title_ru: s.title,
@@ -150,7 +152,23 @@ ${block}
     );
   }
 
-  return { intro: parsed.intro ?? "", items: written };
+  // Словарь сообщает, но не отбрасывает: одно слово не повод лишить
+  // читателя новости. Растущее число попаданий — повод чинить промпт.
+  let flagged = 0;
+  for (const item of written) {
+    const hits = checkLexicon(`${item.title_ru} ${item.summary}`);
+    const echo = repeatsHeadline(item.title_ru, item.summary);
+    if (hits.length === 0 && !echo) continue;
+    flagged++;
+    const what = [
+      ...hits.map((hit) => `«${hit.term}» (${hit.reason})`),
+      ...(echo ? ["первое предложение пересказывает заголовок"] : []),
+    ].join(", ");
+    console.error(`  ~ ${item.title_ru.slice(0, 48)}: ${what}`);
+  }
+  if (flagged > 0) console.error(`  ~ помечено ${flagged} из ${written.length}`);
+
+  return { intro: parsed.intro ?? "", items: written, flagged };
 }
 
 /**

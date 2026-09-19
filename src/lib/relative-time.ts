@@ -1,27 +1,24 @@
-const RTF = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
-
-const STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ["minute", 60_000],
-  ["hour", 3_600_000],
-  ["day", 86_400_000],
-];
+const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
 
 /**
- * «2 часа назад» вместо «2026-09-19». В ленте важно не когда вышло,
- * а насколько давно: дата требует вычитания в уме, относительное время — нет.
+ * «10ч» вместо «10 часов назад». В строке метаданных время стоит рядом
+ * с источником и темой, и развёрнутая форма занимает там больше места,
+ * чем несёт смысла: «назад» не добавляет ничего, а читается в каждой
+ * карточке заново.
  */
 export function relativeTime(value: string | Date): string {
-  const then = typeof value === "string" ? new Date(value) : value;
+  const then = typeof value === "string" ? new Date(`${value}${value.length === 10 ? "T12:00:00" : ""}`) : value;
   if (Number.isNaN(then.getTime())) return "";
 
-  const diff = then.getTime() - Date.now();
-  const abs = Math.abs(diff);
-  if (abs < 60_000) return "только что";
+  const minutes = Math.round((Date.now() - then.getTime()) / 60_000);
+  if (minutes < 1) return "сейчас";
+  if (minutes < 60) return `${minutes}м`;
 
-  for (const [unit, ms] of STEPS) {
-    if (abs < ms * (unit === "day" ? 7 : 60)) {
-      return RTF.format(Math.round(diff / ms), unit);
-    }
-  }
-  return then.toLocaleDateString("ru", { day: "numeric", month: "long" });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}ч`;
+
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}д`;
+
+  return MONTH.format(then);
 }
