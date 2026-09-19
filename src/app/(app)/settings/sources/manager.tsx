@@ -119,12 +119,14 @@ export function SourcesManager({
               <FieldDescription>
                 {error ??
                   "YouTube, GitHub, Substack, arXiv, Hacker News, аккаунт X, канал Telegram, " +
-                    "любой блог — или поисковый запрос X, если ссылки нет."}
+                    "любой блог. Адрес отправителя — рассылка из выделенного ящика. " +
+                    "Без ссылки — поисковый запрос X."}
               </FieldDescription>
               {error ? null : (
                 <FieldDescription>
                   Telegram — только публичные каналы с открытым веб-просмотром: закрытые
-                  не читает ни бот, ни веб-страница.
+                  не читает ни бот, ни веб-страница. Почта — только выделенный ящик
+                  из IMAP_URL, и только на чтение.
                 </FieldDescription>
               )}
             </Field>

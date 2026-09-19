@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import type { RawItem, Source } from "../src/lib/types";
+import { fetchLetters } from "./mail";
 
 const UA = "dailynews/2.0 (+https://github.com/igortomko/dailynews)";
 const MAX_BYTES = 5_000_000;
@@ -76,7 +77,7 @@ const NAMED_ENTITIES: Record<string, string> = {
   mdash: "—", ndash: "–", hellip: "…", middot: "·", deg: "°", euro: "€",
 };
 
-function stripHtml(html: string): string {
+export function stripHtml(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -441,12 +442,55 @@ export async function fetchTelegram(source: Source): Promise<RawItem[]> {
   return (await fetchTelegramFeed(source)).items;
 }
 
+// ---------------------------------------------------------------------------
+// Почта. Выделенный ящик опрашивается по IMAP в том же ночном прогоне.
+// Входящего эндпоинта не заводится: на общей машине лишнего наружу быть
+// не должно. url источника здесь — адрес отправителя, а не адрес фида.
+// ---------------------------------------------------------------------------
+const nameOf = (from: string) => (from.split("<")[0] ?? "").replace(/["']/g, "").trim();
+
+export async function fetchEmailFeed(source: Source): Promise<FeedDoc> {
+  const url = process.env.IMAP_URL;
+  if (!url) throw new Error("выделенный ящик не настроен: нужен IMAP_URL");
+
+  const letters = await fetchLetters(
+    { url, folder: process.env.IMAP_FOLDER },
+    source.url,
+    Number(source.config?.max_age_days ?? 7),
+    Number(source.config?.max_items ?? 30),
+  );
+
+  return {
+    title: letters.map((letter) => nameOf(letter.from)).find(Boolean) ?? source.url,
+    items: letters.map((letter) => ({
+      // У письма нет веб-адреса, пока отправитель его не дал. mid: — это
+      // настоящая схема RFC 2392 для идентификатора письма; выдуманный домен
+      // выглядел бы правдоподобно и увёл бы читателя на чужой сайт.
+      url: letter.link ?? `mid:${letter.messageId}`,
+      // Дедуп идёт по Message-ID, а не по ссылке: «посмотреть в браузере»
+      // у половины рассылок один и тот же на все выпуски, и вторая новость
+      // от отправителя молча не доехала бы никогда.
+      canon: `mid:${letter.messageId}`,
+      title: letter.subject || letter.text.split("\n")[0].slice(0, 200),
+      excerpt: letter.text.replace(/\s+/g, " ").slice(0, 1200),
+      points: null,
+      comments: null,
+      published_at: letter.date,
+    })),
+  };
+}
+
+export async function fetchEmail(source: Source): Promise<RawItem[]> {
+  return (await fetchEmailFeed(source)).items;
+}
+
 const FETCHERS: Record<Source["kind"], (source: Source) => Promise<RawItem[]>> = {
   rss: fetchRss,
   reddit: fetchReddit,
   hackernews: fetchHackerNews,
   x: fetchX,
   telegram: fetchTelegram,
+  email: fetchEmail,
 };
 
 export async function fetchSource(source: Source): Promise<RawItem[]> {
@@ -457,6 +501,7 @@ export async function fetchSource(source: Source): Promise<RawItem[]> {
 const TITLED: Partial<Record<Source["kind"], (source: Source) => Promise<FeedDoc>>> = {
   rss: fetchRssFeed,
   telegram: fetchTelegramFeed,
+  email: fetchEmailFeed,
 };
 
 /**

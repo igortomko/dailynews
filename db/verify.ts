@@ -403,7 +403,36 @@ async function main() {
       /sources_kind_known/,
       "неизвестный вид источника должен отвергаться ограничением с новым именем",
     );
-    console.log("  виды источников: telegram принят, выдуманный отвергнут");
+    await sql`
+      insert into dailynews.sources (kind, label, url)
+      values ('email', 'рассылка', 'letters@example-letter.test')
+    `;
+    console.log("  виды источников: telegram и email приняты, выдуманный отвергнут");
+
+    // --- сверка формы схемы видит переопределение ------------------------------
+    // Ограничение, переопределённое под тем же именем, по имени неотличимо
+    // от применённого: 0018 так и проскочил. Теперь сверяется и содержимое.
+    const { schemaGaps } = await import("./schema-gap");
+    assert.deepEqual(await schemaGaps(sql), [], "на полной схеме расхождений быть не должно");
+
+    // Откатываем ограничение к версии 0021 — как если бы 0022 не применили.
+    await sql`delete from dailynews.sources where kind = 'email'`;
+    await sql`alter table dailynews.sources drop constraint sources_kind_known`;
+    await sql`
+      alter table dailynews.sources add constraint sources_kind_known
+        check (kind in ('rss', 'hackernews', 'reddit', 'x', 'telegram'))
+    `;
+    const stale = await schemaGaps(sql);
+    assert.ok(
+      stale.some((gap) => gap.name === "sources_kind_known"),
+      "неприменённое переопределение должно называться расхождением, а не проходить молча",
+    );
+    await sql`alter table dailynews.sources drop constraint sources_kind_known`;
+    await sql`
+      alter table dailynews.sources add constraint sources_kind_known
+        check (kind in ('rss', 'hackernews', 'reddit', 'x', 'telegram', 'email'))
+    `;
+    console.log("  сверка схемы: переопределённое ограничение больше не проходит молча");
 
     // --- бюджет тем -----------------------------------------------------------
     // Круг по темам раздавал места строго поровну: у живого дайджеста на

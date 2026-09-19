@@ -64,6 +64,17 @@ export function asUrl(input: string): URL | null {
  * выглядит ровно как «у этого сайта нет фида».
  */
 export function planFor(input: string): Plan {
+  // Раньше адреса: URL() принимает «a@b.com» как хост b.com с именем
+  // пользователя a, и подписка молча превратилась бы в попытку найти фид
+  // на сайте отправителя.
+  const address = input.trim().toLowerCase();
+  if (/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address)) {
+    return {
+      candidates: [{ kind: "email", url: address, via: "письма от этого отправителя" }],
+      probePage: false,
+    };
+  }
+
   const url = asUrl(input);
   if (!url) {
     const query = input.trim();
@@ -257,6 +268,7 @@ function labelFor(doc: FeedDoc | null, candidate: Candidate): string {
   if (candidate.kind === "reddit") return `r/${candidate.url}`;
   if (candidate.kind === "x") return `X · ${candidate.url}`.slice(0, 120);
   if (candidate.kind === "telegram") return `@${candidate.url}`;
+  if (candidate.kind === "email") return candidate.url;
   return candidate.url.slice(0, 120);
 }
 

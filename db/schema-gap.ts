@@ -20,11 +20,14 @@
  * Колонки внутри `create table` не разбираются: за них отвечает сама
  * таблица. Нет таблицы — сообщается она одна, а не десяток её колонок.
  *
- * Чего он не видит: индексы, данные, переименования и переопределение
- * ограничения под тем же именем. 0018 снимает profile_digest_size_check
- * и ставит его же с новым потолком — по имени эти два неразличимы,
- * и такую правку проверка пропустит. Признать это честнее, чем сделать
- * вид, что сверка полная.
+ * У именованных ограничений сверяется не только имя, но и содержимое:
+ * значения, которые обещает миграция, ищутся в определении живого
+ * ограничения. Иначе переопределение под тем же именем проходит молча —
+ * 0018 снимает profile_digest_size_check и ставит его же с новым потолком,
+ * 0021 и 0022 так же расширяют список видов источника. По имени эти пары
+ * неразличимы, и неприменённая миграция выглядела бы как применённая.
+ *
+ * Чего он не видит: индексы, данные и переименования.
  */
 import { readFileSync, readdirSync } from "node:fs";
 
@@ -39,7 +42,8 @@ export function promised(dir = "db/migrations") {
   // Таблица у ограничения помнится не ради красоты: увезённая таблица
   // уносит свои ограничения с собой, и без этой связи 0018 требовал бы
   // profile_digest_size_check ещё долго после того, как profile не стало.
-  const constraints: { name: string; table: string; from: string }[] = [];
+  // Значения из тела — чтобы увидеть переопределение под тем же именем.
+  const constraints: { name: string; table: string; from: string; values: string[] }[] = [];
 
   for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) {
     const text = readFileSync(`${dir}/${file}`, "utf8");
@@ -71,8 +75,16 @@ export function promised(dir = "db/migrations") {
       for (const found of statement.matchAll(/add\s+column\s+if\s+not\s+exists\s+(\w+)/gi)) {
         columns.push({ table, column: found[1], from: file });
       }
-      for (const found of statement.matchAll(/add\s+constraint\s+(\w+)/gi)) {
-        constraints.push({ name: found[1], table, from: file });
+      // Вместе с именем запоминается, что ограничение обещает: числа
+      // и строковые значения из его тела. По имени переопределение
+      // неотличимо от уже применённого.
+      for (const found of statement.matchAll(/add\s+constraint\s+(\w+)([\s\S]*?)(?=add\s+constraint|$)/gi)) {
+        constraints.push({
+          name: found[1],
+          table,
+          from: file,
+          values: [...found[2].matchAll(/'([^']*)'|\b(\d+)\b/g)].map((m) => m[1] ?? m[2]),
+        });
       }
       // Колонку могли добавить и снять следом: 0015 завела расписание,
       // 0016 его убрала. Без этого проверка требовала бы от базы то,
@@ -108,13 +120,13 @@ export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]>
   `;
   const has = new Set(live.map((row) => `${row.table_name}.${row.column_name}`));
 
-  const named = await sql<{ conname: string }[]>`
-    select c.conname
+  const named = await sql<{ conname: string; def: string }[]>`
+    select c.conname, pg_get_constraintdef(c.oid) as def
       from pg_constraint c
       join pg_namespace n on n.oid = c.connamespace
      where n.nspname = 'dailynews'
   `;
-  const hasConstraint = new Set(named.map((row) => row.conname));
+  const liveConstraint = new Map(named.map((row) => [row.conname, row.def]));
 
   return [
     ...tables
@@ -126,7 +138,16 @@ export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]>
       .filter((entry) => hasTable.has(entry.table) && !has.has(`${entry.table}.${entry.column}`))
       .map((entry): Gap => ({ kind: "колонка", name: `${entry.table}.${entry.column}`, from: entry.from })),
     ...constraints
-      .filter((entry) => !hasConstraint.has(entry.name))
+      .filter((entry) => {
+        // Таблицы нет — её ограничения уехали вместе с ней.
+        if (!hasTable.has(entry.table)) return false;
+        const live = liveConstraint.get(entry.name);
+        if (live === undefined) return true;
+        // Обещанное значение, которого в живом определении нет, означает,
+        // что ограничение осталось прежним: kind = 'email' отвергался бы
+        // базой при коде, который его уже пишет.
+        return entry.values.some((value) => !live.includes(value));
+      })
       .map((entry): Gap => ({ kind: "ограничение", name: entry.name, from: entry.from })),
   ];
 }

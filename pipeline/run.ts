@@ -47,7 +47,7 @@ export async function collect(sources: Source[]): Promise<number[]> {
         insert into dailynews.items
           (source_id, url, url_canon, title, title_norm, excerpt, points, comments, published_at)
         values (
-          ${result.source.id}, ${item.url}, ${canonUrl(item.url)}, ${item.title},
+          ${result.source.id}, ${item.url}, ${item.canon ?? canonUrl(item.url)}, ${item.title},
           ${normalizeTitle(item.title)}, ${item.excerpt},
           ${item.points}, ${item.comments}, ${item.published_at}
         )

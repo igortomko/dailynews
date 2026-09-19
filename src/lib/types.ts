@@ -22,7 +22,7 @@ export type ReaderTopic = {
 
 export type Source = {
   id: number;
-  kind: "rss" | "hackernews" | "reddit" | "x" | "telegram";
+  kind: "rss" | "hackernews" | "reddit" | "x" | "telegram" | "email";
   label: string;
   url: string;
   config: Record<string, unknown>;
@@ -39,6 +39,12 @@ export type Source = {
 /** Сырой материал до скоринга. */
 export type RawItem = {
   url: string;
+  /**
+   * Чем дедупить, если адрес для этого не годится. У письма «посмотреть
+   * в браузере» одинаков во всех выпусках рассылки, а Message-ID уникален
+   * по RFC. Пусто — канонизируется адрес, как у всех остальных.
+   */
+  canon?: string;
   title: string;
   excerpt: string;
   points: number | null;

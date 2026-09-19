@@ -13,6 +13,7 @@ import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { explain, parseTelegram } from "./fetch";
+import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -726,6 +727,68 @@ assert.throws(
   "страница контакта — это отказ, а не пустой канал",
 );
 
+// --- письма -------------------------------------------------------------------
+// Выделенный ящик: одно письмо — один материал, дедуп по Message-ID,
+// отправитель опознаётся по From. Из письма не подгружается ничего.
+//
+// Куски собраны руками и покрывают кодировки, которые рассылки используют
+// на самом деле: тема в base64 по RFC 2047, текст в quoted-printable,
+// разметка в base64, Message-ID, перенесённый по строкам.
+// latin1, а не utf8: ровно так письмо приходит из сокета — байт в байт.
+// Прочитав его как utf8, мы бы декодировали текст дважды, и кириллица
+// рассыпалась бы в «&5=0 A?>B». Длина литерала в IMAP тоже считается
+// в байтах, и только при latin1 она совпадает с длиной строки.
+const rawLetter = readFileSync("pipeline/fixtures/letter-newsletter.eml", "latin1");
+const letter = parseLetter(rawLetter);
+
+assert.equal(letter.subject, "Выпуск 142: чем кончилась история с ценами на уран", "тема из base64 по RFC 2047");
+// Message-ID переносится по строкам, как всякий длинный заголовок.
+// Неразвёрнутый, он перестаёт совпадать сам с собой, и письмо приезжает
+// в ленту заново каждый прогон.
+assert.equal(
+  letter.messageId,
+  "0000019a-4f21-7c3d-9b55-aa1c2d3e4f50 @mail.example-letter.test",
+  "Message-ID собирается из перенесённых строк",
+);
+assert.equal(addressOf(letter.from), "letters@example-letter.test", "отправитель опознаётся по From");
+assert.equal(letter.date?.getUTCDate(), 18, "дата письма разобрана");
+// Простой текст предпочитается разметке: он уже написан для чтения.
+assert.ok(letter.text.includes("142 долларов"), "текст расшифрован из quoted-printable");
+assert.ok(letter.text.includes("—"), "=E2=80=94 разворачивается в тире, а не остаётся кодом");
+assert.ok(!letter.text.includes("=E2"), "в тексте не остаётся кодов quoted-printable");
+
+// Трекинговый пиксель — это <img src>. Он не должен ни подгружаться,
+// ни попасть в поле адреса, ни доехать до текста.
+assert.ok(!letter.text.includes("track.example-letter.test"), "пиксель не доезжает до текста");
+assert.notEqual(letter.link, "https://track.example-letter.test/open/abc123.gif", "пиксель не становится адресом");
+// Веб-версия берётся из того, что объявил отправитель (List-Archive),
+// а не из первой попавшейся ссылки.
+assert.equal(letter.link, "https://example-letter.test/archive", "ссылка из объявленного архива рассылки");
+
+assert.equal(decodeWords("=?utf-8?q?=D0=A6=D0=B5=D0=BD=D0=B0?="), "Цена", "quoted-printable в заголовке");
+assert.equal(decodeWords("Обычная тема"), "Обычная тема", "незакодированный заголовок не трогается");
+assert.equal(addressOf("Ben Thompson <ben@stratechery.com>"), "ben@stratechery.com", "адрес из имени со скобками");
+assert.equal(addressOf("plain@example.com"), "plain@example.com", "голый адрес остаётся собой");
+assert.equal(imapDate(new Date("2026-09-19T00:00:00Z")), "19-Sep-2026", "дата в том виде, в каком её ждёт SEARCH");
+
+// Ответ сервера режется по объявленной длине литерала, а не по виду строки:
+// в теле письма встречается что угодно, включая строку, неотличимую
+// от служебной. Порезав по виду, получили бы короткое письмо вместо ошибки.
+const fetched = readFileSync("pipeline/fixtures/imap-fetch.txt", "latin1");
+const letters = lettersFrom(fetched);
+assert.equal(letters.length, 2, `писем ${letters.length}, в ответе два`);
+assert.ok(letters[1].text.includes("d4 OK FETCH completed"), "служебная на вид строка внутри письма — это текст письма");
+assert.ok(letters[1].text.includes("Отвечаем в следующем выпуске"), "письмо не обрывается на этой строке");
+assert.notEqual(letters[0].messageId, letters[1].messageId, "у писем разные Message-ID — на них держится дедуп");
+
+// То же самое на уровне протокола: «тег OK» внутри литерала не заканчивает
+// ответ, и ждать надо дальше.
+const withLiteral = "* 1 FETCH (UID 1 BODY[] {22}\r\nd3 OK не конец ответа\nd3 OK done\r\n";
+assert.equal(responseEnd(withLiteral, "d3"), withLiteral.length, "ответ кончается после литерала, а не внутри него");
+assert.equal(responseEnd("* 1 EXISTS\r\n", "d3"), -1, "незаконченный ответ не считается законченным");
+const refused = "d3 NO [AUTHENTICATIONFAILED]\r\n";
+assert.equal(responseEnd(refused, "d3"), refused.length, "отказ тоже конец ответа");
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -734,4 +797,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 181 утверждений");
+console.log("Самопроверка пройдена: 203 утверждений");
