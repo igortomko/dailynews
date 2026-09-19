@@ -6,7 +6,13 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueLoginToken, issueSession, SESSION_COOKIE } from "./auth";
 import { checkFeed } from "../../pipeline/check-sources";
+import { selectSurvivors } from "../../pipeline/select";
+import { writeDigest } from "../../pipeline/digest";
+import { scoreSummaries } from "../../pipeline/summary-quality";
+import { enrichImages } from "../../pipeline/og";
+import type { Profile } from "./types";
 import { MAX_DIGEST, MIN_PER_TOPIC, normalize } from "./topic-budget";
+import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "./voice";
 import { toSlug } from "./slug";
 
 export async function login(_prev: unknown, formData: FormData) {
@@ -204,4 +210,87 @@ export async function setSourceActive(id: number, active: boolean) {
 export async function deleteSource(id: number) {
   await sql`delete from dailynews.sources where id = ${id}`;
   revalidatePath("/settings/sources");
+}
+
+/**
+ * Догрузить сегодняшний выпуск до заданного размера.
+ *
+ * Смена числа новостей иначе ничего не меняет до полуночи: отбор уже прошёл,
+ * и выпуск на двадцать материалов останется на двадцати, сколько ни ставь.
+ * Это ровно тот отказ, что выглядит как успех — настройка принята, а лента
+ * прежняя.
+ *
+ * Поток уже собран и оценён: Jev проходит по всему потоку, а не по выжившим,
+ * поэтому догрузка не трогает ни сбор, ни скоринг. Работы здесь только
+ * на письмо описаний — те же куски по двадцать, что и в ночном прогоне.
+ * Поэтому же она занимает минуты, а не секунды.
+ */
+export async function topUpDigest() {
+  const [profile] = await sql<Profile[]>`select * from dailynews.profile where id = 1`;
+  const [digest] = await sql<{ day: string; item_ids: number[] }[]>`
+    select day::text as day, item_ids from dailynews.digests order by day desc limit 1
+  `;
+  if (!digest) return { error: "Ни одного выпуска ещё нет — дождись прогона" };
+
+  const missing = profile.digest_size - digest.item_ids.length;
+  if (missing <= 0) return { ok: true as const, added: 0 };
+
+  // selectSurvivors сам исключает всё, что уже попало в любой выпуск,
+  // поэтому повторная догрузка не выдаст те же материалы второй раз.
+  const survivors = await selectSurvivors(sql, missing);
+  if (survivors.length === 0) {
+    return { ok: true as const, added: 0, note: "Свежих материалов больше нет" };
+  }
+
+  await enrichImages(
+    survivors.map((item) => ({ id: item.id, url: item.url })),
+    async (id, image) => {
+      await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
+    },
+  );
+
+  const written = await writeDigest(survivors, profile.reader_context, profile.llm ?? {}, {
+    language: profile.language ?? "русском",
+    complexity: profile.complexity ?? DEFAULT_COMPLEXITY,
+    style: profile.style ?? DEFAULT_STYLE,
+  });
+  for (const item of written.items) {
+    await sql`
+      update dailynews.items
+         set title_ru = ${item.title_ru}, summary = ${item.summary}
+       where id = ${item.id}
+    `;
+  }
+
+  // Вторая петля измерения не пропускается: иначе догруженные описания
+  // не попадут в ряд по дням, и ряд начнёт врать о том, что читатель видел.
+  const quality = await scoreSummaries(
+    written.items.map((item) => ({
+      id: Number(item.id), title: item.title_ru, summary: item.summary,
+    })),
+    profile.reader_context,
+  );
+  for (const row of quality.scored) {
+    await sql`
+      update dailynews.items
+         set summary_axes = ${sql.json(row.axes as unknown as Parameters<typeof sql.json>[0])},
+             summary_score = ${row.total}
+       where id = ${row.item_id}
+    `;
+  }
+
+  // Дописываем только то, чего в выпуске ещё нет: два одновременных нажатия
+  // иначе положили бы один материал дважды.
+  await sql`
+    update dailynews.digests
+       set item_ids = item_ids || (
+             select coalesce(array_agg(id), '{}')
+               from unnest(${survivors.map((item) => item.id)}::bigint[]) as fresh(id)
+              where not (id = any(item_ids))
+           )
+     where day = ${digest.day}
+  `;
+
+  revalidatePath("/", "layout");
+  return { ok: true as const, added: survivors.length };
 }

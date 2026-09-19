@@ -52,7 +52,7 @@ export default async function FeedPage({
           variant="ghost"
           size="icon-sm"
           aria-label="Настройки"
-          className="text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground"
+          className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
           render={<Link href="/settings/personalization" />}
         >
           <SettingsIcon />

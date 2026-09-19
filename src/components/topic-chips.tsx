@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,17 +11,21 @@ import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui
 import { DIGEST_SIZES, MAX_DIGEST, MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
-import type { ChipInput } from "@/lib/actions";
+import { topUpDigest, type ChipInput } from "@/lib/actions";
 
 export function TopicChips({
   initial,
   initialTotal,
+  inToday,
   onChange,
 }: {
   initial: ChipInput[];
   initialTotal: number;
+  /** Сколько материалов в последнем выпуске: с ним сверяется предложение догрузить. */
+  inToday: number;
   onChange?: () => void;
 }) {
+  const [, startTopUp] = useTransition();
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
   // и без приведения полоса показывала бы не тот дайджест, который придёт.
   const [chips, setChipsState] = useState<ChipInput[]>(() =>
@@ -41,7 +46,34 @@ export function TopicChips({
     const size = Math.min(MAX_DIGEST, Math.max(3, Math.round(next) || 3));
     setTotalState(size);
     setChips(withCounts(chips, normalize(chips.map((chip) => chip.count), size)));
+    if (size > inToday) offerTopUp(size);
   };
+
+  /**
+   * Новый размер сам по себе ничего не меняет до полуночи: сегодняшний выпуск
+   * уже отобран. Поэтому спрашиваем прямо здесь, а не оставляем читателя
+   * гадать, почему в ленте по-прежнему двадцать материалов.
+   */
+  const offerTopUp = (size: number) =>
+    toast(`Сейчас в выпуске ${inToday}. Загрузить ещё ${size - inToday}?`, {
+      description: "Займёт пару минут: описания пишутся заново.",
+      action: {
+        label: "Загрузить",
+        onClick: () =>
+          startTopUp(async () => {
+            const running = toast.loading("Догружаю выпуск…");
+            const result = await topUpDigest();
+            toast.dismiss(running);
+            if (result?.error) {
+              toast.error(result.error);
+            } else if (result?.added) {
+              toast.success(`Добавлено ${result.added}`);
+            } else {
+              toast.info(result?.note ?? "Свежих материалов больше нет");
+            }
+          }),
+      },
+    });
 
   const [draft, setDraft] = useState("");
   const [dragging, setDragging] = useState<number | null>(null);

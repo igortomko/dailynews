@@ -31,17 +31,19 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
   const older = index >= 0 && index < days.length - 1 ? days[index + 1] : null;
   const available = new Set(days);
 
-  const arrow = "flex size-7 items-center justify-center rounded-md transition-colors";
+  // 40 пикселей на телефоне против 28 на мыши: под палец меньшая цель
+  // промахивается, а на указателе лишний размер только разъезжается.
+  const arrow = "flex size-10 items-center justify-center rounded-md transition-colors sm:size-7";
 
   return (
     <div className="flex items-center gap-1 text-sm font-medium">
       {older ? (
         <Link href={`/?day=${older}`} aria-label="Предыдущий выпуск" className={cn(arrow, "hover:bg-muted")}>
-          <ChevronLeftIcon className="size-4" />
+          <ChevronLeftIcon className="size-5 sm:size-4" />
         </Link>
       ) : (
         <span aria-hidden className={cn(arrow, "text-muted-foreground/30")}>
-          <ChevronLeftIcon className="size-4" />
+          <ChevronLeftIcon className="size-5 sm:size-4" />
         </span>
       )}
 
@@ -51,7 +53,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             <button
               type="button"
               aria-label="Выбрать дату"
-              className="cursor-pointer rounded-md px-1.5 py-0.5 tabular-nums transition-colors hover:bg-muted"
+              className="cursor-pointer rounded-md px-2 py-2 tabular-nums transition-colors hover:bg-muted sm:px-1.5 sm:py-0.5"
             />
           }
         >
@@ -75,11 +77,11 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
 
       {newer ? (
         <Link href={`/?day=${newer}`} aria-label="Следующий выпуск" className={cn(arrow, "hover:bg-muted")}>
-          <ChevronRightIcon className="size-4" />
+          <ChevronRightIcon className="size-5 sm:size-4" />
         </Link>
       ) : (
         <span aria-hidden className={cn(arrow, "text-muted-foreground/30")}>
-          <ChevronRightIcon className="size-4" />
+          <ChevronRightIcon className="size-5 sm:size-4" />
         </span>
       )}
     </div>
