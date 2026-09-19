@@ -16,10 +16,11 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
+  allows, cheapestWith, FEATURES, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
   PLAN_IDS, PLANS, type Gated,
 } from "./plans";
 import { effectivePlan } from "./lemon";
+import { SOURCE_LANGUAGE } from "./voice";
 import { getSources } from "./queries";
 import { toSlug } from "./slug";
 
@@ -69,7 +70,11 @@ export async function savePersonalization(formData: FormData) {
   const readerId = await currentReaderId();
 
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
-  const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
+  const asked_language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
+  // Перевод — платная возможность, и проверяется она здесь, а не только
+  // в форме: поле отправляется по своему адресу мимо погашенного селекта.
+  const plan = effectivePlan(await currentReader());
+  const language = FEATURES.language.has(plan) ? asked_language : SOURCE_LANGUAGE;
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
   // Ползунок шлёт строку, а нечисло превратилось бы в NaN и уронило запрос
   // ограничением, а не подсказкой. Держим в границах колонки здесь же.

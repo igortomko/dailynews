@@ -69,10 +69,16 @@ export function TopicBudgetBar({
   const nudge = (boundary: number, by: number) =>
     onChange(moveBoundary(counts, boundary, upTo(boundary) + by));
 
-  // Ручки выбранного куска: левая — граница с предыдущим, правая — со следующим.
-  const handles = active === null
+  // Ручки куска, на который смотрят: левая — граница с предыдущим, правая —
+  // со следующим. Наведения достаточно, выбирать заранее не нужно: полоса,
+  // которую можно тянуть, обязана показать это до нажатия — иначе подпись
+  // «тяни границы» остаётся единственным намёком, а мышь его не видит.
+  // Выбор всё равно главнее наведения: во время перетаскивания указатель
+  // уходит на соседний кусок, и ручка не должна перепрыгивать за ним.
+  const focused = active ?? hovered;
+  const handles = focused === null
     ? []
-    : [active - 1, active].filter((boundary) => boundary >= 0 && boundary < counts.length - 1);
+    : [focused - 1, focused].filter((boundary) => boundary >= 0 && boundary < counts.length - 1);
 
   const shown = hovered ?? active;
 
