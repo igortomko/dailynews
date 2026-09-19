@@ -66,7 +66,7 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "plus",
     label: "Plus",
     price: 1.99,
-    maxSources: 15,
+    maxSources: 40,
     maxTopics: 5,
     digestSizes: [20, 40],
     kinds: FREE_KINDS,
@@ -76,7 +76,7 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "pro",
     label: "Pro",
     price: 4.99,
-    maxSources: 40,
+    maxSources: 100,
     maxTopics: 10,
     digestSizes: [20, 40, 60, 80, 100],
     // X — единственный платный источник: twitterapi.io берёт около $0.15
