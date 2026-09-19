@@ -2,49 +2,51 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { TrashIcon, PlusIcon } from "lucide-react";
-import { addSource, deleteSource, setSourceActive } from "@/lib/actions";
+import { TrashIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { addSource, deleteSource, discoverSource, setSourceActive } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { Source } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
-
-const KINDS = [
-  { value: "rss", label: "RSS", placeholder: "https://example.com/feed", hint: "Адрес фида. Через RSS ходят блоги, YouTube, arXiv, Substack." },
-  { value: "reddit", label: "Reddit", placeholder: "LocalLLaMA", hint: "Имя сабреддита без r/. Нужны REDDIT_CLIENT_ID и REDDIT_CLIENT_SECRET." },
-  { value: "x", label: "X", placeholder: "from:karpathy OR from:sama", hint: "Поисковый запрос X. Нужен X_API_KEY. Платно, около $0.15 за 1000 постов." },
-  { value: "hackernews", label: "Hacker News", placeholder: "topstories", hint: "topstories, newstories или beststories." },
-] as const;
+import type { Found } from "../../../../../pipeline/discover";
 
 /**
  * Каталог общий на всех читателей, поэтому правит его владелец: удаление
  * источника уносит каскадом собранные материалы, и у такой кнопки не должно
  * быть ста рук. Остальным он виден целиком — знать, откуда берётся лента,
- * полезно и без права её менять. Тариф при этом личный: он решает, сколько
- * источников опрашивается для этого читателя.
+ * полезно и без права её менять.
  */
 export function SourcesManager({
   sources,
-  plan,
   editable,
 }: { sources: Source[]; plan: Plan; editable: boolean }) {
-  const [kind, setKind] = useState<string>("rss");
   const [pending, startTransition] = useTransition();
+  const [input, setInput] = useState("");
+  const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const active = KINDS.find((entry) => entry.value === kind)!;
-  const on = sources.filter((source) => source.active).length;
 
   const dead = sources.filter((source) => source.active && source.last_error);
   const silent = sources.filter(
     (source) => source.active && !source.last_error && source.last_count === 0,
   );
+
+  const parse = () =>
+    startTransition(async () => {
+      setFound(null);
+      setError(null);
+      const result = await discoverSource(input);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setFound(result.found);
+    });
 
   return (
     <div className="flex flex-col gap-6">
@@ -71,56 +73,108 @@ export function SourcesManager({
       <Card>
         <CardHeader>
           <CardTitle>Добавить источник</CardTitle>
-          <CardDescription>RSS проверяется живым запросом до сохранения.</CardDescription>
+          <CardDescription>
+            Вставь ссылку — тип, адрес фида и название определятся сами. Сохраняется только то,
+            что ответило хотя бы одной записью.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <form
-            action={(formData) =>
-              startTransition(async () => {
-                const result = await addSource(formData);
-                if (result?.error) {
-                  setError(result.error);
-                  return;
+          <FieldGroup>
+            <Field data-invalid={error ? true : undefined}>
+              <FieldLabel htmlFor="input">Ссылка</FieldLabel>
+              <div className="flex gap-2">
+                <Input
+                  id="input"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      parse();
+                    }
+                  }}
+                  placeholder="https://www.youtube.com/@канал"
+                  aria-invalid={error ? true : undefined}
+                />
+                <Button type="button" onClick={parse} disabled={pending || !input.trim()}>
+                  <SearchIcon data-icon="inline-start" />
+                  Разобрать
+                </Button>
+              </div>
+              <FieldDescription>
+                {error ??
+                  "YouTube, GitHub, Substack, arXiv, Hacker News, аккаунт X, любой блог — " +
+                    "или поисковый запрос X, если ссылки нет."}
+              </FieldDescription>
+            </Field>
+
+            {found && !plan.kinds.includes(found.kind) ? (
+              <Alert>
+                <AlertTitle>Тариф «{plan.label}» не берёт источники вида {found.kind}</AlertTitle>
+                <AlertDescription>
+                  Ссылка разобралась: {found.label}. Чтобы её добавить, нужен тариф,
+                  который этот вид опрашивает.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {found && plan.kinds.includes(found.kind) ? (
+              <form
+                action={(formData) =>
+                  startTransition(async () => {
+                    const result = await addSource(formData);
+                    if (result?.error) {
+                      setError(result.error);
+                      return;
+                    }
+                    setError(null);
+                    setFound(null);
+                    setInput("");
+                    toast.success("Источник добавлен");
+                  })
                 }
-                setError(null);
-                toast.success("Источник добавлен");
-              })
-            }
-          >
-            <FieldGroup>
-              <Field>
-                <FieldLabel>Тип</FieldLabel>
-                <ToggleGroup
-                  value={[kind]}
-                  onValueChange={(value: string[]) => value[0] && setKind(value[0])}
-                  variant="outline"
-                >
-                  {KINDS.filter((entry) => plan.kinds.includes(entry.value)).map((entry) => (
-                    <ToggleGroupItem key={entry.value} value={entry.value}>
-                      {entry.label}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-                <input type="hidden" name="kind" value={kind} />
-              </Field>
+              >
+                <input type="hidden" name="kind" value={found.kind} />
+                <input type="hidden" name="url" value={found.url} />
+                <input type="hidden" name="input_url" value={found.input_url} />
 
-              <Field data-invalid={error ? true : undefined}>
-                <FieldLabel htmlFor="url">Адрес или запрос</FieldLabel>
-                <Input id="url" name="url" placeholder={active.placeholder} aria-invalid={error ? true : undefined} />
-                <FieldDescription>{error ?? active.hint}</FieldDescription>
-              </Field>
+                <FieldGroup>
+                  <div className="flex flex-col gap-1.5 rounded-md border p-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{found.kind}</Badge>
+                      <span className="text-muted-foreground">{found.via}</span>
+                      <Badge variant="secondary">
+                        свежих {found.fresh} из {found.entries}
+                      </Badge>
+                    </div>
+                    <span className="text-muted-foreground truncate">{found.url}</span>
+                    {found.input_url !== found.url ? (
+                      <span className="text-muted-foreground truncate text-xs">
+                        вставлено: {found.input_url}
+                      </span>
+                    ) : null}
+                    <span className="truncate">{found.sample}</span>
+                    {found.fresh === 0 ? (
+                      <span className="text-muted-foreground text-xs">
+                        Записи есть, но ни одной за окно свежести — фид, похоже, заброшен.
+                      </span>
+                    ) : null}
+                  </div>
 
-              <Field>
-                <FieldLabel htmlFor="label">Название</FieldLabel>
-                <Input id="label" name="label" placeholder="как показывать в ленте" />
-              </Field>
+                  <Field>
+                    <FieldLabel htmlFor="label">Название</FieldLabel>
+                    <Input id="label" name="label" defaultValue={found.label} key={found.url} />
+                    <FieldDescription>Взято из фида, можно переписать.</FieldDescription>
+                  </Field>
 
-              <Button type="submit" disabled={pending} className="self-start">
-                <PlusIcon data-icon="inline-start" />
-                Добавить
-              </Button>
-            </FieldGroup>
-          </form>
+                  <Button type="submit" disabled={pending} className="self-start">
+                    <PlusIcon data-icon="inline-start" />
+                    Добавить
+                  </Button>
+                </FieldGroup>
+              </form>
+            ) : null}
+          </FieldGroup>
         </CardContent>
       </Card>
       ) : null}
@@ -129,7 +183,8 @@ export function SourcesManager({
         <CardHeader>
           <CardTitle>Источники</CardTitle>
           <CardDescription>
-            {on} включено из {sources.length} · тариф «{plan.label}» опрашивает {plan.maxSources}
+            {sources.filter((s) => s.active).length} включено из {sources.length} · тариф
+            «{plan.label}» опрашивает {plan.maxSources}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">

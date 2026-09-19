@@ -27,6 +27,8 @@ export type Source = {
   url: string;
   config: Record<string, unknown>;
   active: boolean;
+  /** Что вставил человек, до разбора. url — уже разрешённый адрес фида. */
+  input_url: string | null;
   last_ok_at: string | null;
   last_count: number | null;
   last_error: string | null;

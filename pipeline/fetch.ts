@@ -9,7 +9,7 @@ const MAX_BYTES = 5_000_000;
  * Поэтому: только http(s), свой таймаут и потолок на размер ответа —
  * иначе один зависший фид держит весь прогон.
  */
-async function get(url: string, timeoutMs = 20_000): Promise<string> {
+export async function fetchText(url: string, timeoutMs = 20_000): Promise<string> {
   const parsed = new URL(url);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`протокол не поддерживается: ${parsed.protocol}`);
@@ -30,7 +30,7 @@ async function get(url: string, timeoutMs = 20_000): Promise<string> {
 }
 
 async function getJson<T>(url: string, timeoutMs = 20_000): Promise<T> {
-  return JSON.parse(await get(url, timeoutMs)) as T;
+  return JSON.parse(await fetchText(url, timeoutMs)) as T;
 }
 
 /** Запускает задачи пачками по `limit`, чтобы не раскладывать источник на лопатки. */
@@ -97,18 +97,25 @@ function parseDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export async function fetchRss(source: Source): Promise<RawItem[]> {
-  const xml = await get(source.url);
+/** Фид целиком: записи и собственное название — его берёт форма добавления. */
+export type FeedDoc = { title: string; items: RawItem[] };
+
+/**
+ * Разбор отделён от запроса: форма добавления источника уже скачала страницу,
+ * чтобы понять, фид это или HTML, и качать то же тело второй раз незачем.
+ */
+export function parseFeed(xml: string): FeedDoc {
   const doc = parser.parse(xml) as Record<string, any>;
 
   // RSS 2.0 кладёт записи в rss.channel.item, Atom — в feed.entry.
   const channel = doc?.rss?.channel ?? doc?.["rdf:RDF"] ?? doc?.feed;
   if (!channel) throw new Error("не похоже на RSS или Atom");
+  const title = stripHtml(firstString(channel.title ?? channel?.channel?.title)).slice(0, 200);
   const entries: unknown[] = [channel.item, channel.entry]
     .flatMap((node) => (Array.isArray(node) ? node : node ? [node] : []));
-  if (entries.length === 0) return [];
+  if (entries.length === 0) return { title, items: [] };
 
-  return entries.flatMap((entry) => {
+  const items = entries.flatMap((entry) => {
     const node = entry as Record<string, unknown>;
     const title = stripHtml(firstString(node.title));
 
@@ -137,6 +144,12 @@ export async function fetchRss(source: Source): Promise<RawItem[]> {
       published_at: parseDate(node.pubDate ?? node.published ?? node.updated ?? node["dc:date"]),
     }];
   });
+
+  return { title, items };
+}
+
+export async function fetchRss(source: Source): Promise<RawItem[]> {
+  return parseFeed(await fetchText(source.url)).items;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +167,10 @@ type HnItem = {
 };
 
 export async function fetchHackerNews(source: Source): Promise<RawItem[]> {
-  const listing = String(source.config?.listing ?? "topstories");
+  // Листинг берётся из url: так написано в схеме («'topstories' или поисковый
+  // запрос X»), а читался он только из config, которого в каталоге нет ни у кого.
+  // Второй источник HN с url = 'newstories' молча отдавал бы topstories.
+  const listing = String(source.url || source.config?.listing || "topstories");
   const count = Number(source.config?.count ?? 90);
   const ids = await getJson<number[]>(`https://hacker-news.firebaseio.com/v0/${listing}.json`);
 
@@ -381,7 +397,7 @@ const hostOf = (source: Source): string => {
 const MAX_AGE_DAYS = 7;
 const MAX_ITEMS_PER_SOURCE = 60;
 
-function freshest(items: RawItem[], source: Source): RawItem[] {
+export function freshest(items: RawItem[], source: Source): RawItem[] {
   const maxAge = Number(source.config?.max_age_days ?? MAX_AGE_DAYS);
   const cap = Number(source.config?.max_items ?? MAX_ITEMS_PER_SOURCE);
   const cutoff = Date.now() - maxAge * 86_400_000;

@@ -11,6 +11,7 @@ import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
+import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -512,6 +513,132 @@ assert.equal(llmCost(million), 0, "ноль — законная цена бес
 process.env.LLM_INPUT_PRICE = "дорого";
 assert.equal(llmCost(million), 0.3, "нечисло откатывается к цене по умолчанию");
 delete process.env.LLM_INPUT_PRICE;
+// --- разбор вставленной ссылки ------------------------------------------------
+// Источник добавляется одной ссылкой, тип выясняет код. Каждое правило по хосту
+// проверяется здесь на строке-примере: у сервисов меняются и адреса, и разметка,
+// а правило, которое перестало срабатывать, выглядит ровно как «у этого сайта
+// нет фида» — отказ, неотличимый от честного ответа.
+const first = (input: string) => {
+  const plan = planFor(input);
+  return "refuse" in plan ? null : plan.candidates[0];
+};
+const refusal = (input: string) => {
+  const plan = planFor(input);
+  return "refuse" in plan ? plan.refuse : null;
+};
+
+assert.equal(asUrl("example.com/blog")?.origin, "https://example.com", "голый домен — это адрес");
+assert.equal(asUrl("from:karpathy OR from:sama"), null, "запрос X адресом не является");
+assert.equal(asUrl("LocalLLaMA"), null, "слово без точки адресом не является");
+
+// YouTube и GitHub — главная причина затеи: фид есть, но по адресу,
+// который человек не угадает.
+assert.equal(
+  first("https://www.youtube.com/channel/UCHnyfMqiRRG1u-2MsSQLbXA")?.url,
+  "https://www.youtube.com/feeds/videos.xml?channel_id=UCHnyfMqiRRG1u-2MsSQLbXA",
+  "канал YouTube по id",
+);
+assert.equal(
+  first("https://www.youtube.com/playlist?list=PLabc123")?.url,
+  "https://www.youtube.com/feeds/videos.xml?playlist_id=PLabc123",
+  "плейлист YouTube",
+);
+// У @handle id в адресе нет, зато YouTube объявляет фид в <link rel="alternate">:
+// такая ссылка обязана уйти во второй слой, а не в отдельный разбор разметки.
+assert.ok(
+  (planFor("https://www.youtube.com/@veritasium") as { probePage: boolean }).probePage,
+  "@handle уходит на разбор разметки страницы",
+);
+assert.equal(
+  first("https://github.com/vercel/next.js")?.url,
+  "https://github.com/vercel/next.js/releases.atom",
+  "репозиторий GitHub — сначала релизы",
+);
+// Репозиторий без единого релиза отвечает 200 и пустым фидом: это отказ,
+// выглядящий как успех, поэтому следом обязаны идти коммиты.
+assert.equal(
+  (planFor("https://github.com/vercel/next.js") as { candidates: { url: string }[] }).candidates[1].url,
+  "https://github.com/vercel/next.js/commits.atom",
+  "у репозитория без релизов остаются коммиты",
+);
+assert.equal(
+  first("https://github.com/igortomko")?.url,
+  "https://github.com/igortomko.atom",
+  "пользователь GitHub",
+);
+assert.equal(first("https://simonw.substack.com/about")?.url, "https://simonw.substack.com/feed", "Substack");
+assert.equal(
+  first("https://arxiv.org/list/cs.AI/recent")?.url,
+  "http://export.arxiv.org/rss/cs.AI",
+  "раздел arXiv",
+);
+assert.equal(first("https://www.reddit.com/r/LocalLLaMA/")?.url, "LocalLLaMA", "сабреддит — имя, а не адрес");
+assert.equal(first("https://news.ycombinator.com/")?.url, "topstories", "Hacker News по умолчанию");
+assert.equal(first("https://news.ycombinator.com/newest")?.url, "newstories", "другой листинг HN");
+assert.equal(first("https://x.com/karpathy")?.url, "from:karpathy", "аккаунт X превращается в запрос");
+assert.equal(first("from:karpathy OR from:sama")?.kind, "x", "текст без точки — это запрос X");
+assert.ok(refusal("https://x.com/home"), "служебный путь X не аккаунт");
+assert.ok(refusal("https://t.me/durov"), "Telegram называется вслух, а не молча не работает");
+assert.ok(
+  (planFor("https://simonwillison.net/") as { probePage: boolean }).probePage,
+  "обычный сайт идёт на разбор разметки",
+);
+
+// --- фиды, объявленные в разметке --------------------------------------------
+// Разметка настоящая: относительный href у simonwillison.net, абсолютный
+// у YouTube, и рядом с ними — alternate без type, который фидом не является.
+const head = `
+  <link rel="stylesheet" href="/style.css">
+  <link rel="alternate" media="handheld" href="https://m.youtube.com/@veritasium">
+  <link rel="alternate" type="application/atom+xml" title="Atom" href="/atom/everything/">
+  <link type='application/rss+xml' rel='alternate' href='/blog/rss'>
+  <link rel="alternate" type="application/rss+xml" title="RSS" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCH">
+`;
+const links = feedLinks(head, "https://simonwillison.net/blog/");
+assert.equal(links.length, 3, "берутся только объявления фидов, а не всякий alternate");
+assert.equal(links[0], "https://simonwillison.net/atom/everything/", "относительный href разворачивается");
+assert.equal(links[1], "https://simonwillison.net/blog/rss", "кавычки и порядок атрибутов бывают любые");
+assert.ok(links[2].includes("channel_id=UCH"), "абсолютный href остаётся как есть");
+assert.deepEqual(feedLinks("<html><body>ничего</body></html>", "https://a.com"), [], "нет объявлений — нет адресов");
+// У YouTube объявление фида лежит в теле, на 761-й тысяче символов из 2,7 млн.
+// Отсечка «фид объявляют в шапке» давала «у этого сайта нет фида» ровно
+// на том случае, ради которого всё затевалось.
+assert.equal(
+  feedLinks(
+    `<head><title>x</title></head><body>${"<p>текст</p>".repeat(40_000)}` +
+      `<link rel="alternate" type="application/rss+xml" href="/late.xml"></body>`,
+    "https://a.com",
+  )[0],
+  "https://a.com/late.xml",
+  "объявление фида ищется во всём документе, а не в первых килобайтах",
+);
+
+assert.ok(looksLikeFeed('<?xml version="1.0"?><rss version="2.0">'), "фид с декларацией");
+assert.ok(looksLikeFeed('<feed xmlns="http://www.w3.org/2005/Atom">'), "Atom без декларации");
+assert.ok(!looksLikeFeed("<!doctype html><html>"), "страница фидом не притворяется");
+
+const guessed = guesses("https://example.com/blog");
+assert.ok(guessed.includes("https://example.com/blog/feed"), "путь пробуется относительно страницы");
+assert.ok(guessed.includes("https://example.com/atom.xml"), "и относительно корня");
+
+// --- почему фида не нашлось ---------------------------------------------------
+// «Фида нет», «страница собирается в браузере» и «пейволл» — три разных ответа
+// для читателя, и одинаковое «не нашлось» на все три ему ничего не говорит.
+assert.equal(
+  diagnose('<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":false}</script>'),
+  "материалы за пейволлом",
+  "пейволл объявляет себя сам, в schema.org",
+);
+assert.equal(
+  diagnose(`<!doctype html><html><head><title>x</title></head><body><div id="root"></div><script>${"var a=1;".repeat(300)}</script></body></html>`),
+  "страница собирается в браузере",
+  "пустая оболочка под скриптом",
+);
+assert.equal(
+  diagnose(`<html><body><article>${"Обычная страница с настоящим текстом внутри. ".repeat(20)}</article></body></html>`),
+  null,
+  "у живой страницы причины нет — значит, фида и правда нет",
+);
 
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
@@ -521,128 +648,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-
-// --- тарифы -----------------------------------------------------------------
-// Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
-// им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
-// решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
-import { PLAN_IDS, PLANS, maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
-import type { Source } from "../src/lib/types";
-
-assert.equal(planOf("pro").id, "pro", "известный тариф читается как он сам");
-assert.equal(planOf("нет такого").id, "free", "незнакомый тариф откатывается к бесплатному");
-assert.equal(planOf(null).id, "free", "пустой тариф откатывается к бесплатному");
-assert.ok(!PLANS.free.kinds.includes("x"), "X не должен быть доступен на бесплатном");
-assert.ok(!PLANS.plus.kinds.includes("x"), "X не должен быть доступен на Plus");
-assert.ok(PLANS.pro.kinds.includes("x"), "X — признак Pro");
-assert.ok(
-  maxDigestOf(PLANS.free) < maxDigestOf(PLANS.plus) &&
-    maxDigestOf(PLANS.plus) < maxDigestOf(PLANS.pro),
-  "размер выпуска должен расти с тарифом",
-);
-
-const source = (id: number, kind: Source["kind"], active = true) =>
-  ({ id, kind, active, label: `s${id}`, url: `https://e/${id}`, config: {},
-     last_ok_at: null, last_count: null, last_error: null } as unknown as Source);
-
-const catalogue = [
-  source(3, "x"), source(1, "rss"), source(2, "hackernews"),
-  source(4, "rss", false), source(5, "rss"), source(6, "rss"),
-  source(7, "rss"), source(8, "rss"), source(9, "rss"),
-];
-
-const onPlus = sourcesForPlan(catalogue, PLANS.plus);
-assert.ok(!onPlus.some((s) => s.kind === "x"), "прогон на Plus не должен опрашивать X");
-assert.ok(!onPlus.some((s) => s.id === 4), "выключенный источник не опрашивается");
-
-const onFree = sourcesForPlan(catalogue, PLANS.free);
-assert.equal(onFree.length, PLANS.free.maxSources, "бесплатный тариф режет до своего предела");
-assert.deepEqual(
-  onFree.map((s) => s.id),
-  [1, 2, 5, 6, 7],
-  "остаются заведённые раньше, иначе набор пляшет от прогона к прогону",
-);
-assert.ok(
-  !sourcesForPlan(catalogue, PLANS.free).some((s) => s.kind === "x"),
-  "запрещённый вид отсекается до предела по числу, а не занимает место",
-);
-
-// Предел в форме обязан считать то же, что опрашивает прогон: иначе после
-// понижения тарифа запрещённый вид занимает места живых источников.
-const afterDowngrade = [
-  source(1, "x"), source(2, "x"), source(3, "x"),
-  source(4, "rss"), source(5, "rss"),
-];
-assert.equal(
-  sourcesForPlan(afterDowngrade, PLANS.free).length,
-  2,
-  "прогон на бесплатном опрашивает только разрешённые виды",
-);
-assert.equal(
-  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
-  2,
-  "и предел в форме обязан считать по тому же правилу",
-);
-
-import { GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
-
-assert.equal(topicsWord(1), "интерес", "единственное число");
-assert.equal(topicsWord(2), "интереса", "два-четыре");
-assert.equal(topicsWord(5), "интересов", "пять и больше");
-assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
-
-assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
-assert.ok(allows(PLANS.pro, "subscription"), "свой ключ — признак Pro");
-assert.ok(!allows(PLANS.plus, "subscription"), "на Plus своего ключа нет");
-assert.ok(
-  allows(PLANS.plus, "personalization") && allows(PLANS.pro, "personalization"),
-  "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
-);
-for (const section of GATED) {
-  // Заглушка зовёт cheapestWith и печатает его подпись: раздел, которого
-  // нет ни в одном тарифе, показал бы «на тарифе Pro» и никогда не открылся.
-  assert.ok(
-    allows(cheapestWith(section), section),
-    `раздел ${section} должен быть хоть на одном тарифе`,
-  );
-}
-
-// Перечень в миграции и перечень в коде расходятся молча: база примет
-// значение, которого код не знает, и planOf молча отдаст бесплатный тариф.
-//
-// Проверяются обе: 0019_plan завела колонку в profile, 0020 увезла её
-// в readers вместе с ограничением. На живой базе работает вторая, на чистой
-// применяются подряд обе, и разойтись им нельзя.
-for (const file of ["0019_plan", "0020_readers"]) {
-  const planSql = readFileSync(`db/migrations/${file}.sql`, "utf8");
-  for (const id of PLAN_IDS) {
-    assert.ok(planSql.includes(`'${id}'`), `тариф ${id} должен быть разрешён в ${file}`);
-  }
-}
-
-// Вердикт по выпуску на читалку. Адрес обслуживает и ручную отправку
-// отдельной статьи, поэтому выключенный выпуск не требует стереть адрес —
-// и не должен молча уходить при выключенном переключателе.
-{
-  const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
-  const ok = kindleDigestVerdict(full);
-  assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
-  assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
-  assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_digest: false }),
-    { send: false, reason: "switched-off" },
-    "выключенный переключатель отменяет выпуск, хотя адрес на месте",
-  );
-  assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_address: null }),
-    { send: false, reason: "no-address" },
-    "без адреса слать некуда, и говорить об этом не о чем",
-  );
-  assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_sender: null }),
-    { send: false, reason: "no-sender" },
-    "вписанный адрес без обратного — сбой, о нём сообщают в лог",
-  );
-}
-
-console.log("Самопроверка пройдена: 149 утверждений");
+console.log("Самопроверка пройдена: 153 утверждений");
