@@ -18,6 +18,8 @@ import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon
  *
  * Иконка остаётся единственным цветным пятном: на общем чёрном фоне успех
  * и ошибка иначе неотличимы, а разбирать это по тексту — лишняя работа.
+ * Оттенок переворачивается вместе с плашкой: 400 читается на тёмной,
+ * на светлой он выцветает до неразличимого — берём 600.
  */
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
@@ -28,16 +30,16 @@ const Toaster = ({ ...props }: ToasterProps) => {
       className="toaster group"
       icons={{
         success: (
-          <CircleCheckIcon className="size-4 text-emerald-400" />
+          <CircleCheckIcon className="size-4 text-emerald-400 dark:text-emerald-600" />
         ),
         info: (
-          <InfoIcon className="size-4 text-sky-400" />
+          <InfoIcon className="size-4 text-sky-400 dark:text-sky-600" />
         ),
         warning: (
-          <TriangleAlertIcon className="size-4 text-amber-400" />
+          <TriangleAlertIcon className="size-4 text-amber-400 dark:text-amber-600" />
         ),
         error: (
-          <OctagonXIcon className="size-4 text-red-400" />
+          <OctagonXIcon className="size-4 text-red-400 dark:text-red-600" />
         ),
         loading: (
           <Loader2Icon className="size-4 animate-spin" />

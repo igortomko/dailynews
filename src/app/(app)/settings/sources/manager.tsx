@@ -408,19 +408,33 @@ export function SourcesManager({
                   </div>
                 </div>
                 {source.last_error ? (
-                  <Badge variant="destructive" title={source.last_error}>ошибка</Badge>
+                  // Своя подсказка вместо title — та же, что у всех иконок
+                  // в приложении. Текст ошибки продублирован в предупреждении
+                  // наверху страницы, поэтому наведение здесь — короткий путь,
+                  // а не единственный.
+                  <Tooltip>
+                    <TooltipTrigger render={<Badge variant="destructive" />}>ошибка</TooltipTrigger>
+                    <TooltipContent>{source.last_error}</TooltipContent>
+                  </Tooltip>
                 ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
                   <Badge variant="destructive">молчит {source.silent_days} дн.</Badge>
                 ) : source.last_count !== null ? (
                   // Одно число без подписи — загадка: рядом уже стоит отдача
                   // за тридцать дней, и какое из двух что значит, неоткуда
                   // узнать, кроме как навести.
-                  <Badge
-                    variant="secondary"
-                    title={`Столько свежих материалов дал последний прогон (${source.last_count})`}
-                  >
-                    {source.last_count}
-                  </Badge>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Badge
+                          variant="secondary"
+                          aria-label={`Последний прогон дал ${source.last_count} свежих материалов`}
+                        />
+                      }
+                    >
+                      {source.last_count}
+                    </TooltipTrigger>
+                    <TooltipContent>Столько свежих материалов дал последний прогон</TooltipContent>
+                  </Tooltip>
                 ) : null}
                 {editable ? (
                   <Tooltip>

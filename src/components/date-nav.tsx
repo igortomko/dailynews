@@ -1,14 +1,32 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { ru } from "react-day-picker/locale";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
+import { Spinner } from "@/components/ui/spinner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+/**
+ * Стрелка, которая сообщает о работе. Выпуск — серверная страница, и между
+ * нажатием и новой лентой на медленной сети проходят секунды: без признака
+ * работы нажатие читается как «не сработало», и его повторяют.
+ *
+ * Про переход знает сам Next — useLinkStatus внутри <Link>; своё состояние
+ * тут завелось бы рядом с настоящим и разошлось бы с ним при первой отмене.
+ */
+function Arrow({ icon: Icon }: { icon: typeof ChevronLeftIcon }) {
+  const { pending } = useLinkStatus();
+  return pending ? (
+    <Spinner className="size-5 sm:size-4" />
+  ) : (
+    <Icon className="size-5 sm:size-4" />
+  );
+}
 
 const FORMAT = new Intl.DateTimeFormat("ru", { day: "numeric", month: "long", year: "numeric" });
 
@@ -25,6 +43,7 @@ const toDay = (date: Date) =>
  */
 export function DateNav({ day, days }: { day: string; days: string[] }) {
   const [open, setOpen] = useState(false);
+  const [going, startGoing] = useTransition();
   const router = useRouter();
 
   const index = days.indexOf(day);
@@ -49,7 +68,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
               />
             }
           >
-            <ChevronLeftIcon className="size-5 sm:size-4" />
+            <Arrow icon={ChevronLeftIcon} />
           </TooltipTrigger>
           <TooltipContent>Предыдущий выпуск</TooltipContent>
         </Tooltip>
@@ -65,10 +84,11 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             <button
               type="button"
               aria-label="Выбрать дату"
-              className="cursor-pointer rounded-md px-2 py-2 tabular-nums transition-colors hover:bg-muted sm:px-1.5 sm:py-0.5"
+              className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2 tabular-nums transition-colors hover:bg-muted sm:px-1.5 sm:py-0.5"
             />
           }
         >
+            {going ? <Spinner className="size-4" /> : null}
           {FORMAT.format(new Date(`${day}T12:00:00`))}
         </PopoverTrigger>
         <PopoverContent align="start" className="w-auto p-0">
@@ -81,7 +101,10 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             onSelect={(date) => {
               if (!date) return;
               setOpen(false);
-              router.push(`/?day=${toDay(date)}`);
+              // Переход в переходе: выпуск за другой день собирается
+              // на сервере, и до его прихода страница остаётся прежней.
+              // Без признака работы это выглядит как «календарь не сработал».
+              startGoing(() => router.push(`/?day=${toDay(date)}`));
             }}
           />
         </PopoverContent>
@@ -98,7 +121,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
               />
             }
           >
-            <ChevronRightIcon className="size-5 sm:size-4" />
+            <Arrow icon={ChevronRightIcon} />
           </TooltipTrigger>
           <TooltipContent>Следующий выпуск</TooltipContent>
         </Tooltip>

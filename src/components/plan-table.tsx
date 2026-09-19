@@ -126,9 +126,25 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                     Перейти на «{plan.label}»
                   </Button>
                 ) : (
-                  <Button size="sm" className="mt-auto" disabled>
-                    Перейти на «{plan.label}»
-                  </Button>
+                  // aria-disabled, а не disabled: выключенная кнопка
+                  // не показывает подсказку, и «не нажимается» остаётся
+                  // без причины — выглядит как поломка оплаты.
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="sm"
+                          className="mt-auto cursor-default aria-disabled:opacity-50"
+                          aria-disabled
+                        />
+                      }
+                    >
+                      Перейти на «{plan.label}»
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Ссылка на оплату этого тарифа ещё не настроена — напиши боту
+                    </TooltipContent>
+                  </Tooltip>
                 )
               ) : (
                 <Button size="sm" variant="outline" className="mt-auto" disabled>
