@@ -194,12 +194,21 @@ async function main() {
   `;
 
   log("6. Telegram");
+  // Без явного адреса уведомление не отправляется. Дефолтный домен —
+  // худший вид ошибки: он выглядит правдоподобно, почти наверняка занят
+  // чужим сайтом, и ссылка «Читать» молча уводит читателя туда.
+  const appUrl = process.env.APP_URL;
+  if (!appUrl) {
+    log("   APP_URL не задан — уведомление пропущено, дайджест сохранён");
+    await sql.end();
+    return;
+  }
   const titleById = new Map(digest.items.map((i) => [i.id, i.title_ru]));
   await notify(
     day,
     digest.intro,
     survivors.map((s) => ({ title: titleById.get(s.id) ?? s.title, topic: s.topic_label })),
-    process.env.APP_URL ?? "https://dailynews.vercel.app",
+    appUrl,
   );
   await sql`update dailynews.digests set sent_at = now() where day = ${day}`;
 
