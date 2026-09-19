@@ -15,7 +15,7 @@ import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget"
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
-import { kindleSetupStep } from "../src/lib/kindle-setup";
+import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
@@ -969,4 +969,14 @@ assert.equal(
   "подтверждение держит экран настроек даже без адреса",
 );
 
-console.log("Самопроверка пройдена: 243 утверждений");
+// Имя обратного адреса. Telegram-id, а не username: username читатель меняет
+// когда захочет, а адрес после одобрения в Amazon заморожен навсегда.
+assert.equal(kindleSenderName(1, "52308619"), "52308619", "адрес собирается из Telegram-id");
+assert.equal(kindleSenderName(1, 52308619), "52308619", "число из драйвера и строка дают одно имя");
+assert.equal(kindleSenderName(7, null), "reader7", "без привязанного Telegram — номер читателя");
+// Пустая строка и мусор — не id. Приняв их за имя, мы бы выдали адрес
+// вида `@kindle.tomko.io`, и письма исчезали бы молча.
+assert.equal(kindleSenderName(7, ""), "reader7", "пустая строка именем не становится");
+assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем не становится");
+
+console.log("Самопроверка пройдена: 248 утверждений");

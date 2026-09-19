@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   approveKindleSender,
   resetKindleSetup,
-  saveKindle,
+  saveKindleDigest,
   saveKindleAddress,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,34 @@ const DOMAIN = "kindle.tomko.io";
 // раздел Amazon, а не на угаданный якорь внутри него: адрес личного
 // документа лежит там же, а хеш-маршруты этой страницы меняются.
 const AMAZON_SETTINGS = "https://www.amazon.com/hz/mycd/myx";
+
+/**
+ * Адрес, который копируется нажатием. Его переносят руками в чужую форму
+ * Amazon, а ошибка в одном символе не сообщает о себе ничем: письмо просто
+ * не доходит. Выделять мышью адрес в предложении неудобно, поэтому нажатие.
+ */
+function CopyAddress({ value }: { value: string }) {
+  if (!value) return <code className="font-mono">—</code>;
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          toast.success("Адрес скопирован");
+        } catch {
+          // Буфер закрыт настройками браузера или небезопасным соединением.
+          // Молчать нельзя: читатель уверен, что скопировал.
+          toast.error("Браузер не дал скопировать — выдели адрес вручную");
+        }
+      }}
+      title="Скопировать"
+      className="cursor-pointer font-mono underline decoration-dotted underline-offset-4 hover:text-foreground"
+    >
+      {value}
+    </button>
+  );
+}
 
 /** Номер шага словами: «1 из 2» отвечает на вопрос «сколько ещё осталось». */
 function StepMark({ now, of, title }: { now: number; of: number; title: string }) {
@@ -98,7 +126,9 @@ export function DeliveryForm({
       </Card>
 
       <Card>
-        <CardHeader>
+        {/* border-b карточка предусматривает сама: он добавляет шапке нижний
+            отступ и проводит линию во всю ширину, а не по ширине текста. */}
+        <CardHeader className="border-b">
           <CardTitle>Kindle</CardTitle>
           <CardDescription>
             {step === "done"
@@ -149,7 +179,7 @@ export function DeliveryForm({
               <p className="text-sm text-muted-foreground">
                 В том же разделе Amazon есть «Approved Personal Document E-mail
                 List». Добавь туда{" "}
-                <code className="font-mono">{sender ? `${sender}@${DOMAIN}` : "—"}</code>{" "}
+                <CopyAddress value={sender ? `${sender}@${DOMAIN}` : ""} />{" "}
                 — без этого письмо отбрасывается молча, без единой ошибки.
               </p>
               {!connected ? (
@@ -182,21 +212,21 @@ export function DeliveryForm({
 
           {/* Настроено: обычные настройки. */}
           {step === "done" ? (
-            <form action={(fd) => run(saveKindle(fd), "Сохранено")}>
+            <form action={(fd) => run(saveKindleDigest(fd), "Сохранено")}>
               <FieldGroup>
-                <Field data-invalid={error ? true : undefined}>
-                  <FieldLabel htmlFor="kindle_address">Адрес читалки</FieldLabel>
-                  <Input
-                    id="kindle_address"
-                    name="kindle_address"
-                    defaultValue={kindleAddress}
-                    placeholder="имя@kindle.com"
-                    aria-invalid={error ? true : undefined}
-                  />
-                  <FieldDescription>
-                    {error ?? `Отправитель ${sender}@${DOMAIN} разрешён в Amazon.`}
-                  </FieldDescription>
-                </Field>
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">Адрес читалки</span>
+                  <span className="text-sm text-muted-foreground">
+                    {kindleAddress || "не задан"}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">Отправитель</span>
+                  <span className="text-sm text-muted-foreground">
+                    <CopyAddress value={`${sender}@${DOMAIN}`} /> разрешён в Amazon.
+                  </span>
+                </div>
 
                 <Field orientation="horizontal">
                   <Switch id="kindle_digest" name="kindle_digest" defaultChecked={kindleDigest} />
@@ -208,16 +238,16 @@ export function DeliveryForm({
                   </FieldLabel>
                 </Field>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-4">
                   <Button type="submit" disabled={pending}>Сохранить</Button>
-                  <Button
+                  <button
                     type="button"
-                    variant="ghost"
                     disabled={pending}
                     onClick={() => run(resetKindleSetup(), "Настройка сброшена", () => setStep("address"))}
+                    className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-50"
                   >
                     Настроить заново
-                  </Button>
+                  </button>
                 </div>
               </FieldGroup>
             </form>

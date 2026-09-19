@@ -19,3 +19,20 @@ export function kindleSetupStep(reader: {
   if (reader.kindle_approved) return "done";
   return reader.kindle_address ? "sender" : "address";
 }
+
+/**
+ * Имя обратного адреса для Kindle: из него собирается `имя@kindle.tomko.io`.
+ *
+ * Telegram-id, а не username: username читатель меняет в Telegram когда
+ * захочет, а адрес после одобрения в Amazon заморожен навсегда. Разъехавшись,
+ * они дали бы адрес, который ничего уже не значит, — и менять его нельзя.
+ * Telegram-id неизменен и не переиспользуется.
+ *
+ * Пока Telegram не привязан, имени взять неоткуда, и берётся номер читателя.
+ * Он тоже неизменен, поэтому такой адрес не хуже — просто менее узнаваем
+ * в списке одобренных отправителей Amazon.
+ */
+export function kindleSenderName(id: number, telegramId: string | number | null): string {
+  const tg = String(telegramId ?? "").trim();
+  return /^\d+$/.test(tg) ? tg : `reader${id}`;
+}

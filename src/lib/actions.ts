@@ -228,39 +228,32 @@ export async function clearLlmKey() {
  * одобрение отправителя в настройках Amazon, а до тех пор выпуски молча
  * не доходят.
  */
-export async function saveKindle(formData: FormData) {
+/**
+ * Переключатель выпуска на экране «настроено». Только он, без адреса.
+ *
+ * Общее действие «сохранить всё, что на форме» здесь было бы ловушкой:
+ * адрес на этом экране — строка, а не поле, в FormData он не приходит,
+ * и прочитанный как пустой обнулил бы доставку при нажатии «Сохранить».
+ */
+export async function saveKindleDigest(formData: FormData) {
   const readerId = await currentReaderId();
-  const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
-  if (address && !/^[^@\s]+@kindle\.com$/.test(address)) {
-    return { error: "Адрес должен заканчиваться на @kindle.com" };
-  }
-
   // Флажок приходит только когда включён: выключенный checkbox формы
   // не отправляется вовсе, и `null` здесь значит «выключен», а не «не трогали».
   const digest = formData.get("kindle_digest") !== null;
 
   await sql`
     update dailynews.readers
-       set kindle_address = ${address || null},
-           kindle_digest = ${digest},
-           updated_at = now()
+       set kindle_digest = ${digest}, updated_at = now()
      where id = ${readerId}
   `;
-
-  // Обратный адрес выдаётся и тому, кто вписал читалку раньше, чем написал
-  // боту: иначе отправителя нет, и доставка пропускается молча.
-  if (address) {
-    const reader = await getReader(readerId);
-    if (reader) await freezeKindleSender(readerId, reader.username);
-  }
   revalidatePath("/settings/delivery");
   return { ok: true as const };
 }
 
 /**
- * Первый шаг настройки Kindle: куда слать. Отдельно от `saveKindle`, потому
- * что на этом шаге переключателя выпуска на экране ещё нет, а `saveKindle`
- * прочитал бы его отсутствие как «выключен» и погасил бы отправку у того,
+ * Первый шаг настройки Kindle: куда слать. Отдельно от переключателя, потому
+ * что на этом шаге его на экране ещё нет: общее действие прочитало бы
+ * отсутствие флажка как «выключен» и погасило бы отправку тому,
  * кто проходит настройку заново.
  */
 export async function saveKindleAddress(formData: FormData) {
@@ -277,7 +270,7 @@ export async function saveKindleAddress(formData: FormData) {
      where id = ${readerId}
   `;
   const reader = await getReader(readerId);
-  if (reader) await freezeKindleSender(readerId, reader.username);
+  if (reader) await freezeKindleSender(readerId, reader.telegram_id);
   revalidatePath("/settings/delivery");
   return { ok: true as const };
 }
