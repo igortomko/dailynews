@@ -84,8 +84,7 @@ export async function getSourceHealth(): Promise<SourceHealth[]> {
      -- Порядок по вниманию, а не по алфавиту: в списке из тридцати строк
      -- сломанное обязано быть сверху. По kind наверх всплывали десять
      -- сабреддитов подряд, а источник с ошибкой лежал где-то в середине.
-     order by s.active desc,
-              (s.last_error is not null) desc,
+     order by (s.last_error is not null) desc,
               (s.silent_since is not null) desc,
               count(i.id) desc,
               s.label

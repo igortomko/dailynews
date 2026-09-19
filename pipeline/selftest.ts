@@ -613,25 +613,29 @@ assert.ok(
   "размер выпуска должен расти с тарифом",
 );
 
-const source = (id: number, kind: Source["kind"], active = true) =>
-  ({ id, kind, active, label: `s${id}`, url: `https://e/${id}`, config: {},
+// Состояний у источника два: он заведён или убран. Выключенных не бывает —
+// переключатель убран из интерфейса, а вместе с ним и третье состояние,
+// из которого не было выхода: включить такой источник стало нечем, прогон
+// его не читал, а в списке он выглядел живым. Убранные сюда не доходят:
+// их отсекает запрос, который отдаёт каталог.
+const source = (id: number, kind: Source["kind"]) =>
+  ({ id, kind, active: true, label: `s${id}`, url: `https://e/${id}`, config: {},
      last_ok_at: null, last_count: null, last_error: null } as unknown as Source);
 
 const catalogue = [
   source(3, "x"), source(1, "rss"), source(2, "hackernews"),
-  source(4, "rss", false), source(5, "rss"), source(6, "rss"),
+  source(4, "rss"), source(5, "rss"), source(6, "rss"),
   source(7, "rss"), source(8, "rss"), source(9, "rss"),
 ];
 
 const onPlus = sourcesForPlan(catalogue, PLANS.plus);
 assert.ok(!onPlus.some((s) => s.kind === "x"), "прогон на Plus не должен опрашивать X");
-assert.ok(!onPlus.some((s) => s.id === 4), "выключенный источник не опрашивается");
 
 const onFree = sourcesForPlan(catalogue, PLANS.free);
 assert.equal(onFree.length, PLANS.free.maxSources, "бесплатный тариф режет до своего предела");
 assert.deepEqual(
   onFree.map((s) => s.id),
-  [1, 2, 5, 6, 7],
+  [1, 2, 4, 5, 6],
   "остаются заведённые раньше, иначе набор пляшет от прогона к прогону",
 );
 assert.ok(
@@ -651,7 +655,7 @@ assert.equal(
   "прогон на бесплатном опрашивает только разрешённые виды",
 );
 assert.equal(
-  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
+  afterDowngrade.filter((s) => PLANS.free.kinds.includes(s.kind)).length,
   2,
   "и предел в форме обязан считать по тому же правилу",
 );
