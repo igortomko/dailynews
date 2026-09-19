@@ -1,9 +1,8 @@
 name: Morning Edition
 
 on:
-  schedule:
-    # 7:00 AM BRT = 10:00 UTC
-    - cron: '0 10 * * *'
+  # Снято с расписания: дайджест собирает pipeline/run.ts (digest.yml).
+  # Оставлено запускаемым вручную, пока архив magazines/ не перенесён.
   workflow_dispatch: # manual trigger
 
 permissions:
