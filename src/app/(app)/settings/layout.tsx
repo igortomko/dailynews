@@ -20,6 +20,7 @@ import { SettingsNav } from "./nav";
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
   const reader = await currentReader();
   const plan = effectivePlan(reader);
+  const onboarding = !reader.onboarded_at;
   // Ссылки на оплату собираются здесь: их строит сервер из переменных
   // окружения, а окно с предложением живёт в клиентских компонентах.
   const checkout = Object.fromEntries(
@@ -30,6 +31,11 @@ export default async function SettingsLayout({ children }: { children: React.Rea
       <PageHeader
         left={
           <div className="flex items-center gap-2">
+            {/* Пока онбординг не пройден, лента недостижима: она сама
+                возвращает сюда. Стрелка «назад к ленте» в этот момент —
+                кнопка, которая обещает и не делает: нажал, и та же страница.
+                Отказ, неотличимый от работы, поэтому её просто нет. */}
+            {onboarding ? null : (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -38,7 +44,10 @@ export default async function SettingsLayout({ children }: { children: React.Rea
                     variant="ghost"
                     size="icon-sm"
                     aria-label="Назад к ленте"
-                    className="text-muted-foreground hover:text-foreground"
+                    // На телефоне 40, на указателе 32: под палец 28 —
+                    // это иконка, а не цель. Так же сделаны шестерёнка
+                    // в ленте и переключатель темы рядом.
+                    className="size-10 text-muted-foreground hover:text-foreground sm:size-8"
                     render={<Link href="/" />}
                   />
                 }
@@ -47,7 +56,8 @@ export default async function SettingsLayout({ children }: { children: React.Rea
               </TooltipTrigger>
               <TooltipContent>Назад к ленте</TooltipContent>
             </Tooltip>
-            <h1 className="text-sm font-medium">Настройки</h1>
+            )}
+            <h1 className="text-sm font-medium">{onboarding ? "Знакомство" : "Настройки"}</h1>
           </div>
         }
         // На телефоне колонка разделов идёт лентой поверху, и «Выйти» под ней

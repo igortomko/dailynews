@@ -83,6 +83,19 @@ const EXACT = new Intl.DateTimeFormat("ru", {
   minute: "2-digit",
 });
 
+/**
+ * Классы для иконки, которая появляется или уходит по состоянию. Обе (все
+ * три) иконки остаются в разметке, одна поверх другой: появляющаяся растёт
+ * с 0.25 и теряет размытие, уходящая делает обратное. Подмена через
+ * условный рендер даёт скачок ровно в тот момент, когда человек смотрит
+ * на кнопку и ждёт ответа.
+ */
+const swap = (shown: boolean) =>
+  cn(
+    "size-3.5 transition-[opacity,filter,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)]",
+    shown ? "scale-100 opacity-100 blur-0" : "scale-[0.25] opacity-0 blur-[4px]",
+  );
+
 /** Домен издания: источник ведёт на издание, заголовок — на сам материал. */
 function siteOf(url: string): string | null {
   try {
@@ -370,7 +383,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                   aria-disabled={kindle !== "idle"}
                   onClick={kindle === "idle" ? sendToKindle : undefined}
                   className={cn(
-                    "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                    "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
                     kindle === "idle"
                       ? "cursor-pointer text-muted-foreground/50"
                       : "text-foreground",
@@ -378,13 +391,11 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                 />
               }
             >
-              {kindle === "sending" ? (
-                <Spinner className="size-3.5" />
-              ) : kindle === "sent" ? (
-                <CheckIcon className="size-3.5" />
-              ) : (
-                <BookOpenIcon className="size-3.5" />
-              )}
+              <span className="relative flex size-3.5 items-center justify-center">
+                <Spinner className={cn("absolute", swap(kindle === "sending"))} />
+                <CheckIcon className={cn("absolute", swap(kindle === "sent"))} />
+                <BookOpenIcon className={swap(kindle === "idle")} />
+              </span>
             </TooltipTrigger>
             <TooltipContent>Отправить статью на читалку</TooltipContent>
           </Tooltip>
@@ -401,7 +412,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                     if (vote !== "up") report({ item_id: item.id, event: "up" });
                   }}
                   className={cn(
-                    "flex size-7 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground",
+                    "flex size-7 cursor-pointer items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
                     vote === "up" ? "text-foreground" : "text-muted-foreground/50",
                   )}
                 />
@@ -425,7 +436,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
                     setVote("down");
                     report({ item_id: item.id, event: "down" });
                   }}
-                  className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
                 />
               }
             >
@@ -500,7 +511,11 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
               alt=""
               loading="lazy"
               onError={() => setImageFailed(true)}
-              className="size-[104px] rounded-lg bg-muted object-cover"
+              // Контур в пиксель, чёрный на светлой теме и белый на тёмной. Без него
+              // светлый скриншот сливается с карточкой, а тёмный — с тёмной темой:
+              // у картинки пропадает край. Цвет чистый, не из палитры: тонированный
+              // подхватывает фон под собой и читается как грязь по краю.
+              className="size-[104px] rounded-lg bg-muted object-cover outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10"
             />
           </a>
         ) : null}

@@ -53,10 +53,15 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
 
   // 40 пикселей на телефоне против 28 на мыши: под палец меньшая цель
   // промахивается, а на указателе лишний размер только разъезжается.
-  const arrow = "flex size-10 items-center justify-center rounded-md transition-colors sm:size-7";
+  // Видимый размер и область нажатия — разные вещи. На указателе стрелка
+  // в 28 пикселей выглядит уместно, но попасть в неё тяжело; псевдоэлемент
+  // растягивает цель до сорока, ничего не меняя на вид. Больше нельзя:
+  // соседняя цель — сама дата, и пересекаться им не положено.
+  const arrow =
+    "relative flex size-10 items-center justify-center rounded-md transition-[color,background-color] duration-150 after:absolute after:top-1/2 after:left-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 sm:size-7";
 
   return (
-    <div className="flex items-center gap-1 text-sm font-medium">
+    <div className="flex items-center gap-2 text-sm font-medium">
       {older ? (
         <Tooltip>
           <TooltipTrigger
