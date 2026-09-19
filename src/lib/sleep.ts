@@ -11,11 +11,23 @@ import type { Reader } from "./types";
  * заходом на сайт. Спросить и не дать простого «да» — значит потерять
  * читателя на ровном месте.
  */
-export const SLEEP_DAYS = 14;
+/**
+ * Через сколько дней молчания спрашивать. Настройка, а не константа:
+ * если окажется, что вернувшиеся возвращаются на третий день, порог
+ * опускается до недели одной переменной, без правки кода и выката.
+ */
+export const SLEEP_DAYS = (() => {
+  const asked = Number(process.env.SLEEP_DAYS?.trim());
+  // Проверка на число, а не `|| 14`: ноль здесь означал бы паузу всем
+  // и сразу, и лучше прочитать его как «переменная не задана».
+  return Number.isFinite(asked) && asked >= 1 ? asked : 14;
+})();
 
 export type SleepVerdict =
   /** Выпуск пишется как обычно. */
   | { verdict: "run" }
+  /** Отпуск кончился: пауза снимается, выпуск пишется. */
+  | { verdict: "wake" }
   /** Пора спросить: выпуск не пишется, в бот уходит вопрос. */
   | { verdict: "ask"; silentDays: number }
   /** Уже спросили, ответа нет: молчим до возвращения. */
@@ -30,11 +42,16 @@ export type SleepVerdict =
  * при заходе на сайт, и это уже признак живого читателя.
  */
 export function sleepVerdict(
-  reader: Pick<Reader, "paused_at" | "onboarded_at">,
+  reader: Pick<Reader, "paused_at" | "onboarded_at" | "resume_at">,
   lastActivityAt: string | Date | null,
   now: Date = new Date(),
 ): SleepVerdict {
-  if (reader.paused_at) return { verdict: "paused" };
+  if (reader.paused_at) {
+    // Читатель уехал и назвал дату возвращения: ждём её и возвращаем ленту
+    // сам, не спрашивая второй раз.
+    if (reader.resume_at && new Date(reader.resume_at) <= now) return { verdict: "wake" };
+    return { verdict: "paused" };
+  }
 
   const since = lastActivityAt ?? reader.onboarded_at;
   // Ни активности, ни онбординга — читатель заведён только что, и мерить

@@ -200,11 +200,30 @@ export async function recordFinished(
  * наступила бы молча, без нового вопроса — читатель решил бы, что лента
  * снова сломалась.
  */
-export async function resumeReader(telegramId: number): Promise<void> {
+export async function resumeReader(telegramId: number, afterDays = 0): Promise<void> {
+  // Отпуск — это не уход: пауза остаётся, но у неё появляется дата конца,
+  // и спрашивать второй раз не нужно.
+  if (afterDays > 0) {
+    await sql`
+      update dailynews.readers
+         set resume_at = now() + ${`${afterDays} days`}::interval, updated_at = now()
+       where telegram_id = ${telegramId}
+    `;
+    return;
+  }
   await sql`
     update dailynews.readers
-       set paused_at = null, sleep_asked_at = null, updated_at = now()
+       set paused_at = null, sleep_asked_at = null, resume_at = null, updated_at = now()
      where telegram_id = ${telegramId}
+  `;
+}
+
+/** Лента вернулась сама: срок отпуска вышел. */
+export async function wakeReader(readerId: number): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set paused_at = null, sleep_asked_at = null, resume_at = null, updated_at = now()
+     where id = ${readerId}
   `;
 }
 

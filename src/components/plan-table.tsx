@@ -29,6 +29,7 @@ const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = 
   { feature: "sources", value: (plan) => String(plan.maxSources) },
   { feature: "topics", value: (plan) => String(plan.maxTopics) },
   { feature: "digest", value: (plan) => `до ${maxDigestOf(plan)}` },
+  { feature: "cadence", value: (plan) => (plan.everyDays <= 1 ? "каждый день" : "через день") },
   { feature: "x", value: (plan) => plan.kinds.includes("x") },
   { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
 ];
