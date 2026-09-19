@@ -6,7 +6,7 @@ import { CheckIcon } from "lucide-react";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
 import type { Plan } from "@/lib/plans";
-import { FieldDescription, FieldGroup } from "@/components/ui/field";
+import { FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function InterestsForm({
@@ -78,7 +78,7 @@ export function InterestsForm({
               plan={plan}
               onChange={schedule}
             />
-            {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
+            {error ? <FieldError>{error}</FieldError> : null}
           </FieldGroup>
         </form>
       </CardContent>
