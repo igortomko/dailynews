@@ -58,8 +58,10 @@
 
 ### 1. База
 
-Проект Supabase `brasil-products`, схема `dailynews`. Миграции применяются
-ролью `postgres` через SQL Editor или Supabase MCP, по порядку:
+Проект Supabase `brasil-products`, схема `dailynews`. Миграции накатывает
+`npm run migrate` владельческой строкой из `SUPABASE_DB_URL` (роль `postgres`):
+роль приложения намеренно не владелец таблиц, и DDL ей запрещён. Файлы
+применяются по порядку имён:
 
 ```
 db/migrations/0001_schema_and_role.sql

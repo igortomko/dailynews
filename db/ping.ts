@@ -57,7 +57,7 @@ async function main() {
   }
   console.error(`\n! база отстаёт от кода: не хватает ${gaps.length}`);
   for (const gap of gaps) console.error(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
-  console.error("\nПрименяет владелец через SQL Editor: роль приложения не владелец таблиц.");
+  console.error("\nНакатить: npm run migrate — нужен SUPABASE_DB_URL, роль приложения не владелец таблиц.");
   process.exitCode = 1;
 }
 
