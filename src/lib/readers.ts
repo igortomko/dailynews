@@ -11,7 +11,8 @@ import type { Reader, ReaderTopic, Topic } from "./types";
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
   reader_context, digest_size, weights, language, complexity, style, llm,
-  kindle_address, kindle_sender, kindle_digest, plan, daily_cap_usd, onboarded_at
+  kindle_address, kindle_sender, kindle_digest, kindle_approved,
+  plan, daily_cap_usd, onboarded_at
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -60,13 +61,20 @@ export async function catalogTopics(): Promise<Topic[]> {
 }
 
 /**
- * Обратный адрес для Kindle. Выдаётся один раз и дальше не меняется:
- * каждая смена означает, что читатель заново одобряет отправителя
- * в настройках Amazon, а до тех пор выпуски молча не доходят.
+ * Обратный адрес для Kindle. Замораживается не при выдаче, а при одобрении.
  *
- * Зовётся из двух мест: при заведении через /start и при сохранении адреса
- * читалки. Только первого не хватало — читатель, вписавший адрес до того,
- * как написал боту, оставался без отправителя, и доставка тихо пропускалась.
+ * Пока читатель не подтвердил, что добавил адрес в список одобренных Amazon,
+ * менять его безопасно: он нигде не записан. После подтверждения смена
+ * означает молчаливую потерю доставки — в Amazon останется одобренным
+ * прежний, а новый будет отбрасываться без единой ошибки.
+ *
+ * Отсюда и перевыдача: строка, перенесённая из profile, пришла без username,
+ * и адрес достался запасной — `reader1`. Как только читатель привязывает
+ * Telegram, имя появляется, и до одобрения адрес пересобирается из него.
+ *
+ * Зовётся при заведении через /start и при сохранении адреса читалки.
+ * Только первого не хватало — читатель, вписавший адрес до того, как написал
+ * боту, оставался без отправителя, и доставка тихо пропускалась.
  */
 export async function freezeKindleSender(id: number, username: string | null): Promise<void> {
   const base = (username ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24);
@@ -75,7 +83,9 @@ export async function freezeKindleSender(id: number, username: string | null): P
     try {
       await sql`
         update dailynews.readers set kindle_sender = ${candidate}
-         where id = ${id} and kindle_sender is null
+         where id = ${id}
+           and not kindle_approved
+           and kindle_sender is distinct from ${candidate}
       `;
       return;
     } catch {

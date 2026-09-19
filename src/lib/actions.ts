@@ -11,7 +11,7 @@ import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import { freezeKindleSender, getReaderTopics, recordCall, spentToday } from "./readers";
+import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
@@ -247,14 +247,78 @@ export async function saveKindle(formData: FormData) {
      where id = ${readerId}
   `;
 
-  // Обратный адрес выдаётся здесь же, если его ещё нет: иначе читатель,
-  // вписавший адрес читалки до первого /start, остался бы без отправителя,
-  // и выпуск не уходил бы — при сохранённом адресе и без единой ошибки.
+  // Обратный адрес выдаётся и тому, кто вписал читалку раньше, чем написал
+  // боту: иначе отправителя нет, и доставка пропускается молча.
   if (address) {
-    const reader = await currentReader();
-    if (!reader.kindle_sender) await freezeKindleSender(reader.id, reader.username);
+    const reader = await getReader(readerId);
+    if (reader) await freezeKindleSender(readerId, reader.username);
+  }
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Первый шаг настройки Kindle: куда слать. Отдельно от `saveKindle`, потому
+ * что на этом шаге переключателя выпуска на экране ещё нет, а `saveKindle`
+ * прочитал бы его отсутствие как «выключен» и погасил бы отправку у того,
+ * кто проходит настройку заново.
+ */
+export async function saveKindleAddress(formData: FormData) {
+  const readerId = await currentReaderId();
+  const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
+  if (!address) return { error: "Впиши адрес читалки" };
+  if (!/^[^@\s]+@kindle\.com$/.test(address)) {
+    return { error: "Адрес должен заканчиваться на @kindle.com" };
   }
 
+  await sql`
+    update dailynews.readers
+       set kindle_address = ${address}, updated_at = now()
+     where id = ${readerId}
+  `;
+  const reader = await getReader(readerId);
+  if (reader) await freezeKindleSender(readerId, reader.username);
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Второй шаг: читатель подтверждает, что добавил наш адрес в одобренные.
+ * Проверить это снаружи нечем — Amazon молчит и про успех, и про отказ,
+ * а неодобренное письмо просто исчезает. Поэтому шаг закрывает человек.
+ *
+ * С этого момента обратный адрес заморожен: в Amazon записан именно он.
+ */
+export async function approveKindleSender() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set kindle_approved = true, updated_at = now()
+     where id = ${readerId} and kindle_address is not null
+  `;
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Пройти настройку заново — с первого шага.
+ *
+ * Снимается и подтверждение, и адрес читалки. Оставить адрес значило бы,
+ * что шаг настройки считается по-разному на экране и в базе: клиент показал
+ * бы первый шаг, а перезагрузка страницы вернула бы на второй, потому что
+ * адрес на месте. Разъехавшиеся состояния здесь — это ровно та тихая ошибка,
+ * которую потом ищут глазами.
+ *
+ * Вместе с подтверждением размораживается обратный адрес: смысл сброса
+ * в том, чтобы одобрить в Amazon заново, а значит и отправителя можно менять.
+ */
+export async function resetKindleSetup() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set kindle_approved = false, kindle_address = null, updated_at = now()
+     where id = ${readerId}
+  `;
   revalidatePath("/settings/delivery");
   return { ok: true as const };
 }
