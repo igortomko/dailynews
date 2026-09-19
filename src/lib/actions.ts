@@ -13,11 +13,11 @@ import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
 import { llmCost, jevCost } from "../../pipeline/cost";
-import type { Reader, Source } from "./types";
+import type { Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestWith, kindDenial, maxDigestOf, planOf, sourcesForPlan, topicsWord,
-  PLAN_IDS, PLANS, type Gated,
+  type Gated,
 } from "./plans";
 import { getSources } from "./queries";
 import { toSlug } from "./slug";
@@ -360,19 +360,6 @@ export async function addSource(formData: FormData) {
   return { ok: true as const, label };
 }
 
-export async function setSourceActive(id: number, active: boolean) {
-  await requireOwner();
-  if (active) {
-    const [source] = await sql<{ kind: Source["kind"] }[]>`
-      select kind from dailynews.sources where id = ${id}
-    `;
-    const denied = source ? await denyBySource(source.kind) : null;
-    if (denied) return denied;
-  }
-  await sql`update dailynews.sources set active = ${active} where id = ${id}`;
-  revalidatePath("/settings/sources");
-  return { ok: true as const };
-}
 
 /**
  * Общая проверка для добавления и включения: одна и та же пара пределов,
