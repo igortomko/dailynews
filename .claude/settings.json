@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./deploy/deploy.sh)",
+      "Bash(ssh root@91.108.126.101:docker compose -f /opt/dailynews/docker-compose.yml logs:*)",
+      "Bash(ssh root@91.108.126.101:docker inspect dailynews:*)",
+      "Bash(ssh root@91.108.126.101:curl -fsS --max-time 5 http://127.0.0.1:8085/*)",
+      "Bash(npx tsx:*)",
+      "Bash(curl -fsS https://news.tomko.io/api/*)",
+      "Bash(gh run:*)",
+      "Bash(gh workflow:*)",
+      "Bash(gh secret list)",
+      "Bash(gh secret set:*)",
+      "Bash(gh variable:*)",
+      "Bash(ln -sfn ../../../.env .env)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(sed -n:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(diff:*)"
+    ]
+  }
+}
