@@ -1,8 +1,8 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
 import {
-  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks, recordCall,
-  spentToday, topicsInUse, wakeReader,
+  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks,
+  readerSources, recordCall, spentToday, topicsInUse, wakeReader,
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -93,14 +93,19 @@ export async function collect(sources: Source[]): Promise<number[]> {
  * Отказ доступа прекращает весь шаг: «нас приняли за робота» — свойство
  * адреса, а не ролика, и сорок одинаковых отказов подряд ничего не добавят.
  */
-export async function transcribeVideos(itemIds: number[]): Promise<{ done: number; cost: number }> {
-  if (itemIds.length === 0) return { done: 0, cost: 0 };
-
+export async function transcribeVideos(): Promise<{ done: number; cost: number }> {
+  // Берём всё окно, а не то, что вставил этот прогон: первая попытка
+  // могла не удаться — провайдер ответил 401, YouTube отказал, — и ролик
+  // остался бы с описанием из фида навсегда, потому что новым он больше
+  // никогда не будет. Отметка о попытке и есть то, что отличает
+  // «уже ходили» от «ещё нет».
   const rows = await sql<{ id: number; url: string; title: string; label: string }[]>`
     select i.id, i.url, i.title, s.label
       from dailynews.items i
       join dailynews.sources s on s.id = i.source_id
-     where i.id = any(${itemIds}::bigint[]) and i.dup_of is null
+     where i.dup_of is null
+       and i.transcribed_at is null
+       and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
      order by i.id
   `;
   const videos = rows.flatMap((row) => {
@@ -121,13 +126,17 @@ export async function transcribeVideos(itemIds: number[]): Promise<{ done: numbe
     try {
       const transcript = await fetchTranscript(video.videoId);
       if (!transcript) {
+        // Субтитров у ролика нет вовсе — это ответ, а не сбой: отмечаем,
+        // иначе он опрашивался бы каждую ночь до конца окна свежести.
+        await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
         noCaptions++;
         continue;
       }
       const writeup = await describeVideo(video.title, video.label, transcript.text, transcript.lang);
       await sql`
         update dailynews.items
-           set excerpt = ${writeup.summary}, body = ${articleHtml(writeup.article) || null}
+           set excerpt = ${writeup.summary}, body = ${articleHtml(writeup.article) || null},
+               transcribed_at = now()
          where id = ${video.id}
       `;
       await recordCall({
@@ -163,7 +172,6 @@ export async function transcribeVideos(itemIds: number[]): Promise<{ done: numbe
 async function runForReader(
   reader: Reader,
   day: string,
-  allSources: Source[],
   shared: { collected: number; duplicates: number; scored: number },
 ): Promise<number> {
   const name = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
@@ -239,7 +247,7 @@ async function runForReader(
     return 0;
   }
 
-  const mySources = sourcesForPlan(allSources, plan).map((source) => source.id);
+  const mySources = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
   const survivors = await selectSurvivors(
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
@@ -498,11 +506,13 @@ async function main() {
   // бесплатный читал бы платный источник за чужой счёт.
   const allowed = new Map<number, Source>();
   for (const reader of readers) {
-    for (const source of sourcesForPlan(all, effectivePlan(reader))) allowed.set(source.id, source);
+    for (const source of sourcesForPlan(await readerSources(reader.id), effectivePlan(reader))) {
+      allowed.set(source.id, source);
+    }
   }
   const sources = [...allowed.values()].sort((a, b) => a.id - b.id);
   if (sources.length < all.length) {
-    log(`   тарифы читателей: опрашиваем ${sources.length} из ${all.length} включённых`);
+    log(`   выбор читателей и их тарифы: опрашиваем ${sources.length} из ${all.length} в каталоге`);
   }
 
   if (topics.length === 0) {
@@ -516,7 +526,7 @@ async function main() {
   const collected = await collect(sources);
   log(`   новых материалов: ${collected.length}`);
 
-  const videos = await transcribeVideos(collected);
+  const videos = await transcribeVideos();
   if (videos.done > 0) {
     log(`   расшифровано роликов: ${videos.done} (${videos.cost.toFixed(3)} $)`);
   }
@@ -582,7 +592,7 @@ async function main() {
   let personal = 0;
   for (const reader of readers) {
     try {
-      personal += await runForReader(reader, day, all, {
+      personal += await runForReader(reader, day, {
         collected: collected.length, duplicates, scored: scored.length,
       });
       await askAboutYesterday(reader);

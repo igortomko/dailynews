@@ -38,6 +38,8 @@ export type BotCommand =
   | { kind: "finished"; telegramId: number; itemId: number; finished: boolean; callbackId: string }
   /** Нажал «продолжать» под вопросом спящему: лента включается обратно. */
   | { kind: "resume"; telegramId: number; chatId: number; afterDays: number; callbackId: string }
+  /** Нажал «Я подписался» под гейтом: проверяем подписку заново. */
+  | { kind: "subscribed"; telegramId: number; chatId: number; username: string | null; callbackId: string }
   | { kind: "ignore" };
 
 type Update = {
@@ -49,7 +51,7 @@ type Update = {
   callback_query?: {
     id?: unknown;
     data?: unknown;
-    from?: { id?: unknown; is_bot?: unknown };
+    from?: { id?: unknown; is_bot?: unknown; username?: unknown };
     message?: { chat?: { id?: unknown } };
   };
 };
@@ -59,6 +61,8 @@ type Update = {
 export const FINISHED_PREFIX = "fin";
 /** Ответ на «продолжать?» у спящего читателя. */
 export const RESUME_PREFIX = "res";
+/** «Я подписался» под предложением подписаться на канал. */
+export const SUBSCRIBED_PREFIX = "sub";
 
 const isId = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value);
@@ -89,6 +93,17 @@ export function parseUpdate(update: unknown): BotCommand {
         telegramId: from,
         itemId: Number(parts[1]),
         finished: parts[2] === "1",
+        callbackId: id,
+      };
+    }
+    if (isId(from) && callback.from?.is_bot !== true && id && parts[0] === SUBSCRIBED_PREFIX) {
+      const chat = callback.message?.chat?.id;
+      const username = typeof callback.from?.username === "string" ? callback.from.username : null;
+      return {
+        kind: "subscribed",
+        telegramId: from,
+        chatId: isId(chat) ? chat : from,
+        username,
         callbackId: id,
       };
     }
@@ -147,7 +162,7 @@ export function looksLikeSource(text: string): boolean {
   return value.includes("://") || value.startsWith("@") || /[^\s@]+\.[^\s@]{2,}/.test(value);
 }
 
-async function call(method: string, body: object): Promise<void> {
+async function call<T = unknown>(method: string, body: object): Promise<T> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
 
@@ -160,6 +175,9 @@ async function call(method: string, body: object): Promise<void> {
   if (!res.ok) {
     throw new Error(`Telegram HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
+  // Отправляющим методам ответ не нужен, а спрашивающим — только он.
+  // Разводить их на два клиента незачем: различается одна строка.
+  return ((await res.json()) as { result: T }).result;
 }
 
 export async function sendMessage(chatId: number, text: string): Promise<void> {
@@ -226,8 +244,15 @@ export async function askResume(chatId: number, silentDays: number): Promise<voi
  * Погасить часики на кнопке. Без этого Telegram крутит их секунд тридцать,
  * и нажатие выглядит как потерянное — притом что ответ уже записан.
  */
-export async function answerCallback(callbackId: string, text: string): Promise<void> {
-  await call("answerCallbackQuery", { callback_query_id: callbackId, text });
+export async function answerCallback(
+  callbackId: string,
+  text: string,
+  alert = false,
+): Promise<void> {
+  // Всплывашка живёт секунду и не оставляет следа. Для «записал» этого
+  // хватает, а для «подписки не вижу» — нет: читатель нажал и ждёт ответа,
+  // и пропущенный ответ он прочитает как сломанную кнопку.
+  await call("answerCallbackQuery", { callback_query_id: callbackId, text, show_alert: alert });
 }
 
 export type Headline = { title: string; topic: string };
@@ -267,3 +292,117 @@ export async function notify(
 
 export const loginLink = (appUrl: string, token: string) =>
   `${appUrl.replace(/\/$/, "")}/auth?token=${encodeURIComponent(token)}`;
+
+/**
+ * Канал, на который зовём перед входом. Пусто — гейта нет вовсе.
+ *
+ * Не задано значит «пускаем», а не «не пускаем»: здесь переменная —
+ * не секрет, а настройка роста. Первый же деплой без неё закрыл бы вход
+ * всем новым читателям, и выглядело бы это как поломка бота.
+ */
+export function channelHandle(): string | null {
+  const raw = process.env.TELEGRAM_CHANNEL?.trim();
+  if (!raw) return null;
+  // Принимаем и @имя, и t.me/имя, и голое имя: в переменную окружения
+  // рано или поздно вставят то, что скопировали из адресной строки.
+  const name = raw
+    // Протокол необязателен: из адресной строки копируют и «t.me/имя».
+    // С обязательным `https://` такая строка проходила мимо замены целиком
+    // и превращалась в «@t.me/имя» — getChatMember отвечал 400, проверка
+    // на каждый запрос возвращала «не знаю», и гейт застревал навсегда
+    // на «не смог проверить подписку».
+    .replace(/^(?:https?:\/\/)?(?:t\.me|telegram\.me)\//i, "")
+    .replace(/^@/, "")
+    .replace(/\/$/, "");
+  return name ? `@${name}` : null;
+}
+
+export const channelLink = (handle: string) => `https://t.me/${handle.replace(/^@/, "")}`;
+
+/** Три ответа на «подписан?». «Не знаю» — не «да»: см. verdictOf. */
+export type Subscription = "yes" | "no" | "unknown";
+
+/**
+ * Что значит статус участника.
+ *
+ * Чистая функция: у неё есть проверка, а у живого канала — только владелец
+ * с его собственной подпиской, на которой все четыре ветки не различить.
+ *
+ * `restricted` — это ограниченный участник: он в канале, пока is_member.
+ * `left` и `kicked` — нет. Незнакомый статус читается как «нет»: Telegram
+ * заводит новые, и гадать в пользу входа значит открыть его тихой ошибкой.
+ */
+export function verdictOf(member: { status?: unknown; is_member?: unknown } | null): Subscription {
+  const status = typeof member?.status === "string" ? member.status : "";
+  if (status === "creator" || status === "administrator" || status === "member") return "yes";
+  if (status === "restricted") return member?.is_member === true ? "yes" : "no";
+  return "no";
+}
+
+/**
+ * Подписан ли читатель на канал.
+ *
+ * Требует, чтобы бот был администратором канала: иначе getChatMember
+ * отвечает отказом, и отличить «не подписан» от «бот не админ» снаружи
+ * нечем. Поэтому ошибка — это «unknown», а не «no»: читателю в этом случае
+ * говорится «не смог проверить», а не «ты не подписан», и он не ищет
+ * подписку, которая у него уже есть.
+ */
+export async function checkSubscription(telegramId: number): Promise<Subscription> {
+  const handle = channelHandle();
+  if (!handle) return "yes";
+  try {
+    return verdictOf(
+      await call<{ status?: string; is_member?: boolean }>("getChatMember", {
+        chat_id: handle,
+        user_id: telegramId,
+      }),
+    );
+  } catch (error) {
+    console.error(`getChatMember: ${(error as Error).message}`);
+    return "unknown";
+  }
+}
+
+/**
+ * Описание из профиля Telegram. Уходит в один вопрос Jev: какие из готовых
+ * интересов этому человеку ближе. Пусто — вопрос не задаётся вовсе.
+ *
+ * Ошибка здесь ничего не ломает: порядок интересов станет обычным.
+ * Свалиться на ней значило бы не пустить читателя в ленту из-за строчки,
+ * которой он, возможно, и не писал.
+ */
+export async function fetchBio(telegramId: number): Promise<string | null> {
+  try {
+    const chat = await call<{ bio?: string; first_name?: string; last_name?: string }>("getChat", {
+      chat_id: telegramId,
+    });
+    const bio = typeof chat?.bio === "string" ? chat.bio.trim() : "";
+    return bio ? bio.slice(0, 500) : null;
+  } catch (error) {
+    console.error(`getChat: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Позвать в канал.
+ *
+ * Две кнопки, а не одна: ссылка уводит в канал, и вернуться к боту, чтобы
+ * сказать «готово», читателю нечем — переписка уже уехала вверх. Кнопка
+ * «Я подписался» остаётся на экране и там, куда он вернётся.
+ */
+export async function askSubscribe(chatId: number, handle: string, intro: string): Promise<void> {
+  await call("sendMessage", {
+    chat_id: chatId,
+    text: intro.slice(0, 4000),
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: `Открыть ${handle}`, url: channelLink(handle) }],
+        [{ text: "Я подписался", callback_data: `${SUBSCRIBED_PREFIX}:1` }],
+      ],
+    },
+  });
+}

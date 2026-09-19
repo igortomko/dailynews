@@ -12,9 +12,12 @@ import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
+import {
+  addReaderSource, freezeKindleSender, getReader, getReaderTopics, readerSources,
+  recordCall, spentToday,
+} from "./readers";
 import { llmCost, jevCost } from "../../pipeline/cost";
-import type { Source } from "./types";
+import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestWith, FEATURES, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
@@ -22,8 +25,9 @@ import {
 } from "./plans";
 import { effectivePlan } from "./lemon";
 import { SOURCE_LANGUAGE } from "./voice";
-import { getSources } from "./queries";
 import { toSlug } from "./slug";
+import { starterBySlug } from "./starter-topics";
+import { resolveSuggestions } from "./onboarding";
 
 /**
  * Запасной вход владельца. Читатели входят ссылкой из бота; пароль остаётся
@@ -138,11 +142,38 @@ export async function saveInterests(formData: FormData) {
     digestSize,
   );
 
+  await writeTopics(readerId, chips, slugs, counts, digestSize, true);
+
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+
+
+/**
+ * Запись интересов и бюджета внимания.
+ *
+ * Общая для настроек и для первого экрана: правила одни и те же, а разойдясь,
+ * они разойдутся молча — онбординг начнёт заводить то, что форма настроек
+ * отвергает, и увидеть это можно будет только по съехавшим темам.
+ *
+ * `finish` — ставить ли отметку о пройденном онбординге. На первом экране
+ * нельзя: интересы выбраны, источников ещё нет, и лента, решив, что
+ * настройка закончена, повела бы читателя в пустой выпуск.
+ */
+async function writeTopics(
+  readerId: number,
+  chips: ChipInput[],
+  slugs: string[],
+  counts: number[],
+  digestSize: number,
+  finish: boolean,
+): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`
       update dailynews.readers
          set digest_size = ${digestSize},
-             onboarded_at = coalesce(onboarded_at, now()),
+             onboarded_at = ${finish ? sql`coalesce(onboarded_at, now())` : sql`onboarded_at`},
              updated_at = now()
        where id = ${readerId}
     `;
@@ -182,12 +213,7 @@ export async function saveInterests(formData: FormData) {
       `;
     }
   });
-
-  revalidatePath("/", "layout");
-  return { ok: true as const };
 }
-
-
 
 /**
  * Адрес Kindle. Обратный адрес не трогаем: он выдан один раз при заведении
@@ -296,28 +322,13 @@ export async function resetKindleSetup() {
 }
 
 /**
- * Каталог источников общий, поэтому правит его владелец. Это не роли:
- * удаление источника уносит каскадом собранные материалы, и у такой кнопки
- * не должно быть ста рук.
- */
-async function requireOwner() {
-  const reader = await currentReader();
-  if (!reader.owner) redirect("/settings/sources");
-  return reader;
-}
-
-/**
  * Разобрать вставленную ссылку: что это за источник, где у него фид и как он
  * называется. Ничего не сохраняет — показывает, что нашлось, чтобы читатель
  * подтвердил. Тип источника знать не нужно, название уже лежит в фиде.
- *
- * Тоже под владельцем: каталог общий, а разбор ходит в сеть — у такой кнопки
- * не должно быть ста рук.
  */
 export async function discoverSource(input: string): Promise<
   { ok: true; found: Found } | { ok: false; error: string }
 > {
-  await requireOwner();
   const raw = input.trim().slice(0, 500);
   if (!raw) return { ok: false, error: "Пустая строка" };
 
@@ -348,7 +359,7 @@ export async function discoverSource(input: string): Promise<
  * записи, через неделю неотличим от заброшенного — а он таким и родился.
  */
 export async function addSource(formData: FormData) {
-  await requireOwner();
+  const reader = await currentReader();
   // Вид сужается один раз: дальше он уходит и в предел тарифа, и в пробу.
   const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
@@ -358,7 +369,7 @@ export async function addSource(formData: FormData) {
 
   // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
   // чем сходить за фидом и отказать после.
-  const denied = await denyForKind(await currentReader(), kind);
+  const denied = await denyForKind(reader, kind);
   if (denied) return { error: denied };
 
   const probe = await probeOne(kind, url, inputUrl);
@@ -366,7 +377,7 @@ export async function addSource(formData: FormData) {
 
   const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
-  const { created } = await saveSource(kind, url, inputUrl, label);
+  const { created } = await saveSource(reader.id, kind, url, inputUrl, label);
   revalidatePath("/settings/sources");
   return { ok: true as const, label, created };
 }
@@ -374,32 +385,33 @@ export async function addSource(formData: FormData) {
 
 
 /**
- * Убрать источник из ленты.
+ * Убрать источник из своей ленты.
  *
- * Не delete: items.source_id стоит на on delete cascade, и настоящее удаление
- * уносило собранные материалы, их оценки, их чтения и их записи в уже
- * отправленных выпусках. Отменить такое нечем — строку источника вернуть
- * легко, сто семьдесят шесть чтений уже нет. Поэтому источник помечается
- * и исчезает отовсюду, а история остаётся.
+ * Удаляется строка связки, а не сам источник. У настоящего delete
+ * на items.source_id стоит on delete cascade: оно уносило бы собранные
+ * материалы, их оценки, их чтения и записи в уже отправленных выпусках —
+ * и не только свои. Отменить такое нечем: строку источника вернуть легко,
+ * сто семьдесят шесть чтений уже нет.
  *
- * active не трогается: отмена обязана вернуть то, что было, а не включить
- * источник, который до удаления был выключен.
+ * Каталог при этом не редеет, и это правильно: он общий, а источник,
+ * которого не выбрал никто, прогон и так не опрашивает — он собирает
+ * объединение личных наборов.
  */
 export async function deleteSource(id: number) {
-  await requireOwner();
+  const readerId = await currentReaderId();
   const [row] = await sql<{ label: string }[]>`
-    update dailynews.sources set deleted_at = now()
-     where id = ${id} and deleted_at is null
-     returning label
+    delete from dailynews.reader_sources rs
+     using dailynews.sources s
+     where rs.source_id = s.id and rs.reader_id = ${readerId} and rs.source_id = ${id}
+     returning s.label
   `;
   revalidatePath("/settings/sources");
   return row ? { ok: true as const, label: row.label } : { error: "Источник уже убран" };
 }
 
-/** Отмена: возвращает источник ровно в то состояние, в каком он был. */
+/** Отмена: возвращает источник в ленту. Каталог его и не терял. */
 export async function restoreSource(id: number) {
-  await requireOwner();
-  await sql`update dailynews.sources set deleted_at = null where id = ${id}`;
+  await addReaderSource(await currentReaderId(), id);
   revalidatePath("/settings/sources");
   return { ok: true as const };
 }
@@ -418,15 +430,34 @@ export async function restoreSource(id: number) {
  * Поэтому же она занимает минуты, а не секунды.
  */
 export async function topUpDigest() {
-  const reader = await currentReader();
-  const [digest] = await sql<{ id: number; day: string; taken: number }[]>`
+  const result = await fillDigest(await currentReader());
+  revalidatePath("/", "layout");
+  return result;
+}
+
+/**
+ * Собственно сборка. Отдельно от topUpDigest, потому что последний шаг
+ * онбординга зовёт её, не перерисовывая страницу: revalidatePath перерисовал
+ * бы сам мастер, а тот, увидев пройденный онбординг, увёл бы читателя
+ * на ленту — мимо экрана, ради которого всё и собиралось.
+ */
+async function fillDigest(reader: Reader) {
+  const [existing] = await sql<{ id: number; day: string; taken: number }[]>`
     select d.id::int as id, d.day::text as day,
            (select count(*)::int from dailynews.digest_items di where di.digest_id = d.id) as taken
       from dailynews.digests d
      where d.reader_id = ${reader.id}
      order by d.day desc limit 1
   `;
-  if (!digest) return { error: "Ни одного выпуска ещё нет — дождись прогона" };
+  // Первого выпуска ещё нет — заводим сегодняшний. Раньше здесь стоял отказ
+  // «дождись прогона», и новый читатель заканчивал настройку обещанием:
+  // поток-то уже собран и оценён, ему нужен только отбор и описания.
+  const digest = existing ?? (await sql<{ id: number; day: string; taken: number }[]>`
+    insert into dailynews.digests (reader_id, day)
+    values (${reader.id}, current_date)
+    on conflict (reader_id, day) do update set reader_id = excluded.reader_id
+    returning id::int as id, day::text as day, 0 as taken
+  `)[0];
 
   // Через догрузку предел тарифа обходится так же, как через ползунок:
   // digest_size мог остаться от прежнего тарифа, а платит за письмо
@@ -447,7 +478,7 @@ export async function topUpDigest() {
   const topics = await getReaderTopics(reader.id);
   // Источники тарифа те же, что в ночном прогоне: кнопка не должна
   // приносить то, чего прогон не принёс бы.
-  const mySources = sourcesForPlan(await getSources(), effectivePlan(reader)).map((s) => s.id);
+  const mySources = sourcesForPlan(await readerSources(reader.id), effectivePlan(reader)).map((s) => s.id);
   const survivors = await selectSurvivors(
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
@@ -508,6 +539,137 @@ export async function topUpDigest() {
     `;
   }
 
-  revalidatePath("/", "layout");
   return { ok: true as const, added: survivors.length };
+}
+
+/**
+ * Первый экран: выбранные интересы.
+ *
+ * Слаги из готового набора и то, что читатель вписал руками, приходят
+ * отдельно — у первых уже есть подсказка для Jev, выверенная под общий
+ * справочник, и брать её из формы значило бы позволить переписать критерий
+ * классификации всем сразу.
+ *
+ * Размер выпуска здесь не спрашивается: на первом экране это третье решение
+ * подряд, а тариф и так знает свой. Поменять его можно в «Интересах».
+ */
+export async function saveOnboardingInterests(slugs: string[], custom: string[]) {
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
+
+  const picked = slugs
+    .map((slug) => starterBySlug.get(slug))
+    .filter((topic) => topic !== undefined)
+    .map((topic) => ({ slug: topic.slug, label: topic.label, hint: topic.hint, count: MIN_PER_TOPIC }));
+
+  // Вписанное руками: подсказки у него нет, и это нормально — Jev получит
+  // само название. Пустая тема в справочник не уезжает.
+  const mine = custom
+    .map((label) => label.trim().slice(0, 60))
+    .filter(Boolean)
+    .map((label) => ({ slug: toSlug(label), label, hint: "", count: MIN_PER_TOPIC }));
+
+  const chips = [...picked, ...mine].filter(
+    (chip, index, all) => chip.slug && all.findIndex((other) => other.slug === chip.slug) === index,
+  );
+
+  if (chips.length === 0) return { error: "Выбери хотя бы один интерес" };
+  if (chips.length > plan.maxTopics) {
+    return {
+      error:
+        `Тариф «${plan.label}» держит ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
+        `а выбрано ${chips.length}`,
+    };
+  }
+
+  const digestSize = plan.digestSizes[0];
+  await writeTopics(
+    reader.id,
+    chips,
+    chips.map((chip) => chip.slug),
+    normalize(chips.map(() => MIN_PER_TOPIC), digestSize),
+    digestSize,
+    false,
+  );
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/**
+ * Первый экран: выбранные источники.
+ *
+ * Форма присылает ключи, а не адреса. Подобранный список пересобирается
+ * на сервере из тех же интересов, и всё, чего в нём нет, отбрасывается:
+ * иначе в общий каталог можно было бы вставить что угодно под нашим
+ * названием, и следующий читатель увидел бы это среди предложений.
+ *
+ * Пробы здесь нет намеренно: эти фиды проверены живым запросом, когда
+ * попадали в набор, а пять проб подряд — это пять секунд ожидания на шаге,
+ * где читатель всего лишь нажимает на названия. Вставленная руками ссылка
+ * проверяется по-прежнему (addSource).
+ */
+export async function saveOnboardingSources(keys: string[]) {
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
+  const topics = await getReaderTopics(reader.id);
+
+  const chosen = await resolveSuggestions(
+    reader.id,
+    topics.map((topic) => topic.slug),
+    plan,
+    keys.slice(0, 100),
+  );
+  if (chosen.length === 0) return { error: "Выбери хотя бы один источник" };
+
+  let added = 0;
+  for (const feed of chosen) {
+    // Предел тарифа спрашивается на каждом, а не один раз на список:
+    // считать «сколько было плюс сколько выбрано» значит повторить
+    // формулу предела второй раз и разойтись с ней на первом же отказе.
+    const denied = await denyForKind(reader, feed.kind);
+    if (denied) {
+      // Причину берём у того, кто отказал. Своя формулировка здесь врала бы
+      // про предел числа там, где отказ был по виду источника, — и читатель
+      // убирал бы лишнее, не понимая, почему это не помогает.
+      if (added === 0) return { error: denied };
+      break;
+    }
+    await saveSource(reader.id, feed.kind, feed.url, feed.url, feed.label);
+    added++;
+  }
+
+  revalidatePath("/", "layout");
+  return { ok: true as const, added };
+}
+
+/**
+ * Последний шаг: собрать первый выпуск и открыть ленту.
+ *
+ * Поток уже собран и оценён — он общий, — поэтому новому читателю нужен
+ * только отбор его весами и описания его языком. Без этого шага онбординг
+ * заканчивался бы обещанием: настроил, нажал «готово» и увидел пустую
+ * ленту до следующей ночи.
+ *
+ * Отметка о пройденном онбординге ставится до сборки, а не после: выпуска
+ * может не получиться (поток пуст, потолок исчерпан), и ронять читателя
+ * обратно на первый экран из-за этого нельзя — настройку он закончил.
+ */
+export async function finishOnboarding() {
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set onboarded_at = coalesce(onboarded_at, now()), updated_at = now()
+     where id = ${readerId}
+  `;
+  // Перерисовки здесь нет намеренно: мастер должен дорисовать свой
+  // последний экран, а не быть уведённым с него собственным успехом.
+  try {
+    return await fillDigest(await currentReader());
+  } catch (error) {
+    // Отказ обязан вернуться значением, а не броском: мастер ждёт ответа,
+    // и на упавшем обещании он остался бы крутить спиннер до закрытия
+    // вкладки. Настройка при этом уже сохранена — терять её не за что.
+    console.error(`первый выпуск: ${(error as Error).message}`);
+    return { error: "Не получилось собрать первый выпуск — соберу ночью" };
+  }
 }

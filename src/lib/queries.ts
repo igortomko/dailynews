@@ -71,7 +71,7 @@ export type SourceHealth = Source & {
  * а не в where: иначе источник без единого материала выпал бы из списка
  * вместо того, чтобы показать ноль.
  */
-export async function getSourceHealth(): Promise<SourceHealth[]> {
+export async function getSourceHealth(readerId: number): Promise<SourceHealth[]> {
   return sql<SourceHealth[]>`
     with digested as (
       -- Состав выпуска переехал из массива digests.item_ids в digest_items,
@@ -88,6 +88,11 @@ export async function getSourceHealth(): Promise<SourceHealth[]> {
            count(g.item_id)::int as in_digest,
            round(avg(sc.total)::numeric, 1)::float as mean_score
       from dailynews.sources s
+      -- Только свои: каталог общий, а список источников — это список того,
+      -- из чего собирают выпуск этому читателю. Чужая строка здесь была бы
+      -- ровно тем отказом, что выглядит как успех: список полон, убрать
+      -- из него нечего, и в выпуске всё равно не то.
+      join dailynews.reader_sources rs on rs.source_id = s.id and rs.reader_id = ${readerId}
       left join dailynews.items i
              on i.source_id = s.id
             and i.collected_at > now() - interval '30 days'
@@ -287,4 +292,46 @@ export async function getCalibration(readerId: number): Promise<{
   `;
 
   return { byScore, byConfidence, byAxis, totals };
+}
+
+/**
+ * Чужие источники, которые уже кормят эти темы.
+ *
+ * Считается по собранному: сколько материалов источник дал по этим темам
+ * за месяц. Это не рейтинг «хороших» источников вообще — это ответ на «кто
+ * пишет о том, что ты выбрал», и он взрослеет вместе с каталогом сам,
+ * без второго списка, который кто-то должен поддерживать руками.
+ *
+ * Своих в ответе нет: предлагать взять то, что уже взято, — это предложение,
+ * на которое нельзя нажать.
+ */
+export async function catalogFor(
+  readerId: number,
+  topicSlugs: string[],
+  kinds: string[],
+  limit = 12,
+): Promise<{ id: number; kind: string; label: string; url: string; items: number }[]> {
+  if (topicSlugs.length === 0 || kinds.length === 0) return [];
+  return sql<{ id: number; kind: string; label: string; url: string; items: number }[]>`
+    select s.id::int as id, s.kind, s.label, s.url, count(distinct i.id)::int as items
+      from dailynews.sources s
+      join dailynews.items i on i.source_id = s.id
+           and i.collected_at > now() - interval '30 days' and i.dup_of is null
+      join dailynews.scores sc on sc.item_id = i.id
+      join dailynews.topics t on t.id = sc.topic_id and t.slug = any(${topicSlugs})
+     where s.deleted_at is null
+       -- Виды тарифа: X платный, и предлагать его бесплатному читателю
+       -- значит показать кнопку, которая откажет после нажатия.
+       and s.kind = any(${kinds})
+       and not exists (
+         select 1 from dailynews.reader_sources rs
+          where rs.source_id = s.id and rs.reader_id = ${readerId}
+       )
+     group by s.id
+     -- distinct обязателен и здесь, и в порядке: материал, попавший сразу
+     -- в две выбранные темы, join отдаёт дважды, и «12 материалов за месяц»
+     -- превращается в двадцать четыре.
+     order by count(distinct i.id) desc, s.label
+     limit ${limit}
+  `;
 }

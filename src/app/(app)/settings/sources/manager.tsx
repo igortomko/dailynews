@@ -173,16 +173,15 @@ function yieldOf(source: SourceHealth): string {
 }
 
 /**
- * Каталог общий на всех читателей, поэтому правит его владелец: удаление
- * источника уносит каскадом собранные материалы, и у такой кнопки не должно
- * быть ста рук. Остальным он виден целиком — знать, откуда берётся лента,
- * полезно и без права её менять.
+ * Список свой у каждого: каталог общий, чтобы один фид опрашивался один
+ * раз на всех, но «мои источники» — это выбор, а не витрина. Убрать
+ * источник значит убрать его у себя; у соседа он остаётся вместе со всей
+ * своей историей.
  */
 export function SourcesManager({
   sources,
   plan,
-  editable,
-}: { sources: SourceHealth[]; plan: Plan; editable: boolean }) {
+}: { sources: SourceHealth[]; plan: Plan }) {
   const [pending, startTransition] = useTransition();
   const [input, setInput] = useState("");
   const [found, setFound] = useState<Found | null>(null);
@@ -256,7 +255,6 @@ export function SourcesManager({
         </Alert>
       ) : null}
 
-      {editable ? (
       <Card>
         {found && plan.kinds.includes(found.kind) ? (
           <form
@@ -417,13 +415,12 @@ export function SourcesManager({
           </>
         )}
       </Card>
-      ) : null}
 
       <Card>
         <CardHeader>
           <CardTitle>Источники</CardTitle>
           <CardDescription>
-            {sources.length} опрашивается · предел тарифа «{plan.label}» — {plan.maxSources}
+            {sources.length} из {plan.maxSources} на тарифе «{plan.label}»
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
@@ -432,9 +429,8 @@ export function SourcesManager({
               <EmptyHeader>
                 <EmptyTitle>Пока ни одного источника</EmptyTitle>
                 <EmptyDescription>
-                  {editable
-                    ? "Вставь ссылку выше — на блог, канал, репозиторий. Пока источников нет, выпуск собирать не из чего."
-                    : "Каталог наполняет владелец ленты."}
+                  Вставь ссылку выше — на блог, канал, рассылку. Пока источников нет,
+                  выпуск собирать не из чего.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -536,28 +532,26 @@ export function SourcesManager({
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
-                {editable ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Убрать ${source.label} из ленты`}
-                          onClick={() => startTransition(() => remove(source.id))}
-                          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        />
-                      }
-                    >
-                      <TrashIcon />
-                    </TooltipTrigger>
-                    {/* Своя подсказка вместо title: браузерная выезжает через
-                        секунду с лишним и рисуется системным шрифтом. */}
-                    <TooltipContent>
-                      Убрать из ленты — материалы и статистика останутся, действие можно отменить
-                    </TooltipContent>
-                  </Tooltip>
-                ) : null}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Убрать ${source.label} из ленты`}
+                        onClick={() => startTransition(() => remove(source.id))}
+                        className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      />
+                    }
+                  >
+                    <TrashIcon />
+                  </TooltipTrigger>
+                  {/* Своя подсказка вместо title: браузерная выезжает через
+                      секунду с лишним и рисуется системным шрифтом. */}
+                  <TooltipContent>
+                    Убрать из ленты — у соседа он останется, и отменить можно
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
           ))}

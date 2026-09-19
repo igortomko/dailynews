@@ -19,7 +19,7 @@ import { createRequire } from "node:module";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { freePort } from "../db/free-port";
+import { assertOwn, startLocalPg } from "../db/free-port";
 import type { Source } from "../src/lib/types";
 
 
@@ -36,10 +36,8 @@ async function main() {
     await db.exec(readFileSync(`db/migrations/${file}`, "utf8"));
   }
 
-  const port = await freePort();
-  const server = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
-  await server.start();
-  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${port}/postgres`;
+  const local = await startLocalPg(db, (port) => new PGLiteSocketServer({ db, port, host: "127.0.0.1" }));
+  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${local.port}/postgres`;
   process.env.DB_POOL_MAX = "1";
 
   const require_ = createRequire(import.meta.url);
@@ -51,6 +49,9 @@ async function main() {
   };
 
   const { sql } = await import("../src/lib/db");
+  // Своим же соединением: сокет PGlite обслуживает одно подключение,
+  // и пробное рядом с рабочим оставляет сервер отдающим пустоту.
+  await assertOwn(local, async (text) => (await sql.unsafe(text))[0] as { token?: string });
   const { collect, transcribeVideos } = await import("./run");
   const { markDuplicates } = await import("./dedup");
   const { discover } = await import("./discover");
@@ -76,7 +77,7 @@ async function main() {
     const duplicates = await markDuplicates(sql, ids);
 
     if (process.argv.includes("--channel")) {
-      const videos = await transcribeVideos(ids);
+      const videos = await transcribeVideos();
       console.log(`\nРасшифровано роликов: ${videos.done}, потрачено $${videos.cost.toFixed(4)}`);
       const shown = await sql<{ title: string; excerpt: string; body: string | null }[]>`
         select title, excerpt, body from dailynews.items
@@ -124,7 +125,7 @@ async function main() {
     }
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});
-    await server.stop();
+    await local.stop();
     await db.close();
   }
 }

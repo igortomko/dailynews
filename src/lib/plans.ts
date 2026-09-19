@@ -7,10 +7,11 @@
  *
  * Считать пределы умеет и интерфейс, и конвейер — и оба обязаны считать
  * одинаково. Понижение тарифа не выключает лишние источники задним числом:
- * они остаются в каталоге включёнными, и только прогон решает, кого
- * опрашивать. Поэтому предел применяется в двух местах, а живёт в одном.
+ * они остаются в наборе читателя, и только прогон решает, кого опрашивать.
+ * Поэтому предел применяется в двух местах, а живёт в одном.
  */
 import type { Source } from "./types";
+import { plural } from "./plural";
 
 export const PLAN_IDS = ["free", "plus", "pro"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
@@ -133,14 +134,7 @@ export const maxDigestOf = (plan: Plan) => plan.digestSizes[plan.digestSizes.len
 export const allows = (plan: Plan, section: Gated) => plan.sections.includes(section);
 
 /** «2 интереса», «5 интересов» — форма нужна и в отказе, и в заглушке. */
-export function topicsWord(n: number): string {
-  const tens = n % 100;
-  if (tens >= 11 && tens <= 14) return "интересов";
-  const ones = n % 10;
-  if (ones === 1) return "интерес";
-  if (ones >= 2 && ones <= 4) return "интереса";
-  return "интересов";
-}
+export const topicsWord = (n: number) => plural(n, "интерес", "интереса", "интересов");
 
 /** Самый дешёвый тариф, который открывает раздел. Для подписи в заглушке. */
 export const cheapestWith = (section: Gated): Plan =>
@@ -228,7 +222,11 @@ export const cheapestFor = (id: FeatureId): Plan =>
   PLAN_IDS.map((planId) => PLANS[planId]).find((plan) => FEATURES[id].has(plan)) ?? PLANS.pro;
 
 /**
- * Кого опрашивать в этом прогоне.
+ * Что из выбранного читателем опрашивать в этом прогоне.
+ *
+ * На вход идёт его собственный набор (`readerSources`), а не каталог:
+ * каталог общий, чтобы один фид опрашивался один раз на всех, но чей это
+ * выпуск — решает личный выбор.
  *
  * Порядок — по id: при понижении тарифа остаются те, что заведены раньше,
  * и набор не пляшет от прогона к прогону. Запрещённый вид отсекается до

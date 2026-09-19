@@ -32,6 +32,7 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
   },
 }) as typeof assertStrict;
 import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import { appOrigin } from "../src/lib/auth";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -41,12 +42,15 @@ import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
 import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
-import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
+import {
+  channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
+} from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
+import { plural } from "../src/lib/plural";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -54,6 +58,7 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf }
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
+import { STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { explain, parseTelegram } from "./fetch";
@@ -1499,6 +1504,177 @@ assert.equal(parseUpdate(privateStart("а что ты умеешь?")).kind, "he
 assert.ok(!looksLikeSource("uranium OR SMR min_faves:100"), "запрос X в чате не читается как источник");
 assert.ok(!looksLikeSource("/help"), "команда не источник");
 assert.ok(!looksLikeSource(""), "пустая строка не источник");
+
+
+// --- число и слово рядом -------------------------------------------------------
+// «1 материалов» — не опечатка, а признак числа, подставленного в готовую
+// строку. Читается как машинный текст, и виден он только на единице.
+const form = (n: number) => plural(n, "материал", "материала", "материалов");
+assert.equal(form(1), "материал");
+assert.equal(form(2), "материала");
+assert.equal(form(5), "материалов");
+// Одиннадцать — не «одиннадцать материал»: второй десяток ведёт себя иначе.
+assert.equal(form(11), "материалов");
+assert.equal(form(12), "материалов");
+assert.equal(form(21), "материал");
+assert.equal(form(22), "материала");
+assert.equal(form(0), "материалов");
+
+// --- адрес, на который приземляет ссылка входа --------------------------------
+// В standalone-сборке за обратным прокси nextUrl.origin — это адрес
+// прослушивания контейнера. Ссылка из бота приземлялась на
+// https://0.0.0.0:3000: кука ставилась, переход выполнялся, страница
+// не открывалась — и по ней понять, что сломалось, было нельзя.
+{
+  const before = process.env.APP_URL;
+  process.env.APP_URL = "https://news.tomko.io";
+  assert.equal(
+    appOrigin("https://0.0.0.0:3000"), "https://news.tomko.io",
+    "адрес берётся из APP_URL, а не из того, на что смотрит контейнер",
+  );
+  process.env.APP_URL = "  ";
+  assert.equal(
+    appOrigin("https://0.0.0.0:3000"), "https://0.0.0.0:3000",
+    "пробелы — это «не задано», а не адрес из пробелов",
+  );
+  delete process.env.APP_URL;
+  assert.equal(
+    appOrigin("http://localhost:3000"), "http://localhost:3000",
+    "без переменной остаётся адрес запроса: в разработке он и есть правильный",
+  );
+  if (before === undefined) delete process.env.APP_URL;
+  else process.env.APP_URL = before;
+}
+
+// --- гейт по подписке на канал ------------------------------------------------
+// Живого канала в проверке нет, а на владельце все четыре ветки неразличимы:
+// он в своём канале создатель, и «не подписан» у него не получить никак.
+assert.equal(verdictOf({ status: "creator" }), "yes", "создатель канала подписан");
+assert.equal(verdictOf({ status: "administrator" }), "yes", "админ подписан");
+assert.equal(verdictOf({ status: "member" }), "yes", "участник подписан");
+assert.equal(
+  verdictOf({ status: "restricted", is_member: true }), "yes",
+  "ограниченный участник всё ещё в канале",
+);
+assert.equal(
+  verdictOf({ status: "restricted", is_member: false }), "no",
+  "ограниченный и не участник — не в канале",
+);
+assert.equal(verdictOf({ status: "left" }), "no", "ушедший не подписан");
+assert.equal(verdictOf({ status: "kicked" }), "no", "выгнанный не подписан");
+// Telegram заводит новые статусы, и гадать в пользу входа нельзя: гейт
+// открылся бы от незнакомого слова, и заметить это было бы нечем.
+assert.equal(verdictOf({ status: "супер" }), "no", "незнакомый статус читается как «нет»");
+assert.equal(verdictOf(null), "no", "пустой ответ — не подписка");
+
+// В переменную окружения рано или поздно вставят то, что скопировали
+// из адресной строки.
+const handleFor = (value: string | undefined) => {
+  const before = process.env.TELEGRAM_CHANNEL;
+  if (value === undefined) delete process.env.TELEGRAM_CHANNEL;
+  else process.env.TELEGRAM_CHANNEL = value;
+  const result = channelHandle();
+  if (before === undefined) delete process.env.TELEGRAM_CHANNEL;
+  else process.env.TELEGRAM_CHANNEL = before;
+  return result;
+};
+assert.equal(handleFor("@lenta"), "@lenta", "@имя остаётся @именем");
+assert.equal(handleFor("lenta"), "@lenta", "голое имя получает собачку");
+assert.equal(handleFor("https://t.me/lenta"), "@lenta", "ссылка сводится к имени");
+assert.equal(handleFor("https://t.me/lenta/"), "@lenta", "хвостовой слэш не уезжает в имя");
+// Протокол необязателен: из адресной строки копируют и «t.me/имя».
+// С обязательным https:// такая строка превращалась в «@t.me/имя»,
+// getChatMember отвечал 400, и гейт застревал на «не смог проверить».
+assert.equal(handleFor("t.me/lenta"), "@lenta", "t.me без протокола — тоже ссылка");
+assert.equal(handleFor("telegram.me/lenta"), "@lenta", "второй домен Telegram тоже");
+assert.equal(handleFor("@lenta_bot"), "@lenta_bot", "подчёркивание в имени остаётся");
+// Не задано — гейта нет. Здесь переменная не секрет, а настройка роста:
+// первый деплой без неё закрыл бы вход всем новым читателям разом.
+assert.equal(handleFor(undefined), null, "без переменной гейта нет");
+assert.equal(handleFor("  "), null, "пробелы — тоже «не задано»");
+
+const subscribedPress = {
+  callback_query: {
+    id: "cb1",
+    data: `${SUBSCRIBED_PREFIX}:1`,
+    from: { id: 4242, is_bot: false, username: "igor" },
+    message: { chat: { id: 777 } },
+  },
+};
+assert.deepEqual(
+  parseUpdate(subscribedPress),
+  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", callbackId: "cb1" },
+  "нажатие «Я подписался» разбирается, а не проваливается в ignore",
+);
+
+// --- стартовый каталог интересов ----------------------------------------------
+// Файл правят руками, и опечатка в related — это кнопка, которой нет:
+// список соседей молча укорачивается, и заметить это на экране нечем.
+{
+  const slugs = new Set(STARTER_TOPICS.map((topic) => topic.slug));
+  assert.equal(slugs.size, STARTER_TOPICS.length, "слаги стартовых интересов не повторяются");
+  for (const topic of STARTER_TOPICS) {
+    assert.ok(topic.hint.length > 10, `у «${topic.label}» должна быть подсказка: она уходит в вопрос Jev`);
+    assert.ok(topic.feeds.length > 0, `у «${topic.label}» должен быть хоть один источник`);
+    assert.ok(topic.related.length > 0, `у «${topic.label}» должны быть соседи`);
+    for (const related of topic.related) {
+      assert.ok(slugs.has(related), `сосед «${related}» у «${topic.label}» не существует`);
+      assert.notEqual(related, topic.slug, "тема не может быть соседом самой себе");
+    }
+    for (const feed of topic.feeds) {
+      assert.ok(feed.label.length > 0, "у источника должно быть название");
+      assert.ok(
+        feed.kind !== "rss" || feed.url.startsWith("https://"),
+        `фид «${feed.label}» должен быть полным адресом`,
+      );
+    }
+  }
+}
+
+// Порядок предложений. Соседи выбранного идут первыми, само выбранное
+// исчезает: предлагать взять взятое — это кнопка, которая ничего не делает.
+{
+  const order = suggestOrder(["ai-infra"]);
+  assert.ok(!order.includes("ai-infra"), "выбранное уходит со сцены");
+  assert.deepEqual(
+    order.slice(0, 4), starterBySlug.get("ai-infra")!.related,
+    "соседи выбранного идут первыми и в своём порядке",
+  );
+  // Последний выбор ближе к пальцу, чем первый: он и отвечает на «а что
+  // ещё такого же».
+  const two = suggestOrder(["ai-infra", "cinema"]);
+  assert.equal(two[0], starterBySlug.get("cinema")!.related[0], "соседи последнего выбора первее");
+  // Ранжирование по описанию из Telegram — второй очередью: оно про человека
+  // вообще, а соседи — про то, что он только что нажал.
+  const ranked = suggestOrder(["ai-infra"], ["music", "выдуманное"]);
+  assert.ok(
+    ranked.indexOf("music") > ranked.indexOf(starterBySlug.get("ai-infra")!.related[0]),
+    "ранжирование не обгоняет соседей",
+  );
+  assert.ok(!ranked.includes("выдуманное"), "слаг не из каталога отбрасывается");
+  assert.equal(
+    new Set(ranked).size, ranked.length,
+    "ни один интерес не показывается дважды",
+  );
+  assert.equal(
+    suggestOrder([]).length, STARTER_TOPICS.length,
+    "без выбора показывается весь набор",
+  );
+}
+
+// --- тариф и бюджет тем -------------------------------------------------------
+// Предел интересов и размер выпуска — два числа одного тарифа, и разъехавшись,
+// они дают тему с нулевой целью: ограничение reader_topics.weight > 0 уронит
+// сохранение там, где читатель всего лишь выбрал интересы.
+for (const id of PLAN_IDS) {
+  const p = PLANS[id];
+  const counts = normalize(Array.from({ length: p.maxTopics }, () => 1), p.digestSizes[0]);
+  assert.equal(counts.length, p.maxTopics, `цели считаются на все темы тарифа «${p.label}»`);
+  assert.ok(
+    counts.every((count) => count >= 1),
+    `на тарифе «${p.label}» ни одна тема не остаётся с нулём`,
+  );
+}
 
 // --- YouTube: ролик приезжает с содержанием, а не одним заголовком ------------
 // Описание ролика лежит в media:group/media:description: своего <description>

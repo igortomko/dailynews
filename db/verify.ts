@@ -21,7 +21,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { freePort } from "./free-port";
+import { assertOwn, startLocalPg } from "./free-port";
 
 
 
@@ -68,10 +68,10 @@ async function main() {
   assert.equal(role.limit, 10, "лимит соединений роли должен быть 10");
   console.log(`  роль: search_path прибит, лимит ${role.limit}`);
 
-  const port = await freePort();
-  const server = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
-  await server.start();
-  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${port}/postgres`;
+  // Метка проверяется после подключения: свободный порт успевает занять
+  // соседняя проверка из другого worktree, и клиент уходит к её базе.
+  const local = await startLocalPg(db, (port) => new PGLiteSocketServer({ db, port, host: "127.0.0.1" }));
+  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${local.port}/postgres`;
   process.env.DB_POOL_MAX = "1";
 
   // queries.ts помечен server-only, чтобы не уехать в клиентский бандл.
@@ -89,6 +89,9 @@ async function main() {
 
   // Импорт после DATABASE_URL: модуль db.ts читает его на загрузке.
   const { sql } = await import("../src/lib/db");
+  // Своим же соединением: сокет PGlite обслуживает одно подключение,
+  // и пробное рядом с рабочим оставляет сервер отдающим пустоту.
+  await assertOwn(local, async (text) => (await sql.unsafe(text))[0] as { token?: string });
   const queries = await import("../src/lib/queries");
   const readers = await import("../src/lib/readers");
   const { markDuplicates } = await import("../pipeline/dedup");
@@ -424,7 +427,7 @@ async function main() {
     // Источник, отвечающий 200 и отдающий ноль, — самая незаметная поломка
     // в ленте. Отдача считается из items, scores и digests, и считать её надо
     // ровно здесь: один неверный join — и полезный источник выглядит пустым.
-    const health = await queries.getSourceHealth();
+    const health = await queries.getSourceHealth(owner.id);
     assert.equal(health.length, sources.length, "в отдаче должны быть все источники, включая пустые");
     const used = health.find((row) => row.id === source.id)!;
     assert.equal(used.items, 4, `материалов ${used.items}, вставлено 4`);
@@ -438,7 +441,7 @@ async function main() {
     // Тишина отмечается временем: прогон могут запустить дважды за сутки,
     // и счётчик посчитал бы два дня за один.
     await sql`update dailynews.sources set silent_since = now() - interval '4 days' where id = ${empty.id}`;
-    const afterSilence = await queries.getSourceHealth();
+    const afterSilence = await queries.getSourceHealth(owner.id);
     assert.equal(
       afterSilence.find((row) => row.id === empty.id)!.silent_days,
       4,
@@ -454,7 +457,7 @@ async function main() {
     // Отметку тишины снимаем: она стоит в порядке выше отдачи, и с ней
     // сравнение по числу материалов ничего не проверяет.
     await sql`update dailynews.sources set silent_since = null where id = ${empty.id}`;
-    const ordered = await queries.getSourceHealth();
+    const ordered = await queries.getSourceHealth(owner.id);
     assert.equal(ordered[0].id, broken.id, "источник с ошибкой должен быть первым");
     assert.ok(
       ordered.findIndex((row) => row.id === source.id) <
@@ -465,7 +468,7 @@ async function main() {
     // третьего состояния у источника больше нет.
     await sql`update dailynews.sources set deleted_at = now() where id = ${broken.id}`;
     assert.ok(
-      !(await queries.getSourceHealth()).some((row) => row.id === broken.id),
+      !(await queries.getSourceHealth(owner.id)).some((row) => row.id === broken.id),
       "убранный источник не остаётся в списке даже с ошибкой",
     );
     await sql`update dailynews.sources set last_error = null, deleted_at = null where id = ${broken.id}`;
@@ -493,7 +496,7 @@ async function main() {
     // Удаление перестало удалять: каскад уносил материалы, чтения и записи
     // в прошлых выпусках, и отменить это было нечем. Проверяется главное:
     // источник исчезает отовсюду, история остаётся, отмена возвращает как было.
-    const before = (await queries.getSourceHealth()).length;
+    const before = (await queries.getSourceHealth(owner.id)).length;
     const itemsBefore = (await sql<{ n: number }[]>`
       select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n;
     assert.ok(itemsBefore > 0, "у источника должны быть материалы, иначе проверка ничего не значит");
@@ -501,7 +504,7 @@ async function main() {
     await sql`update dailynews.sources set deleted_at = now() where id = ${source.id}`;
 
     assert.equal(
-      (await queries.getSourceHealth()).length, before - 1,
+      (await queries.getSourceHealth(owner.id)).length, before - 1,
       "убранный источник исчезает из списка",
     );
     assert.ok(
@@ -520,31 +523,55 @@ async function main() {
 
     await sql`update dailynews.sources set deleted_at = null where id = ${source.id}`;
     assert.equal(
-      (await queries.getSourceHealth()).length, before,
+      (await queries.getSourceHealth(owner.id)).length, before,
       "отмена возвращает источник в список",
     );
     console.log(`  убрать и вернуть: ${itemsBefore} материалов пережили удаление`);
 
-    // --- ссылка, присланная боту -----------------------------------------------
-    // Вебхук открыт всему интернету, а разбор ссылки ходит в сеть: чужой
-    // не должен уметь даже заставить нас сходить по своему адресу. Обе
-    // проверки обязаны срабатывать до единого запроса наружу — здесь это
-    // и видно, потому что сети в проверке нет вовсе.
-    const { addByLink } = await import("../src/lib/sources");
-    const stranger = await readers.ensureReader(BIG_TELEGRAM_ID + 7, "chuzhoy");
-    const refused = await addByLink(stranger, "https://example.com/feed");
-    assert.equal(refused.ok, false, "посторонний не заводит источники");
-    assert.match(
-      (refused as { error: string }).error, /владелец/,
-      "и ему это сказано, а не сделано молча",
+    // --- источники персональны ------------------------------------------------
+    // До reader_sources «источники тарифа» означали первые N строк общего
+    // каталога: у всех читателей набор был один и тот же. На втором читателе
+    // это ровно тот отказ, что выглядит как успех — выпуск приходит вовремя
+    // и собран из чужих источников.
+    const mine = await queries.getSourceHealth(owner.id);
+    const theirs = await queries.getSourceHealth(second.id);
+    assert.ok(mine.length > 0, "у владельца источники есть");
+    assert.equal(theirs.length, 0, "у нового читателя своих источников нет, пока он их не выбрал");
+
+    await readers.addReaderSource(second.id, source.id);
+    assert.deepEqual(
+      (await queries.getSourceHealth(second.id)).map((row) => row.id), [source.id],
+      "взятый источник появляется только у взявшего",
+    );
+    assert.equal(
+      (await queries.getSourceHealth(owner.id)).length, mine.length,
+      "и ничего не меняет у соседа",
     );
 
+    // Убрать у себя — это удалить строку связки. Настоящее удаление уносило
+    // бы каскадом материалы, оценки и чтения, и не только свои.
+    await readers.removeReaderSource(second.id, source.id);
+    assert.equal(
+      (await queries.getSourceHealth(second.id)).length, 0, "убранный уходит из своего списка",
+    );
+    assert.equal(
+      (await sql<{ n: number }[]>`
+        select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n,
+      itemsBefore,
+      "а материалы источника остаются на месте",
+    );
+    console.log(`  источники: ${mine.length} у владельца, у нового — только выбранные им`);
+
+    // --- ссылка, присланная боту -----------------------------------------------
+    // Вебхук открыт всему интернету, а разбор ссылки ходит в сеть: платный
+    // вид обязан отсекаться до единого запроса наружу — здесь это и видно,
+    // потому что сети в проверке нет вовсе.
+    const { addByLink } = await import("../src/lib/sources");
     // Владелец берётся из базы, а не заводится по telegram_id: у перенесённой
     // из profile строки его нет, и ensureReader завёл бы вместо неё нового
     // читателя — тогда проверка меряла бы не то, что думает.
     const [ownerNow] = await sql<(typeof owner)[]>`select * from dailynews.readers where owner`;
     assert.ok(ownerNow?.owner, "владелец должен найтись");
-
     // Платный вид отсекается до запроса наружу — и эта проверка однажды
     // перестала мерить то, что думает. Тариф владельца на время стал
     // правилом в коде: effectivePlan отдавал ему Pro независимо от колонки,
@@ -554,11 +581,98 @@ async function main() {
     // глазами бесплатного читателя, и проверка снова про отсечку, а не про
     // него. Оставлена в прежнем виде намеренно: обходной путь через
     // kindDenial проверял бы правило, но не то, что addByLink его спросит.
+    const { PLANS } = await import("../src/lib/plans");
     const paid = await addByLink({ ...ownerNow, plan: "free" }, "from:karpathy OR from:sama");
     assert.equal(paid.ok, false, "X на бесплатном тарифе не заводится");
     assert.match((paid as { error: string }).error, /Pro/, "отказ называет тариф, который его открывает");
-    await sql`delete from dailynews.readers where id = ${stranger.id}`;
-    console.log("  ссылка боту: посторонний и платный вид отсекаются до запроса наружу");
+
+    // Предел считается по своему набору, а не по каталогу: иначе пятый
+    // источник, заведённый кем угодно, закрывал бы добавление всем
+    // бесплатным читателям разом.
+    const { denyForKind } = await import("../src/lib/sources");
+    const fresh = (await readers.getReader(second.id))!;
+    assert.equal(
+      await denyForKind(fresh, "rss"), null,
+      "у читателя без источников место есть, сколько бы их ни было в каталоге",
+    );
+    // А у того, кто набрал свой предел, места нет. Считается его набор:
+    // до reader_sources предел мерили по каталогу, и пятый источник,
+    // заведённый кем угодно, закрывал добавление всем бесплатным разом.
+    for (const row of sources.slice(0, PLANS.free.maxSources)) {
+      await readers.addReaderSource(second.id, row.id);
+    }
+    assert.ok(
+      await denyForKind(fresh, "rss"),
+      "набравший предел упирается в него",
+    );
+    await sql`delete from dailynews.reader_sources where reader_id = ${second.id}`;
+    console.log("  предел тарифа считается по своему набору, а не по каталогу");
+
+    // --- первый заход ----------------------------------------------------------
+    // Шаг онбординга считается по данным, а не хранится колонкой: колонка
+    // расходится с правдой при первом же отказе на середине — в базе стоит
+    // «выбирает источники», интересов нет, и экран показывает пустой список
+    // того, что подобрано под них.
+    const { onboardingStep, suggestSources } = await import("../src/lib/onboarding");
+    const newcomer = await readers.ensureReader(BIG_TELEGRAM_ID + 11, "novichok");
+    assert.equal(await onboardingStep(newcomer.id), "interests", "без интересов — первый шаг");
+
+    const energy = topicBy("energy");
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${newcomer.id}, ${energy.id}, 1, 1)`;
+    assert.equal(await onboardingStep(newcomer.id), "sources", "интересы есть, источников нет — второй");
+
+    // Подборка под интересы: стартовый список отвечает за темы без истории,
+    // каталог — за то, чтобы предложения взрослели сами.
+    const offered = await suggestSources(newcomer.id, ["energy"], PLANS.free);
+    assert.ok(offered.length > 0, "под выбранный интерес должно найтись, что предложить");
+    assert.equal(
+      new Set(offered.map((row) => row.key)).size, offered.length,
+      "один источник не предлагается дважды",
+    );
+
+    await readers.addReaderSource(newcomer.id, source.id);
+    assert.equal(await onboardingStep(newcomer.id), "ready", "интересы и источники есть — последний шаг");
+    assert.ok(
+      !(await suggestSources(newcomer.id, ["energy"], PLANS.free)).some((row) => row.url === source.url),
+      "взятый источник исчезает из предложений: нажать на него нечем",
+    );
+
+    // Вид, которого тариф не даёт, не предлагается вовсе: показанный
+    // источник X отказал бы уже после нажатия, и читатель убирал бы лишнее,
+    // не понимая, почему это не помогает.
+    const [paidSource] = await sql<{ id: number }[]>`
+      insert into dailynews.sources (kind, label, url)
+      values ('x', 'платный поиск', 'uranium OR SMR')
+      returning id::int as id`;
+    await sql`
+      insert into dailynews.items (source_id, url, url_canon, title, title_norm, collected_at)
+      values (${paidSource.id}, 'https://x.com/p/1', 'x.com/p/1', 'пост', 'post', now())`;
+    await sql`
+      insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+      select i.id, ${energy.id}, 90, 0.9, '{}'::jsonb, 'jev'
+        from dailynews.items i where i.source_id = ${paidSource.id}`;
+    assert.ok(
+      !(await suggestSources(newcomer.id, ["energy"], PLANS.free)).some((row) => row.kind === "x"),
+      "бесплатному не предлагается платный вид источника",
+    );
+    assert.ok(
+      (await suggestSources(newcomer.id, ["energy"], PLANS.pro)).some((row) => row.kind === "x"),
+      "а на Pro он в подборке есть",
+    );
+    await sql`delete from dailynews.sources where id = ${paidSource.id}`;
+
+    // Убранный из каталога не возвращает читателя на шаг назад и не считается
+    // за источник: третьего состояния у источника нет.
+    await sql`update dailynews.sources set deleted_at = now() where id = ${source.id}`;
+    assert.equal(
+      await onboardingStep(newcomer.id), "sources",
+      "убранный источник перестаёт считаться сразу, а не выглядит живым",
+    );
+    await sql`update dailynews.sources set deleted_at = null where id = ${source.id}`;
+    await sql`delete from dailynews.readers where id = ${newcomer.id}`;
+    console.log(`  первый заход: шаг считается по данным, под интерес нашлось ${offered.length} источников`);
 
     // --- новые виды источников ------------------------------------------------
     // Ограничение переименовано намеренно: переопределение под прежним именем
@@ -578,11 +692,52 @@ async function main() {
     `;
     console.log("  виды источников: telegram и email приняты, выдуманный отвергнут");
 
+    // --- этапы расхода ---------------------------------------------------------
+    // Этап, которого нет в ограничении, роняет запись о расходе целиком:
+    // вызов оплачен, а в model_calls его нет, и дневной потолок считает
+    // не те деньги. Так уже ломалось дважды — с переводом статьи и
+    // с расшифровкой ролика, — и оба раза список закрывали тем, что знали
+    // в своей ветке.
+    // Список — объединение по всем веткам, а не по этой: ограничение общее,
+    // и каждая ветка пересоздаёт его под тем же именем. Взявшая только свои
+    // значения стирает чужие вместе с их строками.
+    const stages = [
+      "score", "digest", "summary", "translate", "translation-quality",
+      "video", "voice", "post", "post-quality", "interests",
+    ];
+    for (const stage of stages) {
+      await readers.recordCall({
+        readerId: owner.id, stage: stage as never, model: "проба", tokensIn: 1, costUsd: 0,
+      });
+    }
+    await assert.rejects(
+      readers.recordCall({
+        readerId: owner.id, stage: "выдуманный" as never, model: "проба", tokensIn: 1, costUsd: 0,
+      }),
+      /model_calls_stage_check/,
+      "незнакомый этап отвергается ограничением, а не пишется молча",
+    );
+    await sql`delete from dailynews.model_calls where model = 'проба'`;
+    console.log("  этапы расхода: все известные пишутся, выдуманный отвергнут");
+
     // --- сверка формы схемы видит переопределение ------------------------------
     // Ограничение, переопределённое под тем же именем, по имени неотличимо
     // от применённого: 0018 так и проскочил. Теперь сверяется и содержимое.
     const { schemaGaps } = await import("./schema-gap");
-    assert.deepEqual(await schemaGaps(sql), [], "на полной схеме расхождений быть не должно");
+    const gaps = await schemaGaps(sql);
+    if (gaps.length > 0) {
+      // Расхождение «в базе нет ни одной таблицы» означает не сломанную
+      // схему, а разговор не с той базой. Разница видна только отсюда,
+      // поэтому она называется вслух, а не оставляется на догадки.
+      const [seen] = await sql<{ n: number }[]>`
+        select count(*)::int as n from information_schema.tables where table_schema = 'dailynews'
+      `;
+      const [mark] = await sql<{ token: string }[]>`select token from public.pg_owner_token`;
+      console.error(
+        `  таблиц видно ${seen.n}, метка базы ${mark?.token === local.token ? "своя" : `чужая (${mark?.token})`}`,
+      );
+    }
+    assert.deepEqual(gaps, [], "на полной схеме расхождений быть не должно");
 
     // Откатываем ограничение к версии 0025 — как если бы 0026 не применили.
     await sql`delete from dailynews.sources where kind = 'email'`;
@@ -767,10 +922,29 @@ async function main() {
       console.log("  «дочитал?»: запрос выполняется и находит заголовок");
     }
 
+    // Расшифровка шла только по свежевставленным материалам: первая
+    // неудача — провайдер ответил 401 — и ролик оставался с описанием
+    // из фида навсегда, потому что новым он больше никогда не будет.
+    const [video] = await sql<{ id: number }[]>`
+      insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+      select id, 'https://www.youtube.com/watch?v=abcdefghijk',
+             'youtube.com/watch?v=abcdefghijk', 'Ролик', 'ролик', 'описание из фида'
+        from dailynews.sources limit 1
+      returning id
+    `;
+    const waiting = async () => (await sql<{ id: number }[]>`
+      select id from dailynews.items
+       where transcribed_at is null and url like '%youtube.com/watch%'
+    `).length;
+    assert.equal(await waiting(), 1, "ролик без отметки ждёт расшифровки");
+    await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
+    assert.equal(await waiting(), 0, "с отметкой за ним больше не ходят");
+    console.log("  расшифровка: неудачная попытка повторяется, удачная — нет");
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});
-    await server.stop();
+    await local.stop();
     await db.close();
   }
 }
