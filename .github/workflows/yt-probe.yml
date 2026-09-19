@@ -1,0 +1,24 @@
+name: yt-probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe youtube captions
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          body={"videoId":"O3a99HNskNk","context":{"client":{"clientName":"IOS","clientVersion":"20.03.02","hl":"en","gl":"US"}}}
+          req=urllib.request.Request("https://www.youtube.com/youtubei/v1/player",data=json.dumps(body).encode(),
+            headers={"Content-Type":"application/json","User-Agent":"com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"})
+          d=json.load(urllib.request.urlopen(req,timeout=25))
+          st=d.get("playabilityStatus",{})
+          tr=d.get("captions",{}).get("playerCaptionsTracklistRenderer",{}).get("captionTracks",[])
+          print("IOS status:",st.get("status"),st.get("reason"),"| треков:",len(tr))
+          if tr:
+              u=tr[0]["baseUrl"]
+              r=urllib.request.Request(u,headers={"User-Agent":"com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"})
+              x=urllib.request.urlopen(r,timeout=25).read()
+              print("субтитры:",len(x),"байт |",x[:150])
+          PY
