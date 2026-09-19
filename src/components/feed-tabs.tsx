@@ -48,7 +48,9 @@ export function FeedTabs({
           по центру; когда не помещаются, начинают прокручиваться —
           семь тем по-русски не влезают ни в какую ширину. */}
       <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur">
-        <div className="flex h-12 items-center justify-between gap-3 px-4">
+        {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
+            это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
+        <div className="flex h-14 items-center justify-between gap-3 px-4 sm:h-12">
           {left}
           {right}
         </div>
@@ -67,7 +69,7 @@ export function FeedTabs({
               <TabsTrigger
                 key={tab.slug}
                 value={tab.slug}
-                className="px-2 pb-2.5 text-[0.8125rem] whitespace-nowrap text-muted-foreground data-active:font-medium data-active:text-foreground"
+                className="px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
               >
                 {tab.label}
                 <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>

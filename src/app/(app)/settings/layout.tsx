@@ -28,6 +28,16 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             <h1 className="text-sm font-medium">Настройки</h1>
           </div>
         }
+        // На телефоне колонка разделов идёт лентой поверху, и «Выйти» под ней
+        // занимало целую строку ради одной кнопки. В шапке справа место уже
+        // есть и пустует. На широком экране выход остаётся внизу колонки.
+        right={
+          <form action={logout} className="sm:hidden">
+            <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">
+              Выйти
+            </Button>
+          </form>
+        }
       />
 
       <div className="mx-auto flex max-w-3xl flex-col gap-8 px-4 py-6 sm:flex-row sm:gap-10">
@@ -39,7 +49,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           там нечего. */}
       <aside className="flex shrink-0 flex-col gap-1 sm:sticky sm:top-[4.5rem] sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start">
         <SettingsNav />
-        <form action={logout} className="mt-4 sm:mt-auto">
+        <form action={logout} className="mt-4 hidden sm:mt-auto sm:block">
           <Button variant="ghost" size="sm" type="submit" className="w-full justify-start px-2">
             Выйти
           </Button>

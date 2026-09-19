@@ -7,7 +7,15 @@ import { TopicChips } from "@/components/topic-chips";
 import { FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export function InterestsForm({ chips, total }: { chips: ChipInput[]; total: number }) {
+export function InterestsForm({
+  chips,
+  total,
+  inToday,
+}: {
+  chips: ChipInput[];
+  total: number;
+  inToday: number;
+}) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -53,7 +61,7 @@ export function InterestsForm({ chips, total }: { chips: ChipInput[]; total: num
       <CardContent>
         <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
           <FieldGroup>
-            <TopicChips initial={chips} initialTotal={total} onChange={schedule} />
+            <TopicChips initial={chips} initialTotal={total} inToday={inToday} onChange={schedule} />
             {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
           </FieldGroup>
         </form>
