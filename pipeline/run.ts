@@ -14,7 +14,8 @@ import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
+import { maxDigestOf, sourcesForPlan } from "../src/lib/plans";
+import { effectivePlan } from "../src/lib/lemon";
 
 const log = (msg: string) => console.log(msg);
 
@@ -90,7 +91,7 @@ async function runForReader(
 ): Promise<number> {
   const name = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
   const topics = await getReaderTopics(reader.id);
-  const plan = planOf(reader.plan);
+  const plan = effectivePlan(reader);
 
   // Читатель без интересов пропускается, а не получает пустой выпуск:
   // пустой выпуск выглядит как «сегодня ничего не было».
@@ -389,7 +390,7 @@ async function main() {
   // бесплатный читал бы платный источник за чужой счёт.
   const allowed = new Map<number, Source>();
   for (const reader of readers) {
-    for (const source of sourcesForPlan(all, planOf(reader.plan))) allowed.set(source.id, source);
+    for (const source of sourcesForPlan(all, effectivePlan(reader))) allowed.set(source.id, source);
   }
   const sources = [...allowed.values()].sort((a, b) => a.id - b.id);
   if (sources.length < all.length) {

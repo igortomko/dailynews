@@ -16,9 +16,10 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, kindDenial, maxDigestOf, planOf, sourcesForPlan, topicsWord,
+  allows, cheapestWith, kindDenial, maxDigestOf, sourcesForPlan, topicsWord,
   PLAN_IDS, PLANS, type Gated,
 } from "./plans";
+import { effectivePlan } from "./lemon";
 import { getSources } from "./queries";
 import { toSlug } from "./slug";
 
@@ -59,7 +60,7 @@ export type ChipInput = { slug: string; label: string; hint: string; count: numb
  * действие вызывается по своему адресу, мимо страницы с заглушкой.
  */
 async function denyBySection(section: Gated): Promise<{ error: string } | null> {
-  const plan = planOf((await currentReader()).plan);
+  const plan = effectivePlan(await currentReader());
   if (allows(plan, section)) return null;
   return { error: `Раздел доступен на тарифе «${cheapestWith(section).label}»` };
 }
@@ -105,7 +106,7 @@ export async function saveInterests(formData: FormData) {
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
-  const plan = planOf((await currentReader()).plan);
+  const plan = effectivePlan(await currentReader());
   if (chips.length > plan.maxTopics) {
     return {
       error:
@@ -349,7 +350,7 @@ export async function discoverSource(input: string): Promise<
   // это отказ по тарифу, а не догадка.
   const planned = planFor(raw);
   if (!("refuse" in planned)) {
-    const plan = planOf((await currentReader()).plan);
+    const plan = effectivePlan(await currentReader());
     const denials = planned.candidates.map((candidate) => kindDenial(plan, candidate.kind));
     if (denials.every(Boolean)) return { ok: false, error: denials[0]! };
   }
@@ -418,7 +419,7 @@ export async function setSourceActive(id: number, active: boolean) {
  * на бесплатном тарифе одним переключателем.
  */
 async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
-  const plan = planOf((await currentReader()).plan);
+  const plan = effectivePlan(await currentReader());
 
   const byKind = kindDenial(plan, kind);
   if (byKind) return { error: byKind };
@@ -472,7 +473,7 @@ export async function topUpDigest() {
   // Через догрузку предел тарифа обходится так же, как через ползунок:
   // digest_size мог остаться от прежнего тарифа, а платит за письмо
   // описаний владелец ключа. Потолок один и тот же, что и в прогоне.
-  const target = Math.min(reader.digest_size, maxDigestOf(planOf(reader.plan)));
+  const target = Math.min(reader.digest_size, maxDigestOf(effectivePlan(reader)));
   const missing = target - digest.taken;
   if (missing <= 0) return { ok: true as const, added: 0 };
 
@@ -488,7 +489,7 @@ export async function topUpDigest() {
   const topics = await getReaderTopics(reader.id);
   // Источники тарифа те же, что в ночном прогоне: кнопка не должна
   // приносить то, чего прогон не принёс бы.
-  const mySources = sourcesForPlan(await getSources(), planOf(reader.plan)).map((s) => s.id);
+  const mySources = sourcesForPlan(await getSources(), effectivePlan(reader)).map((s) => s.id);
   const survivors = await selectSurvivors(
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );

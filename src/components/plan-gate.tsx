@@ -1,4 +1,4 @@
-import { LockIcon } from "lucide-react";
+import { CrownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cheapestWith, topicsWord, type Gated, type Plan } from "@/lib/plans";
@@ -30,7 +30,7 @@ export function PlanGate({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <LockIcon className="size-4 text-muted-foreground" aria-hidden />
+          <CrownIcon className="size-4 text-amber-500" aria-hidden />
           {title} — на тарифе «{needed.label}»
         </CardTitle>
         <CardDescription>{what}</CardDescription>
@@ -42,9 +42,8 @@ export function PlanGate({
           в выпуске. На «{needed.label}» — {needed.maxTopics} и {needed.maxSources}, ${needed.price}{" "}
           в месяц.
         </p>
-        {/* Оплаты в проекте нет: кнопка, ведущая в никуда, хуже её отсутствия. */}
-        <Button variant="outline" size="sm" disabled className="self-start">
-          Переход на «{needed.label}» пока вручную
+        <Button size="sm" className="self-start" render={<a href="/settings/subscription" />}>
+          Перейти на «{needed.label}»
         </Button>
       </CardContent>
     </Card>

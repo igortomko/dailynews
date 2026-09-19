@@ -1,5 +1,6 @@
 import { currentReader } from "@/lib/session";
-import { allows, planOf } from "@/lib/plans";
+import { allows } from "@/lib/plans";
+import { effectivePlan } from "@/lib/lemon";
 import { PlanGate } from "@/components/plan-gate";
 import { PersonalizationForm } from "./form";
 
@@ -7,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PersonalizationPage() {
   const profile = await currentReader();
-  const plan = planOf(profile.plan);
+  const plan = effectivePlan(profile);
   // Проверка стоит на самой странице, а не только в меню: спрятанный пункт
   // обходится набранным адресом, и раздел открывался бы целиком.
   if (!allows(plan, "personalization")) {

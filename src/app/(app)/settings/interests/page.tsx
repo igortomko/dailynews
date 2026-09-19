@@ -2,6 +2,7 @@ import { getDigestDays, getFeed } from "@/lib/queries";
 import { getReaderTopics } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { planOf } from "@/lib/plans";
+import { effectivePlan } from "@/lib/lemon";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export default async function InterestsPage() {
     <InterestsForm
       total={reader.digest_size}
       inToday={inToday}
-      plan={planOf(reader.plan)}
+      plan={effectivePlan(reader)}
       chips={topics.map((topic) => ({
         slug: topic.slug,
         label: topic.label,

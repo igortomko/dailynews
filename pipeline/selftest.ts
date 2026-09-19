@@ -1049,4 +1049,78 @@ assert.ok(!alreadyIn("Совет директоров одобрил сделк�
 assert.ok(!alreadyIn("", "русском"), "пустой текст не делит на ноль");
 assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержку swap на узлах.", "русском"), "латинские термины внутри русского не сбивают счёт");
 
-console.log("Самопроверка пройдена: 271 утверждений");
+
+// --- подписка Lemon Squeezy --------------------------------------------------
+// Тариф выдаётся только подписанным событием с их стороны, а действует он,
+// пока оплачен. Оба правила молчаливы при ошибке: лишний платный выпуск
+// и снятый раньше срока тариф одинаково не видны в логе.
+process.env.LEMON_VARIANT_PLUS = "111";
+process.env.LEMON_BUY_PLUS = "https://shop.lemonsqueezy.com/buy/aaa";
+process.env.LEMON_VARIANT_PRO = "222";
+process.env.LEMON_BUY_PRO = "https://shop.lemonsqueezy.com/buy/bbb";
+process.env.LEMON_WEBHOOK_SECRET = "s3cret";
+
+// Импорт статический: переменные окружения читаются при вызове, а не при
+// загрузке модуля, поэтому выставить их выше по файлу достаточно.
+import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import { createHmac } from "node:crypto";
+
+const reader = (over: Record<string, unknown> = {}) =>
+  ({ id: 1, plan: "pro", subscription_status: "active", plan_ends_at: null,
+     plan_renews_at: null, subscription_id: "sub_1", portal_url: null, ...over } as never);
+
+const day = 86_400_000;
+assert.equal(effectivePlan(reader()).id, "pro", "активная подписка даёт купленный тариф");
+assert.equal(
+  effectivePlan(reader({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() + day).toISOString() })).id,
+  "pro",
+  "отменённая подписка работает до конца оплаченного периода",
+);
+assert.equal(
+  effectivePlan(reader({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() - day).toISOString() })).id,
+  "free",
+  "после конца оплаченного периода тариф гаснет сразу, а не к ночному прогону",
+);
+assert.equal(
+  effectivePlan(reader({ subscription_status: "expired", plan_ends_at: null })).id,
+  "free",
+  "истёкшая подписка не даёт платного выпуска",
+);
+assert.equal(effectivePlan(reader({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
+assert.ok(endingAt(reader({ plan_ends_at: new Date(Date.now() + day).toISOString() })), "дата конца видна интерфейсу");
+assert.equal(endingAt(reader()), null, "у активной подписки конца нет");
+
+const body = JSON.stringify({ hello: "world" });
+const good = createHmac("sha256", "s3cret").update(body).digest("hex");
+assert.ok(signatureValid(body, good), "своя подпись принимается");
+assert.ok(!signatureValid(body, good.replace(/.$/, "0")), "чужая подпись отвергается");
+assert.ok(!signatureValid(body, null), "без подписи — отказ");
+assert.ok(!signatureValid(body, "не-шестнадцатеричное"), "мусор вместо подписи не роняет разбор");
+
+const event = (over: Record<string, unknown> = {}) => ({
+  meta: { event_name: "subscription_updated", custom_data: { reader_id: 7 } },
+  data: { id: "sub_9", attributes: { variant_id: 222, status: "active", renews_at: "2026-11-01T00:00:00Z", ends_at: null } },
+  ...over,
+});
+
+const applied = readEvent(event() as never);
+assert.ok(applied.ok && applied.readerId === 7 && applied.update.plan === "pro", "вариант превращается в тариф");
+assert.ok(!readEvent(event({ meta: { event_name: "order_created" } }) as never).ok, "не про подписку — мимо");
+assert.ok(
+  !readEvent(event({ meta: { event_name: "subscription_created", custom_data: {} } }) as never).ok,
+  "без номера читателя платёж некому засчитать",
+);
+assert.ok(
+  !readEvent({ ...event(), data: { id: "x", attributes: { variant_id: 999, status: "active" } } } as never).ok,
+  "чужой вариант не выдаёт тариф",
+);
+const expired = readEvent({
+  ...event(),
+  data: { id: "sub_9", attributes: { variant_id: 222, status: "expired" } },
+} as never);
+assert.ok(expired.ok && expired.update.plan === "free", "истёкшая подписка сбрасывает тариф");
+
+assert.ok(checkoutUrl("pro", 42)?.includes("checkout%5Bcustom%5D%5Breader_id%5D=42"), "номер читателя уходит в оплату");
+assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
+
+console.log("Самопроверка пройдена: 291 утверждение");

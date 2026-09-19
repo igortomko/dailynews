@@ -126,6 +126,66 @@ export const cheapestWith = (section: Gated): Plan =>
   PLAN_IDS.map((id) => PLANS[id]).find((plan) => allows(plan, section)) ?? PLANS.pro;
 
 /**
+ * Что именно закрыто тарифом — описано данными, а не разложено по экранам.
+ *
+ * `has` — та же проверка, по которой возможность работает. Корона, текст
+ * окна и настоящий предел обязаны опираться на одно правило: корона над
+ * работающей кнопкой и работающая кнопка без короны — одинаково стыдно,
+ * и оба случая на глаз незаметны.
+ */
+export type FeatureId =
+  | "personalization" | "calibration" | "subscription" | "x" | "topics" | "digest" | "sources";
+
+export type Feature = {
+  title: string;
+  /** Одна фраза: что читатель получит. Без «улучшенный» и «расширенный». */
+  what: string;
+  has: (plan: Plan) => boolean;
+};
+
+export const FEATURES: Record<FeatureId, Feature> = {
+  personalization: {
+    title: "Язык и подача",
+    what: "На каком языке приходит выпуск и как он написан: попроще или как специалисту, суховато или живее.",
+    has: (plan) => allows(plan, "personalization"),
+  },
+  calibration: {
+    title: "Отчёт о попаданиях",
+    what: "Видно, угадывает ли лента: что ты открывал, что пролистнул и становится ли выбор точнее.",
+    has: (plan) => allows(plan, "calibration"),
+  },
+  subscription: {
+    title: "Своя модель",
+    what: "Подключить свою модель, если хочется другую. По умолчанию выпуск пишет модель Ленты.",
+    has: (plan) => allows(plan, "subscription"),
+  },
+  x: {
+    title: "Посты из X",
+    what: "Твиты попадают в выпуск наравне с новостями сайтов. X берёт за доступ отдельно, поэтому только на Pro.",
+    has: (plan) => plan.kinds.includes("x"),
+  },
+  topics: {
+    title: "Темы",
+    what: "О чём тебе интересно читать — например, ИИ или дизайн. Выпуск делится между темами, чтобы одна не заняла всё.",
+    has: (plan) => plan.maxTopics > PLANS.free.maxTopics,
+  },
+  digest: {
+    title: "Новостей в выпуске",
+    what: "Сколько новостей приходит за раз. Десять — прочитать за кофе, сто — растянуть на день.",
+    has: (plan) => maxDigestOf(plan) > maxDigestOf(PLANS.free),
+  },
+  sources: {
+    title: "Источников",
+    what: "Сайты, блоги и каналы, за которыми лента следит каждый день. Чем их больше, тем шире выбор для выпуска.",
+    has: (plan) => plan.maxSources > PLANS.free.maxSources,
+  },
+};
+
+/** Самый дешёвый тариф, на котором возможность есть. */
+export const cheapestFor = (id: FeatureId): Plan =>
+  PLAN_IDS.map((planId) => PLANS[planId]).find((plan) => FEATURES[id].has(plan)) ?? PLANS.pro;
+
+/**
  * Кого опрашивать в этом прогоне.
  *
  * Порядок — по id: при понижении тарифа остаются те, что заведены раньше,
