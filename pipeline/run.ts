@@ -13,6 +13,7 @@ import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
+import { maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
 
 const log = (msg: string) => console.log(msg);
 
@@ -61,13 +62,15 @@ export async function collect(sources: Source[]): Promise<number[]> {
  * Возвращает потраченное, чтобы прогон мог сказать вслух, во что обошёлся
  * день. Молчаливый расход — это счёт в конце месяца вместо строки в логе.
  */
-async function runForReader(reader: Reader, day: string, shared: {
-  collected: number;
-  duplicates: number;
-  scored: number;
-}): Promise<number> {
+async function runForReader(
+  reader: Reader,
+  day: string,
+  allSources: Source[],
+  shared: { collected: number; duplicates: number; scored: number },
+): Promise<number> {
   const name = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
   const topics = await getReaderTopics(reader.id);
+  const plan = planOf(reader.plan);
 
   // Читатель без интересов пропускается, а не получает пустой выпуск:
   // пустой выпуск выглядит как «сегодня ничего не было».
@@ -84,8 +87,13 @@ async function runForReader(reader: Reader, day: string, shared: {
     return 0;
   }
 
+  // Потолок тарифа поверх ползунка: digest_size мог остаться от прежнего
+  // тарифа, а платит за письмо описаний владелец ключа. Тот же потолок
+  // стоит на догрузке из интерфейса — иначе он обходился бы кнопкой.
+  const digestSize = Math.min(reader.digest_size, maxDigestOf(plan));
+  const mySources = sourcesForPlan(allSources, plan).map((source) => source.id);
   const survivors = await selectSurvivors(
-    sql, reader.id, reader.weights, targetsOf(topics), reader.digest_size,
+    sql, reader.id, reader.weights, targetsOf(topics), digestSize, mySources,
   );
   if (survivors.length === 0) {
     log(`  ${name}: свежих материалов нет — пропуск`);
@@ -151,6 +159,7 @@ async function runForReader(reader: Reader, day: string, shared: {
         flagged: digest.flagged ?? 0,
         summary_quality: Number(meanQuality.toFixed(1)),
         complexity: reader.complexity,
+        plan: plan.id,
         words_per_sentence: Number(perSentence.toFixed(1)),
         long_word_share: Number(longShare.toFixed(3)),
         // Что на самом деле ушло в провайдера: модель выводит writeDigest,
@@ -279,7 +288,24 @@ async function main() {
 
   const readers = await allReaders();
   const topics = await topicsInUse();
-  const sources = await sql<Source[]>`select * from dailynews.sources where active order by id`;
+  const all = await sql<Source[]>`select * from dailynews.sources where active order by id`;
+
+  // Тариф решает не только форма настроек: понижение оставляет лишние
+  // источники включёнными в каталоге, и опрашивать их всё равно нельзя —
+  // X платный, и счёт приходит за сбор, а не за галочку в интерфейсе.
+  //
+  // Сбор общий, поэтому опрашивается объединение по всем читателям, а вот
+  // в выпуск каждому попадает только то, что разрешает его тариф (select.ts).
+  // Иначе либо самый скромный тариф обесточил бы сбор для всех, либо
+  // бесплатный читал бы платный источник за чужой счёт.
+  const allowed = new Map<number, Source>();
+  for (const reader of readers) {
+    for (const source of sourcesForPlan(all, planOf(reader.plan))) allowed.set(source.id, source);
+  }
+  const sources = [...allowed.values()].sort((a, b) => a.id - b.id);
+  if (sources.length < all.length) {
+    log(`   тарифы читателей: опрашиваем ${sources.length} из ${all.length} включённых`);
+  }
 
   if (topics.length === 0) {
     log("Ни у кого нет интересов — оценивать поток не по чему. Прогон отменён.");
@@ -353,7 +379,7 @@ async function main() {
   let personal = 0;
   for (const reader of readers) {
     try {
-      personal += await runForReader(reader, day, {
+      personal += await runForReader(reader, day, all, {
         collected: collected.length, duplicates, scored: scored.length,
       });
     } catch (error) {

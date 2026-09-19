@@ -127,9 +127,10 @@ async function main() {
       "веса по умолчанию в коде и в jsonb-дефолте колонки обязаны совпадать",
     );
 
-    // Тариф достался от потерянной 0019_plan. На чистой базе её колонки нет,
-    // и перенос обязан это пережить, а не уронить всю миграцию.
-    assert.equal(owner.plan, "free", "тариф по умолчанию — free");
+    // Тариф заводит 0019_plan и ставит владельцу pro; 0020 увозит колонку
+    // в readers. Перенос обязан довезти значение, а не выдать умолчание —
+    // и обязан пережить базу, где колонки profile.plan нет вовсе.
+    assert.equal(owner.plan, "pro", "тариф владельца должен переехать как есть");
     await assert.rejects(
       sql`update dailynews.readers set plan = 'platinum' where id = ${owner.id}`,
       /plan/,
@@ -155,6 +156,9 @@ async function main() {
     const second = await readers.ensureReader(BIG_TELEGRAM_ID, "vera");
     assert.ok(!second.owner, "второй читатель не владелец");
     assert.equal(second.telegram_id, String(BIG_TELEGRAM_ID), "telegram_id должен пережить bigint");
+    // Новый читатель начинает с бесплатного: платный источник не достаётся
+    // тому, за кого ещё никто не платил.
+    assert.equal(second.plan, "free", "новый читатель заводится на бесплатном тарифе");
     const again = await readers.ensureReader(BIG_TELEGRAM_ID, "vera-new");
     assert.equal(again.id, second.id, "повторный /start не должен заводить второго читателя");
     assert.equal(again.username, "vera-new", "username обновляется: его меняют в Telegram");
@@ -323,8 +327,11 @@ async function main() {
     // Самая дорогая ошибка многопользовательского отбора: первый прогнавшийся
     // читатель вычерпывает поток, а остальные получают остатки. Выпуск при
     // этом приходит вовремя и выглядит осмысленным.
-    const ownerCandidates = await candidates(sql, owner.id);
-    const secondCandidates = await candidates(sql, second.id);
+    // Все источники каталога: здесь проверяется разделение читателей,
+    // а предел тарифа по источникам — в npm test, на чистых функциях.
+    const everySource = sources.map((entry) => entry.id);
+    const ownerCandidates = await candidates(sql, owner.id, everySource);
+    const secondCandidates = await candidates(sql, second.id, everySource);
     const idsOf = (list: { id: number }[]) => new Set(list.map((row) => String(row.id)));
 
     assert.ok(
@@ -403,7 +410,9 @@ async function main() {
     }
 
     const budgetTargets = targetsOf(await readers.getReaderTopics(owner.id));
-    const survivors = await selectSurvivors(sql, owner.id, owner.weights, budgetTargets, 20);
+    const survivors = await selectSurvivors(
+      sql, owner.id, owner.weights, budgetTargets, 20, everySource,
+    );
     assert.equal(survivors.length, 20, "отбор должен отдать ровно digest_size");
     for (const { topic, target } of budget) {
       const got = survivors.filter((s) => s.topic_label === topic.label).length;
@@ -427,6 +436,7 @@ async function main() {
     `;
     const afterOff = await selectSurvivors(
       sql, owner.id, owner.weights, targetsOf(await readers.getReaderTopics(owner.id)), 20,
+      everySource,
     );
     const offCount = afterOff.filter((s) => s.topic_label === budget[0].topic.label).length;
     assert.ok(
@@ -444,6 +454,7 @@ async function main() {
     `;
     const secondSurvivors = await selectSurvivors(
       sql, second.id, second.weights, targetsOf(await readers.getReaderTopics(second.id)), 20,
+      everySource,
     );
     const secondShare = secondSurvivors.filter((s) => s.topic_label === budget[1].topic.label).length;
     assert.ok(

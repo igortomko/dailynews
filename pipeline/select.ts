@@ -34,7 +34,11 @@ export type Candidate = {
  * не должны. Иначе первый прогнавшийся читатель вычерпывал бы поток,
  * а остальные получали бы остатки — выпуск при этом приходил бы вовремя.
  */
-export async function candidates(sql: Db, readerId: number): Promise<Candidate[]> {
+export async function candidates(
+  sql: Db,
+  readerId: number,
+  sourceIds: number[],
+): Promise<Candidate[]> {
   const rows = await sql<Candidate[]>`
     select i.id, i.title, i.excerpt, i.url, s.label as source_label,
            sc.topic_id::int as topic_id,
@@ -45,6 +49,11 @@ export async function candidates(sql: Db, readerId: number): Promise<Candidate[]
       join dailynews.sources s on s.id = i.source_id
  left join dailynews.topics t on t.id = sc.topic_id
      where i.dup_of is null
+       -- Источники тарифа: сбор общий на всех, а в выпуск попадает только
+       -- то, что тариф этого читателя разрешает. Иначе бесплатный читал бы
+       -- платный источник, за который платит не он.
+       -- Каст обязателен: нетипизированный массив уходит в int, а id — bigint.
+       and i.source_id = any(${sourceIds}::bigint[])
        and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
        and not exists (
          select 1
@@ -130,8 +139,9 @@ export async function selectSurvivors(
   weights: Weights,
   targets: Map<number, number>,
   digestSize: number,
+  sourceIds: number[],
 ): Promise<Survivor[]> {
-  return pickSurvivors(await candidates(sql, readerId), weights, targets, digestSize);
+  return pickSurvivors(await candidates(sql, readerId, sourceIds), weights, targets, digestSize);
 }
 
 /** Цели по темам в виде, который нужен отбору. */

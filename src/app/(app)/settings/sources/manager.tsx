@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { Source } from "@/lib/types";
+import type { Plan } from "@/lib/plans";
 
 const KINDS = [
   { value: "rss", label: "RSS", placeholder: "https://example.com/feed", hint: "Адрес фида. Через RSS ходят блоги, YouTube, arXiv, Substack." },
@@ -26,16 +27,19 @@ const KINDS = [
  * Каталог общий на всех читателей, поэтому правит его владелец: удаление
  * источника уносит каскадом собранные материалы, и у такой кнопки не должно
  * быть ста рук. Остальным он виден целиком — знать, откуда берётся лента,
- * полезно и без права её менять.
+ * полезно и без права её менять. Тариф при этом личный: он решает, сколько
+ * источников опрашивается для этого читателя.
  */
 export function SourcesManager({
   sources,
+  plan,
   editable,
-}: { sources: Source[]; editable: boolean }) {
+}: { sources: Source[]; plan: Plan; editable: boolean }) {
   const [kind, setKind] = useState<string>("rss");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const active = KINDS.find((entry) => entry.value === kind)!;
+  const on = sources.filter((source) => source.active).length;
 
   const dead = sources.filter((source) => source.active && source.last_error);
   const silent = sources.filter(
@@ -91,7 +95,7 @@ export function SourcesManager({
                   onValueChange={(value: string[]) => value[0] && setKind(value[0])}
                   variant="outline"
                 >
-                  {KINDS.map((entry) => (
+                  {KINDS.filter((entry) => plan.kinds.includes(entry.value)).map((entry) => (
                     <ToggleGroupItem key={entry.value} value={entry.value}>
                       {entry.label}
                     </ToggleGroupItem>
@@ -124,7 +128,9 @@ export function SourcesManager({
       <Card>
         <CardHeader>
           <CardTitle>Источники</CardTitle>
-          <CardDescription>{sources.filter((s) => s.active).length} включено из {sources.length}</CardDescription>
+          <CardDescription>
+            {on} включено из {sources.length} · тариф «{plan.label}» опрашивает {plan.maxSources}
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
           {sources.map((source, index) => (
@@ -135,7 +141,10 @@ export function SourcesManager({
                   checked={source.active}
                   disabled={!editable}
                   onCheckedChange={(checked: boolean) =>
-                    startTransition(() => setSourceActive(source.id, checked))
+                    startTransition(async () => {
+                      const result = await setSourceActive(source.id, checked);
+                      if (result && "error" in result) toast.error(result.error);
+                    })
                   }
                 />
                 <div className="flex min-w-0 flex-1 flex-col">

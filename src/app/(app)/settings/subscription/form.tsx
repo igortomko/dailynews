@@ -68,7 +68,7 @@ export function SubscriptionForm({
             action={(formData) =>
               startTransition(async () => {
                 const result = await saveLlm(formData);
-                if (result?.error) {
+                if (result && "error" in result) {
                   setError(result.error);
                   return;
                 }
@@ -107,7 +107,18 @@ export function SubscriptionForm({
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => startTransition(async () => { await clearLlmKey(); toast.success("Ключ убран"); })}
+                    onClick={() =>
+                  startTransition(async () => {
+                    // Отказ тарифа нельзя запивать успехом: «Ключ убран»
+                    // при оставшемся ключе — это отказ, похожий на успех.
+                    const result = await clearLlmKey();
+                    if (result && "error" in result) {
+                      toast.error(result.error);
+                      return;
+                    }
+                    toast.success("Ключ убран");
+                  })
+                }
                   >
                     Убрать ключ
                   </Button>
