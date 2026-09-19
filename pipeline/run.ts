@@ -188,6 +188,11 @@ async function main() {
     ? quality.scored.reduce((sum, row) => sum + row.total, 0) / quality.scored.length
     : 0;
   log(`   качество описаний: ${meanQuality.toFixed(0)} из 85 по ${quality.scored.length}`);
+  log(
+    `   дайджест: ${digest.usage.requests} запроса, ` +
+    `${digest.usage.input} вх (${digest.usage.cached} из кэша), ` +
+    `${digest.usage.output} вых (${digest.usage.reasoning} рассуждение)`,
+  );
 
   // Ползунок сложности меняет промпт — а меняется ли текст, видно только
   // по ряду этих двух чисел рядом с положением ползунка.
@@ -212,6 +217,12 @@ async function main() {
         scored: scored.length,
         jev_input_tokens: usage.input,
         jev_cost_usd: Number(jevCost.toFixed(5)),
+        digest_model: digest.model,
+        digest_input_tokens: digest.usage.input,
+        digest_cached_tokens: digest.usage.cached,
+        digest_output_tokens: digest.usage.output,
+        digest_reasoning_tokens: digest.usage.reasoning,
+        digest_reasoning_effort: digest.reasoningEffort,
         flagged: digest.flagged ?? 0,
         summary_quality: Number(meanQuality.toFixed(1)),
         complexity: profile.complexity ?? DEFAULT_COMPLEXITY,
