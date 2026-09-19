@@ -8,7 +8,7 @@ import { TopicChips } from "@/components/topic-chips";
 import { FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export function InterestsForm({ chips }: { chips: ChipInput[] }) {
+export function InterestsForm({ chips, total }: { chips: ChipInput[]; total: number }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -52,14 +52,13 @@ export function InterestsForm({ chips }: { chips: ChipInput[] }) {
           </span>
         </CardTitle>
         <CardDescription>
-          Направления, по которым собираются новости. Они же — вкладки в ленте.
-          Убранный интерес не удаляется, а гаснет: на нём держатся оценки уже собранного.
+          Направления, по которым собираются новости, и сколько места занимает каждое.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
           <FieldGroup>
-            <TopicChips initial={chips} onChange={schedule} />
+            <TopicChips initial={chips} initialTotal={total} onChange={schedule} />
             {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
           </FieldGroup>
         </form>

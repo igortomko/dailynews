@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueLoginToken, issueSession, SESSION_COOKIE } from "./auth";
 import { checkFeed } from "../../pipeline/check-sources";
+import { MIN_PER_TOPIC, normalize } from "./topic-budget";
+import { toSlug } from "./slug";
 
 export async function login(_prev: unknown, formData: FormData) {
   const password = String(formData.get("password") ?? "");
@@ -50,25 +52,8 @@ export async function logout() {
   redirect("/login");
 }
 
-export type ChipInput = { slug: string; label: string; hint: string };
-
-/** Транслитерация в slug: он уходит в Jev как имя варианта choice. */
-function toSlug(label: string): string {
-  const map: Record<string, string> = {
-    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
-    й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
-    у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ы: "y", э: "e",
-    ю: "yu", я: "ya", ь: "", ъ: "",
-  };
-  return label
-    .toLowerCase()
-    .split("")
-    .map((char) => map[char] ?? char)
-    .join("")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48) || "topic";
-}
+/** `count` — цель по числу новостей в день; в базе это `topics.weight`. */
+export type ChipInput = { slug: string; label: string; hint: string; count: number };
 
 /**
  * Персонализация и интересы — две формы, поэтому два действия. Одна функция
@@ -78,13 +63,18 @@ export async function savePersonalization(formData: FormData) {
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
   const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
-  const digestSize = Math.min(50, Math.max(3, Number(formData.get("digest_size") ?? 12)));
+  // Ползунок шлёт строку, а нечисло превратилось бы в NaN и уронило запрос
+  // ограничением, а не подсказкой. Держим в границах колонки здесь же.
+  const asked = Number(formData.get("complexity"));
+  const complexity = Math.min(5, Math.max(1, Math.round(Number.isFinite(asked) ? asked : 3)));
+  const style = String(formData.get("style") ?? "").trim().slice(0, 40) || "нейтральный";
 
   await sql`
     update dailynews.profile
        set reader_context = ${readerContext},
-           digest_size = ${digestSize},
            language = ${language},
+           complexity = ${complexity},
+           style = ${style},
            onboarded_at = coalesce(onboarded_at, now()),
            updated_at = now()
      where id = 1
@@ -93,23 +83,49 @@ export async function savePersonalization(formData: FormData) {
   return { ok: true as const };
 }
 
+/**
+ * Интересы и бюджет внимания — одна форма: сколько новостей в день и как они
+ * делятся между темами, задаётся одним движением. Поэтому размер дайджеста
+ * сохраняется здесь, и только здесь: у поля должен быть один владелец, иначе
+ * вторая форма, где этого поля нет, молча вернёт его к минимуму.
+ */
 export async function saveInterests(formData: FormData) {
   const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
   if (chips.length === 0) return { error: "Добавь хотя бы один интерес" };
 
   const slugs = chips.map((chip) => chip.slug || toSlug(chip.label));
+  // Разные названия дают один slug: «ИИ-инфра» и «ИИ инфра» после
+  // транслитерации совпадают, on conflict схлопывает их в одну строку,
+  // и цель первой темы теряется. Сумма целей молча перестаёт равняться
+  // размеру дайджеста — полоса показывает одно, приходит другое.
+  if (new Set(slugs).size !== slugs.length) {
+    return { error: "Два интереса совпадают после упрощения названия — переименуй один" };
+  }
+  const digestSize = Math.min(50, Math.max(3, Math.round(Number(formData.get("digest_size"))) || 12));
+  // Приводим ещё раз на сервере: из формы приходит то, что нарисовал
+  // браузер, а сумма целей — это и есть обещание размера дайджеста.
+  const counts = normalize(
+    chips.map((chip) => Math.max(MIN_PER_TOPIC, Math.round(Number(chip.count)) || MIN_PER_TOPIC)),
+    digestSize,
+  );
 
   await sql.begin(async (tx) => {
+    await tx`update dailynews.profile set digest_size = ${digestSize} where id = 1`;
     // Темы, которые убрали, гасим, а не удаляем: на них ссылаются
     // оценки уже собранных материалов, и калибровке они ещё пригодятся.
     await tx`update dailynews.topics set active = false where slug <> all(${slugs})`;
 
     for (const [index, chip] of chips.entries()) {
+      // Цель по числу новостей и есть вес темы: отбор делит номер материала
+      // внутри темы на неё, и при сумме, равной размеру дайджеста, каждая
+      // тема получает примерно столько, сколько здесь написано.
+      const weight = counts[index];
       await tx`
-        insert into dailynews.topics (slug, label, hint, position, active)
-        values (${slugs[index]}, ${chip.label}, ${chip.hint ?? ""}, ${index + 1}, true)
+        insert into dailynews.topics (slug, label, hint, weight, position, active)
+        values (${slugs[index]}, ${chip.label}, ${chip.hint ?? ""}, ${weight}, ${index + 1}, true)
         on conflict (slug) do update
           set label = excluded.label, hint = excluded.hint,
+              weight = excluded.weight,
               position = excluded.position, active = true
       `;
     }

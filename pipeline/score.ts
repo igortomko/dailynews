@@ -93,10 +93,16 @@ const HORIZON_WEIGHT: Record<Horizon, number> = { years: 1, months: 0.6, noise: 
 /** У noul нет своего confidence: уверенность — это удалённость от 0.5. */
 const noulConfidence = (p: number) => Math.abs(p - 0.5) * 2;
 
-export function composite(axes: Axes, weights: Weights, topicWeight: number): number {
+/**
+ * Скор — о материале, а не о теме. Вес темы сюда больше не входит: он
+ * решает, сколько мест тема берёт в дайджесте (pipeline/select.ts), и,
+ * умножая заодно скор, делал бы числа разных тем несравнимыми — корзины
+ * на странице калибровки поехали бы от одной правки внимания.
+ */
+export function composite(axes: Axes, weights: Weights): number {
   const topicTerm = axes.topic.choice === "other"
     ? 0
-    : axes.topic.probabilities[axes.topic.choice] * topicWeight;
+    : axes.topic.probabilities[axes.topic.choice];
 
   return (
     weights.topic * topicTerm +
@@ -127,7 +133,6 @@ export async function scoreAll(
 ): Promise<{ scored: Scored[]; usage: { input: number; output: number }; model: string }> {
   const client = new TypeSafeClient();
   const questions = buildQuestions(topics, readerContext);
-  const topicWeight = new Map(topics.map((t) => [t.slug, t.weight]));
 
   const scored: Scored[] = [];
   const usage = { input: 0, output: 0 };
@@ -184,7 +189,7 @@ export async function scoreAll(
         scored.push({
           item_id: item.id,
           topic_slug: axes.topic.choice,
-          total: composite(axes, weights, topicWeight.get(axes.topic.choice) ?? 1),
+          total: composite(axes, weights),
           confidence: confidences.reduce((a, b) => a + b, 0) / confidences.length,
           axes,
         });
