@@ -105,6 +105,37 @@ function listOf(names: string[], limit = 3): string {
 const SILENT_DAYS = 5;
 
 /**
+ * Куда ведёт источник, если по нему щёлкнуть.
+ *
+ * Адресом фида url бывает не у всех: у Hacker News там листинг, у Telegram —
+ * имя канала, у почты — адрес отправителя. Ссылка на «topstories» вела бы
+ * в никуда, поэтому адрес собирается по виду источника, а где открывать
+ * нечего — ссылки нет вовсе.
+ */
+function openUrlOf(source: SourceHealth): string | null {
+  switch (source.kind) {
+    case "rss":
+      return /^https?:\/\//.test(source.url) ? source.url : null;
+    case "hackernews":
+      return source.url === "newstories"
+        ? "https://news.ycombinator.com/newest"
+        : source.url === "beststories"
+          ? "https://news.ycombinator.com/best"
+          : "https://news.ycombinator.com/";
+    case "telegram":
+      return `https://t.me/${source.url}`;
+    case "reddit":
+      return `https://www.reddit.com/r/${source.url}`;
+    case "x":
+      return `https://x.com/search?q=${encodeURIComponent(source.url)}`;
+    // У почты открывать нечего: адрес отправителя — не страница, а щелчок
+    // по нему запускал бы почтовую программу, чего никто не просил.
+    case "email":
+      return null;
+  }
+}
+
+/**
  * Что с источником не так, или null, когда всё в порядке.
  *
  * Строка отдачи под каждым источником — это тридцать строк служебного текста
@@ -417,12 +448,31 @@ export function SourcesManager({
                   <SourceIcon kind={source.kind} url={source.url} className="mt-0.5 size-4" />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-medium">{source.label}</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {source.url}
-                      {source.input_url && source.input_url !== source.url
-                        ? ` ← ${source.input_url}`
-                        : ""}
-                    </span>
+                    {/*
+                      Адрес открывается в соседнем окне: увидеть, что за
+                      источником, — обычное желание, а копировать ссылку
+                      руками ради этого незачем.
+                    */}
+                    {openUrlOf(source) ? (
+                      <a
+                        href={openUrlOf(source)!}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="truncate text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        {source.url}
+                        {source.input_url && source.input_url !== source.url
+                          ? ` ← ${source.input_url}`
+                          : ""}
+                      </a>
+                    ) : (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {source.url}
+                        {source.input_url && source.input_url !== source.url
+                          ? ` ← ${source.input_url}`
+                          : ""}
+                      </span>
+                    )}
                     {troubleOf(source) ? (
                       <span className="truncate text-xs text-muted-foreground">
                         {troubleOf(source)}
@@ -438,12 +488,12 @@ export function SourcesManager({
                 */}
                 {source.last_error ? (
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="destructive" />}>ошибка</TooltipTrigger>
+                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>ошибка</TooltipTrigger>
                     <TooltipContent>{source.last_error}</TooltipContent>
                   </Tooltip>
                 ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="destructive" />}>
+                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>
                       молчит {source.silent_days} дн.
                     </TooltipTrigger>
                     <TooltipContent>
@@ -452,7 +502,7 @@ export function SourcesManager({
                   </Tooltip>
                 ) : source.last_count !== null ? (
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="secondary" />}>
+                    <TooltipTrigger render={<Badge variant="secondary" className="cursor-help" />}>
                       {source.last_count}
                     </TooltipTrigger>
                     <TooltipContent>
