@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { TrashIcon, PlusIcon, ExternalLinkIcon, GlobeIcon } from "lucide-react";
-import { addSource, deleteSource, discoverSource } from "@/lib/actions";
+import { addSource, deleteSource, discoverSource, restoreSource } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -63,9 +63,35 @@ function SourceIcon({
   const src = faviconOf(kind, url);
   if (!src || failed) return <GlobeIcon className={`${className} text-muted-foreground`} />;
   return (
+    // Ленивая загрузка не украшение: значок — это запрос к чужому домену,
+    // по одному на строку. На семнадцати источниках это семнадцать
+    // рукопожатий TLS при каждом показе страницы, от 0,1 до 1,3 секунды
+    // каждое, и три из них впустую — favicon.ico есть не у всех. С lazy
+    // грузятся только те строки, до которых долистали.
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt="" className={`${className} shrink-0 rounded-sm`} onError={() => setFailed(true)} />
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      width={16}
+      height={16}
+      className={`${className} shrink-0 rounded-sm`}
+      onError={() => setFailed(true)}
+    />
   );
+}
+
+/**
+ * Перечисление, которое не растёт бесконечно.
+ *
+ * Тревога со склеенными именами полусотни источников — это абзац, который
+ * не читают, то есть тревога, переставшая работать. Первые три называются,
+ * остальные считаются: список рядом всё равно сортирован сломанным вверх.
+ */
+function listOf(names: string[], limit = 3): string {
+  if (names.length <= limit) return names.join(", ");
+  return `${names.slice(0, limit).join(", ")} и ещё ${names.length - limit}`;
 }
 
 /**
@@ -123,6 +149,30 @@ export function SourcesManager({
     (source) => source.active && !source.last_error && (source.silent_days ?? 0) >= SILENT_DAYS,
   );
 
+  /**
+   * Убрать источник — с отменой прямо в сообщении.
+   *
+   * Отмена возможна только потому, что удаление перестало удалять: раньше
+   * каскад уносил материалы, чтения и записи в прошлых выпусках, и «отменить»
+   * означало бы вернуть пустую строку вместо источника с историей — отказ,
+   * выглядящий как успех.
+   */
+  const remove = (id: number) =>
+    startTransition(async () => {
+      const result = await deleteSource(id);
+      if (result?.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`${result.label} убран из ленты`, {
+        duration: 10_000,
+        action: {
+          label: "Отменить",
+          onClick: () => startTransition(() => void restoreSource(id)),
+        },
+      });
+    });
+
   const parse = () =>
     startTransition(async () => {
       setFound(null);
@@ -141,7 +191,12 @@ export function SourcesManager({
         <Alert variant="destructive">
           <AlertTitle>Источники с ошибкой: {dead.length}</AlertTitle>
           <AlertDescription>
-            {dead.map((source) => `${source.label}: ${source.last_error}`).join(" · ")}
+            {/*
+              Список обрезан: при полусотне сломанных источников склейка
+              через точку превращала тревогу в абзац, который не читают.
+              Остальные видны в списке — он теперь сортирован сломанным вверх.
+            */}
+            {listOf(dead.map((source) => `${source.label}: ${source.last_error}`))}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -150,7 +205,7 @@ export function SourcesManager({
         <Alert>
           <AlertTitle>Отвечают, но молчат: {silent.length}</AlertTitle>
           <AlertDescription>
-            {silent.map((source) => `${source.label} (${source.silent_days} дн.)`).join(", ")} —
+            {listOf(silent.map((source) => `${source.label} (${source.silent_days} дн.)`))} —
             источник жив и отвечает, но {SILENT_DAYS} дней подряд не даёт ни одного свежего
             материала. Обычно это значит, что его забросили.
           </AlertDescription>
@@ -389,8 +444,9 @@ export function SourcesManager({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Удалить ${source.label}`}
-                    onClick={() => startTransition(() => deleteSource(source.id))}
+                    aria-label={`Убрать ${source.label} из ленты`}
+                    title="Убрать из ленты. Собранные материалы и статистика останутся, действие можно отменить"
+                    onClick={() => startTransition(() => remove(source.id))}
                   >
                     <TrashIcon />
                   </Button>

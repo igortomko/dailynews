@@ -455,6 +455,42 @@ async function main() {
     await sql`delete from dailynews.sources where url = 'https://twice.example.com/feed'`;
     console.log("  список: сломанное сверху, выключенное снизу, повтор отличим от вставки");
 
+    // --- убрать можно, потерять нельзя -----------------------------------------
+    // Удаление перестало удалять: каскад уносил материалы, чтения и записи
+    // в прошлых выпусках, и отменить это было нечем. Проверяется главное:
+    // источник исчезает отовсюду, история остаётся, отмена возвращает как было.
+    const before = (await queries.getSourceHealth()).length;
+    const itemsBefore = (await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n;
+    assert.ok(itemsBefore > 0, "у источника должны быть материалы, иначе проверка ничего не значит");
+
+    await sql`update dailynews.sources set deleted_at = now() where id = ${source.id}`;
+
+    assert.equal(
+      (await queries.getSourceHealth()).length, before - 1,
+      "убранный источник исчезает из списка",
+    );
+    assert.ok(
+      !(await queries.getSources()).some((row) => row.id === source.id),
+      "и из каталога, по которому считается предел тарифа",
+    );
+    const polled = await sql<{ id: number }[]>`
+      select id from dailynews.sources where active and deleted_at is null`;
+    assert.ok(!polled.some((row) => row.id === source.id), "и из того, что опрашивает прогон");
+    assert.equal(
+      (await sql<{ n: number }[]>`
+        select count(*)::int as n from dailynews.items where source_id = ${source.id}`)[0].n,
+      itemsBefore,
+      "материалы остаются на месте: в этом весь смысл мягкого удаления",
+    );
+
+    await sql`update dailynews.sources set deleted_at = null where id = ${source.id}`;
+    assert.equal(
+      (await queries.getSourceHealth()).length, before,
+      "отмена возвращает источник в список",
+    );
+    console.log(`  убрать и вернуть: ${itemsBefore} материалов пережили удаление`);
+
     // --- новые виды источников ------------------------------------------------
     // Ограничение переименовано намеренно: переопределение под прежним именем
     // проверка формы схемы не видит, и 0018 уже проскочил так молча.
