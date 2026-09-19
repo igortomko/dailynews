@@ -11,7 +11,7 @@ import { kindleSenderName } from "./kindle-setup";
  */
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
-  reader_context, digest_size, weights, language, complexity, style, llm,
+  reader_context, digest_size, weights, language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved,
   plan, daily_cap_usd, onboarded_at
 `;

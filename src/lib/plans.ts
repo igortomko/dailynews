@@ -55,7 +55,7 @@ export const PLANS: Record<PlanId, Plan> = {
     // На бесплатном остаётся то, без чего ленты не будет: интересы
     // и источники. Манера письма и разбор статистики — уже выбор,
     // за который платят.
-    sections: [],
+    sections: ["subscription"],
   },
   plus: {
     id: "plus",
@@ -65,7 +65,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxTopics: 5,
     digestSizes: [20, 40],
     kinds: FREE_KINDS,
-    sections: ["personalization", "calibration"],
+    sections: ["personalization", "calibration", "subscription"],
   },
   pro: {
     id: "pro",
@@ -77,8 +77,6 @@ export const PLANS: Record<PlanId, Plan> = {
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
     kinds: [...FREE_KINDS, "x"],
-    // Свой ключ и своя модель — Pro: на них держится и цена дайджеста,
-    // и возможность увести расход за пределы тарифа.
     sections: ["personalization", "calibration", "subscription"],
   },
 };

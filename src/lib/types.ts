@@ -126,5 +126,4 @@ export type Reader = {
   plan: string;
   daily_cap_usd: number;
   onboarded_at: string | null;
-  llm: { base_url?: string; model?: string; api_key?: string; reasoning_effort?: string };
 };

@@ -595,9 +595,15 @@ assert.equal(topicsWord(2), "интереса", "два-четыре");
 assert.equal(topicsWord(5), "интересов", "пять и больше");
 assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
-assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
-assert.ok(allows(PLANS.pro, "subscription"), "свой ключ — признак Pro");
-assert.ok(!allows(PLANS.plus, "subscription"), "на Plus своего ключа нет");
+assert.ok(
+  !allows(PLANS.free, "personalization") && !allows(PLANS.free, "calibration"),
+  "бесплатный тариф не открывает платных разделов",
+);
+// Подписка открыта всем: закрыть её тарифом значит показать кнопку
+// «подписаться» только тем, кто уже подписан.
+for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
+  assert.ok(allows(plan, "subscription"), `подписка видна на тарифе ${plan.id}`);
+}
 assert.ok(
   allows(PLANS.plus, "personalization") && allows(PLANS.pro, "personalization"),
   "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
@@ -989,4 +995,4 @@ assert.equal(kindleSenderName(7, null), "reader7", "без привязанно�
 assert.equal(kindleSenderName(7, ""), "reader7", "пустая строка именем не становится");
 assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем не становится");
 
-console.log("Самопроверка пройдена: 253 утверждений");
+console.log("Самопроверка пройдена: 252 утверждений");

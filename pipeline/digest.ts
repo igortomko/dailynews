@@ -90,13 +90,10 @@ function voiceRules(voice: Voice): string {
   ].join("\n\n");
 }
 
-export type LlmConfig = {
-  base_url?: string; model?: string; api_key?: string; reasoning_effort?: string;
-};
-
 /**
- * Окружение старше настройки в базе: ключ, заданный переменной, не должен
- * молча подменяться тем, что кто-то вписал в интерфейсе.
+ * Настройка модели живёт только в окружении. Своего ключа у читателя нет:
+ * раздел убран, и ключ в базе открытым текстом вместе с ним — хранить
+ * чужой секрет ради настройки, которой никто не пользовался, незачем.
  */
 /**
  * Пустая строка — это «не задано», а не значение. GitHub Actions подставляет
@@ -107,19 +104,19 @@ export type LlmConfig = {
 export const firstSet = (...values: (string | undefined)[]) =>
   values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
 
-function resolve(config: LlmConfig) {
+function resolve() {
   return {
     baseUrl:
-      firstSet(process.env.LLM_BASE_URL, config.base_url) ??
+      firstSet(process.env.LLM_BASE_URL) ??
       "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: firstSet(process.env.LLM_MODEL, config.model) ?? "gemini-2.5-flash",
-    apiKey: firstSet(process.env.LLM_API_KEY, config.api_key) ?? "",
+    model: firstSet(process.env.LLM_MODEL) ?? "gemini-2.5-flash",
+    apiKey: firstSet(process.env.LLM_API_KEY) ?? "",
     // Рассуждение тарифицируется как выход и занимало 80% ответа:
     // 12411 токенов из 15494 на шестнадцати описаниях. Значение по
     // умолчанию у провайдера — «high», то есть самое дорогое, и молча.
     // Пусто — не шлём параметр вовсе: провайдер, который его не знает,
     // отвечает 400 на весь запрос.
-    reasoningEffort: firstSet(process.env.LLM_REASONING_EFFORT, config.reasoning_effort),
+    reasoningEffort: firstSet(process.env.LLM_REASONING_EFFORT),
   };
 }
 
@@ -130,11 +127,10 @@ function resolve(config: LlmConfig) {
 export async function writeDigest(
   survivors: Survivor[],
   readerContext: string,
-  config: LlmConfig = {},
   voice: Voice = DEFAULT_VOICE,
 ): Promise<DigestResult> {
   const language = voice.language || "русском";
-  const { baseUrl, model, apiKey, reasoningEffort } = resolve(config);
+  const { baseUrl, model, apiKey, reasoningEffort } = resolve();
   if (!apiKey) {
     // Без ключа дайджест всё равно собирается — просто исходными заголовками.
     return {
