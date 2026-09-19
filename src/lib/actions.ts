@@ -15,7 +15,10 @@ import { freezeKindleSender, getReaderTopics, recordCall, spentToday } from "./r
 import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
-import { allows, cheapestWith, maxDigestOf, planOf, sourcesForPlan, PLAN_IDS, PLANS, type Gated } from "./plans";
+import {
+  allows, cheapestWith, maxDigestOf, planOf, sourcesForPlan, topicsWord,
+  PLAN_IDS, PLANS, type Gated,
+} from "./plans";
 import { getSources } from "./queries";
 import { toSlug } from "./slug";
 
@@ -105,9 +108,9 @@ export async function saveInterests(formData: FormData) {
   const plan = planOf((await currentReader()).plan);
   if (chips.length > plan.maxTopics) {
     return {
-      error: `Тариф «${plan.label}» держит ${plan.maxTopics} ${
-        plan.maxTopics === 1 ? "интерес" : plan.maxTopics < 5 ? "интереса" : "интересов"
-      }, а выбрано ${chips.length}`,
+      error:
+        `Тариф «${plan.label}» держит ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
+        `а выбрано ${chips.length}`,
     };
   }
 
@@ -318,8 +321,15 @@ async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | n
     };
   }
 
+  // Считаем только то, что прогон и правда опрашивает: sourcesForPlan
+  // отсекает запрещённый вид до предела по числу. Иначе после понижения
+  // тарифа оставшиеся включёнными ленты X занимают места живых источников —
+  // добавить разрешённый нельзя, пока не выключишь те, которые всё равно
+  // никто не опрашивает.
   const [{ n }] = await sql<{ n: number }[]>`
-    select count(*)::int as n from dailynews.sources where active
+    select count(*)::int as n
+      from dailynews.sources
+     where active and kind = any(${plan.kinds})
   `;
   if (n >= plan.maxSources) {
     return { error: `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — выключи лишний` };

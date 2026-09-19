@@ -567,7 +567,29 @@ assert.ok(
   "запрещённый вид отсекается до предела по числу, а не занимает место",
 );
 
-import { GATED, allows, cheapestWith } from "../src/lib/plans";
+// Предел в форме обязан считать то же, что опрашивает прогон: иначе после
+// понижения тарифа запрещённый вид занимает места живых источников.
+const afterDowngrade = [
+  source(1, "x"), source(2, "x"), source(3, "x"),
+  source(4, "rss"), source(5, "rss"),
+];
+assert.equal(
+  sourcesForPlan(afterDowngrade, PLANS.free).length,
+  2,
+  "прогон на бесплатном опрашивает только разрешённые виды",
+);
+assert.equal(
+  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
+  2,
+  "и предел в форме обязан считать по тому же правилу",
+);
+
+import { GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
+
+assert.equal(topicsWord(1), "интерес", "единственное число");
+assert.equal(topicsWord(2), "интереса", "два-четыре");
+assert.equal(topicsWord(5), "интересов", "пять и больше");
+assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
 assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
 assert.ok(allows(PLANS.pro, "subscription"), "свой ключ — признак Pro");
@@ -598,4 +620,4 @@ for (const file of ["0019_plan", "0020_readers"]) {
   }
 }
 
-console.log("Самопроверка пройдена: 138 утверждений");
+console.log("Самопроверка пройдена: 144 утверждения");
