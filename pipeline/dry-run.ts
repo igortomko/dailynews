@@ -3,9 +3,16 @@
  * Не тратит ключ Jev, не пишет в общую базу, ничего не шлёт в Telegram.
  *
  *   npx tsx pipeline/dry-run.ts
+ *   npx tsx pipeline/dry-run.ts --channel https://www.youtube.com/@veritasium
  *
  * Отвечает на вопрос, который нельзя проверить локальными тестами:
  * живы ли источники из каталога и сколько они дают на самом деле.
+ *
+ * С `--channel` в базу процесса добавляется один канал и его свежие ролики
+ * проходят весь путь: субтитры, конспект, запись в items. Это единственный
+ * способ увидеть расшифровку целиком, не трогая ленту живого читателя, —
+ * и единственная часть сухого прогона, которая тратит деньги (около цента
+ * на ролик), поэтому она за флагом.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -42,8 +49,21 @@ async function main() {
   };
 
   const { sql } = await import("../src/lib/db");
-  const { collect } = await import("./run");
+  const { collect, transcribeVideos } = await import("./run");
   const { markDuplicates } = await import("./dedup");
+  const { discover } = await import("./discover");
+
+  const channel = process.argv[process.argv.indexOf("--channel") + 1];
+  if (process.argv.includes("--channel") && channel) {
+    const discovered = await discover(channel);
+    if (!discovered.ok) throw new Error(`фида по ${channel} не нашлось: ${discovered.error}`);
+    const { found } = discovered;
+    await sql`
+      insert into dailynews.sources (kind, url, input_url, label)
+      values (${found.kind}, ${found.url}, ${found.input_url}, ${found.label})
+    `;
+    console.log(`Канал добавлен в базу процесса: ${found.label} → ${found.url} (${found.fresh} свежих)\n`);
+  }
 
   try {
     const sources = await sql<Source[]>`select * from dailynews.sources where deleted_at is null order by kind, label`;
@@ -52,6 +72,20 @@ async function main() {
     const started = Date.now();
     const ids = await collect(sources);
     const duplicates = await markDuplicates(sql, ids);
+
+    if (process.argv.includes("--channel")) {
+      const videos = await transcribeVideos(ids);
+      console.log(`\nРасшифровано роликов: ${videos.done}, потрачено $${videos.cost.toFixed(4)}`);
+      const shown = await sql<{ title: string; excerpt: string; body: string | null }[]>`
+        select title, excerpt, body from dailynews.items
+         where url like '%youtu%' and excerpt <> '' order by id limit 3
+      `;
+      for (const row of shown) {
+        console.log(`\n  ${row.title}`);
+        console.log(`  конспект (${row.excerpt.length}): ${row.excerpt.slice(0, 220)}…`);
+        console.log(`  пересказ: ${row.body ? `${row.body.length} знаков разметки` : "нет"}`);
+      }
+    }
 
     console.log(`\nСобрано: ${ids.length}, из них дублей: ${duplicates}`);
     console.log(`Время: ${Math.round((Date.now() - started) / 1000)} с\n`);

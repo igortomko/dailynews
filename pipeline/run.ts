@@ -93,7 +93,7 @@ export async function collect(sources: Source[]): Promise<number[]> {
  * Отказ доступа прекращает весь шаг: «нас приняли за робота» — свойство
  * адреса, а не ролика, и сорок одинаковых отказов подряд ничего не добавят.
  */
-async function transcribeVideos(itemIds: number[]): Promise<{ done: number; cost: number }> {
+export async function transcribeVideos(itemIds: number[]): Promise<{ done: number; cost: number }> {
   if (itemIds.length === 0) return { done: 0, cost: 0 };
 
   const rows = await sql<{ id: number; url: string; title: string; label: string }[]>`
