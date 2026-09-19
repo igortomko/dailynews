@@ -200,9 +200,10 @@ export function ChannelsForm({
         <CardHeader>
           <CardTitle>Мой голос</CardTitle>
           <CardDescription>
-            Голос копируется буквально: ритм, лицо, длина, эмодзи, место ссылки. Каркас —
-            то, чем твои посты с просмотрами выше медианы отличаются от остальных; он
-            считается только по площадкам, которые отдают статистику.
+            Форма — из каких блоков собран твой пост и чем ты его открываешь; голос —
+            ритм, лицо, длина, эмодзи, место ссылки. Форма важнее: пост твоими словами,
+            но собранный новостной заметкой, читается как чужой с первой строки.
+            Два-три твоих поста уходят в промпт целиком — как образец, а не как факты.
           </CardDescription>
         </CardHeader>
 
@@ -216,13 +217,17 @@ export function ChannelsForm({
               {card && builtAt
                 ? `Собран ${relativeTime(new Date(builtAt))} по ${card.built_from} постам${
                     card.ranked ? " с просмотрами" : " без статистики"
-                  }`
+                  }${card.structure?.length ? "" : " — без формы, собери заново"}`
                 : "Ещё не собран: посты пишутся настройками подачи"}
             </span>
           </div>
 
           {card?.voice?.length ? (
             <div className="flex flex-col gap-3 text-sm">
+              {/* Форма впереди голоса: пост выдаёт себя чужой формой раньше,
+                  чем чужими словами, и проверять глазами надо сначала её. */}
+              {card.structure?.length ? <CardList title="Форма поста" lines={card.structure} /> : null}
+              {card.hooks?.length ? <CardList title="Чем открываешь" lines={card.hooks} /> : null}
               <CardList title="Голос" lines={card.voice} />
               {card.frame.length ? (
                 <CardList title="Каркас удачных постов" lines={card.frame} />

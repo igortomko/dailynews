@@ -38,6 +38,29 @@ export type OwnPost = {
 export type VoiceCard = {
   /** Как он пишет. Копируется буквально. */
   voice: string[];
+  /**
+   * Из каких блоков собран его типичный пост и в каком порядке.
+   *
+   * Отдельно от голоса, потому что это разные вещи и ломаются по-разному.
+   * Голос — слова и ритм; каркас — форма: заголовок отдельной строкой,
+   * сценарий во втором лице, именованные персонажи, разбор по фигурам,
+   * призыв в конце. Пост может быть написан его словами и всё равно
+   * оказаться чужим, если собран новостной заметкой, а он пишет разборы.
+   */
+  structure: string[];
+  /**
+   * Чем он открывает пост — его собственный набор приёмов с примером
+   * каждого. Общий совет «начни с вопроса» уводит от автора, который
+   * вопросами не начинает; его же приём, показанный цитатой, — нет.
+   */
+  hooks: string[];
+  /**
+   * Два-три его поста целиком. Показать надёжнее, чем описать: описание
+   * формы модель читает как пожелание, а пример — как образец. Выбирает
+   * их код, а не модель: «дай примеры» — это платить за то, что и так
+   * лежит в корпусе.
+   */
+  samples: string[];
   /** Чем его удачные посты отличаются от средних. Применяется. */
   frame: string[];
   /** Чего у него не бывает. Запрет сильнее правила: его видно в примерах. */
@@ -155,6 +178,24 @@ async function readOne(network: NetworkId, handle: string): Promise<OwnPost[]> {
     .filter((post) => post.text.trim().length > 40);
 }
 
+/**
+ * Два-три его поста целиком — образец для промпта.
+ *
+ * Выбирает код, а не модель: просить «дай примеры» значит платить выходными
+ * токенами за текст, который уже лежит во входе. Берутся зрелые и лучшие
+ * по просмотрам, а самые короткие пропускаются: пост в одну строку показывает
+ * голос, но не форму, а нужна именно форма.
+ */
+export function samplesOf(posts: OwnPost[], howMany = 3): string[] {
+  const now = Date.now();
+  const ripe = posts.filter((post) => !post.at || now - post.at.getTime() > MATURE_MS);
+  const pool = (ripe.length >= howMany ? ripe : posts).filter((post) => post.text.length > 200);
+  return [...(pool.length >= howMany ? pool : posts)]
+    .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))
+    .slice(0, howMany)
+    .map((post) => post.text.slice(0, MAX_CHARS));
+}
+
 /** Медиана, а не среднее: один пост, улетевший в десять раз, сдвинул бы среднее. */
 export function medianViews(posts: OwnPost[]): number | null {
   const numbers = posts.map((post) => post.views).filter((v): v is number => typeof v === "number");
@@ -191,18 +232,32 @@ export function corpusOf(posts: OwnPost[]): { text: string; ranked: boolean; use
 
 const PROMPT_HEAD = `Ниже посты одного автора из его собственных каналов.
 
-Составь его карточку автора: её дадут модели, чтобы она писала посты его голосом.
+Составь его карточку: её дадут модели, чтобы она писала посты его голосом
+и его формой. Форма здесь важнее слов — пост, написанный его словами, но
+собранный новостной заметкой, читается как чужой с первой строки.
 
-"voice" — как он пишет. 6–10 пунктов, каждый проверяемый по текстам: длина фраз,
-от какого лица, обращается ли к читателю и как, эмодзи и знаки — какие именно
-и в каком месте, чем открывает пост, чем закрывает, ставит ли ссылку и где,
-типичная длина в символах, чего не делает никогда.
+"structure" — из каких блоков собран его типичный пост и в каком порядке.
+5–8 пунктов, каждый проверяемый по текстам: что стоит первой строкой
+(заголовок капсом, вопрос, цитата, сцена — назови, как есть), что идёт
+следом, чем развивается середина (список, именованные персонажи, разбор
+по фигурам, диалог, числа), чем заканчивается, есть ли призыв и какой,
+стоит ли ссылка и где, делится ли текст на абзацы и подзаголовки.
+Пиши как инструкцию сборщику: «первая строка — заголовок капсом без точки,
+отдельным абзацем», а не «структурированный текст».
+
+"hooks" — чем именно он открывает посты. 3–6 приёмов, у каждого короткая
+цитата-пример из этих постов в кавычках. Только те приёмы, что есть в текстах;
+приём, встретившийся один раз, так и помечай.
+
+"voice" — как он пишет: длина фраз, лицо, обращается ли к читателю и как,
+эмодзи и знаки — какие и где, типичная длина в символах, чего не делает
+никогда. 6–10 пунктов.
 
 "taboo" — слова и приёмы, которых у него нет ни в одном посте, хотя у других
 авторов на ту же тему они обычны. 3–6 пунктов.
 
-Пиши пунктами, которые можно проверить по этим же текстам. «Пишет живо»
-проверить нельзя, «начинает пост с подлежащего-компании» — можно.`;
+Проверяемость важнее красоты: «пишет живо» проверить нельзя, «начинает
+с подлежащего-компании» — можно.`;
 
 const PROMPT_RANKED = `"frame" — чем его посты выше медианы отличаются от постов ниже медианы.
 3–5 пунктов, каждый — сравнение, а не совет: «в верхних первая строка называет
@@ -236,7 +291,7 @@ ${ranked ? PROMPT_RANKED : PROMPT_UNRANKED}
 ${text}
 
 Ответь только валидным JSON, без markdown:
-{"voice": ["..."], "frame": ["..."], "taboo": ["..."]}`;
+{"structure": ["..."], "hooks": ["..."], "voice": ["..."], "frame": ["..."], "taboo": ["..."]}`;
 
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -270,7 +325,9 @@ ${text}
       `весь потолок ушёл на рассуждение, проверь LLM_REASONING_EFFORT`,
     );
   }
-  const card = parseCard(answer, { built_from: used, sources, ranked });
+  const card = parseCard(answer, {
+    built_from: used, sources, ranked, samples: samplesOf(posts),
+  });
 
   return {
     card,
@@ -298,7 +355,7 @@ ${text}
  */
 export function parseCard(
   answer: string,
-  meta: { built_from: number; sources: string[]; ranked: boolean },
+  meta: { built_from: number; sources: string[]; ranked: boolean; samples?: string[] },
 ): VoiceCard {
   const cleaned = answer.replace(/```(?:json)?/g, "");
   // Незакрытая скоба — это обрыв, а не «не JSON»: закрывшиеся строки из такого
@@ -343,7 +400,7 @@ export function parseCard(
       .slice(0, 12);
   };
 
-  let parsed: Partial<Record<"voice" | "frame" | "taboo", unknown>>;
+  let parsed: Partial<Record<"voice" | "structure" | "hooks" | "frame" | "taboo", unknown>>;
   try {
     parsed = JSON.parse(json) as typeof parsed;
   } catch (error) {
@@ -352,7 +409,13 @@ export function parseCard(
         error instanceof Error ? error.message : error
       }), собираю из закрывшихся строк`,
     );
-    parsed = { voice: salvage("voice"), frame: salvage("frame"), taboo: salvage("taboo") };
+    parsed = {
+      voice: salvage("voice"),
+      structure: salvage("structure"),
+      hooks: salvage("hooks"),
+      frame: salvage("frame"),
+      taboo: salvage("taboo"),
+    };
   }
 
   const voice = lines(parsed.voice);
@@ -360,6 +423,9 @@ export function parseCard(
 
   return {
     voice,
+    structure: lines(parsed.structure),
+    hooks: lines(parsed.hooks),
+    samples: meta.samples ?? [],
     frame: meta.ranked ? lines(parsed.frame) : [],
     taboo: lines(parsed.taboo),
     built_from: meta.built_from,
@@ -383,6 +449,9 @@ export function cardFromVoice(voice: Voice): VoiceCard {
       `Манера: ${styleOf(voice.style).instruction}`,
       `Язык: ${voice.language}.`,
     ],
+    structure: [],
+    hooks: [],
+    samples: [],
     frame: [],
     taboo: [],
     built_from: 0,
@@ -391,17 +460,32 @@ export function cardFromVoice(voice: Voice): VoiceCard {
   };
 }
 
-/** Блок карточки в промпте. Один и тот же для настоящей и для запасной. */
+/**
+ * Блок карточки в промпте. Один и тот же для настоящей и для запасной.
+ *
+ * Порядок не случайный: сначала форма, потом приёмы входа, потом слова,
+ * и только в конце примеры целиком. Модель держит первое и последнее
+ * крепче середины, а чужой формой пост выдаёт себя раньше, чем чужими
+ * словами.
+ */
 export function cardBlock(card: VoiceCard): string {
   const list = (lines: string[]) => lines.map((line) => `\n— ${line}`).join("");
-  return [
+  const parts = [
+    card.structure.length
+      ? `Форма его поста — собирай ровно так:${list(card.structure)}`
+      : `Формы его постов мы не знаем: не выдумывай свою, держись простого
+короткого текста без заголовков и списков.`,
+    card.hooks.length ? `Чем он открывает пост (бери один из его приёмов, не придумывай новый):${list(card.hooks)}` : "",
     `Голос автора:${list(card.voice)}`,
-    card.frame.length
-      ? `Каркас его удачных постов (замечено сравнением его же постов между собой):${list(card.frame)}`
-      : `Каркаса нет: постов со статистикой не набралось. Не придумывай приёмов за него —
-держись голоса и общих правил выше.`,
     card.taboo.length ? `Чего у него не бывает:${list(card.taboo)}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    card.frame.length
+      ? `Чем его удачные посты отличаются от средних (замечено сравнением его же постов по просмотрам):${list(card.frame)}`
+      : "",
+    card.samples.length
+      ? `Его посты целиком — это образец формы, а не источник фактов. Ни одного факта, числа или имени отсюда в новый пост не переноси:\n\n${
+          card.samples.map((sample, index) => `=== его пост ${index + 1} ===\n${sample}`).join("\n\n")
+        }`
+      : "",
+  ];
+  return parts.filter(Boolean).join("\n\n");
 }
