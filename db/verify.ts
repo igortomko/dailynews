@@ -21,8 +21,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import { freePort } from "./free-port";
 
-const PORT = 55432;
+
 
 async function main() {
   const db = await PGlite.create({ extensions: { pg_trgm } });
@@ -67,9 +68,10 @@ async function main() {
   assert.equal(role.limit, 10, "лимит соединений роли должен быть 10");
   console.log(`  роль: search_path прибит, лимит ${role.limit}`);
 
-  const server = new PGLiteSocketServer({ db, port: PORT, host: "127.0.0.1" });
+  const port = await freePort();
+  const server = new PGLiteSocketServer({ db, port, host: "127.0.0.1" });
   await server.start();
-  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${PORT}/postgres`;
+  process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${port}/postgres`;
   process.env.DB_POOL_MAX = "1";
 
   // queries.ts помечен server-only, чтобы не уехать в клиентский бандл.
@@ -567,23 +569,15 @@ async function main() {
     // читателя — тогда проверка меряла бы не то, что думает.
     const [ownerNow] = await sql<(typeof owner)[]>`select * from dailynews.readers where owner`;
     assert.ok(ownerNow?.owner, "владелец должен найтись");
-    // Платный вид на бесплатном тарифе раньше проверялся тем же addByLink
-    // на владельце с plan: "free". Так больше нельзя: тариф владельца стал
-    // правилом, а не платежом, и «владелец на бесплатном» — состояние,
-    // которого не бывает. Проверка молча меряла не то: владелец получал Pro,
-    // разбор уходил в платную выдачу X и падал на незаданном ключе.
-    const { effectivePlan } = await import("../src/lib/lemon");
-    const { kindDenial, PLANS } = await import("../src/lib/plans");
-    assert.equal(
-      effectivePlan({ ...ownerNow, plan: "free" }).id,
-      "pro",
-      "тариф владельца — правило: бесплатный в колонке его не понижает",
-    );
-    assert.match(
-      kindDenial(PLANS.free, "x") ?? "",
-      /Pro/,
-      "на бесплатном тарифе отказ по виду называет тариф, который его открывает",
-    );
+    // Платный вид отсекается до запроса наружу. Проверка однажды перестала
+    // мерить то, что думает: тариф владельца на время стал правилом в коде,
+    // «владелец на бесплатном» превратился в состояние, которого не бывает,
+    // и разбор уходил в платную выдачу X. Правило вернули в колонку —
+    // проверка снова про отсечку, а не про владельца.
+    const { PLANS } = await import("../src/lib/plans");
+    const paid = await addByLink({ ...ownerNow, plan: "free" }, "from:karpathy OR from:sama");
+    assert.equal(paid.ok, false, "X на бесплатном тарифе не заводится");
+    assert.match((paid as { error: string }).error, /Pro/, "отказ называет тариф, который его открывает");
 
     // Предел считается по своему набору, а не по каталогу: иначе пятый
     // источник, заведённый кем угодно, закрывал бы добавление всем
@@ -886,6 +880,27 @@ async function main() {
       "нулевая цель должна отвергаться базой",
     );
     console.log("  цель темы: ноль запрещён ограничением");
+
+    // Вопрос «дочитал?» спрашивал заголовок из items.title_ru — колонки,
+    // которой нет с тех пор, как тексты дайджеста стали персональными.
+    // Запрос падал каждую ночь строкой в логе, вопрос не уходил ни разу,
+    // а прогон отчитывался успехом. Проверяется сам запрос прогона,
+    // а не его копия: копия разъезжается молча.
+    assert.equal((await readers.pendingKindleAsks(owner.id)).length, 0, "без отправок спрашивать не о чем");
+
+    const [sentItem] = await sql<{ id: number }[]>`
+      select id from dailynews.items order by id limit 1
+    `;
+    if (sentItem) {
+      await sql`
+        insert into dailynews.kindle_sends (reader_id, item_id, status, at)
+        values (${owner.id}, ${sentItem.id}, 'sent', now() - interval '1 day')
+      `;
+      const asks = await readers.pendingKindleAsks(owner.id);
+      assert.equal(asks.length, 1, "отправленная сутки назад статья попадает в вопрос");
+      assert.ok(asks[0].title.length > 0, "заголовок берётся из выпуска читателя или из материала");
+      console.log("  «дочитал?»: запрос выполняется и находит заголовок");
+    }
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
