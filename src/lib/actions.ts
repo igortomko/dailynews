@@ -5,12 +5,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueLoginToken, issueSession, SESSION_COOKIE } from "./auth";
-import { checkFeed } from "../../pipeline/check-sources";
+import { detectSource, probeSource, saveSource } from "../../pipeline/detect";
 import { selectSurvivors } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import type { Profile } from "./types";
+import { SOURCE_KINDS, type Profile, type SourceKind } from "./types";
 import { MAX_DIGEST, MIN_PER_TOPIC, normalize } from "./topic-budget";
 import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "./voice";
 import { toSlug } from "./slug";
@@ -180,26 +180,51 @@ export async function clearLlmKey() {
   revalidatePath("/settings/subscription");
 }
 
+/**
+ * Добавление источника. Основной путь — просто ссылка: тип и настоящий адрес
+ * фида определяются сами, название берётся из фида. Остальные типы (запрос X,
+ * listing Hacker News) ссылкой не выражаются, поэтому тип можно выбрать руками.
+ *
+ * Любой путь проходит живую пробу до сохранения: каталог из непроверенных
+ * адресов превращается в пустую вкладку через неделю.
+ */
 export async function addSource(formData: FormData) {
-  const kind = String(formData.get("kind") ?? "rss") as "rss" | "reddit" | "hackernews" | "x";
-  const url = String(formData.get("url") ?? "").trim();
-  const label = String(formData.get("label") ?? "").trim() || url;
-  if (!url) return { error: "Пустой адрес" };
-
-  // Источник проверяется живым запросом до сохранения: каталог из
-  // непроверенных адресов превращается в пустую вкладку через неделю.
-  if (kind === "rss") {
-    const probe = await checkFeed(url);
-    if (!probe.ok) return { error: `Фид не отвечает: ${probe.error ?? "пусто"}` };
+  const kind = String(formData.get("kind") ?? "auto");
+  const input = String(formData.get("url") ?? "").trim();
+  const typed = String(formData.get("label") ?? "").trim();
+  if (!input) return { error: "Пустой адрес" };
+  // Тип приходит скрытым полем, то есть извне. Незнакомое значение иначе
+  // дойдёт до check-ограничения колонки и упадёт запросом, а не подсказкой.
+  if (kind !== "auto" && !SOURCE_KINDS.includes(kind as SourceKind)) {
+    return { error: `Неизвестный тип источника: ${kind}` };
   }
 
-  await sql`
-    insert into dailynews.sources (kind, label, url)
-    values (${kind}, ${label}, ${url})
-    on conflict (kind, url) do update set active = true, label = excluded.label
-  `;
+  const probe =
+    kind === "auto"
+      ? await detectSource(input)
+      : await probeSource({
+          kind: kind as SourceKind,
+          url: input,
+          label: typed || input,
+        });
+  if (!probe.ok) return { error: probe.error };
+  const found = probe.found;
+
+  try {
+    await saveSource(sql, { ...found, label: typed || found.label }, input);
+  } catch (error) {
+    // Вид источника разрешает ограничение колонки, а не только код. Пока
+    // миграция не применена, база отвергает то, что форма уже предлагает,
+    // и без этой ветки читатель получает пятисотку вместо причины.
+    if ((error as { code?: string }).code === "23514") {
+      return {
+        error: `База не знает вид «${found.kind}» — примени миграции из db/migrations`,
+      };
+    }
+    throw error;
+  }
   revalidatePath("/settings/sources");
-  return { ok: true as const };
+  return { ok: true as const, found };
 }
 
 export async function setSourceActive(id: number, active: boolean) {

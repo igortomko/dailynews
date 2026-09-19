@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "./db";
 import type { Axes, Profile, Source, Topic } from "./types";
+import { sourceHealth, type SourceHealth } from "../../pipeline/health";
 
 export type FeedItem = {
   id: number;
@@ -34,6 +35,11 @@ export async function getAllTopics(): Promise<Topic[]> {
 
 export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`select * from dailynews.sources order by kind, label`;
+}
+
+/** Отдача и тишина: запрос живёт в pipeline/health.ts, им же пользуется прогон. */
+export async function getSourceHealth(): Promise<SourceHealth[]> {
+  return sourceHealth(sql);
 }
 
 /**

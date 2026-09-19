@@ -1,7 +1,7 @@
 /**
- * Проверка источников живым запросом. Тем же кодом пользуется интерфейс,
- * когда добавляешь фид руками: каталог из непроверенных адресов —
- * это молча пустая вкладка через неделю.
+ * Проверка уже сохранённых адресов живым запросом, как в прогоне: с окном
+ * свежести и потолком на число записей. Добавление нового источника идёт
+ * другим путём — `pipeline/detect.ts`, там определяется ещё и тип.
  *
  *   npx tsx pipeline/check-sources.ts <url> [url...]
  */
@@ -22,15 +22,8 @@ export function asSource(url: string, id = 0): Source {
   };
 }
 
-export async function checkFeed(url: string) {
-  const [result] = await fetchAllSources([asSource(url)]);
-  return result.ok
-    ? { ok: true as const, count: result.items.length, sample: result.items[0]?.title ?? "" }
-    : { ok: false as const, count: 0, sample: "", error: result.error };
-}
-
 if (process.argv[2]) {
-  const sources = process.argv.slice(2).map(asSource);
+  const sources = process.argv.slice(2).map((url, index) => asSource(url, index));
   fetchAllSources(sources).then((results) => {
     for (const r of results) {
       console.log(

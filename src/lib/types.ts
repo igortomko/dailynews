@@ -8,9 +8,28 @@ export type Topic = {
   active: boolean;
 };
 
+/** Отдача и тишина источника: считается запросом из pipeline/health.ts. */
+export type { SourceHealth } from "../../pipeline/health";
+
+/**
+ * Со скольких дней молчание перестаёт быть выходными и становится поломкой.
+ * Здесь, а не в pipeline/health.ts: число одно на прогон и на интерфейс,
+ * а модуль запроса в клиентский бандл тянуть незачем.
+ */
+export const SILENT_DAYS = 5;
+
+/**
+ * Виды источников — один список на всё: тип, проверка в действии, форма
+ * и ограничение колонки. Разъедется — форма предложит тип, который база
+ * не примет, и читатель получит ошибку там, где ничего не нарушал.
+ * За совпадением с миграцией и формой следит `npm test`.
+ */
+export const SOURCE_KINDS = ["rss", "hackernews", "reddit", "x", "telegram"] as const;
+export type SourceKind = (typeof SOURCE_KINDS)[number];
+
 export type Source = {
   id: number;
-  kind: "rss" | "hackernews" | "reddit" | "x";
+  kind: SourceKind;
   label: string;
   url: string;
   config: Record<string, unknown>;

@@ -5,7 +5,8 @@
  * Скачивается начало документа: og:image лежит в <head>, и ради него
  * незачем качать страницу целиком.
  */
-const UA = "dailynews/2.0 (+https://github.com/igortomko/dailynews)";
+import { requestPublic } from "./fetch";
+
 const HEAD_BYTES = 120_000;
 
 const PATTERNS = [
@@ -24,11 +25,9 @@ export async function fetchOgImage(pageUrl: string, timeoutMs = 12_000): Promise
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
 
   try {
-    const res = await fetch(pageUrl, {
-      headers: { "user-agent": UA, accept: "text/html" },
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: "follow",
-    });
+    // Адрес приходит из чужого фида, то есть извне: тем же путём, что
+    // и адрес источника, он может увести во внутреннюю сеть общей машины.
+    const res = await requestPublic(pageUrl, { timeoutMs, accept: "text/html" });
     if (!res.ok || !res.headers.get("content-type")?.includes("html")) return null;
 
     // Читаем по кускам и останавливаемся, как только <head> закончился.

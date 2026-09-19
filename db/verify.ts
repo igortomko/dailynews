@@ -98,6 +98,41 @@ async function main() {
     assert.ok(sources.some((s) => s.kind === "x" && s.active), "источники X должны быть включены");
     console.log(`  темы: ${topics.length}, источники: ${sources.length}`);
 
+    // --- приём источника ------------------------------------------------------
+    // Исходная ссылка ложится в jsonb: строка вместо объекта на чтении
+    // неотличима, а `config->>'origin'` начинает молча отдавать null.
+    // Проверяется настоящий запрос приёма, а не его пересказ.
+    const { saveSource } = await import("../pipeline/detect");
+    const added = { kind: "rss" as const, url: "https://ex.example.com/atom.xml", label: "Пример" };
+    await saveSource(sql, added, "https://ex.example.com");
+    // Исходная ссылка на повторе нарочно другая: с одинаковой проверка
+    // прошла бы при любом поведении слияния.
+    await saveSource(sql, { ...added, label: "Пример, переименованный" }, "https://other.example.com");
+    const [kept] = await sql<{ label: string; origin: string | null; shape: string; n: number }[]>`
+      select label, config->>'origin' as origin, jsonb_typeof(config) as shape,
+             count(*) over ()::int as n
+        from dailynews.sources where url = ${added.url}
+    `;
+    assert.ok(kept, `источник ${added.url} не найден после приёма`);
+    assert.equal(kept.n, 1, "повторный приём того же адреса не должен задваивать источник");
+    assert.equal(kept.shape, "object", "config должен лежать объектом, а не jsonb-строкой");
+    // Побеждает последняя вставленная: рядом обновляется и название,
+    // и держать имя от нового добавления, а ссылку от старого — значит
+    // показывать в каталоге две разные истории одного источника.
+    assert.equal(kept.origin, "https://other.example.com", "повторный приём обновляет исходную ссылку");
+    assert.equal(kept.label, "Пример, переименованный", "повторный приём обновляет название");
+    console.log("  приём источника: не задваивает, исходная ссылка в jsonb");
+
+    // Новый вид источника разрешается ограничением колонки, а не только
+    // типом в TypeScript: разъедется — приём упадёт запросом в проде.
+    await saveSource(sql, { kind: "telegram", url: "durov", label: "@durov" });
+    await assert.rejects(
+      sql`insert into dailynews.sources (kind, label, url) values ('email', 'Почта', 'inbox')`,
+      /sources_kind_check/,
+      "неизвестный вид источника база принимать не должна",
+    );
+    console.log("  виды источников: telegram разрешён, выдуманный отвергнут");
+
     const profile = await queries.getProfile();
     assert.equal(profile.id, 1);
     assert.equal(profile.digest_size, 12);
@@ -190,6 +225,33 @@ async function main() {
     assert.equal(feed[0].read_count, 0);
     assert.ok(!feed.some((item) => item.id === ids[1]), "дубль не должен попасть в ленту");
     console.log(`  лента: ${feed.length} материала, порядок по скору`);
+
+    // --- отдача и тишина источника -------------------------------------------
+    // Числа считаются одним запросом на живых данных: «сорок материалов
+    // в день и ни одного в дайджест» — это решение выключить источник,
+    // а решение не должно стоять на пересказе запроса.
+    const { sourceHealth } = await import("../pipeline/health");
+    const health = await sourceHealth(sql);
+    const mine = health.find((row) => row.source_id === String(source.id));
+    assert.ok(mine, "источник, давший материалы, должен быть в отдаче");
+    assert.equal(mine.collected, 4, `собрано ${mine.collected}, вставлено 4`);
+    assert.equal(mine.duplicates, 1, "дубль должен считаться отдельно");
+    assert.equal(mine.digested, 3, "до дайджеста дошли три материала");
+    assert.equal(Math.round(mine.mean_score ?? 0), 92, "средний скор 120/95/60");
+    assert.equal(mine.silent_days, 0, "материал сегодня — тишины нет");
+    // Источник, заведённый только что и ещё не давший ничего, не молчит:
+    // срок считается от даты заведения, иначе тревога срабатывает раньше
+    // первого прогона. Ищем именно его, а не первый попавшийся пустой:
+    // иначе проверка держится на порядке строк в каталоге.
+    const [tg] = await sql<{ id: string }[]>`
+      select id::text as id from dailynews.sources where kind = 'telegram' and url = 'durov'
+    `;
+    assert.ok(tg, "telegram-источник должен был сохраниться выше");
+    const quiet = health.find((row) => row.source_id === tg.id);
+    assert.ok(quiet, "источник без материалов тоже должен быть в списке");
+    assert.equal(quiet.ever, false, "источник без материалов не должен числиться дававшим");
+    assert.equal(quiet.silent_days, 0, "заведённый сегодня источник молчит ноль дней");
+    console.log(`  отдача: ${mine.collected} собрано, ${mine.digested} в дайджест, скор ${Math.round(mine.mean_score ?? 0)}`);
 
     // --- чтения и калибровка -------------------------------------------------
     await sql`

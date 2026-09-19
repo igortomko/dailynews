@@ -1,3 +1,5 @@
+import { lookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import { XMLParser } from "fast-xml-parser";
 import type { RawItem, Source } from "../src/lib/types";
 
@@ -5,32 +7,114 @@ const UA = "dailynews/2.0 (+https://github.com/igortomko/dailynews)";
 const MAX_BYTES = 5_000_000;
 
 /**
- * Источники настраиваются пользователем, то есть адрес приходит извне.
- * Поэтому: только http(s), свой таймаут и потолок на размер ответа —
- * иначе один зависший фид держит весь прогон.
+ * Адрес источника вводит человек, а машина общая: в той же сети живут чужие
+ * контейнеры. Без проверки адреса форма добавления — готовый сканер
+ * внутренней сети: «HTTP 401» на внутреннем адресе это уже ответ. Поэтому
+ * имя разрешается в адрес до запроса, а перенаправление проверяется заново —
+ * публичный хост умеет увести на 127.0.0.1, и на этом смысл проверки кончился
+ * бы. Защита не от гонки DNS, а от обычного увода: цена такой гонки здесь
+ * выше выгоды.
  */
-async function get(url: string, timeoutMs = 20_000): Promise<string> {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`протокол не поддерживается: ${parsed.protocol}`);
+const INTERNAL = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8],
+  // 169.254.169.254 — метаданные облака, самая ценная цель из всех.
+  ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.168.0.0", 16], ["224.0.0.0", 4],
+  ["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
+] as const) {
+  INTERNAL.addSubnet(network, prefix, isIP(network) === 6 ? "ipv6" : "ipv4");
+}
+
+export function isInternal(ip: string): boolean {
+  // BlockList, а не свои префиксы: он сам приводит v4 внутри v6 к обычному
+  // виду. Рукописная проверка ловила «::ffff:127.0.0.1» и пропускала ровно
+  // тот же адрес в шестнадцатеричной записи — «::ffff:7f00:1».
+  const plain = ip.replace(/^\[|\]$/g, "");
+  const type = isIP(plain);
+  if (type === 0) return true;
+  return INTERNAL.check(plain, type === 6 ? "ipv6" : "ipv4");
+}
+
+async function assertPublic(url: URL): Promise<void> {
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const addresses = isIP(host)
+    ? [host]
+    : (await lookup(host, { all: true })).map((entry) => entry.address);
+  if (addresses.length === 0) throw new Error("имя не разрешается в адрес");
+  const internal = addresses.find(isInternal);
+  if (internal) throw new Error(`адрес ведёт во внутреннюю сеть (${internal})`);
+}
+
+/** Сколько перенаправлений готовы пройти, проверяя каждое. */
+const MAX_REDIRECTS = 5;
+
+/**
+ * Запрос по внешнему адресу: только http(s), свой таймаут на всю цепочку
+ * и проверка каждого перехода. Потолок на размер стоит у вызывающего —
+ * страницу og-картинки читают по кускам и бросают на середине.
+ */
+export async function requestPublic(
+  url: string,
+  options: { timeoutMs?: number; accept?: string } = {},
+): Promise<Response> {
+  const deadline = Date.now() + (options.timeoutMs ?? 20_000);
+  let current = new URL(url);
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (current.protocol !== "http:" && current.protocol !== "https:") {
+      throw new Error(`протокол не поддерживается: ${current.protocol}`);
+    }
+    await assertPublic(current);
+
+    const res = await fetch(current, {
+      headers: { "user-agent": UA, accept: options.accept ?? "*/*" },
+      signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      // Не "follow": перенаправление — это новый адрес, и его нужно
+      // проверить тем же порядком, что и первый.
+      redirect: "manual",
+    });
+    if (res.status < 300 || res.status >= 400) return res;
+
+    const location = res.headers.get("location");
+    if (!location) throw new Error(`HTTP ${res.status} без адреса перехода`);
+    current = new URL(location, current);
   }
-  const res = await fetch(url, {
-    headers: { "user-agent": UA, accept: "*/*" },
-    signal: AbortSignal.timeout(timeoutMs),
-    redirect: "follow",
-  });
+  throw new Error(`больше ${MAX_REDIRECTS} перенаправлений`);
+}
+
+/**
+ * Текст по внешнему адресу. Потолок на размер: иначе один фид на гигабайт
+ * держит весь прогон.
+ */
+export async function fetchText(url: string, timeoutMs = 20_000): Promise<string> {
+  const res = await requestPublic(url, { timeoutMs });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const length = Number(res.headers.get("content-length") ?? 0);
   if (length > MAX_BYTES) throw new Error(`ответ ${length} байт, больше потолка`);
 
-  const body = await res.text();
-  if (body.length > MAX_BYTES) throw new Error("ответ больше потолка");
-  return body;
+  // Читаем по кускам и считаем байты: res.text() сначала соберёт в памяти
+  // весь ответ и только потом даст его измерить, а длина строки — это
+  // символы, а не байты, и на кириллице потолок расходится вдвое.
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw new Error("ответ больше потолка");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function getJson<T>(url: string, timeoutMs = 20_000): Promise<T> {
-  return JSON.parse(await get(url, timeoutMs)) as T;
+  return JSON.parse(await fetchText(url, timeoutMs)) as T;
 }
 
 /** Запускает задачи пачками по `limit`, чтобы не раскладывать источник на лопатки. */
@@ -76,7 +160,7 @@ const NAMED_ENTITIES: Record<string, string> = {
   mdash: "—", ndash: "–", hellip: "…", middot: "·", deg: "°", euro: "€",
 };
 
-function stripHtml(html: string): string {
+export function stripHtml(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -97,18 +181,22 @@ function parseDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export async function fetchRss(source: Source): Promise<RawItem[]> {
-  const xml = await get(source.url);
+/**
+ * Разбор уже скачанного фида. Заголовок канала отдаётся вместе с записями:
+ * при добавлении источника название берётся из фида, а не сочиняется руками.
+ */
+export function parseFeed(xml: string): { title: string; items: RawItem[] } {
   const doc = parser.parse(xml) as Record<string, any>;
 
   // RSS 2.0 кладёт записи в rss.channel.item, Atom — в feed.entry.
   const channel = doc?.rss?.channel ?? doc?.["rdf:RDF"] ?? doc?.feed;
   if (!channel) throw new Error("не похоже на RSS или Atom");
+  const feedTitle = stripHtml(firstString(channel.title));
   const entries: unknown[] = [channel.item, channel.entry]
     .flatMap((node) => (Array.isArray(node) ? node : node ? [node] : []));
-  if (entries.length === 0) return [];
+  if (entries.length === 0) return { title: feedTitle, items: [] };
 
-  return entries.flatMap((entry) => {
+  const items = entries.flatMap((entry) => {
     const node = entry as Record<string, unknown>;
     const title = stripHtml(firstString(node.title));
 
@@ -137,6 +225,16 @@ export async function fetchRss(source: Source): Promise<RawItem[]> {
       published_at: parseDate(node.pubDate ?? node.published ?? node.updated ?? node["dc:date"]),
     }];
   });
+
+  return { title: feedTitle, items };
+}
+
+export async function fetchFeed(url: string): Promise<{ title: string; items: RawItem[] }> {
+  return parseFeed(await fetchText(url));
+}
+
+export async function fetchRss(source: Source): Promise<RawItem[]> {
+  return (await fetchFeed(source.url)).items;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +252,10 @@ type HnItem = {
 };
 
 export async function fetchHackerNews(source: Source): Promise<RawItem[]> {
-  const listing = String(source.config?.listing ?? "topstories");
+  // Смысл url зависит от kind, и у hackernews это listing — так он и
+  // приходит из формы. Читать его только из config значило бы молча
+  // отдавать topstories тому, кто выбрал newstories.
+  const listing = source.url.trim() || String(source.config?.listing ?? "topstories");
   const count = Number(source.config?.count ?? 90);
   const ids = await getJson<number[]>(`https://hacker-news.firebaseio.com/v0/${listing}.json`);
 
@@ -343,11 +444,86 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
   return items;
 }
 
+
+// ---------------------------------------------------------------------------
+// Telegram — публичный веб-просмотр t.me/s/<канал>. Ключей не нужно и наружу
+// ничего не выставляется. Цена: только публичные каналы. Bot API читает лишь
+// те, где бот администратор, а MTProto требует держать файл личной сессии
+// на общей машине рядом с чужими продуктами — это отдельное решение, а не
+// заодно.
+//
+// Разметка чужая и может измениться в любой день, поэтому разбор проверяется
+// на сохранённом куске HTML (`npm test`), а переезд канала ловится той же
+// проверкой тишины, что и заброшенный фид: ноль постов несколько дней подряд.
+// ---------------------------------------------------------------------------
+const VIEW_SUFFIX: Record<string, number> = { K: 1e3, M: 1e6 };
+
+/** «18.8M» — это число, а не строка: скор сравнивает охват с очками HN. */
+function parseViews(raw: string | undefined): number | null {
+  const match = raw?.trim().match(/^([\d.]+)([KM])?$/);
+  if (!match) return null;
+  return Math.round(Number(match[1]) * (VIEW_SUFFIX[match[2]] ?? 1));
+}
+
+export function parseTelegram(html: string): RawItem[] {
+  // Блоки режутся по обёртке сообщения: она же отделяет шапку канала,
+  // в которой есть и описание, и служебные ссылки.
+  return html.split("tgme_widget_message_wrap").slice(1).flatMap((block) => {
+    const post = block.match(/data-post="([^"]+)"/)?.[1];
+    // Текст лежит в одном div с инлайновой разметкой внутри; у поста
+    // из одной картинки его нет вовсе — такой пост пропускаем.
+    const body = block.match(/tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/)?.[1];
+    if (!post || !body) return [];
+
+    // Перенос строки в посте — граница мысли: первая строка работает
+    // заголовком. stripHtml схлопывает любые пробелы, поэтому режем до него.
+    const lines = body
+      .replace(/<br\s*\/?>/gi, "\n")
+      .split("\n")
+      .map((line) => stripHtml(line))
+      .filter(Boolean);
+    if (lines.length === 0) return [];
+
+    const published = parseDate(block.match(/datetime="([^"]+)"/)?.[1]);
+    return [{
+      url: `https://t.me/${post}`,
+      title: lines[0].slice(0, 200),
+      excerpt: lines.join(" ").slice(0, 1200),
+      points: parseViews(block.match(/tgme_widget_message_views">([^<]+)</)?.[1]),
+      comments: null,
+      published_at: published,
+    }];
+  });
+}
+
+export async function fetchTelegram(source: Source): Promise<RawItem[]> {
+  // url источника — имя канала. Вставленную ссылку приводим на всякий
+  // случай и здесь: источник мог приехать и миграцией, и руками.
+  const channel = source.url
+    .replace(/^@/, "")
+    // И t.me, и telegram.me: byHost принимает оба, и адрес с любого из них
+    // может доехать сюда миграцией или ручной вставкой.
+    .replace(/^https?:\/\/(t|telegram)\.me\//i, "")
+    .replace(/^s\//, "")
+    .replace(/\/.*$/, "");
+  if (!channel) throw new Error("не разобрал имя канала");
+
+  const html = await fetchText(`https://t.me/s/${encodeURIComponent(channel)}`);
+  const items = parseTelegram(html);
+  // Закрытый канал отдаёт 200 и страницу-визитку без единого сообщения.
+  // Это ровно тот отказ, что выглядит как успех, — говорим вслух.
+  if (items.length === 0 && !html.includes("tgme_widget_message_wrap")) {
+    throw new Error("канал закрыт для веб-просмотра или не существует");
+  }
+  return items;
+}
+
 const FETCHERS: Record<Source["kind"], (source: Source) => Promise<RawItem[]>> = {
   rss: fetchRss,
   reddit: fetchReddit,
   hackernews: fetchHackerNews,
   x: fetchX,
+  telegram: fetchTelegram,
 };
 
 export async function fetchSource(source: Source): Promise<RawItem[]> {
@@ -381,7 +557,7 @@ const hostOf = (source: Source): string => {
 const MAX_AGE_DAYS = 7;
 const MAX_ITEMS_PER_SOURCE = 60;
 
-function freshest(items: RawItem[], source: Source): RawItem[] {
+export function freshest(items: RawItem[], source: Source): RawItem[] {
   const maxAge = Number(source.config?.max_age_days ?? MAX_AGE_DAYS);
   const cap = Number(source.config?.max_items ?? MAX_ITEMS_PER_SOURCE);
   const cutoff = Date.now() - maxAge * 86_400_000;

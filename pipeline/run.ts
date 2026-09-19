@@ -1,8 +1,9 @@
 import { sql } from "../src/lib/db";
-import type { Profile, Source, Topic } from "../src/lib/types";
+import { SILENT_DAYS, type Profile, type Source, type Topic } from "../src/lib/types";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { markDuplicates } from "./dedup";
+import { silent, sourceHealth } from "./health";
 import { scoreAll, type Scorable } from "./score";
 import { writeDigest } from "./digest";
 import { selectSurvivors } from "./select";
@@ -76,6 +77,28 @@ async function main() {
   log(`1. Сбор: ${sources.length} источников`);
   const collected = await collect(sources);
   log(`   новых материалов: ${collected.length}`);
+
+  // Источник, который отвечает 200 и не даёт ничего, не виден нигде:
+  // дайджест приходит полный, просто без него. Поэтому тишина попадает
+  // в лог прогона, а не только в интерфейс.
+  const labelById = new Map(sources.map((source) => [String(source.id), source.label]));
+  // Упавший источник уже отчитался ошибкой строкой выше: сказать про него
+  // ещё и «молчит» — это два сообщения об одном, и то, что слабее.
+  const failed = new Set(
+    (await sql<{ id: string }[]>`
+      select id::text as id from dailynews.sources where last_error is not null
+    `).map((row) => row.id),
+  );
+  const quiet = silent(await sourceHealth(sql))
+    .filter((row) => labelById.has(row.source_id) && !failed.has(row.source_id));
+  if (quiet.length > 0) {
+    log(
+      `   молчат ${SILENT_DAYS}+ дней: ` +
+      quiet
+        .map((row) => `${labelById.get(row.source_id)} (${row.ever ? `${row.silent_days} дн.` : "ни разу"})`)
+        .join(", "),
+    );
+  }
 
   log("2. Дедуп");
   // Берём всё окно, а не результат вставки: если прогон упал между
