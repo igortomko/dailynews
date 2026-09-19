@@ -2,33 +2,34 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LockIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Gated } from "@/lib/plans";
+import { FEATURES, type FeatureId, type Plan } from "@/lib/plans";
+import { PaywallCrown } from "@/components/paywall";
 
-const SECTIONS: { href: string; label: string; section?: Gated }[] = [
-  { href: "/settings/personalization", label: "Персонализация", section: "personalization" },
+const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
+  { href: "/settings/personalization", label: "Персонализация", feature: "personalization" },
   { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/sources", label: "Источники" },
   { href: "/settings/delivery", label: "Доставка" },
-  { href: "/settings/calibration", label: "Калибровка", section: "calibration" },
+  { href: "/settings/calibration", label: "Калибровка", feature: "calibration" },
   { href: "/settings/subscription", label: "Подписка" },
   { href: "/settings/about", label: "О проекте" },
 ];
 
 /**
- * Закрытый раздел показывается с замком, а не прячется: спрятанный пункт
+ * Закрытый раздел показывается с короной, а не прячется: спрятанный пункт
  * не даёт понять, что в продукте вообще есть — и за что предлагается
- * платить. Ссылка остаётся рабочей, на той стороне стоит заглушка.
+ * платить. Ссылка остаётся рабочей, на той стороне стоит заглушка;
+ * клик по самой короне открывает окно с предложением, не уводя со страницы.
  */
-export function SettingsNav({ open }: { open: Gated[] }) {
+export function SettingsNav({ plan }: { plan: Plan }) {
   const pathname = usePathname();
 
   return (
     <nav className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
       {SECTIONS.map((section) => {
         const active = pathname === section.href;
-        const locked = section.section !== undefined && !open.includes(section.section);
+        const locked = section.feature !== undefined && !FEATURES[section.feature].has(plan);
         return (
           <Link
             key={section.href}
@@ -45,8 +46,8 @@ export function SettingsNav({ open }: { open: Gated[] }) {
             )}
           >
             {section.label}
-            {locked ? (
-              <LockIcon className="ml-1.5 inline size-3 align-[-1px] opacity-60" aria-label="закрыто тарифом" />
+            {locked && section.feature ? (
+              <PaywallCrown feature={section.feature} plan={plan} className="ml-1.5" />
             ) : null}
           </Link>
         );

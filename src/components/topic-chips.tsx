@@ -9,7 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import { maxDigestOf, type Plan } from "@/lib/plans";
+import { maxDigestOf, PLANS, type Plan } from "@/lib/plans";
+import { usePaywall } from "@/components/paywall";
+import { CrownIcon } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { topUpDigest, type ChipInput } from "@/lib/actions";
@@ -84,6 +86,15 @@ export function TopicChips({
   const [selected, setSelected] = useState<number | null>(null);
 
   const full = chips.length >= plan.maxTopics;
+  // Предел — не повод молчать: кнопка остаётся нажимаемой и объясняет,
+  // что за ней. Погашенная кнопка сообщает только «нельзя».
+  const topicsPaywall = usePaywall("topics", plan);
+  const digestPaywall = usePaywall("digest", plan);
+
+  /** Размеры показываем все, какие есть в продукте: за чужими — корона. */
+  const sizes = Array.from(
+    new Set([...plan.digestSizes, ...PLANS.pro.digestSizes, total]),
+  ).sort((a, b) => a - b);
 
   const add = (label: string) => {
     const trimmed = label.trim();
@@ -143,15 +154,29 @@ export function TopicChips({
             вариантом, пока его не сменили. */}
         <ToggleGroup
           value={[String(total)]}
-          onValueChange={(value: string[]) => value[0] && setTotal(Number(value[0]))}
+          onValueChange={(value: string[]) => {
+            const size = Number(value[0]);
+            if (!value[0]) return;
+            // Выбор размера не с этого тарифа не гасится молча: молчаливый
+            // отказ читается как поломка переключателя.
+            if (size > maxDigestOf(plan)) {
+              digestPaywall.open();
+              return;
+            }
+            setTotal(size);
+          }}
           variant="outline"
         >
-          {(plan.digestSizes.includes(total) ? plan.digestSizes : [total, ...plan.digestSizes]).map((size) => (
+          {sizes.map((size) => (
             <ToggleGroupItem key={size} value={String(size)}>
               {size}
+              {size > maxDigestOf(plan) ? (
+                <CrownIcon className="ml-1 size-3 text-amber-500" aria-label="на платном тарифе" />
+              ) : null}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        {digestPaywall.dialog}
         <input type="hidden" name="digest_size" value={total} />
       </Field>
 
@@ -305,11 +330,20 @@ export function TopicChips({
               }
             }}
           />
-          <Button type="button" variant="outline" disabled={full} onClick={() => add(draft)}>
-            <PlusIcon data-icon="inline-start" />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => (full ? topicsPaywall.open() : add(draft))}
+          >
+            {full ? (
+              <CrownIcon data-icon="inline-start" className="text-amber-500" />
+            ) : (
+              <PlusIcon data-icon="inline-start" />
+            )}
             Добавить
           </Button>
         </div>
+        {topicsPaywall.dialog}
         <FieldDescription>
           {full
             ? `Тариф «${plan.label}» держит ${plan.maxTopics} — освободи место, убрав интерес`

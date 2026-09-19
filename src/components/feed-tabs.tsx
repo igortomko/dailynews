@@ -79,7 +79,7 @@ export function FeedTabs({
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-4 py-4 sm:py-6">
+      <div className="mx-auto max-w-page px-4 py-4 sm:py-6">
         <div className="rounded-xl border bg-card px-4 sm:px-6">
       {tabs.map((tab) => {
         const list = forTab(tab.slug);

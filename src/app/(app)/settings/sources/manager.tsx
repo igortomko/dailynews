@@ -14,6 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
 import type { Plan } from "@/lib/plans";
+import { PaywallCrown } from "@/components/paywall";
 import type { Found } from "../../../../../pipeline/discover";
 
 /**
@@ -269,10 +270,13 @@ export function SourcesManager({
 
                 {found && !plan.kinds.includes(found.kind) ? (
                   <Alert>
-                    <AlertTitle>Тариф «{plan.label}» не берёт источники вида {found.kind}</AlertTitle>
+                    <AlertTitle className="flex items-center gap-1.5">
+                      Посты из X — на платном тарифе
+                      <PaywallCrown feature="x" plan={plan} />
+                    </AlertTitle>
                     <AlertDescription>
-                      Ссылка разобралась: {found.label}. Чтобы её добавить, нужен тариф,
-                      который этот вид опрашивает.
+                      Ссылка разобралась: {found.label}. Твиты попадают в выпуск наравне
+                      с новостями сайтов, но X берёт за доступ отдельно.
                     </AlertDescription>
                   </Alert>
                 ) : null}

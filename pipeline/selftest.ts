@@ -6,6 +6,8 @@
  *   npx tsx pipeline/selftest.ts
  */
 import assert from "node:assert/strict";
+import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
@@ -631,11 +633,13 @@ assert.ok(
   !allows(PLANS.free, "personalization") && !allows(PLANS.free, "calibration"),
   "бесплатный тариф не открывает платных разделов",
 );
-// Подписка открыта всем: закрыть её тарифом значит показать кнопку
-// «подписаться» только тем, кто уже подписан.
-for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
-  assert.ok(allows(plan, "subscription"), `подписка видна на тарифе ${plan.id}`);
-}
+// Подписка открыта всем и тарифом не закрывается вовсе: закрыть её значит
+// показать кнопку «подписаться» только тем, кто уже подписан. Поэтому её
+// и нет среди разделов, которые тариф может закрыть.
+assert.ok(
+  !(GATED as readonly string[]).includes("subscription"),
+  "раздел подписки не должен закрываться тарифом",
+);
 assert.ok(
   allows(PLANS.plus, "personalization") && allows(PLANS.pro, "personalization"),
   "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
@@ -1087,4 +1091,73 @@ assert.ok(!alreadyIn("Совет директоров одобрил сделк�
 assert.ok(!alreadyIn("", "русском"), "пустой текст не делит на ноль");
 assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержку swap на узлах.", "русском"), "латинские термины внутри русского не сбивают счёт");
 
-console.log("Самопроверка пройдена: 307 утверждений");
+
+// --- подписка Lemon Squeezy --------------------------------------------------
+// Тариф выдаётся только подписанным событием с их стороны, а действует он,
+// пока оплачен. Обе ошибки молчаливы: лишний платный выпуск и снятый раньше
+// срока тариф одинаково не видны в логе.
+process.env.LEMON_VARIANT_PLUS = "111";
+process.env.LEMON_BUY_PLUS = "https://shop.lemonsqueezy.com/buy/aaa";
+process.env.LEMON_VARIANT_PRO = "222";
+process.env.LEMON_BUY_PRO = "https://shop.lemonsqueezy.com/buy/bbb";
+process.env.LEMON_WEBHOOK_SECRET = "s3cret";
+
+const paid = (over: Record<string, unknown> = {}) =>
+  ({ id: 1, plan: "pro", subscription_status: "active", plan_ends_at: null,
+     plan_renews_at: null, subscription_id: "sub_1", portal_url: null, ...over }) as never;
+
+const DAY = 86_400_000;
+assert.equal(effectivePlan(paid()).id, "pro", "активная подписка даёт купленный тариф");
+assert.equal(
+  effectivePlan(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() + DAY).toISOString() })).id,
+  "pro",
+  "отменённая подписка работает до конца оплаченного периода",
+);
+assert.equal(
+  effectivePlan(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() - DAY).toISOString() })).id,
+  "free",
+  "после конца оплаченного периода тариф гаснет сразу, а не к ночному прогону",
+);
+assert.equal(
+  effectivePlan(paid({ subscription_status: "expired", plan_ends_at: null })).id,
+  "free",
+  "истёкшая подписка не даёт платного выпуска",
+);
+assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
+assert.ok(endingAt(paid({ plan_ends_at: new Date(Date.now() + DAY).toISOString() })), "дата конца видна интерфейсу");
+assert.equal(endingAt(paid()), null, "у активной подписки конца нет");
+
+const signedBody = JSON.stringify({ hello: "world" });
+const goodSignature = createHmac("sha256", "s3cret").update(signedBody).digest("hex");
+assert.ok(signatureValid(signedBody, goodSignature), "своя подпись принимается");
+assert.ok(!signatureValid(signedBody, goodSignature.replace(/.$/, "0")), "чужая подпись отвергается");
+assert.ok(!signatureValid(signedBody, null), "без подписи — отказ");
+assert.ok(!signatureValid(signedBody, "не-шестнадцатеричное"), "мусор вместо подписи не роняет разбор");
+
+const lemonEvent = (over: Record<string, unknown> = {}) => ({
+  meta: { event_name: "subscription_updated", custom_data: { reader_id: 7 } },
+  data: { id: "sub_9", attributes: { variant_id: 222, status: "active", renews_at: "2026-11-01T00:00:00Z", ends_at: null } },
+  ...over,
+});
+
+const applied = readEvent(lemonEvent() as never);
+assert.ok(applied.ok && applied.readerId === 7 && applied.update.plan === "pro", "вариант превращается в тариф");
+assert.ok(!readEvent(lemonEvent({ meta: { event_name: "order_created" } }) as never).ok, "не про подписку — мимо");
+assert.ok(
+  !readEvent(lemonEvent({ meta: { event_name: "subscription_created", custom_data: {} } }) as never).ok,
+  "без номера читателя платёж некому засчитать",
+);
+assert.ok(
+  !readEvent({ ...lemonEvent(), data: { id: "x", attributes: { variant_id: 999, status: "active" } } } as never).ok,
+  "чужой вариант не выдаёт тариф",
+);
+const expiredEvent = readEvent({
+  ...lemonEvent(),
+  data: { id: "sub_9", attributes: { variant_id: 222, status: "expired" } },
+} as never);
+assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкшая подписка сбрасывает тариф");
+
+assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
+assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
+
+console.log("Самопроверка пройдена: 327 утверждений");

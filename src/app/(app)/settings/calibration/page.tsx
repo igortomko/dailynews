@@ -1,6 +1,7 @@
 import { getCalibration, getSummaryQuality } from "@/lib/queries";
 import { currentReader } from "@/lib/session";
-import { allows, planOf } from "@/lib/plans";
+import { allows } from "@/lib/plans";
+import { effectivePlan } from "@/lib/lemon";
 import { PlanGate } from "@/components/plan-gate";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -28,7 +29,7 @@ function Row({ label, shown, opened, rate }: { label: string; shown: number; ope
 
 export default async function CalibrationPage() {
   const reader = await currentReader();
-  const plan = planOf(reader.plan);
+  const plan = effectivePlan(reader);
   // Тяжёлые запросы статистики не должны выполняться ради страницы,
   // которую тариф всё равно не покажет.
   if (!allows(plan, "calibration")) {

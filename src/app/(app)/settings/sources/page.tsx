@@ -1,6 +1,7 @@
 import { getSourceHealth } from "@/lib/queries";
 import { currentReader } from "@/lib/session";
 import { planOf } from "@/lib/plans";
+import { effectivePlan } from "@/lib/lemon";
 import { SourcesManager } from "./manager";
 
 export const dynamic = "force-dynamic";
@@ -10,5 +11,5 @@ export default async function SourcesPage() {
   // владелец: удаление источника уносит каскадом собранные материалы,
   // и у такой кнопки не должно быть ста рук.
   const [reader, sources] = [await currentReader(), await getSourceHealth()];
-  return <SourcesManager sources={sources} plan={planOf(reader.plan)} editable={reader.owner} />;
+  return <SourcesManager sources={sources} plan={effectivePlan(reader)} editable={reader.owner} />;
 }
