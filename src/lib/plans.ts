@@ -39,7 +39,9 @@ export type Plan = {
   sections: Gated[];
 };
 
-const FREE_KINDS: Source["kind"][] = ["rss", "hackernews", "reddit"];
+// Telegram и почта ничего не стоят: публичный канал читается как страница,
+// а ящик свой. Платный здесь только X — у него счёт за прочитанные посты.
+const FREE_KINDS: Source["kind"][] = ["rss", "hackernews", "reddit", "telegram", "email"];
 
 export const PLANS: Record<PlanId, Plan> = {
   free: {

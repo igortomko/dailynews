@@ -38,6 +38,7 @@ function yieldOf(source: SourceHealth): string {
  */
 export function SourcesManager({
   sources,
+  plan,
   editable,
 }: { sources: SourceHealth[]; plan: Plan; editable: boolean }) {
   const [pending, startTransition] = useTransition();

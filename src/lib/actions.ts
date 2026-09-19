@@ -291,7 +291,7 @@ export async function discoverSource(input: string): Promise<
   }
 }
 
-const KNOWN_KINDS = new Set(["rss", "hackernews", "reddit", "x", "telegram", "email"]);
+const KNOWN_KINDS = new Set<Source["kind"]>(["rss", "hackernews", "reddit", "x", "telegram", "email"]);
 
 /**
  * Сохраняется только то, что действительно ответило, и перепроверяется ровно
@@ -301,7 +301,8 @@ const KNOWN_KINDS = new Set(["rss", "hackernews", "reddit", "x", "telegram", "em
  */
 export async function addSource(formData: FormData) {
   await requireOwner();
-  const kind = String(formData.get("kind") ?? "").trim();
+  // Вид сужается один раз: дальше он уходит и в предел тарифа, и в пробу.
+  const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
   const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
   if (!KNOWN_KINDS.has(kind)) return { error: "Сначала разбери ссылку" };
