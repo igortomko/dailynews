@@ -182,45 +182,7 @@ export async function saveInterests(formData: FormData) {
   return { ok: true as const };
 }
 
-export async function saveLlm(formData: FormData) {
-  const readerId = await currentReaderId();
-  const denied = await denyBySection("subscription");
-  if (denied) return denied;
 
-  const provider = String(formData.get("base_url") ?? "").trim();
-  const model = String(formData.get("model") ?? "").trim();
-  const apiKey = String(formData.get("api_key") ?? "").trim();
-
-  if (provider && !/^https:\/\//.test(provider)) {
-    return { error: "Адрес должен начинаться с https://" };
-  }
-
-  // Пустой ключ означает «не менять»: иначе форма стирала бы сохранённый
-  // ключ каждый раз, когда её открывают посмотреть остальные поля.
-  await sql`
-    update dailynews.readers
-       set llm = jsonb_strip_nulls(
-             llm
-             || jsonb_build_object('base_url', nullif(${provider}, ''))
-             || jsonb_build_object('model', nullif(${model}, ''))
-             || case when ${apiKey} = '' then '{}'::jsonb
-                     else jsonb_build_object('api_key', ${apiKey}) end
-           ),
-           updated_at = now()
-     where id = ${readerId}
-  `;
-  revalidatePath("/settings/subscription");
-  return { ok: true as const };
-}
-
-export async function clearLlmKey() {
-  const readerId = await currentReaderId();
-  const denied = await denyBySection("subscription");
-  if (denied) return denied;
-
-  await sql`update dailynews.readers set llm = llm - 'api_key' where id = ${readerId}`;
-  revalidatePath("/settings/subscription");
-}
 
 /**
  * Адрес Kindle. Обратный адрес не трогаем: он выдан один раз при заведении
@@ -504,7 +466,7 @@ export async function topUpDigest() {
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const written = await writeDigest(survivors, reader.reader_context, reader.llm ?? {}, {
+  const written = await writeDigest(survivors, reader.reader_context, {
     language: reader.language,
     complexity: reader.complexity,
     style: reader.style,

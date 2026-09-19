@@ -7,7 +7,7 @@
  * можно только сверив с оригиналом. Поэтому куски небольшие, а на выходе
  * считаются блоки и длина.
  */
-import { resolve, type LlmConfig, type Usage } from "./digest";
+import { resolve, type Usage } from "./digest";
 
 /** Больше — меньше запросов, но выше шанс, что потолок ответа делится
  *  с рассуждением модели и ответ оборвётся. Шесть тысяч знаков — это
@@ -163,9 +163,8 @@ export function chunkProblem(source: string[], translated: string[]): string {
 export async function translateArticle(
   markdown: string,
   language: string,
-  config: LlmConfig = {},
 ): Promise<Translated> {
-  const resolved = resolve(config);
+  const resolved = resolve();
   if (!resolved.apiKey) throw new Error("нет ключа модели: переводить нечем");
 
   const usage: Usage = { input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 };
