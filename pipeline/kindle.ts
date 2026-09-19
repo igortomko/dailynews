@@ -109,8 +109,24 @@ type KindleTarget = {
   kindle_digest: boolean;
 };
 
-export function sendsDigestToKindle<T extends KindleTarget>(
-  reader: T,
-): reader is T & { kindle_address: string; kindle_sender: string } {
-  return Boolean(reader.kindle_address && reader.kindle_sender && reader.kindle_digest);
+/**
+ * Уходит ли выпуск этому читателю на читалку — и если нет, почему.
+ *
+ * Вердикт, а не булево: три причины отказа требуют разного обращения.
+ * Пустой адрес — читатель не просил, молчать уместно. Не выданный обратный
+ * адрес — сбой на нашей стороне при вписанном адресе, и молчать нельзя:
+ * выпуска ждут. Выключенный переключатель — решение читателя; адрес он
+ * оставил для отправки отдельных статей, и раньше такого выбора не было
+ * вовсе: «не присылай выпуск» делалось стиранием адреса, заодно выключая
+ * ручную отправку.
+ */
+export type KindleVerdict =
+  | { send: true; to: string; sender: string }
+  | { send: false; reason: "no-address" | "no-sender" | "switched-off" };
+
+export function kindleDigestVerdict(reader: KindleTarget): KindleVerdict {
+  if (!reader.kindle_address) return { send: false, reason: "no-address" };
+  if (!reader.kindle_sender) return { send: false, reason: "no-sender" };
+  if (!reader.kindle_digest) return { send: false, reason: "switched-off" };
+  return { send: true, to: reader.kindle_address, sender: reader.kindle_sender };
 }

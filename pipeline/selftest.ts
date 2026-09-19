@@ -14,7 +14,7 @@ import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
-import { digestHtml, sendsDigestToKindle } from "./kindle";
+import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
@@ -567,7 +567,29 @@ assert.ok(
   "запрещённый вид отсекается до предела по числу, а не занимает место",
 );
 
-import { GATED, allows, cheapestWith } from "../src/lib/plans";
+// Предел в форме обязан считать то же, что опрашивает прогон: иначе после
+// понижения тарифа запрещённый вид занимает места живых источников.
+const afterDowngrade = [
+  source(1, "x"), source(2, "x"), source(3, "x"),
+  source(4, "rss"), source(5, "rss"),
+];
+assert.equal(
+  sourcesForPlan(afterDowngrade, PLANS.free).length,
+  2,
+  "прогон на бесплатном опрашивает только разрешённые виды",
+);
+assert.equal(
+  afterDowngrade.filter((s) => s.active && PLANS.free.kinds.includes(s.kind)).length,
+  2,
+  "и предел в форме обязан считать по тому же правилу",
+);
+
+import { GATED, allows, cheapestWith, topicsWord } from "../src/lib/plans";
+
+assert.equal(topicsWord(1), "интерес", "единственное число");
+assert.equal(topicsWord(2), "интереса", "два-четыре");
+assert.equal(topicsWord(5), "интересов", "пять и больше");
+assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
 
 assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
 assert.ok(allows(PLANS.pro, "subscription"), "свой ключ — признак Pro");
@@ -598,24 +620,29 @@ for (const file of ["0019_plan", "0020_readers"]) {
   }
 }
 
-// Переключатель выпуска на читалку. Адрес обслуживает и ручную отправку
-// отдельной статьи, поэтому выключенный выпуск не должен требовать стереть
-// адрес — и не должен молча слаться при выключённом переключателе.
+// Вердикт по выпуску на читалку. Адрес обслуживает и ручную отправку
+// отдельной статьи, поэтому выключенный выпуск не требует стереть адрес —
+// и не должен молча уходить при выключенном переключателе.
 {
   const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
-  assert.equal(sendsDigestToKindle(full), true, "адрес, отправитель и переключатель — шлём");
-  assert.equal(
-    sendsDigestToKindle({ ...full, kindle_digest: false }), false,
+  const ok = kindleDigestVerdict(full);
+  assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
+  assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_digest: false }),
+    { send: false, reason: "switched-off" },
     "выключенный переключатель отменяет выпуск, хотя адрес на месте",
   );
-  assert.equal(
-    sendsDigestToKindle({ ...full, kindle_address: null }), false,
-    "без адреса слать некуда",
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_address: null }),
+    { send: false, reason: "no-address" },
+    "без адреса слать некуда, и говорить об этом не о чем",
   );
-  assert.equal(
-    sendsDigestToKindle({ ...full, kindle_sender: null }), false,
-    "без обратного адреса Amazon отбросит письмо молча",
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_sender: null }),
+    { send: false, reason: "no-sender" },
+    "вписанный адрес без обратного — сбой, о нём сообщают в лог",
   );
 }
 
-console.log("Самопроверка пройдена: 142 утверждения");
+console.log("Самопроверка пройдена: 149 утверждений");
