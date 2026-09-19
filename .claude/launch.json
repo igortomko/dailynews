@@ -15,11 +15,9 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": [
         "next",
-        "dev",
-        "--port",
-        "3100"
+        "dev"
       ],
-      "port": 3100
+      "autoPort": true
     }
   ]
 }
