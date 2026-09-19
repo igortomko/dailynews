@@ -261,7 +261,12 @@ async function deliver(
     }
   }
 
-  if (!reader.kindle_address || !reader.kindle_sender) return;
+  if (!reader.kindle_address) return;
+  if (!reader.kindle_sender) {
+    // Молчать здесь нельзя: адрес читалки вписан, значит выпуска ждут.
+    log(`  ${name}: Kindle — обратный адрес не выдан, отправка пропущена`);
+    return;
+  }
   try {
     const sent = await sendToKindle({
       to: reader.kindle_address,

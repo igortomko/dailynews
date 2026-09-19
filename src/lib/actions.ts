@@ -11,7 +11,7 @@ import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import { getReaderTopics, recordCall, spentToday } from "./readers";
+import { freezeKindleSender, getReaderTopics, recordCall, spentToday } from "./readers";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
@@ -237,6 +237,15 @@ export async function saveKindle(formData: FormData) {
        set kindle_address = ${address || null}, updated_at = now()
      where id = ${readerId}
   `;
+
+  // Обратный адрес выдаётся здесь же, если его ещё нет: иначе читатель,
+  // вписавший адрес читалки до первого /start, остался бы без отправителя,
+  // и выпуск не уходил бы — при сохранённом адресе и без единой ошибки.
+  if (address) {
+    const reader = await currentReader();
+    if (!reader.kindle_sender) await freezeKindleSender(reader.id, reader.username);
+  }
+
   revalidatePath("/settings/delivery");
   return { ok: true as const };
 }

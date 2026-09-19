@@ -63,8 +63,12 @@ export async function catalogTopics(): Promise<Topic[]> {
  * Обратный адрес для Kindle. Выдаётся один раз и дальше не меняется:
  * каждая смена означает, что читатель заново одобряет отправителя
  * в настройках Amazon, а до тех пор выпуски молча не доходят.
+ *
+ * Зовётся из двух мест: при заведении через /start и при сохранении адреса
+ * читалки. Только первого не хватало — читатель, вписавший адрес до того,
+ * как написал боту, оставался без отправителя, и доставка тихо пропускалась.
  */
-async function freezeKindleSender(id: number, username: string | null): Promise<void> {
+export async function freezeKindleSender(id: number, username: string | null): Promise<void> {
   const base = (username ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24);
   // Второй кандидат содержит id читателя, поэтому занятым быть не может.
   for (const candidate of [base || `reader${id}`, `${base || "reader"}-${id}`]) {
