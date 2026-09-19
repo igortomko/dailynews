@@ -1,0 +1,15 @@
+# Секреты не должны попадать в контекст сборки вообще: Next.js копирует
+# .env* в standalone-вывод, и они оказываются внутри образа. На хосте
+# файл читает compose через env_file — в образе ему делать нечего.
+.env
+.env.*
+!.env.example
+
+.git
+node_modules
+.next
+magazines
+legacy
+supabase
+deploy
+*.md

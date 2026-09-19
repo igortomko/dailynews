@@ -40,6 +40,14 @@ ssh "$HOST" "cd $DIR && GIT_COMMIT=$COMMIT docker compose -f $DIR/docker-compose
 echo "→ страница сайта в Caddy"
 ssh "$HOST" "cp $DIR/deploy/$DOMAIN.caddy /etc/caddy/sites/$DOMAIN.caddy && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null && systemctl reload caddy"
 
+# Секреты на хосте лежат рядом с кодом, поэтому исключаются и из rsync,
+# и из контекста сборки (.dockerignore). Проверяем, что в образе их нет.
+echo "→ проверка: нет ли секретов в образе"
+if ssh "$HOST" "docker run --rm --entrypoint sh \$(docker compose -f $DIR/docker-compose.yml images -q web) -c 'ls -a /app | grep -c \"^\\.env\"' 2>/dev/null" | grep -qv '^0$'; then
+  echo "! в образе остались файлы .env — сборка прошла с секретами" >&2
+  exit 1
+fi
+
 echo "→ проверка: обслуживает ли запущенный контейнер отправленный код"
 for attempt in $(seq 1 20); do
   SERVED=$(ssh "$HOST" "curl -fsS --max-time 5 http://127.0.0.1:8085/api/version 2>/dev/null" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' || true)

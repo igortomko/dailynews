@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Без этого ARG в Dockerfile остаётся своим значением по умолчанию,
+        # и проверка после переключения сравнивает коммит с «unknown».
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     container_name: dailynews
     restart: unless-stopped
     # Только на петлю: наружу выходит один Caddy на хосте.
