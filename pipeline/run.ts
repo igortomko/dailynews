@@ -139,6 +139,13 @@ export async function transcribeVideos(): Promise<{ done: number; cost: number }
                transcribed_at = now()
          where id = ${video.id}
       `;
+      // Оценка снимается вместе с текстом, по которому её ставили: ролик,
+      // расшифрованный не в тот же прогон, что собран, уже оценён — и оценён
+      // по описанию из фида. У торгового канала это «🎁 Получить БЕСПЛАТНО
+      // индикаторы»: ни темы, ни конкретики, скор 8 из ста. Конспект менял
+      // текст, а решение о материале принималось по старому. Шаг оценки
+      // идёт следом в этом же прогоне и переоценит по содержанию.
+      await sql`delete from dailynews.scores where item_id = ${video.id}`;
       await recordCall({
         readerId: null, stage: "video", model: writeup.model,
         tokensIn: writeup.usage.input, tokensOut: writeup.usage.output,
