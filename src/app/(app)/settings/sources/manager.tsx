@@ -105,6 +105,56 @@ function listOf(names: string[], limit = 3): string {
 const SILENT_DAYS = 5;
 
 /**
+ * Куда ведёт источник, если по нему щёлкнуть.
+ *
+ * Адресом фида url бывает не у всех: у Hacker News там листинг, у Telegram —
+ * имя канала, у почты — адрес отправителя. Ссылка на «topstories» вела бы
+ * в никуда, поэтому адрес собирается по виду источника, а где открывать
+ * нечего — ссылки нет вовсе.
+ */
+function openUrlOf(source: SourceHealth): string | null {
+  switch (source.kind) {
+    case "rss":
+      return /^https?:\/\//.test(source.url) ? source.url : null;
+    case "hackernews":
+      return source.url === "newstories"
+        ? "https://news.ycombinator.com/newest"
+        : source.url === "beststories"
+          ? "https://news.ycombinator.com/best"
+          : "https://news.ycombinator.com/";
+    case "telegram":
+      return `https://t.me/${source.url}`;
+    case "reddit":
+      return `https://www.reddit.com/r/${source.url}`;
+    case "x":
+      return `https://x.com/search?q=${encodeURIComponent(source.url)}`;
+    // У почты открывать нечего: адрес отправителя — не страница, а щелчок
+    // по нему запускал бы почтовую программу, чего никто не просил.
+    case "email":
+      return null;
+  }
+}
+
+/**
+ * Что с источником не так, или null, когда всё в порядке.
+ *
+ * Строка отдачи под каждым источником — это тридцать строк служебного текста
+ * на экране из десяти. Читают её, только когда с источником что-то не то;
+ * в остальное время она есть в подсказке у числа последнего прогона.
+ */
+function troubleOf(source: SourceHealth): string | null {
+  // Прогон его ещё не видел: ни удачи, ни ошибки.
+  if (!source.last_ok_at && !source.last_error) {
+    return "добавлен — первый сбор в ближайшем прогоне";
+  }
+  if (source.items === 0) return "за 30 дней — ни одного материала";
+  // Материалы даёт, но ни один не переживает отбор: источник есть, толку нет,
+  // и по одному числу последнего прогона этого не увидеть.
+  if (source.in_digest === 0) return "за 30 дней ни один материал не дошёл до выпуска";
+  return null;
+}
+
+/**
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
  * не значит: важно, сколько из них дошло до выпусков и не перепечатки ли это.
  */
@@ -398,42 +448,82 @@ export function SourcesManager({
                   <SourceIcon kind={source.kind} url={source.url} className="mt-0.5 size-4" />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-medium">{source.label}</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {source.url}
-                      {source.input_url && source.input_url !== source.url
-                        ? ` ← ${source.input_url}`
-                        : ""}
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground">{yieldOf(source)}</span>
+                    {/*
+                      Адрес открывается в соседнем окне: увидеть, что за
+                      источником, — обычное желание, а копировать ссылку
+                      руками ради этого незачем.
+                    */}
+                    {openUrlOf(source) ? (
+                      <a
+                        href={openUrlOf(source)!}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="truncate text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        {source.url}
+                        {source.input_url && source.input_url !== source.url
+                          ? ` ← ${source.input_url}`
+                          : ""}
+                      </a>
+                    ) : (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {source.url}
+                        {source.input_url && source.input_url !== source.url
+                          ? ` ← ${source.input_url}`
+                          : ""}
+                      </span>
+                    )}
+                    {troubleOf(source) ? (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {troubleOf(source)}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
+                {/*
+                  Одно число без подписи — загадка. Всплывающая подсказка
+                  говорит, что оно значит, и заодно держит отдачу за тридцать
+                  дней: в строке она стоит только у проблемных, а посмотреть
+                  её иногда хочется у любого.
+                */}
                 {source.last_error ? (
                   // Своя подсказка вместо title — та же, что у всех иконок
                   // в приложении. Текст ошибки продублирован в предупреждении
                   // наверху страницы, поэтому наведение здесь — короткий путь,
                   // а не единственный.
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="destructive" />}>ошибка</TooltipTrigger>
+                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>ошибка</TooltipTrigger>
                     <TooltipContent>{source.last_error}</TooltipContent>
                   </Tooltip>
                 ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
-                  <Badge variant="destructive">молчит {source.silent_days} дн.</Badge>
+                  <Tooltip>
+                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>
+                      молчит {source.silent_days} дн.
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Отвечает, но {SILENT_DAYS} дней подряд не даёт ничего свежего
+                    </TooltipContent>
+                  </Tooltip>
                 ) : source.last_count !== null ? (
                   // Одно число без подписи — загадка: рядом уже стоит отдача
                   // за тридцать дней, и какое из двух что значит, неоткуда
-                  // узнать, кроме как навести.
+                  // узнать, кроме как навести. Подпись нужна и диктору:
+                  // подсказка достаётся курсору, а он её не видит.
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <Badge
                           variant="secondary"
+                          className="cursor-help"
                           aria-label={`Последний прогон дал ${source.last_count} свежих материалов`}
                         />
                       }
                     >
                       {source.last_count}
                     </TooltipTrigger>
-                    <TooltipContent>Столько свежих материалов дал последний прогон</TooltipContent>
+                    <TooltipContent>
+                      Свежих материалов в последнем прогоне · {yieldOf(source)}
+                    </TooltipContent>
                   </Tooltip>
                 ) : null}
                 {editable ? (

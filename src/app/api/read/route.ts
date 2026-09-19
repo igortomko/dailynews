@@ -36,6 +36,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "плохие поля" }, { status: 400 });
   }
 
+  // Читатель вернулся — пауза снимается сама. Кнопка в боте остаётся
+  // коротким путём для тех, кто до сайта не дошёл.
+  await sql`
+    update dailynews.readers
+       set paused_at = null, sleep_asked_at = null
+     where id = ${readerId} and paused_at is not null
+  `;
+
   // Отмена «меньше такого» удаляет событие, а не пишет второе поверх.
   // Лента прячет материал по самому наличию строки down: пока она лежит
   // в reads, «Вернуть» возвращает карточку до первой перезагрузки, после
@@ -45,6 +53,8 @@ export async function POST(request: NextRequest) {
   // Удаляется только собственная строка собственного читателя, и только
   // down: отменять показ или переход незачем, а возможность стирать любое
   // событие означала бы, что калибровку можно подчистить запросом.
+  //
+  // Стоит после снятия паузы: отмена — это тоже «читатель вернулся».
   if (event === "down" && payload.undo === true) {
     await sql`
       delete from dailynews.reads
