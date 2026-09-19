@@ -31,4 +31,7 @@ export const sql = postgres(url, {
   max: Number(process.env.DB_POOL_MAX ?? 3),
   idle_timeout: 20,
   connect_timeout: 15,
+  // Потолок на запрос. Общий пулер иногда не отдаёт соединение сразу,
+  // и без потолка страница висит вместо того, чтобы вернуть ошибку.
+  connection: { statement_timeout: 15_000 },
 });

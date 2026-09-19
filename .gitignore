@@ -24,3 +24,7 @@ next-env.d.ts
 # Прочее
 .DS_Store
 *.log
+
+# supabase link
+supabase/
+.dn_pw_tmp

@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx pipeline/selftest.ts",
     "verify:db": "tsx db/verify.ts",
-    "dry-run": "tsx pipeline/dry-run.ts"
+    "dry-run": "tsx pipeline/dry-run.ts",
+    "ping": "tsx --env-file=.env db/ping.ts",
+    "env:set": "tsx scripts/env-set.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

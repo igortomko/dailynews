@@ -13,7 +13,7 @@
  * каталога живого инстанса, а не из текста миграции.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
@@ -27,7 +27,9 @@ async function main() {
   // Без них 0001 спотыкается не на своей ошибке.
   await db.exec(`create schema if not exists extensions; create role products_reader;`);
 
-  const migrations = ["0001_schema_and_role.sql", "0002_tables.sql", "0003_seed.sql"];
+  // Из каталога, а не списком: перечисленные вручную миграции рано или
+  // поздно расходятся с тем, что лежит в папке, и новая проскакивает мимо.
+  const migrations = readdirSync("db/migrations").filter((f) => f.endsWith(".sql")).sort();
   const sqlText = migrations
     .map((file) => readFileSync(`db/migrations/${file}`, "utf8"))
     .join("\n");
@@ -122,7 +124,7 @@ async function main() {
     console.log("  дедуп: перепечатка поймана по pg_trgm");
 
     // --- оценки и дайджест ---------------------------------------------------
-    const axes = (topic: string, kind: string, extra = {}) => JSON.stringify({
+    const axes = (topic: string, kind: string, extra = {}) => ({
       topic: { choice: topic, confidence: 0.9, probabilities: { [topic]: 0.9 } },
       kind: { choice: kind, confidence: 0.8, probabilities: {} },
       horizon: { choice: "years", confidence: 0.7, probabilities: {} },
@@ -143,7 +145,10 @@ async function main() {
       const topic = topics.find((t) => t.slug === slug)!;
       await sql`
         insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
-        values (${itemId}, ${topic.id}, ${total}, 0.8, ${axes(slug, kind)}, 'jev-latest')
+        values (
+          ${itemId}, ${topic.id}, ${total}, 0.8,
+          ${sql.json(axes(slug, kind) as unknown as Parameters<typeof sql.json>[0])}, 'jev-latest'
+        )
       `;
       await sql`update dailynews.items set title_ru = 'RU', summary = 'S' where id = ${itemId}`;
     }
@@ -158,6 +163,13 @@ async function main() {
     assert.equal(feed[0].total, 120, "лента должна идти по убыванию скора");
     assert.ok(feed[0].topic_slug === "ai-infra");
     assert.equal(typeof feed[0].axes, "object", "axes должны прийти объектом, а не строкой");
+    // Двойное кодирование не видно на чтении, но ломает извлечение осей в SQL.
+    const [stored] = await sql<{ kind: string | null; shape: string }[]>`
+      select axes->'kind'->>'choice' as kind, jsonb_typeof(axes) as shape
+        from dailynews.scores limit 1
+    `;
+    assert.equal(stored.shape, "object", "axes должны лежать объектом, а не jsonb-строкой");
+    assert.ok(stored.kind, "axes->'kind'->>'choice' не должен быть null");
     assert.equal(feed[0].axes.kind.choice, "fact", "axes должны разобраться из jsonb");
     assert.equal(feed[0].read_count, 0);
     assert.ok(!feed.some((item) => item.id === ids[1]), "дубль не должен попасть в ленту");

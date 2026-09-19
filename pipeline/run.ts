@@ -73,7 +73,15 @@ async function main() {
   log(`   новых материалов: ${collected.length}`);
 
   log("2. Дедуп");
-  const duplicates = await markDuplicates(sql, collected);
+  // Берём всё окно, а не результат вставки: если прогон упал между
+  // вставкой и дедупом, по свежим id эти материалы больше никогда
+  // не проверятся. Повторная пометка — no-op, так что это безопасно.
+  const pending_dedup = await sql<{ id: number }[]>`
+    select id from dailynews.items
+     where dup_of is null
+       and collected_at > now() - ${`${SCORE_WINDOW_DAYS} days`}::interval
+  `;
+  const duplicates = await markDuplicates(sql, pending_dedup.map((row) => row.id));
   log(`   помечено дублей: ${duplicates}`);
 
   log("3. Скоринг Jev — весь поток, не выборка");
@@ -105,7 +113,11 @@ async function main() {
       insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
       values (
         ${row.item_id}, ${topicIdBySlug.get(row.topic_slug) ?? null},
-        ${row.total}, ${row.confidence}, ${JSON.stringify(row.axes)}, ${model}
+        ${row.total}, ${row.confidence},
+        -- Объект, а не JSON.stringify: драйвер сериализует сам, и лишний
+        -- stringify кладёт в jsonb строку вместо объекта. Тогда axes->'kind'
+        -- молча возвращает null, и ломается вся калибровка по осям.
+        ${sql.json(row.axes as unknown as Parameters<typeof sql.json>[0])}, ${model}
       )
       on conflict (item_id) do nothing
     `;
@@ -114,19 +126,33 @@ async function main() {
   log(`   оценено: ${scored.length}, токенов: ${usage.input}, $${jevCost.toFixed(4)}`);
 
   log("4. Отбор: код сортирует по составному скору");
+  // Отбор по чистому скору отдаёт дайджест самой плодовитой теме: источники
+  // по энергетике дают вчетверо больше материалов, чем по демографии, и все
+  // они честно совпадают со своей темой. Поэтому берём по кругу — сначала
+  // лучшее в каждой теме, потом вторые по каждой. Читателю нужны направления,
+  // а вкладки и так позволяют уйти вглубь одной темы.
+  // ponytail: жёсткий круг; если у темы сегодня пусто, её место просто уходит
+  // следующей по скору — при необходимости добавить порог качества.
   const survivors = await sql<Survivor[]>`
-    select i.id, i.title, i.excerpt, i.url, s.label as source_label,
-           coalesce(t.label, 'Прочее') as topic_label,
-           sc.total, sc.axes
-      from dailynews.scores sc
-      join dailynews.items i on i.id = sc.item_id
-      join dailynews.sources s on s.id = i.source_id
- left join dailynews.topics t on t.id = sc.topic_id
-     where i.dup_of is null
-       and not exists (
-         select 1 from dailynews.digests d where i.id = any(d.item_ids)
-       )
-     order by sc.total desc
+    with ranked as (
+      select i.id, i.title, i.excerpt, i.url, s.label as source_label,
+             coalesce(t.label, 'Прочее') as topic_label,
+             sc.total, sc.axes,
+             row_number() over (
+               partition by sc.topic_id order by sc.total desc
+             ) as rank_in_topic
+        from dailynews.scores sc
+        join dailynews.items i on i.id = sc.item_id
+        join dailynews.sources s on s.id = i.source_id
+   left join dailynews.topics t on t.id = sc.topic_id
+       where i.dup_of is null
+         and not exists (
+           select 1 from dailynews.digests d where i.id = any(d.item_ids)
+         )
+    )
+    select id, title, excerpt, url, source_label, topic_label, total, axes
+      from ranked
+     order by rank_in_topic asc, total desc
      limit ${profile.digest_size}
   `;
   log(`   отобрано: ${survivors.length} из ${pending.length}`);
