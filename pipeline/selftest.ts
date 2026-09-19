@@ -42,6 +42,7 @@ import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../
 import { checkSecret, looksLikeSource, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
+import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -575,6 +576,54 @@ assert.ok(
   !/redirect: "follow"/.test(outbound),
   "ни один внешний запрос не должен следовать перенаправлениям без проверки адреса",
 );
+
+
+// --- выборка для петли качества ----------------------------------------------
+// Петля меряет наш промпт, а не выпуск конкретного читателя. Сотня описаний
+// у каждого — один и тот же ответ, оплаченный столько раз, сколько читателей:
+// её вход дороже входа самого дайджеста, 3170 токенов на описание против 527.
+{
+  const items = Array.from({ length: 100 }, (_, i) => i);
+  const sample = qualitySample(items);
+  assert.equal(sample.length, QUALITY_SAMPLE, "из сотни берём дюжину");
+  assert.deepEqual(qualitySample([1, 2, 3]), [1, 2, 3], "короткий выпуск идёт целиком");
+
+  // Равномерно, а не первые N: описания приходят в порядке отбора, и первая
+  // дюжина — всегда лучшие материалы дня. Ряд по ним поехал бы вверх
+  // и перестал сравниваться с днями, когда выпуск был короче.
+  assert.ok(sample.includes(0) && sample.some((n) => n > 80), "выборка покрывает весь выпуск");
+  assert.ok(
+    new Set(sample).size === sample.length,
+    "один и тот же материал не попадает в выборку дважды",
+  );
+}
+
+// --- порядок блоков в промпте дайджеста ---------------------------------------
+// Провайдер кэширует совпадающий начальный кусок запроса и берёт за него
+// в пятьдесят раз меньше. Персональная строка в начале рвала кэш всем сразу:
+// одинаковые правила оплачивались заново у каждого читателя. Проверка
+// механическая, зато ловит ровно тот регресс, который иначе виден только
+// в счёте через месяц.
+{
+  const source = readFileSync("pipeline/digest.ts", "utf8");
+  const at = (needle: string) => {
+    const index = source.indexOf(needle);
+    assert.ok(index > 0, `в промпте должен быть кусок ${needle}`);
+    return index;
+  };
+  assert.ok(
+    at("Язык выпуска:") < at("${voiceRules(voice)}"),
+    "язык общее манеры: у читателей с одним языком префикс длиннее",
+  );
+  assert.ok(
+    at("${voiceRules(voice)}") < at("Читатель: ${readerContext}"),
+    "контекст читателя — самое персональное, и стоит последним",
+  );
+  assert.ok(
+    at("Читатель: ${readerContext}") < at("Материалы:"),
+    "материалы идут после всех правил",
+  );
+}
 
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
