@@ -132,6 +132,63 @@ async function main() {
     process.exit(1);
   }
   console.log(`\n✓ выполнено ${applied}, записано без выполнения ${recorded}, разрывов не осталось`);
+
+  if (applied > 0) await warnProdBehind();
+}
+
+/**
+ * База одна на все ветки, а прод обслуживает одну из них.
+ *
+ * 19 сентября 2026 миграция 0020 уехала в живую базу из своего worktree
+ * и снесла `profile`, `items.title_ru` и `digests.item_ids` — всё, на чём
+ * стоял код, развёрнутый из main. Сайт лёг целиком, и ни одна проверка
+ * этого не поймала: `schema-gap` ищет то, чего базе не хватает, а здесь
+ * база ушла вперёд. Отказ выглядел как успех ровно до первого открытия
+ * страницы.
+ *
+ * Поэтому после каждой применённой миграции спрашиваем прод, какой коммит
+ * он обслуживает. Чужой коммит означает: прод сейчас говорит со схемой,
+ * которой уже нет. Не падаем — миграцию откатывать поздно, — но говорим
+ * громко и единственным нужным словом: разворачивай.
+ */
+async function warnProdBehind() {
+  const base = process.env.APP_URL;
+  if (!base) return;
+
+  let served: string;
+  try {
+    const response = await fetch(new URL("/api/version", base), {
+      signal: AbortSignal.timeout(5000),
+    });
+    served = ((await response.json()) as { commit?: string }).commit ?? "";
+  } catch {
+    return; // прод недостижим — это не повод падать здесь
+  }
+  if (!served) return;
+
+  const { execFileSync } = await import("node:child_process");
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (served === head) return;
+
+  // Коммит прода среди предков HEAD — прод просто отстал на свои же
+  // миграции, и разворачивание догонит. Иначе это другая ветка, и прод
+  // уже сейчас обращается к тому, чего в базе нет.
+  let ancestor = false;
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", served, head], { stdio: "ignore" });
+    ancestor = true;
+  } catch {
+    ancestor = false;
+  }
+
+  console.error(
+    `\n! схема изменилась, а ${base} обслуживает ${served.slice(0, 8)}, не ${head.slice(0, 8)}` +
+    (ancestor
+      ? "\n  Прод отстал от схемы — разворачивай: ./deploy/deploy.sh"
+      : "\n  Это другая ветка. Прод сейчас говорит со схемой, которой уже нет —" +
+        "\n  так 19 сентября 2026 лёг весь сайт. Разворачивай ту ветку, чьи миграции" +
+        "\n  только что применены: ./deploy/deploy.sh"),
+  );
 }
 
 /**

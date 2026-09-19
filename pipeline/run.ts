@@ -8,7 +8,7 @@ import { composite, scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
 import { notify } from "../src/lib/telegram";
-import { sendToKindle } from "./kindle";
+import { sendToKindle, kindleDigestVerdict } from "./kindle";
 import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
@@ -261,16 +261,21 @@ async function deliver(
     }
   }
 
-  if (!reader.kindle_address) return;
-  if (!reader.kindle_sender) {
-    // Молчать здесь нельзя: адрес читалки вписан, значит выпуска ждут.
-    log(`  ${name}: Kindle — обратный адрес не выдан, отправка пропущена`);
+  const kindle = kindleDigestVerdict(reader);
+  if (!kindle.send) {
+    // Пустой адрес — читатель не просил, говорить не о чем. Остальные две
+    // причины он должен увидеть: одна сбой, другая его собственный выбор.
+    if (kindle.reason === "no-sender") {
+      log(`  ${name}: Kindle — обратный адрес не выдан, отправка пропущена`);
+    } else if (kindle.reason === "switched-off") {
+      log(`  ${name}: Kindle — выпуск выключен в настройках`);
+    }
     return;
   }
   try {
     const sent = await sendToKindle({
-      to: reader.kindle_address,
-      sender: reader.kindle_sender,
+      to: kindle.to,
+      sender: kindle.sender,
       day,
       intro,
       articles: survivors.map((s) => ({

@@ -93,3 +93,40 @@ export async function sendToKindle(options: {
   }
   return true;
 }
+
+/**
+ * Уходит ли выпуск этому читателю на читалку.
+ *
+ * Три условия, и каждое выключает по своей причине: нет адреса — слать
+ * некуда; нет обратного адреса — Amazon отбросит письмо молча; выключен
+ * переключатель — читатель просил не слать выпуск, но адрес оставил
+ * для отправки отдельных статей. Раньше третьего не было, и «не присылай
+ * выпуск» делалось стиранием адреса, заодно выключая ручную отправку.
+ */
+type KindleTarget = {
+  kindle_address: string | null;
+  kindle_sender: string | null;
+  kindle_digest: boolean;
+};
+
+/**
+ * Уходит ли выпуск этому читателю на читалку — и если нет, почему.
+ *
+ * Вердикт, а не булево: три причины отказа требуют разного обращения.
+ * Пустой адрес — читатель не просил, молчать уместно. Не выданный обратный
+ * адрес — сбой на нашей стороне при вписанном адресе, и молчать нельзя:
+ * выпуска ждут. Выключенный переключатель — решение читателя; адрес он
+ * оставил для отправки отдельных статей, и раньше такого выбора не было
+ * вовсе: «не присылай выпуск» делалось стиранием адреса, заодно выключая
+ * ручную отправку.
+ */
+export type KindleVerdict =
+  | { send: true; to: string; sender: string }
+  | { send: false; reason: "no-address" | "no-sender" | "switched-off" };
+
+export function kindleDigestVerdict(reader: KindleTarget): KindleVerdict {
+  if (!reader.kindle_address) return { send: false, reason: "no-address" };
+  if (!reader.kindle_sender) return { send: false, reason: "no-sender" };
+  if (!reader.kindle_digest) return { send: false, reason: "switched-off" };
+  return { send: true, to: reader.kindle_address, sender: reader.kindle_sender };
+}

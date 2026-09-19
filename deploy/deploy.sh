@@ -29,6 +29,28 @@ if ! npx tsx --env-file=.env db/ping.ts > /tmp/dailynews-ping.log 2>&1; then
   exit 1
 fi
 
+# Сессий несколько, машина одна. Два развёртывания внахлёст дают образ,
+# собранный из файлов одной ветки поверх артефактов другой: 19 сентября 2026
+# так получился контейнер, где /api/version отдавал новый коммит, а бандл
+# содержал старые запросы к снесённой таблице. Отказ выглядел как успех —
+# проверка «обслуживает ли отправленный код» сравнивала переменную окружения,
+# а не код. Поэтому весь заход идёт под замком на хосте.
+echo "→ замок развёртывания"
+exec 9>/tmp/dailynews-deploy.lock
+if ! ssh "$HOST" "mkdir -p $DIR && exec 9>$DIR/.deploy.lock && flock -w 600 -n 9 || flock -w 600 9"; then
+  echo "! не удалось взять замок развёртывания на $HOST" >&2
+  exit 1
+fi
+
+# Чей код сейчас живёт на проде. Не наш предок — значит рядом работает
+# другая сессия, и мы перекрываем её ветку. Не отказ: чья ветка должна быть
+# на проде, решает владелец, а не скрипт. Но молчать об этом нельзя.
+LIVE=$(ssh "$HOST" "curl -fsS --max-time 5 http://127.0.0.1:8085/api/version 2>/dev/null" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' || true)
+if [ -n "${LIVE:-}" ] && [ "$LIVE" != "$COMMIT" ] && ! git merge-base --is-ancestor "$LIVE" HEAD 2>/dev/null; then
+  echo "! прод обслуживает $LIVE — это не предок $COMMIT." >&2
+  echo "  Рядом развёртывается другая ветка; сейчас её код будет заменён." >&2
+fi
+
 echo "→ отправка файлов"
 rsync -az --delete \
   --exclude '.git' \
@@ -45,7 +67,7 @@ rsync -az --delete \
 ssh "$HOST" "cp $DIR/deploy/docker-compose.yml $DIR/docker-compose.yml"
 
 echo "→ сборка и переключение"
-ssh "$HOST" "cd $DIR && GIT_COMMIT=$COMMIT docker compose -f $DIR/docker-compose.yml up -d --build"
+ssh "$HOST" "cd $DIR && GIT_COMMIT=$COMMIT docker compose -f $DIR/docker-compose.yml build --pull web && GIT_COMMIT=$COMMIT docker compose -f $DIR/docker-compose.yml up -d --force-recreate web"
 
 echo "→ страница сайта в Caddy"
 ssh "$HOST" "cp $DIR/deploy/$DOMAIN.caddy /etc/caddy/sites/$DOMAIN.caddy && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null && systemctl reload caddy"

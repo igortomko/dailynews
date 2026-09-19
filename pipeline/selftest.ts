@@ -14,7 +14,7 @@ import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
-import { digestHtml } from "./kindle";
+import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
@@ -620,4 +620,29 @@ for (const file of ["0019_plan", "0020_readers"]) {
   }
 }
 
-console.log("Самопроверка пройдена: 144 утверждения");
+// Вердикт по выпуску на читалку. Адрес обслуживает и ручную отправку
+// отдельной статьи, поэтому выключенный выпуск не требует стереть адрес —
+// и не должен молча уходить при выключенном переключателе.
+{
+  const full = { kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true };
+  const ok = kindleDigestVerdict(full);
+  assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
+  assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_digest: false }),
+    { send: false, reason: "switched-off" },
+    "выключенный переключатель отменяет выпуск, хотя адрес на месте",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_address: null }),
+    { send: false, reason: "no-address" },
+    "без адреса слать некуда, и говорить об этом не о чем",
+  );
+  assert.deepEqual(
+    kindleDigestVerdict({ ...full, kindle_sender: null }),
+    { send: false, reason: "no-sender" },
+    "вписанный адрес без обратного — сбой, о нём сообщают в лог",
+  );
+}
+
+console.log("Самопроверка пройдена: 149 утверждений");
