@@ -373,6 +373,25 @@ async function main() {
     assert.equal(withSeen[0].seen, true, "показанный материал должен быть отмечен");
     assert.equal(withSeen[1].seen, false, "чужой строке события seen взяться неоткуда");
 
+    // Отметка «уехало на читалку» переживает перезагрузку только если её
+    // отдаёт лента: раньше она жила в карточке и стиралась обновлением
+    // страницы — кнопка снова предлагала отправить, а повтор ловил отказ
+    // от частичного индекса. Провалившаяся отправка отметкой не считается:
+    // её и нужно повторить.
+    assert.equal(withSeen[0].kindled, false, "до отправки материал не отмечен");
+    await sql`
+      insert into dailynews.kindle_sends (reader_id, item_id, status)
+      values (${owner.id}, ${ids[0]}, 'sent'), (${owner.id}, ${ids[2]}, 'failed')
+    `;
+    const withKindle = await queries.getFeed(owner.id, today);
+    assert.equal(withKindle[0].kindled, true, "отправленный материал должен быть отмечен");
+    assert.equal(
+      withKindle.find((item) => String(item.id) === String(ids[2]))?.kindled,
+      false,
+      "провалившаяся отправка не отмечается: её повторяют",
+    );
+    await sql`delete from dailynews.kindle_sends where reader_id = ${owner.id}`;
+
     const afterRead = await queries.getFeed(owner.id, today);
     assert.equal(afterRead[0].read_count, 2, "счётчик чтений должен вырасти");
 

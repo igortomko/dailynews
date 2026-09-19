@@ -211,7 +211,8 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 placeholder="Чем занимаешься, какой стек, что за продукт, где живёшь"
               />
               <FieldDescription>
-                Расскажите о себе, это влияет на саммари и отбор новостей под ваши интересы.
+                Расскажи о себе: это влияет и на то, как написаны описания,
+                и на то, что вообще попадёт в выпуск.
               </FieldDescription>
             </Field>
 
