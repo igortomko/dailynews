@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { XIcon, PlusIcon, GripVerticalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +49,11 @@ export function TopicChips({
   const setHint = (index: number, hint: string) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, hint } : chip)));
 
+  // Переименование не трогает slug: он уже стоит в оценках собранного,
+  // и смена имени не должна заводить вторую тему вместо той же.
+  const rename = (index: number, label: string) =>
+    setChips(chips.map((chip, i) => (i === index ? { ...chip, label } : chip)));
+
   /** Порядок интересов — это порядок вкладок в ленте. */
   const reorder = (from: number, to: number) => {
     if (from === to || to < 0 || to >= chips.length) return;
@@ -95,49 +100,91 @@ export function TopicChips({
       {chips.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {chips.map((chip, index) => (
-            <div
-              key={`${chip.label}-${index}`}
-              draggable
-              onDragStart={() => setDragging(index)}
-              onDragEnd={() => setDragging(null)}
-              onDragOver={(event) => {
-                event.preventDefault();
-                if (dragging === null || dragging === index) return;
-                // Переставляем на лету: чип уезжает под курсор сразу,
-                // и не приходится угадывать, куда он приземлится.
-                const moved = reorder(dragging, index);
-                if (moved !== undefined) setDragging(moved);
-              }}
-              onClick={() => setSelected(selected === index ? null : index)}
-              // Стрелками — для клавиатуры: перетаскивание ею недоступно.
-              onKeyDown={(event) => {
-                if (event.key === "ArrowLeft") { event.preventDefault(); reorder(index, index - 1); }
-                if (event.key === "ArrowRight") { event.preventDefault(); reorder(index, index + 1); }
-              }}
-              tabIndex={0}
-              role="button"
-              aria-label={`${chip.label}. Стрелками влево и вправо — переставить`}
-              className={cn(
-                "group flex h-10 cursor-grab items-center gap-1 rounded-lg border bg-card pr-1 pl-1 text-sm transition-colors select-none",
-                "hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none active:cursor-grabbing",
-                dragging === index && "opacity-40",
-                selected === index && "border-foreground/30 bg-muted",
-              )}
-            >
-              <GripVerticalIcon className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
-              <span className="px-0.5">{chip.label}</span>
-              <button
-                type="button"
-                aria-label={`Убрать ${chip.label}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  remove(index);
+            <Fragment key={`${chip.label}-${index}`}>
+              <div
+                draggable={selected !== index}
+                onDragStart={() => setDragging(index)}
+                onDragEnd={() => setDragging(null)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  if (dragging === null || dragging === index) return;
+                  const moved = reorder(dragging, index);
+                  if (moved !== undefined) setDragging(moved);
                 }}
-                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-background hover:text-foreground"
+                onClick={() => setSelected(selected === index ? null : index)}
+                onKeyDown={(event) => {
+                  if (selected === index) return;
+                  if (event.key === "ArrowLeft") { event.preventDefault(); reorder(index, index - 1); }
+                  if (event.key === "ArrowRight") { event.preventDefault(); reorder(index, index + 1); }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={`${chip.label}. Стрелками влево и вправо — переставить`}
+                className={cn(
+                  "group flex h-10 items-center gap-1 rounded-lg border bg-card px-1 text-sm transition-colors select-none",
+                  "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                  selected === index
+                    ? "border-foreground/30 bg-muted"
+                    : "cursor-grab hover:bg-muted active:cursor-grabbing",
+                  dragging === index && "opacity-40",
+                )}
               >
-                <XIcon className="size-3.5" />
-              </button>
-            </div>
+                <GripVerticalIcon className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+
+                {/* Имя правится прямо в чипе: отдельное поле «название темы»
+                    заставляло бы искать, где переименовать то, что уже видно. */}
+                {selected === index ? (
+                  <input
+                    value={chip.label}
+                    aria-label="Название темы"
+                    onChange={(event) => rename(index, event.target.value)}
+                    onClick={(event) => event.stopPropagation()}
+                    size={Math.max(chip.label.length, 4)}
+                    className="min-w-0 bg-transparent px-0.5 outline-none"
+                  />
+                ) : (
+                  <span className="px-0.5">{chip.label}</span>
+                )}
+
+                <button
+                  type="button"
+                  aria-label={`Убрать ${chip.label}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    remove(index);
+                  }}
+                  className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-background hover:text-foreground"
+                >
+                  <XIcon className="size-3.5" />
+                </button>
+              </div>
+
+              {/* Детали раскрываются под самим чипом, а не внизу формы:
+                  w-full в ряду с переносом переводит блок на новую строку,
+                  и он оказывается ровно под своей строкой чипов. */}
+              {selected === index ? (
+                <div className="w-full rounded-lg border bg-muted/40 p-3">
+                  <label
+                    htmlFor={`hint-${index}`}
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    Что относится к теме
+                  </label>
+                  <Textarea
+                    id={`hint-${index}`}
+                    rows={2}
+                    value={chip.hint}
+                    placeholder="через запятую: что сюда попадает"
+                    onChange={(event) => setHint(index, event.target.value)}
+                    className="mt-1.5 bg-background"
+                  />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Это читает модель, раскладывающая поток по темам: чем точнее,
+                    тем меньше попадёт по ошибке.
+                  </p>
+                </div>
+              ) : null}
+            </Fragment>
           ))}
         </div>
       ) : null}
@@ -161,25 +208,6 @@ export function TopicChips({
         </Field>
       ) : null}
 
-      {/* Уточнение живёт под облаком, а не в каждом чипе: шесть полей ввода
-          в ряд превращали страницу в форму, где не видно самого списка тем. */}
-      {selected !== null && chips[selected] ? (
-        <Field>
-          <FieldLabel htmlFor="chip-hint">Что относится к теме «{chips[selected].label}»</FieldLabel>
-          <Textarea
-            id="chip-hint"
-            rows={2}
-            value={chips[selected].hint}
-            placeholder="через запятую: что сюда попадает"
-            onChange={(event) => setHint(selected, event.target.value)}
-          />
-          <FieldDescription>
-            Это читает модель, раскладывающая поток по темам: чем точнее, тем меньше попадёт по ошибке.
-          </FieldDescription>
-        </Field>
-      ) : (
-        <FieldDescription>Нажми на тему, чтобы уточнить, что к ней относится.</FieldDescription>
-      )}
     </FieldGroup>
   );
 }

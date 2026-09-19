@@ -62,11 +62,22 @@ export type LlmConfig = { base_url?: string; model?: string; api_key?: string };
  * Окружение старше настройки в базе: ключ, заданный переменной, не должен
  * молча подменяться тем, что кто-то вписал в интерфейсе.
  */
+/**
+ * Пустая строка — это «не задано», а не значение. GitHub Actions подставляет
+ * пустоту вместо несуществующего секрета, и `??` её пропускает: он
+ * откатывается только на null и undefined. Из-за этого адрес провайдера
+ * стал пустым, и fetch получил «/chat/completions».
+ */
+export const firstSet = (...values: (string | undefined)[]) =>
+  values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
+
 function resolve(config: LlmConfig) {
   return {
-    baseUrl: process.env.LLM_BASE_URL ?? config.base_url ?? "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: process.env.LLM_MODEL ?? config.model ?? "gemini-2.5-flash",
-    apiKey: process.env.LLM_API_KEY ?? config.api_key ?? "",
+    baseUrl:
+      firstSet(process.env.LLM_BASE_URL, config.base_url) ??
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: firstSet(process.env.LLM_MODEL, config.model) ?? "gemini-2.5-flash",
+    apiKey: firstSet(process.env.LLM_API_KEY, config.api_key) ?? "",
   };
 }
 
@@ -121,6 +132,23 @@ export async function writeDigest(
                 (то же самое во второй раз)
     хорошо:     Структурные отличия у людей на антидепрессантах объясняются
                 тяжестью состояния и возрастом, а не самими препаратами.
+
+Не у всякого материала есть событие. Разбор, эссе, колонка не сообщают,
+что случилось, — они что-то утверждают. Тогда описание несёт мысль автора,
+а не пересказ того, что материал существует.
+
+    заголовок:  Куда исчезли кнопки «Download on the App Store»
+    плохо:      Значки Apple и Google были дефолтным способом перевести
+                посетителя в магазин в 2010-х… С сайтов они почти пропали.
+                (история значков; что утверждает автор — неизвестно)
+    хорошо:     Продуктовые сайты перестали вести в магазин приложений и
+                ведут прямо в веб-версию: установка стала лишним шагом,
+                а не воронкой. Автор показывает это на <примерах> и
+                связывает со сменой правил Apple.
+
+Проверка: после описания читатель должен уметь пересказать мысль материала
+одним предложением. Если пересказать нечего — так и напиши, коротко, и это
+честнее пересказа оглавления.
 
 Что в описании должно быть:
 — первым предложением: доказательство или механизм — откуда это известно,
