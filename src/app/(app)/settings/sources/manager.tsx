@@ -118,9 +118,15 @@ export function SourcesManager({
               </div>
               <FieldDescription>
                 {error ??
-                  "YouTube, GitHub, Substack, arXiv, Hacker News, аккаунт X, любой блог — " +
-                    "или поисковый запрос X, если ссылки нет."}
+                  "YouTube, GitHub, Substack, arXiv, Hacker News, аккаунт X, канал Telegram, " +
+                    "любой блог — или поисковый запрос X, если ссылки нет."}
               </FieldDescription>
+              {error ? null : (
+                <FieldDescription>
+                  Telegram — только публичные каналы с открытым веб-просмотром: закрытые
+                  не читает ни бот, ни веб-страница.
+                </FieldDescription>
+              )}
             </Field>
 
             {found && !plan.kinds.includes(found.kind) ? (

@@ -148,8 +148,12 @@ export function parseFeed(xml: string): FeedDoc {
   return { title, items };
 }
 
+export async function fetchRssFeed(source: Source): Promise<FeedDoc> {
+  return parseFeed(await fetchText(source.url));
+}
+
 export async function fetchRss(source: Source): Promise<RawItem[]> {
-  return parseFeed(await fetchText(source.url)).items;
+  return (await fetchRssFeed(source)).items;
 }
 
 // ---------------------------------------------------------------------------
@@ -359,15 +363,109 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
   return items;
 }
 
+// ---------------------------------------------------------------------------
+// Telegram. Только публичные каналы и только веб-просмотр t.me/s/<канал>:
+// Bot API читает лишь те каналы, где бот админ, а MTProto с личной сессией
+// на общей машине — отдельное решение владельца.
+//
+// Это разбор чужой разметки, и он сломается при её смене — молча, как всегда.
+// Поэтому: тест на сохранённом куске и попадание под проверку тишины.
+// ---------------------------------------------------------------------------
+
+/**
+ * Разбор страницы публичного канала.
+ *
+ * Посты режутся по data-post, а не разбираются тремя независимыми списками
+ * (посты, тексты, времена) с последующим сопоставлением по номеру: пост
+ * без текста — их там хватает, одни картинки — сдвинул бы все даты на один,
+ * и каждая новость получила бы чужое время. Выглядело бы это нормально.
+ */
+export function parseTelegram(html: string, channel: string): FeedDoc {
+  const title = stripHtml(
+    html.match(/<meta property="og:title" content="([^"]*)"/)?.[1] ?? "",
+  ) || channel;
+
+  // Закрытый, несуществующий или выключивший веб-просмотр канал отвечает 200
+  // и уводит с /s/ на страницу контакта. Без этой проверки такой источник
+  // сохранился бы пустым и через неделю выглядел бы просто заброшенным.
+  const marks = [...html.matchAll(/data-post="([^"]+)"/g)];
+  if (marks.length === 0) {
+    throw new Error(
+      /Telegram: Contact @/.test(html)
+        ? "это не публичный канал: t.me/s/ отдал страницу контакта"
+        : "канал не отдал ни одного поста",
+    );
+  }
+
+  const items: RawItem[] = [];
+  for (const [index, mark] of marks.entries()) {
+    const start = mark.index ?? 0;
+    const end = index + 1 < marks.length ? (marks[index + 1].index ?? html.length) : html.length;
+    const chunk = html.slice(start, end);
+
+    const body = chunk.match(
+      /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/,
+    )?.[1];
+    // Пост без текста — одни картинки. Заголовка у него нет, и выдумывать
+    // его неоткуда.
+    if (!body) continue;
+
+    // <br> до общей чистки тегов: без этого строки склеиваются в одну,
+    // и заголовком становится весь пост целиком.
+    const text = stripHtml(body.replace(/<br\s*\/?>/gi, "\n"));
+    if (!text) continue;
+
+    const when = chunk.match(/<time datetime="([^"]+)"/)?.[1];
+    const published = when ? new Date(when) : null;
+    items.push({
+      url: `https://t.me/${mark[1]}`,
+      // У поста нет заголовка, как и у твита: первая строка работает
+      // заголовком, потому что Jev и дайджест ждут его отдельно от текста.
+      title: (text.split("\n").find((line) => line.trim()) ?? text).trim().slice(0, 200),
+      excerpt: text.replace(/\s+/g, " ").slice(0, 1200),
+      points: null,
+      comments: null,
+      published_at: published && !Number.isNaN(published.getTime()) ? published : null,
+    });
+  }
+  return { title, items };
+}
+
+export async function fetchTelegramFeed(source: Source): Promise<FeedDoc> {
+  // url источника здесь — имя канала, а не адрес (как у Reddit).
+  const channel = source.url.replace(/^@/, "").replace(/^.*t\.me\/(s\/)?/, "").replace(/\/.*$/, "");
+  return parseTelegram(await fetchText(`https://t.me/s/${encodeURIComponent(channel)}`), channel);
+}
+
+export async function fetchTelegram(source: Source): Promise<RawItem[]> {
+  return (await fetchTelegramFeed(source)).items;
+}
+
 const FETCHERS: Record<Source["kind"], (source: Source) => Promise<RawItem[]>> = {
   rss: fetchRss,
   reddit: fetchReddit,
   hackernews: fetchHackerNews,
   x: fetchX,
+  telegram: fetchTelegram,
 };
 
 export async function fetchSource(source: Source): Promise<RawItem[]> {
   return FETCHERS[source.kind](source);
+}
+
+/** У каких источников есть собственное название — его берёт форма добавления. */
+const TITLED: Partial<Record<Source["kind"], (source: Source) => Promise<FeedDoc>>> = {
+  rss: fetchRssFeed,
+  telegram: fetchTelegramFeed,
+};
+
+/**
+ * Записи вместе с названием источника, если оно у него есть. Форме добавления
+ * нужно и то, и другое, а у HN, Reddit и X названия нет вообще.
+ */
+export async function fetchDoc(source: Source): Promise<FeedDoc> {
+  const titled = TITLED[source.kind];
+  return titled ? titled(source) : { title: "", items: await fetchSource(source) };
 }
 
 /**

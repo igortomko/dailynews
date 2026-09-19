@@ -17,7 +17,7 @@
  * уже нельзя. Поэтому сохраняется только то, что действительно ответило,
  * а «фида нет», «страница собирается в браузере» и «пейволл» называются вслух.
  */
-import { explain, fetchText, fetchSource, freshest, parseFeed, type FeedDoc } from "./fetch";
+import { explain, fetchDoc, fetchText, freshest, parseFeed, type FeedDoc } from "./fetch";
 import type { Source } from "../src/lib/types";
 
 export type Candidate = {
@@ -139,7 +139,12 @@ export function planFor(input: string): Plan {
   }
 
   if (host === "t.me" || host === "telegram.me") {
-    return { refuse: "Telegram-каналы пока не поддерживаются" };
+    // Ссылка бывает на канал, на его веб-просмотр и на отдельный пост.
+    const name = segments[0] === "s" ? segments[1] : segments[0];
+    if (!name || name.startsWith("+") || name === "joinchat") {
+      return { refuse: "Приглашение в закрытый чат читать нечем — нужен публичный канал t.me/имя" };
+    }
+    return only("telegram", name, `публичный канал @${name}`);
   }
 
   // Общий случай: сначала сам адрес — он может уже быть фидом, — а если это
@@ -251,6 +256,7 @@ function labelFor(doc: FeedDoc | null, candidate: Candidate): string {
   if (candidate.kind === "hackernews") return `Hacker News · ${candidate.url}`;
   if (candidate.kind === "reddit") return `r/${candidate.url}`;
   if (candidate.kind === "x") return `X · ${candidate.url}`.slice(0, 120);
+  if (candidate.kind === "telegram") return `@${candidate.url}`;
   return candidate.url.slice(0, 120);
 }
 
@@ -269,17 +275,9 @@ async function tryCandidates(
   for (const candidate of candidates) {
     tried.push(candidate.url);
     try {
-      let doc: FeedDoc | null = null;
-      let items;
-      if (candidate.kind === "rss") {
-        const body = await fetchText(candidate.url);
-        if (!looksLikeFeed(body)) throw new Error("не похоже на RSS или Atom");
-        doc = parseFeed(body);
-        items = doc.items;
-      } else {
-        // Тем же фетчером, которым ходит прогон: у X, HN и Reddit свой.
-        items = await fetchSource(probe(candidate));
-      }
+      // Тем же фетчером, которым ходит прогон: у X, HN, Reddit и Telegram свой.
+      const doc: FeedDoc = await fetchDoc(probe(candidate));
+      const items = doc.items;
       if (items.length === 0) {
         // Название фида в отказе отличает «адрес неверный» от «адрес верный,
         // но сегодня пусто»: arXiv в выходные отдаёт фид со skipDays и без

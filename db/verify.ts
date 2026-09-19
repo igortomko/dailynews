@@ -51,7 +51,7 @@ async function main() {
   const [{ count }] = (await db.query<{ count: number }>(
     "select count(*)::int as count from dailynews.sources",
   )).rows;
-  const seeded = (sqlText.match(/^\s*\('(rss|reddit|hackernews|x)'/gm) ?? []).length;
+  const seeded = (sqlText.match(/^\s*\('(rss|reddit|hackernews|x|telegram)'/gm) ?? []).length;
   assert.equal(count, seeded, `источников ${count}, в миграциях ${seeded} — повтор задвоил`);
   const [{ owners }] = (await db.query<{ owners: number }>(
     "select count(*)::int as owners from dailynews.readers",
@@ -390,6 +390,20 @@ async function main() {
       "дни тишины считаются от отметки",
     );
     console.log(`  отдача источника: ${used.items} → ${used.in_digest} в дайджесте, скор ${used.mean_score}`);
+
+    // --- новые виды источников ------------------------------------------------
+    // Ограничение переименовано намеренно: переопределение под прежним именем
+    // проверка формы схемы не видит, и 0018 уже проскочил так молча.
+    await sql`
+      insert into dailynews.sources (kind, label, url)
+      values ('telegram', 'канал', 'durov')
+    `;
+    await assert.rejects(
+      sql`insert into dailynews.sources (kind, label, url) values ('carrier-pigeon', 'x', 'y')`,
+      /sources_kind_known/,
+      "неизвестный вид источника должен отвергаться ограничением с новым именем",
+    );
+    console.log("  виды источников: telegram принят, выдуманный отвергнут");
 
     // --- бюджет тем -----------------------------------------------------------
     // Круг по темам раздавал места строго поровну: у живого дайджеста на

@@ -12,7 +12,7 @@ import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
-import { explain } from "./fetch";
+import { explain, parseTelegram } from "./fetch";
 import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
 import { checkSecret, parseUpdate } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -579,7 +579,12 @@ assert.equal(first("https://news.ycombinator.com/newest")?.url, "newstories", "�
 assert.equal(first("https://x.com/karpathy")?.url, "from:karpathy", "аккаунт X превращается в запрос");
 assert.equal(first("from:karpathy OR from:sama")?.kind, "x", "текст без точки — это запрос X");
 assert.ok(refusal("https://x.com/home"), "служебный путь X не аккаунт");
-assert.ok(refusal("https://t.me/durov"), "Telegram называется вслух, а не молча не работает");
+assert.equal(first("https://t.me/durov")?.url, "durov", "канал Telegram — имя, а не адрес");
+assert.equal(first("https://t.me/s/durov")?.url, "durov", "ссылка на веб-просмотр даёт тот же канал");
+assert.equal(first("https://t.me/durov/123")?.url, "durov", "ссылка на пост даёт канал целиком");
+// Читать закрытый чат нечем, и сказать это надо сразу, а не выяснять
+// на практике.
+assert.ok(refusal("https://t.me/+AbCdEf"), "приглашение в закрытый чат — отказ вслух");
 assert.ok(
   (planFor("https://simonwillison.net/") as { probePage: boolean }).probePage,
   "обычный сайт идёт на разбор разметки",
@@ -672,6 +677,55 @@ assert.equal(
 assert.equal(explain(new Error("не похоже на RSS или Atom")), "не похоже на RSS или Atom", "незнакомое доходит как есть");
 assert.equal(explain(undefined), "не ответил без объяснений", "пустая ошибка не даёт пустую строку");
 
+// --- публичный канал Telegram -------------------------------------------------
+// Разбор чужой разметки ломается при её смене молча, поэтому тест идёт
+// по сохранённому куску настоящей страницы, а не по её представлению
+// в чьей-то голове. Обновлять файл — новым сохранением.
+const tgPage = readFileSync("pipeline/fixtures/telegram-channel.html", "utf8");
+const tg = parseTelegram(tgPage, "telegram");
+assert.equal(tg.title, "Telegram News", "название канала берётся из og:title");
+assert.equal(tg.items.length, 2, `постов ${tg.items.length}, в куске сохранено 2`);
+assert.match(tg.items[0].url, /^https:\/\/t\.me\/telegram\/\d+$/, "ссылка ведёт на конкретный пост");
+assert.notEqual(tg.items[0].url, tg.items[1].url, "у постов разные адреса — иначе дедуп схлопнет канал в один");
+assert.ok(tg.items[0].title.length > 0, "у поста есть заголовок");
+assert.ok(tg.items[0].title.length <= 200, "заголовок не длиннее двухсот символов");
+// <br> превращается в перенос до чистки тегов: иначе заголовком становится
+// весь пост целиком, а не его первая строка.
+assert.ok(!tg.items[0].title.includes("\n"), "заголовок — одна строка");
+assert.ok(
+  tg.items[0].excerpt.length > tg.items[0].title.length,
+  "в тексте поста больше, чем в его первой строке",
+);
+assert.ok(tg.items[0].published_at instanceof Date, "дата поста разобрана");
+assert.ok(
+  (tg.items[1].published_at?.getTime() ?? 0) > (tg.items[0].published_at?.getTime() ?? 0),
+  "у постов разные даты, и они идут по возрастанию — на этом держится отсечка свежести",
+);
+
+// Пост без текста — одни картинки. Такие бывают, и если резать страницу
+// тремя независимыми списками, один такой пост сдвинет все даты на единицу,
+// и каждая новость получит чужое время. Выглядит это нормально.
+const mediaOnly = tgPage.replace(
+  /<div class="tgme_widget_message_text[^"]*"[^>]*>[\s\S]*?<\/div>/,
+  '<div class="tgme_widget_message_photo"></div>',
+);
+const trimmed = parseTelegram(mediaOnly, "telegram");
+assert.equal(trimmed.items.length, 1, "пост без текста пропускается, а не занимает чужое место");
+assert.equal(
+  trimmed.items[0].published_at?.toISOString(),
+  tg.items[1].published_at?.toISOString(),
+  "у оставшегося поста своя дата, а не съехавшая на соседнюю",
+);
+
+// Закрытый, несуществующий и выключивший веб-просмотр канал отвечает 200
+// и уводит на страницу контакта. Сохранить такой источник значит завести
+// пустую вкладку, которая через неделю выглядит просто заброшенной.
+assert.throws(
+  () => parseTelegram(readFileSync("pipeline/fixtures/telegram-contact.html", "utf8"), "нет"),
+  /не публичный канал/,
+  "страница контакта — это отказ, а не пустой канал",
+);
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -680,4 +734,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 165 утверждений");
+console.log("Самопроверка пройдена: 181 утверждений");

@@ -291,7 +291,7 @@ export async function discoverSource(input: string): Promise<
   }
 }
 
-const KNOWN_KINDS = new Set(["rss", "hackernews", "reddit", "x"]);
+const KNOWN_KINDS = new Set(["rss", "hackernews", "reddit", "x", "telegram"]);
 
 /**
  * Сохраняется только то, что действительно ответило, и перепроверяется ровно

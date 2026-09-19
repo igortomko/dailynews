@@ -22,7 +22,7 @@ export type ReaderTopic = {
 
 export type Source = {
   id: number;
-  kind: "rss" | "hackernews" | "reddit" | "x";
+  kind: "rss" | "hackernews" | "reddit" | "x" | "telegram";
   label: string;
   url: string;
   config: Record<string, unknown>;
