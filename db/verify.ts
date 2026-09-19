@@ -99,14 +99,21 @@ async function main() {
     const topics = await readers.catalogTopics();
     const sources = await queries.getSources();
     assert.ok(topics.length >= 6, `тем ${topics.length}, ожидалось не меньше 6`);
-    assert.ok(sources.length >= 20, `источников ${sources.length}`);
-    // Reddit заведён, но выключен: заявку на Data API можно подать позже,
-    // а на источники ссылаются уже собранные материалы.
-    const reddit = sources.filter((s) => s.kind === "reddit");
-    assert.ok(reddit.length > 0, "источники Reddit должны остаться в каталоге");
-    assert.ok(reddit.every((s) => !s.active), "источники Reddit должны быть выключены");
-    assert.ok(sources.some((s) => s.kind === "x" && s.active), "источники X должны быть включены");
-    console.log(`  темы: ${topics.length}, источники: ${sources.length}`);
+    assert.ok(sources.length > 0, `источников ${sources.length}`);
+    // Состояний у источника два: заведён или убран. Reddit и X 0006 выключала,
+    // 0031 убрала — включить их было нечем, прогон их не читал, а в списке
+    // они выглядели живыми.
+    assert.ok(
+      !sources.some((s) => s.kind === "reddit" || s.kind === "x"),
+      "выключенные виды убраны из каталога, а не лежат в нём третьим состоянием",
+    );
+    assert.ok(sources.every((s) => s.active), "у неубранных active всегда true — колонка больше ничего не значит");
+    // Убраны, но не уничтожены: строки на месте, и материалы, которые на них
+    // ссылаются, тоже.
+    const [{ removed }] = await sql<{ removed: number }[]>`
+      select count(*)::int as removed from dailynews.sources where deleted_at is not null`;
+    assert.ok(removed > 0, "убранные источники остаются в базе вместе со своей историей");
+    console.log(`  темы: ${topics.length}, источники: ${sources.length}, убрано ${removed}`);
 
     // --- перенос читателя из profile ------------------------------------------
     // Строка profile была живой: контекст, веса, пройденный онбординг.
@@ -424,17 +431,14 @@ async function main() {
         ordered.findIndex((row) => row.id === empty.id),
       "при прочих равных давший материалы стоит выше пустого",
     );
-    // Выключенные уходят вниз сплошным хвостом: вперемешку с рабочими они
-    // выглядят рабочими, а прогон их не читает.
-    await sql`update dailynews.sources set active = false where id = ${broken.id}`;
-    const withOff = await queries.getSourceHealth();
-    const firstOff = withOff.findIndex((row) => !row.active);
-    assert.ok(firstOff > 0, "выключенные не должны начинать список");
+    // Убранный исчезает из списка совсем — ни хвостом, ни как-либо ещё:
+    // третьего состояния у источника больше нет.
+    await sql`update dailynews.sources set deleted_at = now() where id = ${broken.id}`;
     assert.ok(
-      withOff.slice(firstOff).every((row) => !row.active),
-      "после первого выключенного включённых быть не должно, даже с ошибкой",
+      !(await queries.getSourceHealth()).some((row) => row.id === broken.id),
+      "убранный источник не остаётся в списке даже с ошибкой",
     );
-    await sql`update dailynews.sources set last_error = null, active = true where id = ${broken.id}`;
+    await sql`update dailynews.sources set last_error = null, deleted_at = null where id = ${broken.id}`;
 
     // --- «добавлен» против «уже был» -------------------------------------------
     // xmax = 0 у настоящей вставки и ненулевой у обновления по конфликту.
@@ -453,7 +457,7 @@ async function main() {
     assert.equal(await insertTwice(), true, "первая вставка — новый источник");
     assert.equal(await insertTwice(), false, "вторая — обновление, а не добавление");
     await sql`delete from dailynews.sources where url = 'https://twice.example.com/feed'`;
-    console.log("  список: сломанное сверху, выключенное снизу, повтор отличим от вставки");
+    console.log("  список: сломанное сверху, убранное не показывается, повтор отличим от вставки");
 
     // --- убрать можно, потерять нельзя -----------------------------------------
     // Удаление перестало удалять: каскад уносил материалы, чтения и записи

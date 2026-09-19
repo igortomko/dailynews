@@ -137,16 +137,9 @@ export function SourcesManager({
   const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const dead = sources.filter((source) => source.active && source.last_error);
-  // Выключенные называются один раз и с причиной. Тринадцать одинаковых
-  // меток в строках превращали список в частокол, по которому всё равно
-  // нечего было решить.
-  const off = sources.filter((source) => !source.active);
-  const offByKind = [...new Set(off.map((source) => source.kind))]
-    .map((kind) => `${kind}: ${off.filter((source) => source.kind === kind).length}`)
-    .join(", ");
+  const dead = sources.filter((source) => source.last_error);
   const silent = sources.filter(
-    (source) => source.active && !source.last_error && (source.silent_days ?? 0) >= SILENT_DAYS,
+    (source) => !source.last_error && (source.silent_days ?? 0) >= SILENT_DAYS,
   );
 
   /**
@@ -208,16 +201,6 @@ export function SourcesManager({
             {listOf(silent.map((source) => `${source.label} (${source.silent_days} дн.)`))} —
             источник жив и отвечает, но {SILENT_DAYS} дней подряд не даёт ни одного свежего
             материала. Обычно это значит, что его забросили.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {off.length > 0 ? (
-        <Alert>
-          <AlertTitle>Не опрашивается: {off.length}</AlertTitle>
-          <AlertDescription>
-            {offByKind} — эти источники лежат в каталоге, но прогон их не читает.
-            Включить их больше нечем: остаётся удалить те, что не вернутся.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -379,9 +362,7 @@ export function SourcesManager({
         <CardHeader>
           <CardTitle>Источники</CardTitle>
           <CardDescription>
-            {sources.filter((s) => s.active).length} опрашивается
-            {off.length > 0 ? `, ${off.length} нет` : ""} · предел тарифа «{plan.label}» —
-            {" "}{plan.maxSources}
+            {sources.length} опрашивается · предел тарифа «{plan.label}» — {plan.maxSources}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
