@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
-import { checkFeed } from "../../pipeline/check-sources";
+import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
@@ -16,7 +16,7 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, maxDigestOf, planOf, sourcesForPlan, topicsWord,
+  allows, cheapestWith, kindDenial, maxDigestOf, planOf, sourcesForPlan, topicsWord,
   PLAN_IDS, PLANS, type Gated,
 } from "./plans";
 import { getSources } from "./queries";
@@ -334,30 +334,75 @@ async function requireOwner() {
   return reader;
 }
 
+/**
+ * Разобрать вставленную ссылку: что это за источник, где у него фид и как он
+ * называется. Ничего не сохраняет — показывает, что нашлось, чтобы читатель
+ * подтвердил. Тип источника знать не нужно, название уже лежит в фиде.
+ *
+ * Тоже под владельцем: каталог общий, а разбор ходит в сеть — у такой кнопки
+ * не должно быть ста рук.
+ */
+export async function discoverSource(input: string): Promise<
+  { ok: true; found: Found } | { ok: false; error: string }
+> {
+  await requireOwner();
+  const raw = input.trim().slice(0, 500);
+  if (!raw) return { ok: false, error: "Пустая строка" };
+
+  // Тариф спрашивается до сети. Какой это будет вид, planFor знает без
+  // единого запроса, а разбор ссылки X — уже платный запрос к twitterapi.io:
+  // потратить деньги и отказать после сохранения значит взять плату
+  // за отказ. Вид определяется правилами по хосту, поэтому отказ здесь —
+  // это отказ по тарифу, а не догадка.
+  const planned = planFor(raw);
+  if (!("refuse" in planned)) {
+    const plan = planOf((await currentReader()).plan);
+    const denials = planned.candidates.map((candidate) => kindDenial(plan, candidate.kind));
+    if (denials.every(Boolean)) return { ok: false, error: denials[0]! };
+  }
+
+  try {
+    return await discover(raw);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message.slice(0, 300) };
+  }
+}
+
+const KNOWN_KINDS = new Set<Source["kind"]>(["rss", "hackernews", "reddit", "x", "telegram", "email"]);
+
+/**
+ * Сохраняется только то, что действительно ответило, и перепроверяется ровно
+ * тот кандидат, который показала форма: если разбор гнать заново, сохранится
+ * одно, а подтверждал читатель другое. Источник, сохранённый без единой
+ * записи, через неделю неотличим от заброшенного — а он таким и родился.
+ */
 export async function addSource(formData: FormData) {
   await requireOwner();
-  const kind = String(formData.get("kind") ?? "rss") as "rss" | "reddit" | "hackernews" | "x";
+  // Вид сужается один раз: дальше он уходит и в предел тарифа, и в пробу.
+  const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
-  const label = String(formData.get("label") ?? "").trim() || url;
+  const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
+  if (!KNOWN_KINDS.has(kind)) return { error: "Сначала разбери ссылку" };
   if (!url) return { error: "Пустой адрес" };
 
+  // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
+  // чем сходить за фидом и отказать после.
   const denied = await denyBySource(kind);
   if (denied) return denied;
 
-  // Источник проверяется живым запросом до сохранения: каталог из
-  // непроверенных адресов превращается в пустую вкладку через неделю.
-  if (kind === "rss") {
-    const probe = await checkFeed(url);
-    if (!probe.ok) return { error: `Фид не отвечает: ${probe.error ?? "пусто"}` };
-  }
+  const probe = await probeOne(kind, url, inputUrl);
+  if (!probe.ok) return { error: `Источник больше не отвечает: ${probe.error}` };
+
+  const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
   await sql`
-    insert into dailynews.sources (kind, label, url)
-    values (${kind}, ${label}, ${url})
-    on conflict (kind, url) do update set active = true, label = excluded.label
+    insert into dailynews.sources (kind, label, url, input_url)
+    values (${kind}, ${label}, ${url}, ${inputUrl})
+    on conflict (kind, url) do update
+      set active = true, label = excluded.label, input_url = excluded.input_url
   `;
   revalidatePath("/settings/sources");
-  return { ok: true as const };
+  return { ok: true as const, label };
 }
 
 export async function setSourceActive(id: number, active: boolean) {
@@ -382,14 +427,8 @@ export async function setSourceActive(id: number, active: boolean) {
 async function denyBySource(kind: Source["kind"]): Promise<{ error: string } | null> {
   const plan = planOf((await currentReader()).plan);
 
-  if (!plan.kinds.includes(kind)) {
-    const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
-    return {
-      error: where.length
-        ? `Источники ${kind} есть только на тарифе «${where.join("», «")}»`
-        : `Источники ${kind} недоступны`,
-    };
-  }
+  const byKind = kindDenial(plan, kind);
+  if (byKind) return { error: byKind };
 
   // Считаем только то, что прогон и правда опрашивает: sourcesForPlan
   // отсекает запрещённый вид до предела по числу. Иначе после понижения

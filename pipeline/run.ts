@@ -29,9 +29,14 @@ export async function collect(sources: Source[]): Promise<number[]> {
       await sql`update dailynews.sources set last_error = ${result.error} where id = ${result.source.id}`;
       continue;
     }
+    // Тишина отмечается временем, а не счётчиком: прогон могут запустить
+    // дважды за сутки, и счётчик посчитал бы два дня за один. Снимается
+    // первой же записью.
     await sql`
       update dailynews.sources
-         set last_ok_at = now(), last_count = ${result.items.length}, last_error = null
+         set last_ok_at = now(), last_count = ${result.items.length}, last_error = null,
+             silent_since = case when ${result.items.length} > 0 then null
+                                 else coalesce(silent_since, now()) end
        where id = ${result.source.id}
     `;
 
@@ -42,7 +47,7 @@ export async function collect(sources: Source[]): Promise<number[]> {
         insert into dailynews.items
           (source_id, url, url_canon, title, title_norm, excerpt, points, comments, published_at)
         values (
-          ${result.source.id}, ${item.url}, ${canonUrl(item.url)}, ${item.title},
+          ${result.source.id}, ${item.url}, ${item.canon ?? canonUrl(item.url)}, ${item.title},
           ${normalizeTitle(item.title)}, ${item.excerpt},
           ${item.points}, ${item.comments}, ${item.published_at}
         )
@@ -52,6 +57,20 @@ export async function collect(sources: Source[]): Promise<number[]> {
       if (rows[0]) inserted.push(rows[0].id);
     }
   }
+
+  // Источник, отвечающий 200 и отдающий ноль, — самая незаметная поломка
+  // в ленте: ошибки нет, дайджест приходит, просто одного голоса в нём
+  // больше не слышно. Поэтому тишина называется вслух в каждом прогоне.
+  const silent = await sql<{ label: string; days: number }[]>`
+    select label, (current_date - silent_since::date)::int as days
+      from dailynews.sources
+     where active and silent_since is not null
+     order by silent_since
+  `;
+  if (silent.length > 0) {
+    log(`  молчат: ${silent.map((row) => `${row.label} (${row.days} дн.)`).join(", ")}`);
+  }
+
   return inserted;
 }
 
@@ -91,9 +110,27 @@ async function runForReader(
   // тарифа, а платит за письмо описаний владелец ключа. Тот же потолок
   // стоит на догрузке из интерфейса — иначе он обходился бы кнопкой.
   const digestSize = Math.min(reader.digest_size, maxDigestOf(plan));
+
+  // Сколько уже лежит в сегодняшнем выпуске. Состав дописывается, а не
+  // заменяется: прочитанное утром не должно исчезать из ленты. Но без этого
+  // вычитания повторный прогон дописывал бы ещё digestSize материалов поверх,
+  // и выпуск рос бы с каждым запуском — сорок, восемьдесят, сто двадцать.
+  // Выглядело бы это как «сегодня много новостей».
+  const [today] = await sql<{ taken: number }[]>`
+    select count(*)::int as taken
+      from dailynews.digests d
+      join dailynews.digest_items di on di.digest_id = d.id
+     where d.reader_id = ${reader.id} and d.day = ${day}
+  `;
+  const missing = digestSize - today.taken;
+  if (missing <= 0) {
+    log(`  ${name}: выпуск за ${day} уже полон (${today.taken} из ${digestSize}) — пропуск`);
+    return 0;
+  }
+
   const mySources = sourcesForPlan(allSources, plan).map((source) => source.id);
   const survivors = await selectSurvivors(
-    sql, reader.id, reader.weights, targetsOf(topics), digestSize, mySources,
+    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
   );
   if (survivors.length === 0) {
     log(`  ${name}: свежих материалов нет — пропуск`);

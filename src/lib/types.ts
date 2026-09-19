@@ -22,19 +22,29 @@ export type ReaderTopic = {
 
 export type Source = {
   id: number;
-  kind: "rss" | "hackernews" | "reddit" | "x";
+  kind: "rss" | "hackernews" | "reddit" | "x" | "telegram" | "email";
   label: string;
   url: string;
   config: Record<string, unknown>;
   active: boolean;
+  /** Что вставил человек, до разбора. url — уже разрешённый адрес фида. */
+  input_url: string | null;
   last_ok_at: string | null;
   last_count: number | null;
   last_error: string | null;
+  /** С какого момента источник отвечает и не даёт ни одной свежей записи. */
+  silent_since: string | null;
 };
 
 /** Сырой материал до скоринга. */
 export type RawItem = {
   url: string;
+  /**
+   * Чем дедупить, если адрес для этого не годится. У письма «посмотреть
+   * в браузере» одинаков во всех выпусках рассылки, а Message-ID уникален
+   * по RFC. Пусто — канонизируется адрес, как у всех остальных.
+   */
+  canon?: string;
   title: string;
   excerpt: string;
   points: number | null;

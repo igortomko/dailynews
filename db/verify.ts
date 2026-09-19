@@ -51,7 +51,7 @@ async function main() {
   const [{ count }] = (await db.query<{ count: number }>(
     "select count(*)::int as count from dailynews.sources",
   )).rows;
-  const seeded = (sqlText.match(/^\s*\('(rss|reddit|hackernews|x)'/gm) ?? []).length;
+  const seeded = (sqlText.match(/^\s*\('(rss|reddit|hackernews|x|telegram)'/gm) ?? []).length;
   assert.equal(count, seeded, `источников ${count}, в миграциях ${seeded} — повтор задвоил`);
   const [{ owners }] = (await db.query<{ owners: number }>(
     "select count(*)::int as owners from dailynews.readers",
@@ -364,6 +364,75 @@ async function main() {
       "дубль не должен попадать в кандидаты",
     );
     console.log("  отбор: своё не повторяется, чужое остаётся доступным");
+
+    // --- здоровье источников --------------------------------------------------
+    // Источник, отвечающий 200 и отдающий ноль, — самая незаметная поломка
+    // в ленте. Отдача считается из items, scores и digests, и считать её надо
+    // ровно здесь: один неверный join — и полезный источник выглядит пустым.
+    const health = await queries.getSourceHealth();
+    assert.equal(health.length, sources.length, "в отдаче должны быть все источники, включая пустые");
+    const used = health.find((row) => row.id === source.id)!;
+    assert.equal(used.items, 4, `материалов ${used.items}, вставлено 4`);
+    assert.equal(used.duplicates, 1, "перепечатка должна попасть в долю дублей");
+    assert.equal(used.in_digest, 3, `в дайджест дошло ${used.in_digest}, ожидалось 3`);
+    assert.equal(used.mean_score, 91.7, `средний скор ${used.mean_score}, ожидалось 91.7`);
+    const empty = health.find((row) => row.id !== source.id)!;
+    assert.equal(empty.items, 0, "источник без материалов показывает ноль, а не выпадает из списка");
+    assert.equal(empty.silent_days, null, "без отметки тишины дней тишины нет");
+
+    // Тишина отмечается временем: прогон могут запустить дважды за сутки,
+    // и счётчик посчитал бы два дня за один.
+    await sql`update dailynews.sources set silent_since = now() - interval '4 days' where id = ${empty.id}`;
+    const afterSilence = await queries.getSourceHealth();
+    assert.equal(
+      afterSilence.find((row) => row.id === empty.id)!.silent_days,
+      4,
+      "дни тишины считаются от отметки",
+    );
+    console.log(`  отдача источника: ${used.items} → ${used.in_digest} в дайджесте, скор ${used.mean_score}`);
+
+    // --- новые виды источников ------------------------------------------------
+    // Ограничение переименовано намеренно: переопределение под прежним именем
+    // проверка формы схемы не видит, и 0018 уже проскочил так молча.
+    await sql`
+      insert into dailynews.sources (kind, label, url)
+      values ('telegram', 'канал', 'durov')
+    `;
+    await assert.rejects(
+      sql`insert into dailynews.sources (kind, label, url) values ('carrier-pigeon', 'x', 'y')`,
+      /sources_kind_known/,
+      "неизвестный вид источника должен отвергаться ограничением с новым именем",
+    );
+    await sql`
+      insert into dailynews.sources (kind, label, url)
+      values ('email', 'рассылка', 'letters@example-letter.test')
+    `;
+    console.log("  виды источников: telegram и email приняты, выдуманный отвергнут");
+
+    // --- сверка формы схемы видит переопределение ------------------------------
+    // Ограничение, переопределённое под тем же именем, по имени неотличимо
+    // от применённого: 0018 так и проскочил. Теперь сверяется и содержимое.
+    const { schemaGaps } = await import("./schema-gap");
+    assert.deepEqual(await schemaGaps(sql), [], "на полной схеме расхождений быть не должно");
+
+    // Откатываем ограничение к версии 0025 — как если бы 0026 не применили.
+    await sql`delete from dailynews.sources where kind = 'email'`;
+    await sql`alter table dailynews.sources drop constraint sources_kind_known`;
+    await sql`
+      alter table dailynews.sources add constraint sources_kind_known
+        check (kind in ('rss', 'hackernews', 'reddit', 'x', 'telegram'))
+    `;
+    const stale = await schemaGaps(sql);
+    assert.ok(
+      stale.some((gap) => gap.name === "sources_kind_known"),
+      "неприменённое переопределение должно называться расхождением, а не проходить молча",
+    );
+    await sql`alter table dailynews.sources drop constraint sources_kind_known`;
+    await sql`
+      alter table dailynews.sources add constraint sources_kind_known
+        check (kind in ('rss', 'hackernews', 'reddit', 'x', 'telegram', 'email'))
+    `;
+    console.log("  сверка схемы: переопределённое ограничение больше не проходит молча");
 
     // --- бюджет тем -----------------------------------------------------------
     // Круг по темам раздавал места строго поровну: у живого дайджеста на

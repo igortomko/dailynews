@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import type { RawItem, Source } from "../src/lib/types";
+import { fetchLetters } from "./mail";
 
 const UA = "dailynews/2.0 (+https://github.com/igortomko/dailynews)";
 const MAX_BYTES = 5_000_000;
@@ -9,7 +10,7 @@ const MAX_BYTES = 5_000_000;
  * Поэтому: только http(s), свой таймаут и потолок на размер ответа —
  * иначе один зависший фид держит весь прогон.
  */
-async function get(url: string, timeoutMs = 20_000): Promise<string> {
+export async function fetchText(url: string, timeoutMs = 20_000): Promise<string> {
   const parsed = new URL(url);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`протокол не поддерживается: ${parsed.protocol}`);
@@ -30,7 +31,7 @@ async function get(url: string, timeoutMs = 20_000): Promise<string> {
 }
 
 async function getJson<T>(url: string, timeoutMs = 20_000): Promise<T> {
-  return JSON.parse(await get(url, timeoutMs)) as T;
+  return JSON.parse(await fetchText(url, timeoutMs)) as T;
 }
 
 /** Запускает задачи пачками по `limit`, чтобы не раскладывать источник на лопатки. */
@@ -76,7 +77,7 @@ const NAMED_ENTITIES: Record<string, string> = {
   mdash: "—", ndash: "–", hellip: "…", middot: "·", deg: "°", euro: "€",
 };
 
-function stripHtml(html: string): string {
+export function stripHtml(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -97,18 +98,25 @@ function parseDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export async function fetchRss(source: Source): Promise<RawItem[]> {
-  const xml = await get(source.url);
+/** Фид целиком: записи и собственное название — его берёт форма добавления. */
+export type FeedDoc = { title: string; items: RawItem[] };
+
+/**
+ * Разбор отделён от запроса: форма добавления источника уже скачала страницу,
+ * чтобы понять, фид это или HTML, и качать то же тело второй раз незачем.
+ */
+export function parseFeed(xml: string): FeedDoc {
   const doc = parser.parse(xml) as Record<string, any>;
 
   // RSS 2.0 кладёт записи в rss.channel.item, Atom — в feed.entry.
   const channel = doc?.rss?.channel ?? doc?.["rdf:RDF"] ?? doc?.feed;
   if (!channel) throw new Error("не похоже на RSS или Atom");
+  const title = stripHtml(firstString(channel.title ?? channel?.channel?.title)).slice(0, 200);
   const entries: unknown[] = [channel.item, channel.entry]
     .flatMap((node) => (Array.isArray(node) ? node : node ? [node] : []));
-  if (entries.length === 0) return [];
+  if (entries.length === 0) return { title, items: [] };
 
-  return entries.flatMap((entry) => {
+  const items = entries.flatMap((entry) => {
     const node = entry as Record<string, unknown>;
     const title = stripHtml(firstString(node.title));
 
@@ -137,6 +145,16 @@ export async function fetchRss(source: Source): Promise<RawItem[]> {
       published_at: parseDate(node.pubDate ?? node.published ?? node.updated ?? node["dc:date"]),
     }];
   });
+
+  return { title, items };
+}
+
+export async function fetchRssFeed(source: Source): Promise<FeedDoc> {
+  return parseFeed(await fetchText(source.url));
+}
+
+export async function fetchRss(source: Source): Promise<RawItem[]> {
+  return (await fetchRssFeed(source)).items;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +172,10 @@ type HnItem = {
 };
 
 export async function fetchHackerNews(source: Source): Promise<RawItem[]> {
-  const listing = String(source.config?.listing ?? "topstories");
+  // Листинг берётся из url: так написано в схеме («'topstories' или поисковый
+  // запрос X»), а читался он только из config, которого в каталоге нет ни у кого.
+  // Второй источник HN с url = 'newstories' молча отдавал бы topstories.
+  const listing = String(source.url || source.config?.listing || "topstories");
   const count = Number(source.config?.count ?? 90);
   const ids = await getJson<number[]>(`https://hacker-news.firebaseio.com/v0/${listing}.json`);
 
@@ -343,15 +364,153 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
   return items;
 }
 
+// ---------------------------------------------------------------------------
+// Telegram. Только публичные каналы и только веб-просмотр t.me/s/<канал>:
+// Bot API читает лишь те каналы, где бот админ, а MTProto с личной сессией
+// на общей машине — отдельное решение владельца.
+//
+// Это разбор чужой разметки, и он сломается при её смене — молча, как всегда.
+// Поэтому: тест на сохранённом куске и попадание под проверку тишины.
+// ---------------------------------------------------------------------------
+
+/**
+ * Разбор страницы публичного канала.
+ *
+ * Посты режутся по data-post, а не разбираются тремя независимыми списками
+ * (посты, тексты, времена) с последующим сопоставлением по номеру: пост
+ * без текста — их там хватает, одни картинки — сдвинул бы все даты на один,
+ * и каждая новость получила бы чужое время. Выглядело бы это нормально.
+ */
+export function parseTelegram(html: string, channel: string): FeedDoc {
+  const title = stripHtml(
+    html.match(/<meta property="og:title" content="([^"]*)"/)?.[1] ?? "",
+  ) || channel;
+
+  // Закрытый, несуществующий или выключивший веб-просмотр канал отвечает 200
+  // и уводит с /s/ на страницу контакта. Без этой проверки такой источник
+  // сохранился бы пустым и через неделю выглядел бы просто заброшенным.
+  const marks = [...html.matchAll(/data-post="([^"]+)"/g)];
+  if (marks.length === 0) {
+    throw new Error(
+      /Telegram: Contact @/.test(html)
+        ? "это не публичный канал: t.me/s/ отдал страницу контакта"
+        : "канал не отдал ни одного поста",
+    );
+  }
+
+  const items: RawItem[] = [];
+  for (const [index, mark] of marks.entries()) {
+    const start = mark.index ?? 0;
+    const end = index + 1 < marks.length ? (marks[index + 1].index ?? html.length) : html.length;
+    const chunk = html.slice(start, end);
+
+    const body = chunk.match(
+      /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/,
+    )?.[1];
+    // Пост без текста — одни картинки. Заголовка у него нет, и выдумывать
+    // его неоткуда.
+    if (!body) continue;
+
+    // <br> до общей чистки тегов: без этого строки склеиваются в одну,
+    // и заголовком становится весь пост целиком.
+    const text = stripHtml(body.replace(/<br\s*\/?>/gi, "\n"));
+    if (!text) continue;
+
+    const when = chunk.match(/<time datetime="([^"]+)"/)?.[1];
+    const published = when ? new Date(when) : null;
+    items.push({
+      url: `https://t.me/${mark[1]}`,
+      // У поста нет заголовка, как и у твита: первая строка работает
+      // заголовком, потому что Jev и дайджест ждут его отдельно от текста.
+      title: (text.split("\n").find((line) => line.trim()) ?? text).trim().slice(0, 200),
+      excerpt: text.replace(/\s+/g, " ").slice(0, 1200),
+      points: null,
+      comments: null,
+      published_at: published && !Number.isNaN(published.getTime()) ? published : null,
+    });
+  }
+  return { title, items };
+}
+
+export async function fetchTelegramFeed(source: Source): Promise<FeedDoc> {
+  // url источника здесь — имя канала, а не адрес (как у Reddit).
+  const channel = source.url.replace(/^@/, "").replace(/^.*t\.me\/(s\/)?/, "").replace(/\/.*$/, "");
+  return parseTelegram(await fetchText(`https://t.me/s/${encodeURIComponent(channel)}`), channel);
+}
+
+export async function fetchTelegram(source: Source): Promise<RawItem[]> {
+  return (await fetchTelegramFeed(source)).items;
+}
+
+// ---------------------------------------------------------------------------
+// Почта. Выделенный ящик опрашивается по IMAP в том же ночном прогоне.
+// Входящего эндпоинта не заводится: на общей машине лишнего наружу быть
+// не должно. url источника здесь — адрес отправителя, а не адрес фида.
+// ---------------------------------------------------------------------------
+const nameOf = (from: string) => (from.split("<")[0] ?? "").replace(/["']/g, "").trim();
+
+export async function fetchEmailFeed(source: Source): Promise<FeedDoc> {
+  const url = process.env.IMAP_URL;
+  if (!url) throw new Error("выделенный ящик не настроен: нужен IMAP_URL");
+
+  const letters = await fetchLetters(
+    { url, folder: process.env.IMAP_FOLDER },
+    source.url,
+    Number(source.config?.max_age_days ?? 7),
+    Number(source.config?.max_items ?? 30),
+  );
+
+  return {
+    title: letters.map((letter) => nameOf(letter.from)).find(Boolean) ?? source.url,
+    items: letters.map((letter) => ({
+      // У письма нет веб-адреса, пока отправитель его не дал. mid: — это
+      // настоящая схема RFC 2392 для идентификатора письма; выдуманный домен
+      // выглядел бы правдоподобно и увёл бы читателя на чужой сайт.
+      url: letter.link ?? `mid:${letter.messageId}`,
+      // Дедуп идёт по Message-ID, а не по ссылке: «посмотреть в браузере»
+      // у половины рассылок один и тот же на все выпуски, и вторая новость
+      // от отправителя молча не доехала бы никогда.
+      canon: `mid:${letter.messageId}`,
+      title: letter.subject || letter.text.split("\n")[0].slice(0, 200),
+      excerpt: letter.text.replace(/\s+/g, " ").slice(0, 1200),
+      points: null,
+      comments: null,
+      published_at: letter.date,
+    })),
+  };
+}
+
+export async function fetchEmail(source: Source): Promise<RawItem[]> {
+  return (await fetchEmailFeed(source)).items;
+}
+
 const FETCHERS: Record<Source["kind"], (source: Source) => Promise<RawItem[]>> = {
   rss: fetchRss,
   reddit: fetchReddit,
   hackernews: fetchHackerNews,
   x: fetchX,
+  telegram: fetchTelegram,
+  email: fetchEmail,
 };
 
 export async function fetchSource(source: Source): Promise<RawItem[]> {
   return FETCHERS[source.kind](source);
+}
+
+/** У каких источников есть собственное название — его берёт форма добавления. */
+const TITLED: Partial<Record<Source["kind"], (source: Source) => Promise<FeedDoc>>> = {
+  rss: fetchRssFeed,
+  telegram: fetchTelegramFeed,
+  email: fetchEmailFeed,
+};
+
+/**
+ * Записи вместе с названием источника, если оно у него есть. Форме добавления
+ * нужно и то, и другое, а у HN, Reddit и X названия нет вообще.
+ */
+export async function fetchDoc(source: Source): Promise<FeedDoc> {
+  const titled = TITLED[source.kind];
+  return titled ? titled(source) : { title: "", items: await fetchSource(source) };
 }
 
 /**
@@ -381,7 +540,7 @@ const hostOf = (source: Source): string => {
 const MAX_AGE_DAYS = 7;
 const MAX_ITEMS_PER_SOURCE = 60;
 
-function freshest(items: RawItem[], source: Source): RawItem[] {
+export function freshest(items: RawItem[], source: Source): RawItem[] {
   const maxAge = Number(source.config?.max_age_days ?? MAX_AGE_DAYS);
   const cap = Number(source.config?.max_items ?? MAX_ITEMS_PER_SOURCE);
   const cutoff = Date.now() - maxAge * 86_400_000;
@@ -392,6 +551,55 @@ function freshest(items: RawItem[], source: Source): RawItem[] {
     .filter((item) => !item.published_at || item.published_at.getTime() >= cutoff)
     .sort((a, b) => (b.published_at?.getTime() ?? 0) - (a.published_at?.getTime() ?? 0))
     .slice(0, cap);
+}
+
+/**
+ * Почему источник не ответил — словами, а не кодом драйвера.
+ *
+ * Node отдаёт наверх «fetch failed» на всё сразу: и на несуществующий домен,
+ * и на просроченный сертификат, и на оборванное соединение, — а настоящую
+ * причину прячет в error.cause. В списке источников это одинаковая строка,
+ * по которой нельзя решить, чинить адрес, подождать или выбросить источник.
+ */
+export function explain(error: unknown): string {
+  const err = (error ?? {}) as {
+    name?: string;
+    message?: string;
+    code?: string;
+    cause?: { code?: string; message?: string };
+  };
+  const message = String(err.message ?? error ?? "");
+  const code = err.cause?.code ?? err.code ?? "";
+
+  if (err.name === "TimeoutError" || /timed out|aborted/i.test(message)) {
+    return "не ответил за отведённое время";
+  }
+
+  const byCode: Record<string, string> = {
+    ENOTFOUND: "домен не существует",
+    EAI_AGAIN: "домен не разрешается",
+    ECONNREFUSED: "хост отказал в соединении",
+    ECONNRESET: "соединение оборвано на полпути",
+    EHOSTUNREACH: "хост недоступен",
+    ETIMEDOUT: "не ответил за отведённое время",
+    CERT_HAS_EXPIRED: "просроченный сертификат",
+    ERR_TLS_CERT_ALTNAME_INVALID: "сертификат выдан другому домену",
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: "сертификат не проверяется",
+    DEPTH_ZERO_SELF_SIGNED_CERT: "самоподписанный сертификат",
+  };
+  if (byCode[code]) return byCode[code];
+
+  const status = Number(message.match(/^HTTP (\d{3})/)?.[1] ?? 0);
+  // 402 приходит от перепродавца X, когда кончился баланс. «Источник ответил
+  // 402» звучит как поломка источника, а чинить надо счёт.
+  if (status === 402) return "нужна оплата (402) — у провайдера кончился баланс";
+  if (status === 401 || status === 403) return `источник закрылся от робота (${status})`;
+  if (status === 404 || status === 410) return `адрес больше не существует (${status})`;
+  if (status === 429) return "источник просит реже (429)";
+  if (status >= 500) return `сервер источника не в порядке (${status})`;
+  if (status) return `источник ответил ${status}`;
+
+  return message.slice(0, 300) || "не ответил без объяснений";
 }
 
 export type SourceResult =
@@ -422,7 +630,7 @@ export async function fetchAllSources(
         try {
           result = { source, ok: true, items: freshest(await fetchSource(source), source) };
         } catch (error) {
-          result = { source, ok: false, error: (error as Error).message.slice(0, 500) };
+          result = { source, ok: false, error: explain(error).slice(0, 500) };
         }
         results.push(result);
         onResult?.(result);
