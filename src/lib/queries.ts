@@ -11,6 +11,7 @@ export type FeedItem = {
   title: string;
   title_ru: string | null;
   summary: string | null;
+  image_url: string | null;
   source_label: string;
   topic_slug: string | null;
   topic_label: string | null;
@@ -45,7 +46,7 @@ export async function getSources(): Promise<Source[]> {
  */
 export async function getFeed(): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
-    select i.id, i.url, i.title, i.title_ru, i.summary,
+    select i.id, i.url, i.title, i.title_ru, i.summary, i.image_url,
            s.label as source_label,
            t.slug as topic_slug, t.label as topic_label,
            sc.total, sc.confidence, sc.axes,

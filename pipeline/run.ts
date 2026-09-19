@@ -6,6 +6,7 @@ import { markDuplicates } from "./dedup";
 import { scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { notify } from "./telegram";
+import { enrichImages } from "./og";
 
 /** Цена Jev, $ за миллион токенов. Выход не тарифицируется. */
 const JEV_INPUT_PRICE = 0.042;
@@ -162,6 +163,15 @@ async function main() {
     await sql.end();
     return;
   }
+
+  // Картинки тянем только для выживших: двенадцать запросов вместо трёхсот.
+  const withImages = await enrichImages(
+    survivors.map((s) => ({ id: s.id, url: s.url })),
+    async (id, image) => {
+      await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
+    },
+  );
+  log(`   иллюстраций найдено: ${withImages} из ${survivors.length}`);
 
   log(`5. Дайджест: модель видит ${survivors.length} материалов вместо ${pending.length}`);
   const digest = await writeDigest(survivors, profile.reader_context);

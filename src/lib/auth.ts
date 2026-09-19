@@ -64,6 +64,24 @@ export async function verifySession(value: string | undefined): Promise<boolean>
   return equal(signature, await sign(issuedAt));
 }
 
+/** Сколько живёт ссылка входа. Она приходит в личный чат, но короткий срок
+ *  всё равно дешевле, чем хранение одноразовых токенов в базе. */
+const LINK_TTL_MS = 10 * 60 * 1000;
+
+export async function issueLoginToken(): Promise<string> {
+  const expires = String(Date.now() + LINK_TTL_MS);
+  const nonce = crypto.randomUUID();
+  return `${expires}.${nonce}.${await sign(`login:${expires}:${nonce}`)}`;
+}
+
+export async function verifyLoginToken(token: string | null): Promise<boolean> {
+  if (!token) return false;
+  const [expires, nonce, signature] = token.split(".");
+  if (!expires || !nonce || !signature) return false;
+  if (Date.now() > Number(expires)) return false;
+  return equal(signature, await sign(`login:${expires}:${nonce}`));
+}
+
 export async function checkPassword(candidate: string): Promise<boolean> {
   const expected = process.env.APP_PASSWORD;
   if (!expected) throw new Error("APP_PASSWORD не задан");

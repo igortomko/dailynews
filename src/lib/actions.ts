@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
-import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
+import { checkPassword, issueLoginToken, issueSession, SESSION_COOKIE } from "./auth";
 import { checkFeed } from "../../pipeline/check-sources";
 
 export async function login(_prev: unknown, formData: FormData) {
@@ -15,6 +15,34 @@ export async function login(_prev: unknown, formData: FormData) {
   const session = await issueSession();
   (await cookies()).set(session.name, session.value, session.options);
   redirect(String(formData.get("next") || "/"));
+}
+
+/**
+ * Ссылка входа приходит в тот же чат, что и дайджест. Почта потребовала бы
+ * отдельного провайдера и ещё одного ключа, а бот уже настроен и проверен.
+ */
+export async function sendLoginLink() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const appUrl = process.env.APP_URL;
+  if (!token || !chatId || !appUrl) {
+    return { error: "Telegram или адрес приложения не настроены" };
+  }
+
+  const link = `${appUrl.replace(/\/$/, "")}/auth?token=${encodeURIComponent(await issueLoginToken())}`;
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `<a href="${link}">Войти в ленту</a>\n\nСсылка действует 10 минут.`,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) return { error: `Telegram ответил ${res.status}` };
+  return { ok: true as const };
 }
 
 export async function logout() {
