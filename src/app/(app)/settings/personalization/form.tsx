@@ -212,10 +212,13 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 onClick={() => {
                   clearTimeout(timer.current);
                   save();
-                  router.push("/");
+                  // У блогера настройка на шаг длиннее: голос собирается
+                  // с его каналов, и просить их потом — значит получить
+                  // первый пост, написанный ничьим голосом.
+                  router.push(FEATURES.posts.has(plan) ? "/settings/channels?first=1" : "/");
                 }}
               >
-                Готово
+                {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
               </Button>
             ) : null}
           </FieldGroup>

@@ -11,6 +11,7 @@ const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
   { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/sources", label: "Источники" },
   { href: "/settings/delivery", label: "Доставка", feature: "delivery" },
+  { href: "/settings/channels", label: "Мои площадки", feature: "posts" },
   { href: "/settings/subscription", label: "Подписка" },
   { href: "/settings/about", label: "О проекте" },
 ];

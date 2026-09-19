@@ -57,6 +57,16 @@ export type RawItem = {
   body?: string;
   points: number | null;
   comments: number | null;
+  /**
+   * Просмотры, если площадка их показывает. Читает это только карточка
+   * автора: ей нужно отличить его удачный пост от среднего, и просмотры —
+   * единственное число, которое `t.me/s/` отдаёт бесплатно.
+   *
+   * В скоринг не уходит: там про материал спрашивают `points`, и подмена
+   * смысла колонки поменяла бы вопрос Jev для всех telegram-источников
+   * сразу, а числа до и после такой правки несравнимы.
+   */
+  views?: number | null;
   published_at: Date | null;
 };
 
@@ -149,4 +159,36 @@ export type Reader = {
   /** Читатель попросил вернуть ленту с этого числа: отпуск, а не уход. */
   resume_at: string | null;
   onboarded_at: string | null;
+  /**
+   * Карточка автора: голос, каркас удачных постов, табу. Пусто — ни одного
+   * его текста ещё не читали, и пост пишется настройками подачи.
+   */
+  voice_card: VoiceCardRow | null;
+  voice_built_at: string | null;
+  /** Посты, вставленные руками: LinkedIn и Threads наружу не отдают ничего. */
+  voice_sample: string;
+};
+
+/**
+ * Карточка автора так, как она лежит в jsonb. Полная форма и её сборка —
+ * в `pipeline/voice-card.ts`; здесь только то, что читает интерфейс.
+ */
+export type VoiceCardRow = {
+  voice: string[];
+  frame: string[];
+  taboo: string[];
+  built_from: number;
+  sources: string[];
+  ranked: boolean;
+};
+
+/** Площадка читателя: откуда читаем его текст и куда он публикует. */
+export type ReaderChannel = {
+  network: string;
+  /** Пусто у сетей, которые наружу ничего не отдают. */
+  handle: string | null;
+  /** Что вставил человек: в списке показывается это, а не адрес фида. */
+  input_url: string | null;
+  label: string | null;
+  created_at: string;
 };

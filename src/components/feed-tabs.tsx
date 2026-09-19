@@ -5,15 +5,22 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { ItemCard } from "@/components/item-card";
 import type { FeedItem } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
+import type { Plan } from "@/lib/plans";
+import type { NetworkId } from "@/lib/networks";
 
 export function FeedTabs({
   topics,
   items,
+  plan,
+  networks,
   left,
   right,
 }: {
   topics: ReaderTopic[];
   items: FeedItem[];
+  /** Действующий тариф: от него зависят корона и кнопка «Своё мнение». */
+  plan: Plan;
+  networks: NetworkId[];
   left: React.ReactNode;
   right: React.ReactNode;
 }) {
@@ -102,7 +109,13 @@ export function FeedTabs({
               </Empty>
             ) : (
               list.map((item) => (
-                <ItemCard key={`${item.day}-${item.id}`} item={item} showTopic={tab.slug === "all"} />
+                <ItemCard
+                  key={`${item.day}-${item.id}`}
+                  item={item}
+                  showTopic={tab.slug === "all"}
+                  plan={plan}
+                  networks={networks}
+                />
               ))
             )}
           </TabsContent>

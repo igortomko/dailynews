@@ -1,5 +1,5 @@
 import { sql } from "./db";
-import type { Reader, ReaderTopic, Topic } from "./types";
+import type { Reader, ReaderChannel, ReaderTopic, Topic, VoiceCardRow } from "./types";
 import { kindleSenderName } from "./kindle-setup";
 
 /**
@@ -9,11 +9,27 @@ import { kindleSenderName } from "./kindle-setup";
  * Ни одна выборка здесь не обходится без reader_id. Запрос без него в общей
  * ленте — это чужие данные, показанные вовремя и без единой ошибки в логе.
  */
+/**
+ * Колонки перечислены здесь, а `select *` не используется: часть из них
+ * приходится приводить (bigint отдаётся строкой), и звёздочка тащила бы
+ * заодно `llm`, который не читает никто.
+ *
+ * Цена такого списка: колонка, заведённая миграцией и прочитанная кодом,
+ * но забытая здесь, приходит как `undefined` — и молча. Так и вышло
+ * с подпиской: 0029 завела `subscription_status` и `plan_ends_at`,
+ * `effectivePlan` их читает, а список остался прежним — платящий читатель
+ * считался бесплатным и в вебе, и в прогоне. Ни ошибки, ни предупреждения:
+ * тариф просто не работал. Поэтому `npm run verify:db` сверяет этот список
+ * с колонками живой таблицы.
+ */
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
   reader_context, digest_size, weights, language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved,
-  plan, daily_cap_usd, onboarded_at
+  plan, daily_cap_usd, onboarded_at,
+  subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
+  paused_at, sleep_asked_at, resume_at,
+  voice_card, voice_built_at, voice_sample
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -147,7 +163,11 @@ export async function spentToday(readerId: number): Promise<number> {
 
 export type CallRecord = {
   readerId: number | null;
-  stage: "score" | "digest" | "summary" | "translate" | "translation-quality";
+  stage:
+    | "score" | "digest" | "summary" | "translate" | "translation-quality"
+    // Карточка автора и пост — такие же оплаченные вызовы, и потолок
+    // читателя считается по той же таблице.
+    | "voice" | "post" | "post-quality";
   model: string;
   tokensIn: number;
   tokensOut?: number;
@@ -252,4 +272,71 @@ export async function lastActivityAt(readerId: number): Promise<string | null> {
      where d.reader_id = ${readerId}
   `;
   return row?.at ?? null;
+}
+
+/**
+ * Площадки читателя: откуда берётся голос и куда он публикует.
+ *
+ * reader_id первым аргументом, как и во всех остальных запросах о содержимом:
+ * список площадок без него — это чужие каналы, показанные без единой ошибки.
+ */
+export async function getChannels(readerId: number): Promise<ReaderChannel[]> {
+  return sql<ReaderChannel[]>`
+    select network, handle, input_url, label, created_at
+      from dailynews.reader_channels
+     where reader_id = ${readerId}
+     order by created_at, network
+  `;
+}
+
+/** Одна площадка на сеть: upsert, а не вставка — вторая ссылка заменяет первую. */
+export async function saveChannel(
+  readerId: number,
+  network: string,
+  channel: { handle?: string | null; input_url?: string | null; label?: string | null } = {},
+): Promise<void> {
+  await sql`
+    insert into dailynews.reader_channels (reader_id, network, handle, input_url, label)
+    values (
+      ${readerId}, ${network},
+      ${channel.handle ?? null}, ${channel.input_url ?? null}, ${channel.label ?? null}
+    )
+    on conflict (reader_id, network) do update
+      -- Отмечает сеть галочкой тот же запрос, что добавляет канал ссылкой,
+      -- и галочка не должна стирать разобранный адрес: coalesce оставляет
+      -- прежнее, когда нового не принесли.
+      set handle    = coalesce(excluded.handle, dailynews.reader_channels.handle),
+          input_url = coalesce(excluded.input_url, dailynews.reader_channels.input_url),
+          label     = coalesce(excluded.label, dailynews.reader_channels.label)
+  `;
+}
+
+export async function deleteChannel(readerId: number, network: string): Promise<void> {
+  await sql`
+    delete from dailynews.reader_channels
+     where reader_id = ${readerId} and network = ${network}
+  `;
+}
+
+/**
+ * Карточка автора кладётся объектом, а не строкой: `JSON.stringify` в jsonb
+ * сохраняет строку, и `voice_card->'voice'` становится null молча (урок 0005).
+ * Драйвер сам сериализует объект правильно, если не трогать его руками.
+ */
+export async function saveVoiceCard(readerId: number, card: VoiceCardRow): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set voice_card = ${sql.json(card as unknown as Parameters<typeof sql.json>[0])},
+           voice_built_at = now(),
+           updated_at = now()
+     where id = ${readerId}
+  `;
+}
+
+export async function saveVoiceSample(readerId: number, sample: string): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set voice_sample = ${sample}, updated_at = now()
+     where id = ${readerId}
+  `;
 }

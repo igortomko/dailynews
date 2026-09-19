@@ -64,6 +64,15 @@ export function effectivePlan(reader: Reader, now = new Date()): Plan {
   const bought = planOf(reader.plan);
   if (bought.id === "free") return bought;
 
+  /**
+   * Подписки нет вовсе — значит тариф выставлен не оплатой: так стоит pro
+   * у владельца (0019 и перенос 0020) и так же выдаётся тариф руками.
+   * Спрашивать у отсутствующей подписки, действует ли она, бессмысленно,
+   * а ответ «нет» гасил бы владельцу его же возможности — молча, потому что
+   * колонка plan при этом остаётся правильной.
+   */
+  if (!reader.subscription_id) return bought;
+
   const status = reader.subscription_status ?? "";
   if (status === "active" || status === "on_trial") return bought;
 

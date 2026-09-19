@@ -721,6 +721,133 @@ async function main() {
     );
     console.log("  цель темы: ноль запрещён ограничением");
 
+
+    // --- блогерский Pro: площадки, голос, черновики ------------------------
+    //
+    // Пост уходит под именем читателя, поэтому чужой здесь дороже, чем
+    // в ленте: сосед опубликовал бы наш черновик по нашему же промаху.
+    const posts = await import("../src/lib/posts");
+
+    await readers.saveChannel(owner.id, "telegram", {
+      handle: "ownerchannel", input_url: "t.me/ownerchannel", label: "Канал владельца",
+    });
+    await readers.saveChannel(owner.id, "linkedin");
+    await readers.saveChannel(second.id, "telegram", { handle: "verachannel" });
+
+    const ownerChannels = await readers.getChannels(owner.id);
+    assert.deepEqual(
+      ownerChannels.map((channel) => channel.network).sort(),
+      ["linkedin", "telegram"],
+      "площадки читателя — только его",
+    );
+    assert.equal(
+      ownerChannels.find((channel) => channel.network === "telegram")?.handle,
+      "ownerchannel",
+      "чужой канал в свой список не попадает",
+    );
+    assert.equal(
+      ownerChannels.find((channel) => channel.network === "linkedin")?.handle,
+      null,
+      "LinkedIn читать нечем: строка означает только «дай таб»",
+    );
+    // Отметка «публикую здесь» не должна стирать разобранный адрес: галочка
+    // и ссылка живут в одной строке, и upsert без coalesce терял бы канал.
+    await readers.saveChannel(owner.id, "telegram");
+    assert.equal(
+      (await readers.getChannels(owner.id)).find((c) => c.network === "telegram")?.handle,
+      "ownerchannel",
+      "повторная отметка сети не стирает канал",
+    );
+
+    // Карточка автора кладётся объектом, а не строкой: JSON.stringify в jsonb
+    // сохраняет строку, и voice_card->'voice' молча становится null (0005).
+    await readers.saveVoiceCard(owner.id, {
+      voice: ["короткие фразы"], frame: ["в верхних есть число"], taboo: [],
+      built_from: 20, sources: ["telegram"], ranked: true,
+    });
+    const [cardRow] = await sql<{ kind: string; first: string | null }[]>`
+      select jsonb_typeof(voice_card) as kind, voice_card->'voice'->>0 as first
+        from dailynews.readers where id = ${owner.id}
+    `;
+    assert.equal(cardRow.kind, "object", "карточка в jsonb обязана быть объектом, а не строкой");
+    assert.equal(cardRow.first, "короткие фразы", "пункт голоса читается запросом, а не разбором строки");
+    assert.ok(
+      (await readers.getReader(owner.id))?.voice_card?.voice.length,
+      "getReader обязан выбирать карточку: без неё пост писался бы настройками подачи",
+    );
+
+    // Материал для поста — только из его выпусков. Это и есть проверка права:
+    // чужой материал постом не становится.
+    const mine = await posts.postSourceFor(owner.id, ids[0]);
+    assert.equal(mine?.title, "Владелец: GPT-6", "заголовок берётся из его выпуска, а не из items");
+    assert.equal(
+      await posts.postSourceFor(second.id, ids[0]),
+      undefined,
+      "материал чужого выпуска постом не становится",
+    );
+
+    const saved = await posts.saveDrafts(owner.id, ids[0], [
+      { network: "telegram", variant: 1, text: "первый", length: 6, over: false, unverified: [] },
+      { network: "telegram", variant: 2, text: "второй", length: 6, over: false, unverified: [] },
+    ]);
+    assert.equal(saved.length, 2, "оба варианта сохранены: выбор между ними — сигнал о вкусе");
+    assert.ok(saved.every((draft) => draft.id > 0), "у каждого черновика свой номер");
+
+    // Номер черновика приходит из браузера: без читателя в условии сосед
+    // помечал бы чужую строку.
+    assert.equal(
+      await posts.takeDraft(second.id, saved[0].id, "первый"),
+      false,
+      "чужой черновик пометить нельзя",
+    );
+    assert.ok(await posts.takeDraft(owner.id, saved[0].id, "первый"), "свой — можно");
+    const [taken] = await sql<{ taken_text: string | null }[]>`
+      select taken_text from dailynews.reader_posts where id = ${saved[0].id}
+    `;
+    assert.equal(taken.taken_text, null, "не правил — копии текста в базе не появляется");
+    await posts.takeDraft(owner.id, saved[1].id, "второй, но переписанный");
+    const [edited] = await sql<{ taken_text: string | null }[]>`
+      select taken_text from dailynews.reader_posts where id = ${saved[1].id}
+    `;
+    assert.equal(
+      edited.taken_text, "второй, но переписанный",
+      "его правка сохраняется: без неё вкус автора не измерить ничем",
+    );
+    assert.equal(await posts.takenToday(owner.id), 2, "взятые за сутки считаются по читателю");
+    assert.equal(await posts.takenToday(second.id), 0, "у соседа свой счёт");
+    console.log("  блогер: площадки и черновики у каждого свои, правка сохраняется");
+
+    // Оплаченные этапы обязаны проходить ограничение: этап, которого нет
+    // в check, уронил бы запись расхода — а с ней и ответ, уже оплаченный.
+    for (const stage of ["voice", "post", "post-quality"] as const) {
+      await readers.recordCall({
+        readerId: owner.id, stage, model: "deepseek-flash", tokensIn: 10, tokensOut: 5, costUsd: 0,
+      });
+    }
+    console.log("  расход: этапы voice, post и post-quality принимаются");
+
+    // --- список колонок читателя не должен отставать от таблицы ------------
+    //
+    // 0029 завела подписку, effectivePlan её читает, а select в readers.ts
+    // остался прежним: платящий читатель считался бесплатным и в вебе,
+    // и в прогоне — молча, без единой ошибки. Проверка сверяет форму,
+    // а не память: колонка, появившаяся в таблице, обязана доехать до кода.
+    const live = (await sql<{ column_name: string }[]>`
+      select column_name from information_schema.columns
+       where table_schema = 'dailynews' and table_name = 'readers'
+    `).map((row) => row.column_name);
+    // Читаются кодом не все: llm остался неиспользованным, служебные времена
+    // никому не нужны. Список исключений короткий и назван вслух — молчаливое
+    // исключение здесь ничем не отличалось бы от забытой колонки.
+    const SKIP = new Set(["llm", "created_at", "updated_at", "reader_context_hash"]);
+    const loaded = new Set(Object.keys((await readers.getReader(owner.id)) ?? {}));
+    const missed = live.filter((column) => !SKIP.has(column) && !loaded.has(column));
+    assert.deepEqual(
+      missed, [],
+      `колонки читателя есть в базе, но не выбираются кодом: ${missed.join(", ")}`,
+    );
+    console.log(`  читатель: выбираются все ${live.length - SKIP.size} нужных колонок`);
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});

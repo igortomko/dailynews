@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { getDigestDays, getFeed } from "@/lib/queries";
-import { getReaderTopics } from "@/lib/readers";
+import { getChannels, getReaderTopics } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
+import { effectivePlan } from "@/lib/lemon";
+import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
@@ -21,11 +23,16 @@ export default async function FeedPage({
   const reader = await currentReader();
   if (!reader.onboarded_at) redirect("/settings/personalization");
 
-  const [{ day: requested }, days, topics] = await Promise.all([
+  const [{ day: requested }, days, topics, channels] = await Promise.all([
     searchParams,
     getDigestDays(reader.id),
     getReaderTopics(reader.id),
+    getChannels(reader.id),
   ]);
+  // Действующий, а не купленный: у отменённой подписки оплаченный месяц
+  // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
+  const plan = effectivePlan(reader);
+  const networks = tabsOf(channels.map((channel) => channel.network)).map((network) => network.id);
 
   if (days.length === 0) {
     return (
@@ -50,6 +57,8 @@ export default async function FeedPage({
     <FeedTabs
       topics={topics}
       items={items}
+      plan={plan}
+      networks={networks}
       left={<DateNav day={day} days={days} />}
       right={
         <Tooltip>

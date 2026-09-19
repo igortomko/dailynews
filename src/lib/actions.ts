@@ -12,7 +12,14 @@ import { selectSurvivors, targetsOf } from "../../pipeline/select";
 import { writeDigest } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
-import { freezeKindleSender, getReader, getReaderTopics, recordCall, spentToday } from "./readers";
+import {
+  deleteChannel, freezeKindleSender, getChannels, getReader, getReaderTopics, recordCall,
+  saveChannel, saveVoiceCard, saveVoiceSample, spentToday,
+} from "./readers";
+import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
+import { buildVoiceCard, cardFromVoice, readOwnPosts, type VoiceCard } from "../../pipeline/voice-card";
+import { writePost } from "../../pipeline/post";
+import { NETWORK_IDS, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
@@ -510,4 +517,195 @@ export async function topUpDigest() {
 
   revalidatePath("/", "layout");
   return { ok: true as const, added: survivors.length };
+}
+
+// ---------------------------------------------------------------------------
+// Блогерский Pro: площадки, голос, посты.
+//
+// Предел проверяется в каждом действии, а не только на странице: действие
+// зовётся по своему адресу мимо страницы с заглушкой, и без этой проверки
+// бесплатный читатель получал бы посты за наш счёт через fetch из консоли.
+// ---------------------------------------------------------------------------
+
+/** Что вставил читатель → какая это сеть. Разбор тот же, что у источников. */
+const NETWORK_BY_KIND: Partial<Record<Source["kind"], NetworkId>> = {
+  telegram: "telegram",
+  x: "x",
+  rss: "blog",
+};
+
+/**
+ * Добавить площадку ссылкой.
+ *
+ * Адрес разбирает тот же `discover`, что и источники: он же проверяет, что
+ * канал публичный и хоть что-то отдаёт. Сохраняется только ответившее —
+ * площадка, принятая пустой, выглядит настроенной, а голос по ней собрать
+ * не из чего, и понять это можно будет только по пустой карточке.
+ */
+export async function addChannel(input: string): Promise<{ ok: true; network: NetworkId; label: string } | { error: string }> {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+
+  const found = await discover(input);
+  if (!found.ok) return { error: found.error };
+
+  const network = NETWORK_BY_KIND[found.found.kind];
+  if (!network) {
+    return { error: "Это похоже на рассылку, а не на твой канал: нужен канал Telegram, аккаунт X или блог" };
+  }
+
+  await saveChannel(readerId, network, {
+    handle: found.found.url,
+    input_url: found.found.input_url,
+    label: found.found.label,
+  });
+  revalidatePath("/settings/channels");
+  return { ok: true as const, network, label: found.found.label };
+}
+
+/** Отметить сеть, куда он публикует. Адрес при этом не трогается. */
+export async function toggleChannel(network: string, on: boolean) {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: "Неизвестная сеть" };
+
+  if (on) await saveChannel(readerId, network);
+  else await deleteChannel(readerId, network);
+  revalidatePath("/settings/channels");
+  return { ok: true as const };
+}
+
+/**
+ * Вставленные руками посты.
+ *
+ * Не обходной путь, а единственный для LinkedIn и Threads: ленту они наружу
+ * не отдают вовсе. Поэтому поле живёт рядом со списком площадок, а не
+ * в «если ничего не получилось».
+ */
+export async function saveSample(formData: FormData) {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+  await saveVoiceSample(readerId, String(formData.get("sample") ?? "").slice(0, 20_000));
+  revalidatePath("/settings/channels");
+  return { ok: true as const };
+}
+
+/**
+ * Собрать карточку автора заново.
+ *
+ * Руками, а не по расписанию: голос меняется годами, и ночной пересчёт
+ * платил бы за один и тот же ответ каждую ночь. Кнопка стоит рядом с числом
+ * прочитанных постов — видно, на чём карточка собрана.
+ */
+export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ranked: boolean; failed: string[] } | { error: string }> {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const reader = await currentReader();
+
+  const spent = await spentToday(reader.id);
+  if (spent >= reader.daily_cap_usd) {
+    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+  }
+
+  const channels = await getChannels(reader.id);
+  const { posts, failed } = await readOwnPosts(
+    channels.map((channel) => ({ network: channel.network as NetworkId, handle: channel.handle })),
+    reader.voice_sample,
+  );
+  if (posts.length === 0) {
+    return {
+      error: failed.length
+        ? `Ни одна площадка не ответила: ${failed.map((entry) => `${entry.network} — ${entry.why}`).join("; ")}`
+        : "Читать нечего: добавь канал ссылкой или вставь три своих поста",
+    };
+  }
+
+  try {
+    const built = await buildVoiceCard(posts);
+    await saveVoiceCard(reader.id, built.card);
+    await recordCall({
+      readerId: reader.id, stage: "voice", model: built.model,
+      tokensIn: built.usage.input, tokensOut: built.usage.output,
+      costUsd: llmCost(built.usage),
+    });
+    revalidatePath("/settings/channels");
+    return {
+      ok: true as const,
+      built_from: built.card.built_from,
+      ranked: built.card.ranked,
+      failed: failed.map((entry) => `${entry.network}: ${entry.why}`),
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не собралось" };
+  }
+}
+
+/**
+ * Черновики поста по материалу выпуска.
+ *
+ * Материал берётся из выпуска этого читателя, а не из общей `items`:
+ * запрос без `reader_id` отдал бы соседний выпуск — вовремя и без ошибок.
+ * Заодно это и есть проверка, что материал ему вообще показывали.
+ */
+export async function writeOpinion(itemId: number): Promise<
+  | { ok: true; drafts: SavedDraft[]; added: string[]; fallback: boolean; built_from: number }
+  | { error: string }
+> {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const reader = await currentReader();
+
+  const spent = await spentToday(reader.id);
+  if (spent >= reader.daily_cap_usd) {
+    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+  }
+
+  const item = await postSourceFor(reader.id, itemId);
+  if (!item) return { error: "Этого материала в твоих выпусках нет" };
+
+  const channels = await getChannels(reader.id);
+  const networks = tabsOf(channels.map((channel) => channel.network));
+  if (networks.length === 0) {
+    return { error: "Сначала отметь в настройках, где ты публикуешь" };
+  }
+
+  // Карточка есть — пишем его голосом. Нет — настройками подачи, и мотатка
+  // обязана сказать это вслух: иначе он прочтёт общий черновик и решит,
+  // что возможность не работает.
+  const card = reader.voice_card?.voice?.length
+    ? (reader.voice_card as VoiceCard)
+    : cardFromVoice({
+        language: reader.language,
+        complexity: reader.complexity,
+        style: reader.style,
+      });
+
+  try {
+    const written = await writePost(item, card, networks.map((network) => network.id));
+    await recordCall({
+      readerId: reader.id, stage: "post", model: written.model,
+      tokensIn: written.usage.input, tokensOut: written.usage.output,
+      costUsd: llmCost(written.usage),
+    });
+    const saved = await saveDrafts(reader.id, item.id, written.drafts);
+    return {
+      ok: true as const,
+      drafts: saved,
+      added: written.added,
+      fallback: card.built_from === 0,
+      built_from: card.built_from,
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не написалось" };
+  }
+}
+
+/** Он скопировал пост: отметка и его правка — вход для следующей карточки. */
+export async function takeOpinion(postId: number, text: string) {
+  const readerId = await currentReaderId();
+  const ok = await takeDraft(readerId, postId, text.slice(0, 10_000));
+  return ok ? { ok: true as const } : { error: "Черновик не найден" };
 }
