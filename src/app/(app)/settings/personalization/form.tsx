@@ -7,12 +7,24 @@ import { Button } from "@/components/ui/button";
 import { CheckIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DEFAULT_COMPLEXITY,
+  DEFAULT_STYLE,
+  STYLES,
+  complexityAt,
+  styleOf,
+} from "@/lib/voice";
 import type { Profile } from "@/lib/types";
-
-// Подсказки, а не выбор: список из трёх закрывал бы всё остальное.
-const SUGGESTED_LANGUAGES = ["русском", "английском", "португальском (бразильский вариант)"];
 
 export function PersonalizationForm({ profile }: { profile: Profile }) {
   const [pending, startTransition] = useTransition();
@@ -21,6 +33,9 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
   const first = !profile?.onboarded_at;
+
+  const [complexity, setComplexity] = useState(profile?.complexity ?? DEFAULT_COMPLEXITY);
+  const [style, setStyle] = useState(profile?.style ?? DEFAULT_STYLE);
 
   const save = () => {
     const node = form.current;
@@ -60,32 +75,18 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
             {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
           </span>
         </CardTitle>
-        <CardDescription>
-          {first
-            ? "По этим направлениям будут собираться новости, и по ним же раскладываться вкладки."
-            : "Сколько материалов, на каком языке, для кого и о чём."}
-        </CardDescription>
+        {first ? (
+          <CardDescription>
+            По этим направлениям будут собираться новости, и по ним же раскладываться вкладки.
+          </CardDescription>
+        ) : null}
       </CardHeader>
       <CardContent>
         <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
-          {/* Порядок от общего к частному: сколько и на каком языке — решения
-              на один раз; кто читает влияет на отбор сильнее списка тем,
-              поэтому стоит перед ним; интересы меняются чаще всего и потому
-              в конце, ближе к кнопке. */}
+          {/* Сколько новостей в день — в «Интересах», рядом с полосой, где
+              это число делится между темами: там оно одно решение, а не два.
+              Здесь остаётся только то, как текст написан и для кого. */}
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="digest_size">Материалов в дайджесте</FieldLabel>
-              <Input
-                id="digest_size"
-                name="digest_size"
-                type="number"
-                min={3}
-                max={50}
-                defaultValue={profile?.digest_size ?? 12}
-                className="w-24"
-              />
-            </Field>
-
             <Field>
               <FieldLabel htmlFor="language">Язык</FieldLabel>
               <Input
@@ -93,29 +94,60 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
                 name="language"
                 defaultValue={profile?.language ?? "русском"}
                 placeholder="русском"
-                className="max-w-sm"
+                className="max-w-64"
               />
-              <div className="flex flex-wrap gap-1.5">
-                {SUGGESTED_LANGUAGES.map((entry) => (
-                  <button
-                    key={entry}
-                    type="button"
-                    onClick={() => {
-                      const field = document.getElementById("language") as HTMLInputElement | null;
-                      if (!field) return;
-                      field.value = entry;
-                      schedule();
-                    }}
-                    className="cursor-pointer rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-solid hover:text-foreground"
-                  >
-                    {entry}
-                  </button>
-                ))}
+            </Field>
+
+            {/* Ползунок и селект меняются мимо события формы: базовый компонент
+                не шлёт change с настоящего поля, поэтому о правке сообщаем сами.
+                Скрытое поле держит значение для FormData. */}
+            <Field>
+              <FieldLabel htmlFor="complexity">Сложность языка</FieldLabel>
+              <div className="flex max-w-sm items-center gap-3">
+                <Slider
+                  id="complexity"
+                  min={1}
+                  max={5}
+                  step={1}
+                  // Массивом, а не числом: обёртка рисует по ползунку на элемент,
+                  // и на скаляре откатывается к [min, max] — два ползунка вместо
+                  // одного, причём поле при этом продолжает сохраняться.
+                  value={[complexity]}
+                  onValueChange={(value) => {
+                    setComplexity(Array.isArray(value) ? value[0] : value);
+                    schedule();
+                  }}
+                  aria-label="Сложность языка"
+                />
+                <span className="w-36 shrink-0 text-sm">{complexityAt(complexity).label}</span>
               </div>
-              <FieldDescription>
-                Пиши в форме «на каком»: русском, английском, испанском. Подойдёт любой —
-                это идёт в запрос к модели как есть. Источники остаются на своих языках.
-              </FieldDescription>
+              <input type="hidden" name="complexity" value={complexity} />
+              <FieldDescription>{complexityAt(complexity).hint}</FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="style">Манера</FieldLabel>
+              <Select
+                value={style}
+                onValueChange={(value: string | null) => {
+                  if (!value) return;
+                  setStyle(value);
+                  schedule();
+                }}
+              >
+                <SelectTrigger id="style" className="max-w-64">
+                  <SelectValue>{styleOf(style).label}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {STYLES.map((entry) => (
+                    <SelectItem key={entry.key} value={entry.key}>
+                      {entry.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <input type="hidden" name="style" value={style} />
+              <FieldDescription>{styleOf(style).hint}</FieldDescription>
             </Field>
 
             <Field>
@@ -128,8 +160,7 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
                 placeholder="Чем занимаешься, какой стек, что за продукт, где живёшь"
               />
               <FieldDescription>
-                Этот текст видит и модель, раскладывающая поток по темам, и та, что пишет
-                дайджест. Он влияет на отбор сильнее, чем список интересов.
+                Расскажите о себе, это влияет на саммари и отбор новостей под ваши интересы.
               </FieldDescription>
             </Field>
 

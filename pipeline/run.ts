@@ -4,10 +4,13 @@ import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { markDuplicates } from "./dedup";
 import { scoreAll, type Scorable } from "./score";
-import { writeDigest, type Survivor } from "./digest";
+import { writeDigest } from "./digest";
+import { selectSurvivors } from "./select";
 import { notify } from "./telegram";
 import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
+import { readability } from "./lexicon";
+import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "../src/lib/voice";
 
 /** Цена Jev, $ за миллион токенов. Выход не тарифицируется. */
 const JEV_INPUT_PRICE = 0.042;
@@ -128,35 +131,11 @@ async function main() {
   log(`   оценено: ${scored.length}, токенов: ${usage.input}, $${jevCost.toFixed(4)}`);
 
   log("4. Отбор: код сортирует по составному скору");
-  // Отбор по чистому скору отдаёт дайджест самой плодовитой теме: источники
-  // по энергетике дают вчетверо больше материалов, чем по демографии, и все
-  // они честно совпадают со своей темой. Поэтому берём по кругу — сначала
-  // лучшее в каждой теме, потом вторые по каждой. Читателю нужны направления,
-  // а вкладки и так позволяют уйти вглубь одной темы.
-  // ponytail: жёсткий круг; если у темы сегодня пусто, её место просто уходит
-  // следующей по скору — при необходимости добавить порог качества.
-  const survivors = await sql<Survivor[]>`
-    with ranked as (
-      select i.id, i.title, i.excerpt, i.url, s.label as source_label,
-             coalesce(t.label, 'Прочее') as topic_label,
-             sc.total, sc.axes,
-             row_number() over (
-               partition by sc.topic_id order by sc.total desc
-             ) as rank_in_topic
-        from dailynews.scores sc
-        join dailynews.items i on i.id = sc.item_id
-        join dailynews.sources s on s.id = i.source_id
-   left join dailynews.topics t on t.id = sc.topic_id
-       where i.dup_of is null
-         and not exists (
-           select 1 from dailynews.digests d where i.id = any(d.item_ids)
-         )
-    )
-    select id, title, excerpt, url, source_label, topic_label, total, axes
-      from ranked
-     order by rank_in_topic asc, total desc
-     limit ${profile.digest_size}
-  `;
+  // Взвешенный круг по темам: сколько мест берёт тема, решает её вес.
+  // Запрос вынесен в select.ts, чтобы db/verify.ts гонял ровно его,
+  // а не свою копию: перекос в дележе мест — это правильный на вид
+  // дайджест не о том, и на глаз он неотличим от верного.
+  const survivors = await selectSurvivors(sql, profile.digest_size);
   log(`   отобрано: ${survivors.length} из ${pending.length}`);
 
   if (survivors.length === 0) {
@@ -175,12 +154,11 @@ async function main() {
   log(`   иллюстраций найдено: ${withImages} из ${survivors.length}`);
 
   log(`5. Дайджест: модель видит ${survivors.length} материалов вместо ${pending.length}`);
-  const digest = await writeDigest(
-    survivors,
-    profile.reader_context,
-    profile.llm ?? {},
-    profile.language ?? "русском",
-  );
+  const digest = await writeDigest(survivors, profile.reader_context, profile.llm ?? {}, {
+    language: profile.language ?? "русском",
+    complexity: profile.complexity ?? DEFAULT_COMPLEXITY,
+    style: profile.style ?? DEFAULT_STYLE,
+  });
   for (const item of digest.items) {
     await sql`
       update dailynews.items
@@ -193,10 +171,9 @@ async function main() {
   // а собственный выход. Правка промпта либо улучшает ряд чисел, либо нет —
   // на глаз двенадцать описаний в день всегда читаются нормально.
   const quality = await scoreSummaries(
-    digest.items.map((item) => {
-      const survivor = survivors.find((s) => Number(s.id) === Number(item.id));
-      return { id: Number(item.id), title: item.title_ru, summary: item.summary };
-    }),
+    digest.items.map((item) => ({
+      id: Number(item.id), title: item.title_ru, summary: item.summary,
+    })),
     profile.reader_context,
   );
   for (const row of quality.scored) {
@@ -212,6 +189,18 @@ async function main() {
     : 0;
   log(`   качество описаний: ${meanQuality.toFixed(0)} из 85 по ${quality.scored.length}`);
 
+  // Ползунок сложности меняет промпт — а меняется ли текст, видно только
+  // по ряду этих двух чисел рядом с положением ползунка.
+  const measured = digest.items.map((item) => readability(item.summary));
+  const mean = (pick: (r: { perSentence: number; longShare: number }) => number) =>
+    measured.length ? measured.reduce((sum, r) => sum + pick(r), 0) / measured.length : 0;
+  const perSentence = mean((r) => r.perSentence);
+  const longShare = mean((r) => r.longShare);
+  log(
+    `   сложность текста: ${perSentence.toFixed(1)} слов в предложении, ` +
+    `${(longShare * 100).toFixed(0)}% длинных (ползунок ${profile.complexity ?? DEFAULT_COMPLEXITY} из 5)`,
+  );
+
   const order = survivors.map((s) => s.id);
   await sql`
     insert into dailynews.digests (day, intro, item_ids, stats)
@@ -225,6 +214,9 @@ async function main() {
         jev_cost_usd: Number(jevCost.toFixed(5)),
         flagged: digest.flagged ?? 0,
         summary_quality: Number(meanQuality.toFixed(1)),
+        complexity: profile.complexity ?? DEFAULT_COMPLEXITY,
+        words_per_sentence: Number(perSentence.toFixed(1)),
+        long_word_share: Number(longShare.toFixed(3)),
         seconds: Math.round((Date.now() - started) / 1000),
         // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
         // строку, и stats->>'jev_cost_usd' молча возвращает null.

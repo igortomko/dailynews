@@ -6,12 +6,16 @@
  *   npx tsx pipeline/selftest.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { composite } from "./score";
-import { matchWritten } from "./digest";
-import { checkLexicon, repeatsHeadline } from "./lexicon";
+import { matchWritten, parseDigest } from "./digest";
+import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
+import { MIN_PER_TOPIC, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { COMPLEXITY, STYLES, complexityAt, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
+import { toSlug } from "../src/lib/slug";
 import type { Axes, Weights } from "../src/lib/types";
 
 const weights: Weights = {
@@ -86,35 +90,37 @@ assert.ok(
 );
 
 // --- составной скор --------------------------------------------------------
-const fact = composite(axes(), weights, 1);
-const reprint = composite(axes({ kind: { choice: "reprint", confidence: 0.9, probabilities: {} } }), weights, 1);
+const fact = composite(axes(), weights);
+const reprint = composite(axes({ kind: { choice: "reprint", confidence: 0.9, probabilities: {} } }), weights);
 assert.ok(reprint < fact, "перепечатка должна проигрывать факту");
 
-const opinion = composite(axes({ kind: { choice: "opinion", confidence: 0.9, probabilities: {} } }), weights, 1);
+const opinion = composite(axes({ kind: { choice: "opinion", confidence: 0.9, probabilities: {} } }), weights);
 assert.ok(opinion < fact, "мнение должно проигрывать факту");
 
-const clickbait = composite(axes({ clickbait: { noul: 1 } }), weights, 1);
+const clickbait = composite(axes({ clickbait: { noul: 1 } }), weights);
 assert.ok(clickbait < fact - 25, "кликбейт должен штрафоваться заметно");
 
-const noise = composite(axes({ horizon: { choice: "noise", confidence: 0.8, probabilities: {} } }), weights, 1);
+const noise = composite(axes({ horizon: { choice: "noise", confidence: 0.8, probabilities: {} } }), weights);
 assert.ok(noise < fact, "шум дня должен проигрывать сигналу на годы");
 
-const stale = composite(axes({ novelty: { score: 0, max: 2, confidence: 0.8 } }), weights, 1);
+const stale = composite(axes({ novelty: { score: 0, max: 2, confidence: 0.8 } }), weights);
 assert.ok(stale < fact, "пережёвывание известного должно проигрывать новому");
 
-const vague = composite(axes({ specifics: { score: 0, max: 2, confidence: 0.8 } }), weights, 1);
+const vague = composite(axes({ specifics: { score: 0, max: 2, confidence: 0.8 } }), weights);
 assert.ok(vague < fact, "материал без цифр и источника должен проигрывать");
 
 // «Прочее» теряет самую тяжёлую ось, но не убивается совсем: отличный
 // материал вне заданных тем должен уметь пробиться наверх.
-const other = composite(axes({ topic: { choice: "other", confidence: 0.9, probabilities: { other: 0.9 } } }), weights, 1);
+const other = composite(axes({ topic: { choice: "other", confidence: 0.9, probabilities: { other: 0.9 } } }), weights);
 assert.equal(other, fact - weights.topic * 0.9, "прочее теряет ровно тематическую ось");
 assert.ok(other > 0, "прочее не должно обнуляться");
 
-// Вес темы из онбординга должен двигать результат.
+// Вес темы в скор не входит: он делит места в дайджесте, а не подкручивает
+// оценку материала. Иначе числа разных тем несравнимы и корзины калибровки
+// едут от одной правки внимания.
 assert.ok(
-  composite(axes(), weights, 1.5) > composite(axes(), weights, 0.5),
-  "вес темы должен влиять на скор",
+  !/topicWeight/.test(readFileSync("pipeline/score.ts", "utf8")),
+  "вес темы не должен возвращаться в формулу скора",
 );
 
 // --- сопоставление ответа модели с материалами --------------------------------
@@ -189,6 +195,132 @@ assert.equal(firstSet("  ", "x"), "x", "пробелы — тоже пустот
 assert.equal(firstSet(undefined, undefined), undefined, "нет значений — undefined");
 assert.equal(firstSet(" a ", "b"), "a", "значение обрезается по краям");
 
+
+// --- оборванный ответ модели ---------------------------------------------------
+// Провайдер обрывает простыню JSON на середине массива. Падение разбора
+// оставляло день без дайджеста целиком, хотя почти все описания доехали.
+const cut = '{"intro": "сегодня про ИИ", "items": [{"id": 1, "title_ru": "А", "summary": "раз"},' +
+  '{"id": 2, "title_ru": "Б", "summary": "два"},{"id": 3, "title_ru": "В", "summ';
+assert.equal(parseDigest(cut).items?.length, 2, "из оборванного ответа спасаются целые описания");
+assert.equal(parseDigest(cut).intro, "сегодня про ИИ", "интро переживает обрыв");
+assert.equal(
+  parseDigest('{"intro":"и","items":[{"id":7,"title_ru":"Т","summary":"С"}]}').items?.[0].id,
+  7,
+  "целый ответ разбирается обычным путём",
+);
+
+// --- объявленная связь вместо связи -------------------------------------------
+// Эта форма и была жалобой читателя: «не понял, зачем мне это». Ось её
+// не ловит — она засчитывает упоминание читателя за найденную связь.
+assert.ok(
+  checkLexicon("Datasette может быть полезен читателю для внутренних дашбордов").length > 0,
+  "«может быть полезен читателю» должно помечаться",
+);
+assert.ok(
+  checkLexicon("компоненты стека, используемые в его проекте").length > 0,
+  "«в его проекте» без следствия — объявление связи",
+);
+assert.equal(
+  checkLexicon("Тот же приём стоит проверить везде, где имя таблицы приходит из запроса").length,
+  0,
+  "настоящая связь через глагол помечаться не должна",
+);
+
+// --- разгон перед выводом ------------------------------------------------------
+// Хвост описания начинался с пустого подлежащего: «Эта ситуация демонстрирует,
+// как…». Читатель только что прочёл, о чём речь, — слово потрачено на разгон.
+assert.ok(
+  checkLexicon("Эта ситуация демонстрирует, как геополитика влияет на рынки").length > 0,
+  "«эта ситуация демонстрирует» — разгон, а не мысль",
+);
+assert.ok(
+  checkLexicon("Это показывает, как меняется цена").length > 0,
+  "указательное «это» перед выводом тоже разгон",
+);
+assert.equal(
+  checkLexicon("Демонстрирует, как геополитика влияет на энергетические рынки").length,
+  0,
+  "та же мысль без разгона помечаться не должна",
+);
+assert.equal(
+  checkLexicon("Может быть критично при разработке систем с контролем логики").length,
+  0,
+  "вывод без обращения и без разгона — чистый",
+);
+
+// --- столкновение slug ---------------------------------------------------------
+// Разные названия сходятся в один slug, а `on conflict (slug) do update`
+// схлопывает их в одну строку: цель первой темы теряется, и сумма целей
+// молча перестаёт равняться размеру дайджеста. Полоса показывает одно,
+// приходит другое — поэтому saveInterests отказывает до вставки.
+assert.equal(toSlug("ИИ-инфра"), toSlug("ИИ инфра"), "пунктуация в slug не различается");
+assert.equal(toSlug("AI-инфра"), "ai-infra", "кириллица транслитерируется");
+assert.equal(toSlug("!!!"), "topic", "пустой после чистки slug не должен быть пустым");
+
+// --- бюджет тем ---------------------------------------------------------------
+// Сумма целей — это и есть размер дайджеста. Разъедется она — и «11 из 20»
+// на экране будет означать не то, что придёт читателю, причём молча.
+const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+
+assert.equal(sum(normalize([1, 1, 1, 1, 1], 20)), 20, "цели должны складываться в размер дайджеста");
+assert.equal(sum(normalize([10, 5, 5], 12)), 12, "уменьшение дайджеста пересчитывает цели");
+assert.equal(sum(normalize([7, 1, 1, 1], 20)), 20, "перекошенные цели тоже приводятся к сумме");
+assert.ok(
+  normalize([10, 5, 5], 20)[0] > normalize([10, 5, 5], 20)[1],
+  "пропорция при пересчёте должна сохраняться",
+);
+assert.ok(
+  normalize([30, 1, 1], 20).every((count) => count >= MIN_PER_TOPIC),
+  "ни одна тема не должна опуститься ниже минимума при пересчёте",
+);
+// Дробное округление каждой доли по отдельности даёт сумму то 19, то 21.
+assert.equal(sum(normalize([1, 1, 1], 20)), 20, "три равные доли от двадцати не должны терять место");
+assert.equal(sum(normalize([2, 3, 4, 5, 6, 7], 21)), 21, "шесть тем на двадцать одно место");
+// Мест меньше, чем тем: цели не обнуляются, отбор вернётся к ровному кругу.
+assert.ok(normalize([5, 5, 5, 5], 3).every((count) => count === MIN_PER_TOPIC), "мест меньше, чем тем");
+
+const moved = moveBoundary([10, 6, 4], 0, 7);
+assert.equal(sum(moved), 20, "перетаскивание границы не меняет размер дайджеста");
+assert.deepEqual(moved, [7, 9, 4], "сколько ушло слева, столько пришло справа");
+assert.deepEqual(
+  moveBoundary([10, 6, 4], 0, 99),
+  [15, 1, 4],
+  "граница не должна съедать соседа целиком",
+);
+assert.deepEqual(
+  moveBoundary([10, 6, 4], 1, 0),
+  [10, 1, 9],
+  "граница не уходит за левого соседа",
+);
+
+// --- голос --------------------------------------------------------------------
+// Колонка complexity ограничена в базе значениями 1..5: разъедется список —
+// ползунок начнёт показывать деления, которых промпт не знает.
+assert.equal(COMPLEXITY.length, 5, "делений сложности должно быть ровно пять, как в check базы");
+assert.ok(
+  COMPLEXITY.every((entry, index) => entry.key === String(index + 1)),
+  "ключи сложности должны совпадать со значением колонки",
+);
+assert.ok(
+  [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
+  "у каждого варианта должны быть и подпись для читателя, и требование для модели",
+);
+assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
+assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
+assert.equal(styleOf("выдуманная").key, "нейтральный", "незнакомая манера читается как нейтральная");
+
+// --- механическая сложность текста --------------------------------------------
+// Ползунок меняет промпт, а изменился ли текст — на глаз не видно.
+const plain = readability("Цена упала вдвое. Теперь сервер стоит 20 долларов в месяц.");
+const dense = readability(
+  "Продемонстрированная производительность инфраструктурного инференса свидетельствует " +
+  "о существенной трансформации экономической целесообразности самостоятельного " +
+  "развёртывания крупномасштабных языковых моделей организациями.",
+);
+assert.ok(dense.perSentence > plain.perSentence, "длинные предложения должны считаться сложнее");
+assert.ok(dense.longShare > plain.longShare, "доля длинных слов должна ловить канцелярит");
+assert.equal(readability("").perSentence, 0, "пустой текст не должен делить на ноль");
+
 // --- расположение middleware ------------------------------------------------
 // Проект использует srcDirectory, и Next подключает middleware только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
@@ -197,4 +329,4 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 45 утверждений");
+console.log("Самопроверка пройдена: 80 утверждений");

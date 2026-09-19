@@ -64,6 +64,10 @@ export type Profile = {
   reader_context: string;
   digest_size: number;
   language: string;
+  /** 1 — объясняй с нуля, 5 — пиши как специалисту. Уходит в промпт дайджеста. */
+  complexity: number;
+  /** Манера письма. Незнакомое значение читается как «нейтральный». */
+  style: string;
   weights: Weights;
   onboarded_at: string | null;
   llm: { base_url?: string; model?: string; api_key?: string };

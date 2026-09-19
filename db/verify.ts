@@ -81,6 +81,7 @@ async function main() {
   const { sql } = await import("../src/lib/db");
   const queries = await import("../src/lib/queries");
   const { markDuplicates } = await import("../pipeline/dedup");
+  const { selectSurvivors } = await import("../pipeline/select");
   const { normalizeTitle, canonUrl } = await import("../pipeline/normalize");
 
   try {
@@ -100,6 +101,8 @@ async function main() {
     const profile = await queries.getProfile();
     assert.equal(profile.id, 1);
     assert.equal(profile.digest_size, 12);
+    assert.equal(profile.complexity, 3, "сложность по умолчанию — середина шкалы");
+    assert.equal(profile.style, "нейтральный", "манера по умолчанию");
     assert.ok(profile.weights.topic === 40, "веса должны прийти из jsonb-дефолта");
     assert.equal(profile.onboarded_at, null, "онбординг не пройден — так и должно быть");
 
@@ -215,6 +218,83 @@ async function main() {
     `;
     assert.equal(again.length, 0, "материалы из вчерашнего дайджеста не должны отбираться снова");
     console.log("  отбор: отправленное не повторяется");
+
+    // --- бюджет тем -----------------------------------------------------------
+    // Круг по темам раздавал места строго поровну: у живого дайджеста на
+    // двадцать материалов выходило 3-3-3-3-3-3, и тема в фокусе получала
+    // столько же, сколько тема, которую читатель просил пореже. Отказ был
+    // неотличим от работы — дайджест приходил полный и осмысленный, просто
+    // не о том. Поэтому проверяется настоящий запрос отбора, а не пересказ.
+    //
+    // Цели нарочно не круглые: на 10-5-5 ошибка в порядке сортировки могла
+    // бы остаться незаметной.
+    // Явная проверка вместо `!`: переименуют slug в каталоге — и падение
+    // будет про отсутствующее свойство, а не про пропавшую тему.
+    const topicBy = (slug: string) => {
+      const topic = topics.find((t) => t.slug === slug);
+      assert.ok(topic, `тема ${slug} не найдена в каталоге`);
+      return topic;
+    };
+    const budget = [
+      { topic: topicBy("ai-infra"), target: 11 },
+      { topic: topicBy("design"), target: 6 },
+      { topic: topicBy("blockchain"), target: 3 },
+    ];
+    for (const { topic, target } of budget) {
+      await sql`update dailynews.topics set weight = ${target} where id = ${topic.id}`;
+    }
+    // Материалов должно быть заметно больше, чем мест: при дефиците проходят
+    // все, и любые цели дают одинаковую картину — проверка прошла бы и на
+    // сломанном отборе.
+    for (const { topic } of budget) {
+      for (let n = 0; n < 20; n++) {
+        const url = `https://${topic.slug}.example.com/${n}`;
+        const [row] = await sql<{ id: number }[]>`
+          insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+          values (
+            ${source.id}, ${url}, ${url}, ${`${topic.label} материал ${n}`},
+            ${`${topic.slug}-${n}`}, ''
+          )
+          returning id
+        `;
+        await sql`
+          insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+          values (
+            ${row.id}, ${topic.id}, ${100 - n}, 0.8,
+            ${sql.json(axes(topic.slug, "fact") as unknown as Parameters<typeof sql.json>[0])},
+            'jev-latest'
+          )
+        `;
+      }
+    }
+
+    const survivors = await selectSurvivors(sql, 20);
+    assert.equal(survivors.length, 20, "отбор должен отдать ровно digest_size");
+    for (const { topic, target } of budget) {
+      const got = survivors.filter((s) => s.topic_label === topic.label).length;
+      assert.equal(got, target, `${topic.label}: просили ${target}, отбор дал ${got}`);
+    }
+    // Внутри темы порядок по скору остаётся: бюджет решает «сколько»,
+    // а не «какие».
+    const best = survivors.filter((s) => s.topic_label === budget[0].topic.label);
+    assert.equal(best[0].total, 100, "внутри темы первым должен идти лучший по скору");
+    console.log(`  бюджет тем: ${budget.map((b) => b.target).join("-")} — выполнен точно`);
+
+    // Выключенная тема не должна уносить свой прежний бюджет: оценки,
+    // сделанные до выключения, живут ещё двое суток, и всё это время
+    // убранная из ленты тема забирала бы одиннадцать мест из двадцати.
+    await sql`update dailynews.topics set active = false where id = ${budget[0].topic.id}`;
+    const afterOff = await selectSurvivors(sql, 20);
+    const offCount = afterOff.filter((s) => s.topic_label === budget[0].topic.label).length;
+    assert.ok(
+      offCount <= 2,
+      `выключенная тема взяла ${offCount} мест — бюджет должен гаснуть вместе с темой`,
+    );
+    assert.ok(offCount > 0, "материалы выключенной темы не выбрасываются совсем");
+    await sql`update dailynews.topics set active = true where id = ${budget[0].topic.id}`;
+    console.log(`  выключенная тема: ${offCount} мест вместо ${budget[0].target}`);
+
+    console.log("  вес темы: ноль запрещён ограничением");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {

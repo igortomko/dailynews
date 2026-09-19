@@ -1,0 +1,142 @@
+/**
+ * Переписать вчерашний дайджест новым промптом и сравнить числа со старым.
+ *
+ *   npx tsx --env-file=.env pipeline/prompt-replay.ts
+ *   npx tsx --env-file=.env pipeline/prompt-replay.ts --complexity 2 --style телеграфный
+ *
+ * Зачем отдельный прогон. Правка промпта либо двигает ряд оценок, либо нет,
+ * и на глаз это не видно: двенадцать описаний в день читаются нормально
+ * при любой формулировке. Ждать сутки до следующего прогона, чтобы увидеть
+ * одно число, — значит править промпт вслепую и по впечатлению.
+ *
+ * Сравнение честное: те же материалы, те же шесть вопросов, а старые оценки
+ * уже лежат в базе рядом со старым текстом. Меняется только формулировка.
+ *
+ * Ничего не пишет: ни в items, ни в digests, ни в Telegram. Стоит около
+ * цента — один вызов дайджеста и по вопросу на описание.
+ */
+import { sql } from "../src/lib/db";
+import type { Profile } from "../src/lib/types";
+import { writeDigest, type Survivor } from "./digest";
+import { scoreSummaries, type SummaryQuality } from "./summary-quality";
+import { readability } from "./lexicon";
+import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "../src/lib/voice";
+
+type Stored = { id: number; title_ru: string; summary: string };
+
+const flag = (name: string) => {
+  const at = process.argv.indexOf(`--${name}`);
+  return at > 0 ? process.argv[at + 1] : undefined;
+};
+
+/** С командной строки приходит что угодно: «NaN из 5» в отчёте врал бы о том, что ушло в промпт. */
+const asked = (value: string | number | undefined) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(5, Math.max(1, Math.round(parsed))) : DEFAULT_COMPLEXITY;
+};
+
+const mean = (values: number[]) =>
+  values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+
+function report(label: string, scored: { total: number; axes: SummaryQuality["axes"] }[]) {
+  const axis = (pick: (a: SummaryQuality["axes"]) => number) => mean(scored.map((row) => pick(row.axes)));
+  console.log(
+    `${label.padEnd(9)} ${mean(scored.map((r) => r.total)).toFixed(1).padStart(5)} из 85  ` +
+    `самодост ${axis((a) => a.self_sufficient.score).toFixed(2)}  ` +
+    `конкрет ${axis((a) => a.specifics.score).toFixed(2)}  ` +
+    `связь ${axis((a) => a.reader_relevance.noul).toFixed(2)}  ` +
+    `направл ${axis((a) => a.direction_clear.noul).toFixed(2)}  ` +
+    `пересказ ${axis((a) => a.repeats_headline.noul).toFixed(2)}  ` +
+    `оценки ${axis((a) => a.evaluative.noul).toFixed(2)}`,
+  );
+}
+
+async function main() {
+  const [profile] = await sql<Profile[]>`select * from dailynews.profile where id = 1`;
+
+  // Берём последний дайджест: у его материалов уже есть и текст, и оценки —
+  // это и есть база для сравнения, считать её заново незачем.
+  const survivors = await sql<(Survivor & { day: string })[]>`
+    with last_day as (select day, item_ids from dailynews.digests order by day desc limit 1)
+    select i.id, i.title, i.excerpt, i.url, s.label as source_label,
+           coalesce(t.label, 'Прочее') as topic_label, sc.total, sc.axes,
+           (select day::text from last_day) as day
+      from last_day
+      cross join lateral unnest(last_day.item_ids) as u(item_id)
+      join dailynews.items i on i.id = u.item_id
+      join dailynews.sources s on s.id = i.source_id
+      join dailynews.scores sc on sc.item_id = i.id
+ left join dailynews.topics t on t.id = sc.topic_id
+  `;
+  if (survivors.length === 0) {
+    console.log("Ни одного дайджеста — сравнивать не с чем.");
+    await sql.end();
+    return;
+  }
+
+  const stored = await sql<Stored[]>`
+    select id, title_ru, summary
+      from dailynews.items
+     where id = any(${survivors.map((s) => s.id)}) and summary is not null
+  `;
+
+  const voice = {
+    language: profile.language ?? "русском",
+    complexity: asked(flag("complexity") ?? profile.complexity),
+    style: flag("style") ?? profile.style ?? DEFAULT_STYLE,
+  };
+  console.log(
+    `День ${survivors[0].day}, материалов ${survivors.length}. ` +
+    `Сложность ${voice.complexity} из 5, манера «${voice.style}».\n`,
+  );
+
+  const digest = await writeDigest(survivors, profile.reader_context, profile.llm ?? {}, voice);
+  const fresh = await scoreSummaries(
+    digest.items.map((item) => ({
+      id: Number(item.id),
+      title: item.title_ru,
+      summary: item.summary,
+    })),
+    profile.reader_context,
+  );
+
+  // Старый текст переоцениваем сейчас, а не берём сохранённые числа:
+  // формулировка вопроса могла с тех пор измениться, и тогда разница
+  // между «было» и «стало» означала бы разницу вопросов, а не текста.
+  const old = await scoreSummaries(
+    stored.map((row) => ({ id: row.id, title: row.title_ru, summary: row.summary })),
+    profile.reader_context,
+  );
+
+  console.log("");
+  report("было", old.scored);
+  report("стало", fresh.scored);
+
+  const before = stored.map((row) => readability(row.summary));
+  const after = digest.items.map((item) => readability(item.summary));
+  console.log(
+    `\nсложность текста: было ${mean(before.map((r) => r.perSentence)).toFixed(1)} слов в предложении, ` +
+    `${(mean(before.map((r) => r.longShare)) * 100).toFixed(0)}% длинных → ` +
+    `стало ${mean(after.map((r) => r.perSentence)).toFixed(1)} и ` +
+    `${(mean(after.map((r) => r.longShare)) * 100).toFixed(0)}%`,
+  );
+
+  // Худшие описания печатаем целиком: число говорит, что стало хуже,
+  // но не говорит чем.
+  const byScore = [...fresh.scored].sort((a, b) => a.total - b.total).slice(0, 3);
+  const written = new Map(digest.items.map((item) => [Number(item.id), item]));
+  console.log("\nТри худших из новых:");
+  for (const row of byScore) {
+    const item = written.get(row.item_id);
+    if (!item) continue;
+    console.log(`\n[${row.total.toFixed(0)}] ${item.title_ru}\n${item.summary}`);
+  }
+
+  await sql.end();
+}
+
+main().catch(async (error) => {
+  console.error(error);
+  await sql.end({ timeout: 5 }).catch(() => {});
+  process.exit(1);
+});

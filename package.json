@@ -13,7 +13,8 @@
     "verify:db": "tsx db/verify.ts",
     "dry-run": "tsx --env-file=.env pipeline/dry-run.ts",
     "ping": "tsx --env-file=.env db/ping.ts",
-    "env:set": "tsx scripts/env-set.ts"
+    "env:set": "tsx scripts/env-set.ts",
+    "replay": "tsx --env-file=.env pipeline/prompt-replay.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
