@@ -192,3 +192,45 @@ export async function recordFinished(
      limit 1
   `;
 }
+
+/**
+ * Вернуть ленту спящему читателю.
+ *
+ * Снимается и пауза, и отметка вопроса: без второго следующая пауза
+ * наступила бы молча, без нового вопроса — читатель решил бы, что лента
+ * снова сломалась.
+ */
+export async function resumeReader(telegramId: number): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set paused_at = null, sleep_asked_at = null, updated_at = now()
+     where telegram_id = ${telegramId}
+  `;
+}
+
+/** Поставить на паузу и запомнить, что вопрос уже задан. */
+export async function pauseReader(readerId: number): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set paused_at = now(), sleep_asked_at = now(), updated_at = now()
+     where id = ${readerId}
+  `;
+}
+
+/**
+ * Когда читатель последний раз что-то делал в ленте.
+ *
+ * Событие любое, включая показ: карточка отмечается показанной только
+ * при заходе на сайт, и это уже признак живого читателя. Telegram сюда
+ * не считается — там пролистывание неотличимо от чтения.
+ */
+export async function lastActivityAt(readerId: number): Promise<string | null> {
+  const [row] = await sql<{ at: string | null }[]>`
+    select max(r.at)::text as at
+      from dailynews.reads r
+      join dailynews.digest_items di on di.item_id = r.item_id
+      join dailynews.digests d on d.id = di.digest_id
+     where d.reader_id = ${readerId}
+  `;
+  return row?.at ?? null;
+}

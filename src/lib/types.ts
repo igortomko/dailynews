@@ -142,5 +142,9 @@ export type Reader = {
   plan_ends_at: string | null;
   /** Их страница управления: смена карты, отмена, возобновление. */
   portal_url: string | null;
+  /** Пусто — лента идёт. Время — с какого момента выпуск не пишется. */
+  paused_at: string | null;
+  /** Когда спросили «продолжать?»: без отметки вопрос уходил бы каждую ночь. */
+  sleep_asked_at: string | null;
   onboarded_at: string | null;
 };
