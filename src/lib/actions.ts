@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueLoginToken, issueSession, SESSION_COOKIE } from "./auth";
 import { checkFeed } from "../../pipeline/check-sources";
-import { MIN_PER_TOPIC, normalize } from "./topic-budget";
+import { MAX_DIGEST, MIN_PER_TOPIC, normalize } from "./topic-budget";
 import { toSlug } from "./slug";
 
 export async function login(_prev: unknown, formData: FormData) {
@@ -101,7 +101,7 @@ export async function saveInterests(formData: FormData) {
   if (new Set(slugs).size !== slugs.length) {
     return { error: "Два интереса совпадают после упрощения названия — переименуй один" };
   }
-  const digestSize = Math.min(50, Math.max(3, Math.round(Number(formData.get("digest_size"))) || 12));
+  const digestSize = Math.min(MAX_DIGEST, Math.max(3, Math.round(Number(formData.get("digest_size"))) || 12));
   // Приводим ещё раз на сервере: из формы приходит то, что нарисовал
   // браузер, а сумма целей — это и есть обещание размера дайджеста.
   const counts = normalize(

@@ -23,6 +23,9 @@ export type Written = {
 
 export type DigestResult = { intro: string; items: Written[]; flagged?: number };
 
+/** Сколько материалов уходит в модель одним запросом. */
+const CHUNK = 20;
+
 /**
  * Запретные списки есть только для языков, которые проверены глазами.
  * Для остальных уходят принципы без перечня слов: список, придуманный
@@ -120,7 +123,7 @@ export async function writeDigest(
     };
   }
 
-  const block = survivors
+  const blockOf = (list: Survivor[]) => list
     .map((s) => [
       `--- id: ${s.id}`,
       `ЗАГОЛОВОК: ${s.title}`,
@@ -130,9 +133,9 @@ export async function writeDigest(
     ].join("\n"))
     .join("\n\n");
 
-  const prompt = `${readerContext}
+  const promptFor = (list: Survivor[], askIntro: boolean) => `${readerContext}
 
-Ниже ${survivors.length} материалов, уже отобранных по интересам читателя.
+Ниже ${list.length} материалов, уже отобранных по интересам читателя.
 
 Для каждого дай "title_ru" — заголовок на ${language} языке: живой, не дословный перевод.
 
@@ -230,15 +233,16 @@ ${bannedFor(language)};
 предложения. Цифры из источника должны попасть в текст. Детали чужой реализации —
 только если читателю с ними что-то делать.
 
-И ещё "intro" — одно-два предложения обо всей подборке: что сегодня главное и есть ли
-связь между материалами. Без приветствий. Связи нет — так и скажи.
+${askIntro ? `И ещё "intro" — одно-два предложения обо всей подборке: что сегодня главное и есть ли
+связь между материалами. Без приветствий. Связи нет — так и скажи.` : ""}
 
 Материалы:
-${block}
+${blockOf(list)}
 
 Ответь только валидным JSON, без markdown:
-{"intro": "...", "items": [{"id": <число>, "title_ru": "...", "summary": "..."}]}`;
+{${askIntro ? '"intro": "...", ' : ""}"items": [{"id": <число>, "title_ru": "...", "summary": "..."}]}`;
 
+  const ask = async (list: Survivor[], askIntro: boolean) => {
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
@@ -251,29 +255,48 @@ ${block}
       // заголовков остались на языке источника.
       max_tokens: 32000,
       response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: promptFor(list, askIntro) }],
     }),
     // Рассуждающие модели тратят на дайджест по несколько минут; потолок
     // должен быть выше их худшего случая, иначе прогон падает молча.
     signal: AbortSignal.timeout(600_000),
   });
-  if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
 
-  const payload = await res.json();
-  const text: string = payload.choices?.[0]?.message?.content ?? "";
-  const json = text.replace(/```(?:json)?/g, "").trim();
-  const match = json.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`LLM вернул не JSON: ${text.slice(0, 200)}`);
+    const payload = await res.json();
+    const text: string = payload.choices?.[0]?.message?.content ?? "";
+    const json = text.replace(/```(?:json)?/g, "").trim();
+    const match = json.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error(`LLM вернул не JSON: ${text.slice(0, 200)}`);
 
-  const parsed = parseDigest(match[0]);
-  const { items: written, missing } = matchWritten(survivors, parsed.items ?? []);
+    const parsed = parseDigest(match[0]);
+    return { parsed, finish: payload.choices?.[0]?.finish_reason as string | undefined };
+  };
+
+  // Кусками, а не одной простынёй: потолок ответа делится с рассуждением
+  // модели, и на двадцати описаниях шестнадцати тысяч уже не хватало.
+  // При сотне новостей в дайджесте один запрос не поместится ни в какой
+  // разумный потолок, а обрыв стоит целого дня. Вступление просит только
+  // первый кусок: в нём лучшие по отбору, о них вступление и пишется.
+  const fromModel: Written[] = [];
+  let intro = "";
+  let finish: string | undefined;
+  for (let at = 0; at < survivors.length; at += CHUNK) {
+    const chunk = survivors.slice(at, at + CHUNK);
+    const answer = await ask(chunk, at === 0);
+    fromModel.push(...(answer.parsed.items ?? []));
+    if (at === 0) intro = answer.parsed.intro ?? "";
+    finish = answer.finish;
+  }
+
+  const { items: written, missing } = matchWritten(survivors, fromModel);
 
   // Подстановка обязана быть заметной. Заголовок на языке источника вместо
   // перевода выглядит как работающий дайджест, и разница видна только глазами.
   if (missing > 0) {
     console.error(
       `  ! модель перевела ${survivors.length - missing} из ${survivors.length}; ` +
-      `${missing} осталось без перевода (обрыв: ${payload.choices?.[0]?.finish_reason})`,
+      `${missing} осталось без перевода (обрыв: ${finish})`,
     );
   }
 
@@ -293,7 +316,7 @@ ${block}
   }
   if (flagged > 0) console.error(`  ~ помечено ${flagged} из ${written.length}`);
 
-  return { intro: parsed.intro ?? "", items: written, flagged };
+  return { intro, items: written, flagged };
 }
 
 /**

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { savePersonalization } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { CheckIcon } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -18,6 +17,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  LANGUAGES,
   DEFAULT_COMPLEXITY,
   DEFAULT_STYLE,
   STYLES,
@@ -36,6 +36,7 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
 
   const [complexity, setComplexity] = useState(profile?.complexity ?? DEFAULT_COMPLEXITY);
   const [style, setStyle] = useState(profile?.style ?? DEFAULT_STYLE);
+  const [language, setLanguage] = useState(profile?.language ?? "русском");
 
   const save = () => {
     const node = form.current;
@@ -87,43 +88,66 @@ export function PersonalizationForm({ profile }: { profile: Profile }) {
               это число делится между темами: там оно одно решение, а не два.
               Здесь остаётся только то, как текст написан и для кого. */}
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="language">Язык</FieldLabel>
-              <Input
-                id="language"
-                name="language"
-                defaultValue={profile?.language ?? "русском"}
-                placeholder="русском"
-                className="max-w-64"
-              />
-            </Field>
-
-            {/* Ползунок и селект меняются мимо события формы: базовый компонент
-                не шлёт change с настоящего поля, поэтому о правке сообщаем сами.
-                Скрытое поле держит значение для FormData. */}
-            <Field>
-              <FieldLabel htmlFor="complexity">Сложность языка</FieldLabel>
-              <div className="flex max-w-sm items-center gap-3">
-                <Slider
-                  id="complexity"
-                  min={1}
-                  max={5}
-                  step={1}
-                  // Массивом, а не числом: обёртка рисует по ползунку на элемент,
-                  // и на скаляре откатывается к [min, max] — два ползунка вместо
-                  // одного, причём поле при этом продолжает сохраняться.
-                  value={[complexity]}
-                  onValueChange={(value) => {
-                    setComplexity(Array.isArray(value) ? value[0] : value);
+            {/* Язык и сложность — одно решение «как это будет написано»,
+                поэтому стоят в строку. На узком экране колонки схлопываются
+                сами: две трёхсотпиксельные колонки на телефоне нечитаемы. */}
+            <div className="grid gap-5 @md/field-group:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="language">Язык</FieldLabel>
+                {/* Список из пятнадцати, а колонка осталась свободным текстом:
+                    миграция 0014 убрала список из трёх ровно потому, что его
+                    выбирал автор формы. Сохранённое значение вне списка
+                    остаётся выбранным, а не подменяется первым пунктом. */}
+                <Select
+                  value={language}
+                  onValueChange={(value: string | null) => {
+                    if (!value) return;
+                    setLanguage(value);
                     schedule();
                   }}
-                  aria-label="Сложность языка"
-                />
-                <span className="w-36 shrink-0 text-sm">{complexityAt(complexity).label}</span>
-              </div>
-              <input type="hidden" name="complexity" value={complexity} />
-              <FieldDescription>{complexityAt(complexity).hint}</FieldDescription>
-            </Field>
+                >
+                  <SelectTrigger id="language" className="w-full">
+                    <SelectValue>{language}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(LANGUAGES.includes(language) ? LANGUAGES : [language, ...LANGUAGES]).map((entry) => (
+                      <SelectItem key={entry} value={entry}>
+                        {entry}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <input type="hidden" name="language" value={language} />
+                <FieldDescription>Источники остаются на своих языках.</FieldDescription>
+              </Field>
+
+              {/* Ползунок и селект меняются мимо события формы: базовый компонент
+                  не шлёт change с настоящего поля, поэтому о правке сообщаем сами.
+                  Скрытое поле держит значение для FormData. */}
+              <Field>
+                <FieldLabel htmlFor="complexity">Сложность языка</FieldLabel>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    id="complexity"
+                    min={1}
+                    max={5}
+                    step={1}
+                    // Массивом, а не числом: обёртка рисует по ползунку на элемент,
+                    // и на скаляре откатывается к [min, max] — два ползунка вместо
+                    // одного, причём поле при этом продолжает сохраняться.
+                    value={[complexity]}
+                    onValueChange={(value) => {
+                      setComplexity(Array.isArray(value) ? value[0] : value);
+                      schedule();
+                    }}
+                    aria-label="Сложность языка"
+                  />
+                  <span className="w-32 shrink-0 text-sm">{complexityAt(complexity).label}</span>
+                </div>
+                <input type="hidden" name="complexity" value={complexity} />
+                <FieldDescription>{complexityAt(complexity).hint}</FieldDescription>
+              </Field>
+            </div>
 
             <Field>
               <FieldLabel htmlFor="style">Манера</FieldLabel>

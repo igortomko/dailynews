@@ -296,6 +296,18 @@ async function main() {
 
     console.log("  вес темы: ноль запрещён ограничением");
 
+    // Список в форме предлагает до ста. Разъедется с ограничением колонки —
+    // и выбор «100» вернёт ошибку там, где читатель ничего не нарушал.
+    const { MAX_DIGEST } = await import("../src/lib/topic-budget");
+    await sql`update dailynews.profile set digest_size = ${MAX_DIGEST} where id = 1`;
+    await assert.rejects(
+      sql`update dailynews.profile set digest_size = ${MAX_DIGEST + 1} where id = 1`,
+      /digest_size/,
+      "за потолком список предлагать не должен, а база — принимать",
+    );
+    await sql`update dailynews.profile set digest_size = 12 where id = 1`;
+    console.log(`  размер дайджеста: ${MAX_DIGEST} проходит, ${MAX_DIGEST + 1} отвергается`);
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});
