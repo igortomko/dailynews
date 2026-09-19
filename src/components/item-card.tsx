@@ -123,7 +123,7 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
   return (
     <article
       ref={article}
-      className="border-b py-5 last:border-0"
+      className="group border-b py-5 last:border-0"
     >
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
@@ -154,7 +154,18 @@ export function ItemCard({ item, showTopic }: { item: FeedItem; showTopic: boole
             {horizon ? <Badge variant="secondary">{horizon}</Badge> : null}
             {clickbait ? <Badge variant="destructive">кликбейт</Badge> : null}
 
-            <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            {/* Появляются по наведению: в покое они спорили с заголовком
+                за внимание, а нужны раз на десяток материалов. Место под
+                них держится всегда, поэтому строка не дёргается. На тач-
+                устройствах наведения нет — там показываем сразу. */}
+            <div
+              className={cn(
+                "ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",
+                "group-hover:opacity-100 group-focus-within:opacity-100",
+                "[@media(hover:none)]:opacity-100",
+                vote === "up" && "opacity-100",
+              )}
+            >
               <button
                 type="button"
                 aria-label="Больше такого"
