@@ -52,7 +52,12 @@ export function FeedTabs({
           {left}
           {right}
         </div>
-        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
+        {/* Родитель flex, полоса с margin: auto. Когда вкладки помещаются,
+            поля разводят их по центру; когда шире — поля схлопываются в ноль,
+            полоса прижимается к левому краю и прокручивается.
+            justify-center здесь не годится: при переполнении он прячет
+            левый край так, что до него не докрутить. */}
+        <div className="flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
           {/* Штатный вариант line: подчёркивание в два пикселя через ::after.
               Самодельные рамки здесь не годились — состояние называется
               data-active, и перекрытия по data-[state=active] не совпадали,

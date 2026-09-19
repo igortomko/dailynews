@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 const SECTIONS = [
   { href: "/settings/personalization", label: "Персонализация" },
+  { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/sources", label: "Источники" },
   { href: "/settings/calibration", label: "Калибровка" },
   { href: "/settings/subscription", label: "Подписка" },

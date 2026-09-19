@@ -2,8 +2,8 @@ name: Daily digest
 
 on:
   schedule:
-    # 07:00 BRT = 10:00 UTC
-    - cron: '0 10 * * *'
+    # Полночь по Сан-Паулу (UTC−3). Выпуск готов к утру.
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 concurrency:

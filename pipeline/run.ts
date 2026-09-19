@@ -179,7 +179,7 @@ async function main() {
     survivors,
     profile.reader_context,
     profile.llm ?? {},
-    profile.language ?? "ru",
+    profile.language ?? "русском",
   );
   for (const item of digest.items) {
     await sql`

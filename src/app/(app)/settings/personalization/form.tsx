@@ -2,28 +2,21 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveInterests, type ChipInput } from "@/lib/actions";
-import { TopicChips } from "@/components/topic-chips";
+import { savePersonalization } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { CheckIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Profile } from "@/lib/types";
 
-const LANGUAGES = [
-  { value: "ru", label: "Русский" },
-  { value: "en", label: "English" },
-  { value: "pt", label: "Português" },
-];
+// Подсказки, а не выбор: список из трёх закрывал бы всё остальное.
+const SUGGESTED_LANGUAGES = ["русском", "английском", "португальском (бразильский вариант)"];
 
-export function PersonalizationForm({ profile, chips }: { profile: Profile; chips: ChipInput[] }) {
+export function PersonalizationForm({ profile }: { profile: Profile }) {
   const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [language, setLanguage] = useState(profile?.language ?? "ru");
   const form = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
@@ -33,12 +26,7 @@ export function PersonalizationForm({ profile, chips }: { profile: Profile; chip
     const node = form.current;
     if (!node) return;
     startTransition(async () => {
-      const result = await saveInterests(new FormData(node));
-      if (result?.error) {
-        setError(result.error);
-        return;
-      }
-      setError(null);
+      await savePersonalization(new FormData(node));
       setSaved(true);
       router.refresh();
     });
@@ -99,25 +87,34 @@ export function PersonalizationForm({ profile, chips }: { profile: Profile; chip
             </Field>
 
             <Field>
-              <FieldLabel>Язык</FieldLabel>
-              <ToggleGroup
-                value={[language]}
-                onValueChange={(value: string[]) => {
-                  if (!value[0]) return;
-                  setLanguage(value[0] as typeof language);
-                  schedule();
-                }}
-                variant="outline"
-              >
-                {LANGUAGES.map((entry) => (
-                  <ToggleGroupItem key={entry.value} value={entry.value}>
-                    {entry.label}
-                  </ToggleGroupItem>
+              <FieldLabel htmlFor="language">Язык</FieldLabel>
+              <Input
+                id="language"
+                name="language"
+                defaultValue={profile?.language ?? "русском"}
+                placeholder="русском"
+                className="max-w-sm"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {SUGGESTED_LANGUAGES.map((entry) => (
+                  <button
+                    key={entry}
+                    type="button"
+                    onClick={() => {
+                      const field = document.getElementById("language") as HTMLInputElement | null;
+                      if (!field) return;
+                      field.value = entry;
+                      schedule();
+                    }}
+                    className="cursor-pointer rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-solid hover:text-foreground"
+                  >
+                    {entry}
+                  </button>
                 ))}
-              </ToggleGroup>
-              <input type="hidden" name="language" value={language} />
+              </div>
               <FieldDescription>
-                На нём пишутся заголовки и описания. Источники остаются на своих языках.
+                Пиши в форме «на каком»: русском, английском, испанском. Подойдёт любой —
+                это идёт в запрос к модели как есть. Источники остаются на своих языках.
               </FieldDescription>
             </Field>
 
@@ -135,10 +132,6 @@ export function PersonalizationForm({ profile, chips }: { profile: Profile; chip
                 дайджест. Он влияет на отбор сильнее, чем список интересов.
               </FieldDescription>
             </Field>
-
-            <TopicChips initial={chips} onChange={schedule} />
-
-            {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
 
             {/* Кнопка остаётся только в онбординге: там она не сохраняет,
                 а заканчивает настройку и уводит в ленту. */}

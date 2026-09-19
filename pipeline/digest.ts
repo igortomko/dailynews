@@ -21,38 +21,40 @@ export type Written = {
 export type DigestResult = { intro: string; items: Written[]; flagged?: number };
 
 /**
- * Язык дайджеста. Запретный список у каждого языка свой: «ключевой»
- * и «delve» не переводятся друг в друга, и список, переведённый дословно,
- * ловит не те слова.
+ * Запретные списки есть только для языков, которые проверены глазами.
+ * Для остальных уходят принципы без перечня слов: список, придуманный
+ * для непроверенного языка, ловил бы не те слова и звучал бы уверенно.
  */
-const LANGUAGE: Record<string, { name: string; banned: string }> = {
-  ru: {
-    name: "русском",
-    banned: `— оценок вместо фактов: «важный», «ключевой», «уникальный», «прорывной», «революционный»;
+const BANNED: Record<string, string> = {
+  русском: `— оценок вместо фактов: «важный», «ключевой», «уникальный», «прорывной», «революционный»;
 — зачинов: «стоит отметить», «важно понимать», «давайте разберёмся», «в современном мире»,
   «не секрет, что»;
 — ссылок на безымянных: «эксперты считают», «исследования показывают» — назови, кто именно;
 — оборотов «является инструментом для», «позволяет осуществлять», «выступает в роли» —
   глагол справляется сам;
 — итогов: «таким образом», «подводя итог», «в заключение»`,
-  },
-  en: {
-    name: "английском",
-    banned: `— evaluation instead of fact: "key", "pivotal", "game changer", "transformative", "robust";
+  английском: `— evaluation instead of fact: "key", "pivotal", "game changer", "transformative", "robust";
 — throat-clearing: "it's worth noting", "in today's fast-changing world", "here's the thing";
 — weasel attribution: "experts agree", "studies show" — name who;
 — padded verbs: "serves as", "acts as a catalyst", "enables the ability to" — the verb alone;
 — recap endings: "ultimately", "in conclusion", "in summary"`,
-  },
-  pt: {
-    name: "португальском (бразильский вариант)",
-    banned: `— avaliação no lugar do fato: "fundamental", "inovador", "revolucionário", "robusto";
+  португальском: `— avaliação no lugar do fato: "fundamental", "inovador", "revolucionário", "robusto";
 — aberturas vazias: "vale destacar", "é importante ressaltar", "em um mundo cada vez mais";
 — atribuição vaga: "especialistas afirmam", "estudos mostram" — diga quem;
 — verbos inchados: "atua como", "possibilita", "viabiliza" — o verbo sozinho;
 — fechos de resumo: "em suma", "por fim", "concluindo"`,
-  },
 };
+
+/** Общие правила, когда перечня для языка нет. */
+const BANNED_FALLBACK = `— оценок вместо фактов: слов вроде «важный», «прорывной», «уникальный»;
+— зачинов, которые ничего не сообщают, и итогов в конце;
+— ссылок на безымянных: «эксперты», «исследования» — называй, кто именно;
+— раздутых глаголов там, где хватает простого`;
+
+function bannedFor(language: string): string {
+  const key = Object.keys(BANNED).find((name) => language.toLowerCase().includes(name));
+  return key ? BANNED[key] : BANNED_FALLBACK;
+}
 
 export type LlmConfig = { base_url?: string; model?: string; api_key?: string };
 
@@ -76,9 +78,8 @@ export async function writeDigest(
   survivors: Survivor[],
   readerContext: string,
   config: LlmConfig = {},
-  languageCode = "ru",
+  language = "русском",
 ): Promise<DigestResult> {
-  const language = LANGUAGE[languageCode] ?? LANGUAGE.ru;
   const { baseUrl, model, apiKey } = resolve(config);
   if (!apiKey) {
     // Без ключа дайджест всё равно собирается — просто исходными заголовками.
@@ -107,7 +108,7 @@ export async function writeDigest(
 
 Ниже ${survivors.length} материалов, уже отобранных по интересам читателя.
 
-Для каждого дай "title_ru" — заголовок на ${language.name} языке: живой, не дословный перевод.
+Для каждого дай "title_ru" — заголовок на ${language} языке: живой, не дословный перевод.
 
 И "summary" — текст, после которого материал можно не открывать.
 
@@ -136,7 +137,7 @@ export async function writeDigest(
   это красивые слова, а не ответ, зачем читателю эта новость.
 
 Чего в нём быть не должно:
-${language.banned};
+${bannedFor(language)};
 — больше одного тире на весь текст.
 
 Единицы пишутся сокращённо: км, мин, с, кг, г, млн, тыс., %, г. для года.

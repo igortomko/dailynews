@@ -70,13 +70,31 @@ function toSlug(label: string): string {
     .slice(0, 48) || "topic";
 }
 
-export async function saveInterests(formData: FormData) {
-  const language = String(formData.get("language") ?? "ru");
-  if (!["ru", "en", "pt"].includes(language)) return { error: "Неизвестный язык" };
-  const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
+/**
+ * Персонализация и интересы — две формы, поэтому два действия. Одна функция
+ * с ветками «пришло ли поле» молча очищала бы то, чего в форме нет.
+ */
+export async function savePersonalization(formData: FormData) {
+  // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
+  const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
   const digestSize = Math.min(50, Math.max(3, Number(formData.get("digest_size") ?? 12)));
 
+  await sql`
+    update dailynews.profile
+       set reader_context = ${readerContext},
+           digest_size = ${digestSize},
+           language = ${language},
+           onboarded_at = coalesce(onboarded_at, now()),
+           updated_at = now()
+     where id = 1
+  `;
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+export async function saveInterests(formData: FormData) {
+  const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
   if (chips.length === 0) return { error: "Добавь хотя бы один интерес" };
 
   const slugs = chips.map((chip) => chip.slug || toSlug(chip.label));
@@ -96,13 +114,10 @@ export async function saveInterests(formData: FormData) {
       `;
     }
 
+    // Онбординг считается пройденным по интересам: без них лента пуста.
     await tx`
       update dailynews.profile
-         set reader_context = ${readerContext},
-             digest_size = ${digestSize},
-             language = ${language},
-             onboarded_at = coalesce(onboarded_at, now()),
-             updated_at = now()
+         set onboarded_at = coalesce(onboarded_at, now()), updated_at = now()
        where id = 1
     `;
   });
