@@ -46,7 +46,7 @@ async function main() {
   const { markDuplicates } = await import("./dedup");
 
   try {
-    const sources = await sql<Source[]>`select * from dailynews.sources where active order by kind, label`;
+    const sources = await sql<Source[]>`select * from dailynews.sources where active and deleted_at is null order by kind, label`;
     console.log(`Источников включено: ${sources.length}\n`);
 
     const started = Date.now();

@@ -28,7 +28,9 @@ export type FeedItem = {
 };
 
 export async function getSources(): Promise<Source[]> {
-  return sql<Source[]>`select * from dailynews.sources order by kind, label`;
+  return sql<Source[]>`
+    select * from dailynews.sources where deleted_at is null order by kind, label
+  `;
 }
 
 
@@ -77,6 +79,7 @@ export async function getSourceHealth(): Promise<SourceHealth[]> {
             and i.collected_at > now() - interval '30 days'
       left join dailynews.scores sc on sc.item_id = i.id
       left join digested g on g.item_id = i.id
+     where s.deleted_at is null
      group by s.id
      -- Порядок по вниманию, а не по алфавиту: в списке из тридцати строк
      -- сломанное обязано быть сверху. По kind наверх всплывали десять
