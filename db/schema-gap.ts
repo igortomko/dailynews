@@ -36,7 +36,10 @@ export type Gap = { kind: "таблица" | "колонка" | "огранич�
 export function promised(dir = "db/migrations") {
   const tables: { table: string; from: string }[] = [];
   const columns: { table: string; column: string; from: string }[] = [];
-  const constraints: { name: string; from: string }[] = [];
+  // Таблица у ограничения помнится не ради красоты: увезённая таблица
+  // уносит свои ограничения с собой, и без этой связи 0018 требовал бы
+  // profile_digest_size_check ещё долго после того, как profile не стало.
+  const constraints: { name: string; table: string; from: string }[] = [];
 
   for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) {
     const text = readFileSync(`${dir}/${file}`, "utf8");
@@ -55,6 +58,9 @@ export function promised(dir = "db/migrations") {
       for (let i = columns.length - 1; i >= 0; i--) {
         if (columns[i].table.toLowerCase() === gone) columns.splice(i, 1);
       }
+      for (let i = constraints.length - 1; i >= 0; i--) {
+        if (constraints[i].table.toLowerCase() === gone) constraints.splice(i, 1);
+      }
     }
 
     // Один alter table может добавлять несколько колонок через запятую,
@@ -66,7 +72,7 @@ export function promised(dir = "db/migrations") {
         columns.push({ table, column: found[1], from: file });
       }
       for (const found of statement.matchAll(/add\s+constraint\s+(\w+)/gi)) {
-        constraints.push({ name: found[1], from: file });
+        constraints.push({ name: found[1], table, from: file });
       }
       // Колонку могли добавить и снять следом: 0015 завела расписание,
       // 0016 его убрала. Без этого проверка требовала бы от базы то,

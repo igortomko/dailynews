@@ -10,20 +10,19 @@
  * в локальном `.env` и в CI не уезжает.
  *
  * Что применять, решает журнал `dailynews.migrations`, прочитанный
- * владельческой строкой. Роль приложения его не видит — на журнале RLS,
- * и она получает пустой список вместо отказа, — но владелец RLS обходит,
- * и это единственный, кому журнал вообще нужен.
+ * владельцем: RLS на нём обходит только владелец, роль приложения видит
+ * пустой список вместо отказа.
  *
- * Раньше здесь гнались все файлы подряд: «они идемпотентны, повтор безопасен».
- * На живой базе это оказалось неправдой. 0008 ставит на reads check без
- * событий `up` и `down`, которые заводит 0010, — и повторное применение 0008
- * падает на собственных данных: «check constraint is violated by some row».
- * Идемпотентен каждый файл по отдельности, а не их последовательность поверх
- * данных, которые накопились между ними.
+ * Накатывать всё подряд нельзя, хотя файлы и писались идемпотентными.
+ * Идемпотентность — это про повтор на той же базе, а не про повтор на базе,
+ * ушедшей вперёд: 0008 задаёт `reads_event_check` без голосов, 0010 голоса
+ * добавляет, и повтор 0008 на живых данных отбивается самой базой. Так и
+ * вышло при первом прогоне.
  *
- * Форма схемы (`db/schema-gap.ts`) осталась, но второй меркой: ею сверяется
- * результат рабочей ролью. «Команда прошла» и «база изменилась» — разные
- * утверждения, и журнал отвечает только на первое.
+ * Файл, которого нет в журнале, но чьи обещания в схеме уже выполнены,
+ * записывается как применённый без выполнения — иначе журнал, заведённый
+ * позже самих миграций, никогда не догонит базу. Каждый такой случай
+ * печатается: тихо считать миграцию применённой нельзя.
  */
 import postgres from "postgres";
 import { readFileSync, readdirSync } from "node:fs";
@@ -33,19 +32,16 @@ import { sql } from "../src/lib/db";
 const OWNER = process.env.SUPABASE_DB_URL;
 
 async function main() {
-  const gaps = await schemaGaps(sql);
-  if (gaps.length === 0) {
-    console.log("База знает всё, что обещают миграции. Накатывать нечего.");
-    await sql.end();
-    return;
-  }
-
-  console.log(`Базе не хватает ${gaps.length}:`);
-  for (const gap of gaps) console.log(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
-
-  await sql.end();
+  const gapsBefore = await schemaGaps(sql);
 
   if (!OWNER) {
+    await sql.end();
+    if (gapsBefore.length === 0) {
+      console.log("База знает всё, что обещают миграции. Накатывать нечего.");
+      return;
+    }
+    console.error(`Базе не хватает ${gapsBefore.length}:`);
+    for (const gap of gapsBefore) console.error(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
     console.error(
       "\n! SUPABASE_DB_URL не задан — под ролью приложения DDL запрещён.\n" +
       "  Положить владельческую строку: npx tsx scripts/env-set.ts SUPABASE_DB_URL\n" +
@@ -55,38 +51,75 @@ async function main() {
   }
 
   const owner = postgres(OWNER, { prepare: false, ssl: { rejectUnauthorized: false }, max: 1 });
-  const all = readdirSync("db/migrations").filter((file) => file.endsWith(".sql")).sort();
-  let needed: string[] = [];
+  let applied = 0;
+  let recorded = 0;
   try {
-    // Журнал читаем владельцем: роль приложения его не видит из-за RLS.
-    const applied = new Set(
-      (await owner<{ name: string }[]>`select name from dailynews.migrations`).map((row) => row.name),
-    );
-    // Имя в журнале — имя файла без расширения: его пишет сама миграция
-    // последней строкой. Разойдутся — файл будет накатываться каждый раз.
-    needed = all.filter((file) => !applied.has(file.replace(/\.sql$/, "")));
+    // Владельческая строка обязана вести в ту же базу, что и рабочая.
+    // Прямой хост и пулер выглядят по-разному, и проект в строке пулера
+    // спрятан в имени роли — на глаз они не сверяются. Накатить миграции
+    // в соседний проект общего аккаунта — ошибка, которую никто не заметит:
+    // команды пройдут, журнал наполнится, а приложение останется без колонок.
+    // Отпечаток снимается с sources, а не с profile: profile увезена
+    // в 0020, и проверка по ней отбивала бы собственную базу как чужую.
+    // Каталог источников есть с 0002, переживает все миграции и виден
+    // обеим ролям — а проверке надо работать и до накатывания.
+    const fingerprint = (db: typeof sql) => db<{ mark: string }[]>`
+      select md5(count(*)::text || coalesce(max(url), '')) as mark from dailynews.sources
+    `;
+    const [here] = await fingerprint(sql);
+    const [there] = await fingerprint(owner as unknown as typeof sql);
+    if (!here || !there || here.mark !== there.mark) {
+      console.error(
+        "\n! SUPABASE_DB_URL ведёт не в ту базу, с которой работает приложение.\n" +
+        "  Каталоги источников в них разные, значит это разные проекты Supabase.\n" +
+        "  Возьми строку из того же проекта, что и DATABASE_URL.",
+      );
+      process.exit(1);
+    }
 
-    const foreign = [...applied].filter((name) => !all.includes(`${name}.sql`));
+    const journal = await owner<{ name: string }[]>`select name from dailynews.migrations`;
+    const known = new Set(journal.map((row) => row.name));
+    const files = readdirSync("db/migrations").filter((file) => file.endsWith(".sql")).sort();
+    const pending = files.filter((file) => !known.has(file.replace(/\.sql$/, "")));
+
+    if (pending.length === 0) {
+      console.log(`Журнал знает все ${files.length} миграций. Накатывать нечего.`);
+      return;
+    }
+    console.log(`В журнале ${known.size} из ${files.length}, к разбору ${pending.length}.`);
+
+    // Запись без файла — миграция из чужой ветки, уже стоящая в базе.
+    // Молчать о ней нельзя: её изменений нет ни в одной проверке, а номер
+    // она занимает. Так нашлась 0019_plan с колонкой profile.plan.
+    const foreign = [...known].filter((name) => !files.includes(`${name}.sql`));
     if (foreign.length > 0) {
-      // Запись без файла — миграция из чужой ветки, уже стоящая в базе.
-      // Молчать о ней нельзя: её изменений нет ни в одной проверке.
-      console.log(`\nВ журнале есть записи без файлов: ${foreign.join(", ")}`);
-    }
-    if (needed.length === 0) {
-      console.log("\nВ журнале отмечены все файлы — накатывать нечего.");
+      console.log(`В журнале есть записи без файлов: ${foreign.join(", ")}`);
     }
 
-    for (const file of needed) {
-      console.log(`\n→ ${file}`);
+    // Какой файл за какой разрыв отвечает: если разрывов у файла нет,
+    // его обещания в базе уже выполнены.
+    const owed = new Set(gapsBefore.map((gap) => gap.from));
+
+    for (const file of pending) {
+      const name = file.replace(/\.sql$/, "");
+      if (!owed.has(file)) {
+        console.log(`  ${file}: обещанное в базе уже есть — записываю в журнал, не выполняя`);
+        await owner`insert into dailynews.migrations (name) values (${name}) on conflict (name) do nothing`;
+        recorded++;
+        continue;
+      }
+      console.log(`→ ${file}`);
       await owner.unsafe(readFileSync(`db/migrations/${file}`, "utf8"));
       console.log("  применена");
+      applied++;
     }
   } finally {
     await owner.end({ timeout: 10 }).catch(() => {});
+    await sql.end().catch(() => {});
   }
 
-  // Проверяем результат той же меркой, что и до накатывания: «команда прошла»
-  // и «база изменилась» — разные утверждения.
+  // Проверяем результат рабочей ролью: «команда прошла» и «база изменилась» —
+  // разные утверждения, и вторая проверяется тем же, чем ходит приложение.
   const after = postgres(process.env.DATABASE_URL!, {
     prepare: false, ssl: { rejectUnauthorized: false }, max: 1,
   });
@@ -98,11 +131,57 @@ async function main() {
     for (const gap of left) console.error(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
     process.exit(1);
   }
-  console.log(`\n✓ применено файлов: ${needed.length}, разрывов не осталось`);
+  console.log(`\n✓ выполнено ${applied}, записано без выполнения ${recorded}, разрывов не осталось`);
+}
+
+/**
+ * Диагностика: одну и ту же схему видят рабочая роль и владелец.
+ * Расхождение между ними — это не «миграция не доехала», а «доехала,
+ * но роль её не видит», и лечится оно грантом, а не повтором миграции.
+ */
+async function diagnose() {
+  const mine = await schemaGaps(sql);
+  console.log(`рабочая роль не видит: ${mine.length}`);
+  for (const gap of mine) console.log(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
+
+  if (!OWNER) {
+    await sql.end();
+    return;
+  }
+  const owner = postgres(OWNER, { prepare: false, ssl: { rejectUnauthorized: false }, max: 1 });
+  const theirs = await schemaGaps(owner as unknown as typeof sql);
+  console.log(`\nвладелец не видит: ${theirs.length}`);
+  for (const gap of theirs) console.log(`  ${gap.kind} ${gap.name} — из ${gap.from}`);
+
+  // Переопределение ограничения под тем же именем сверка формы не видит,
+  // а именно оно решает, сохранится ли «60 новостей». Печатаем текстом.
+  const checks = await owner<{ conname: string; def: string }[]>`
+    select conname, pg_get_constraintdef(oid) as def
+      from pg_constraint
+     where conrelid = 'dailynews.readers'::regclass and contype = 'c'
+     order by conname
+  `;
+  console.log("\nограничения readers:");
+  for (const row of checks) console.log(`  ${row.conname}: ${row.def}`);
+
+  const journal = await owner<{ name: string; applied_at: Date }[]>`
+    select name, applied_at from dailynews.migrations order by name desc limit 5
+  `;
+  console.log(`\nпоследние записи журнала:`);
+  for (const row of journal) console.log(`  ${row.name}  ${row.applied_at.toISOString().slice(0, 16)}`);
+
+  await owner.end({ timeout: 10 }).catch(() => {});
+  await sql.end().catch(() => {});
 }
 
 // Разбор файлов нужен и без сети: так видно, что вообще обещано.
-if (process.argv.includes("--list")) {
+if (process.argv.includes("--check")) {
+  diagnose().catch(async (error) => {
+    console.error(error.message ?? error);
+    await sql.end({ timeout: 5 }).catch(() => {});
+    process.exit(1);
+  });
+} else if (process.argv.includes("--list")) {
   const { tables, columns, constraints } = promised();
   console.log(
     `таблиц обещано: ${tables.length}, колонок: ${columns.length}, ` +
