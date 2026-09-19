@@ -30,14 +30,18 @@ export function FeedTabs({ topics, items }: { topics: Topic[]; items: FeedItem[]
         : items.filter((item) => item.topic_slug === slug);
 
   return (
-    <Tabs defaultValue="all" className="flex flex-col gap-2 overflow-x-hidden">
+    <Tabs defaultValue="all" className="flex flex-col gap-2">
       {/* Вкладки как в Google News: подчёркивание вместо плашки. Плашка
           обводит каждую тему рамкой и превращает ряд в набор кнопок;
           подчёркивание отмечает одну, остальные оставляет текстом.
           Полоса выходит за колонку и растушёвана: семь тем по-русски
           не помещаются, а обрезанный край должен читаться как «есть ещё». */}
-      <div className="-mx-4 border-b [mask-image:linear-gradient(to_right,transparent,black_1rem,black_calc(100%-1rem),transparent)]">
-        <TabsList className="h-auto w-max justify-start gap-1 rounded-none border-0 bg-transparent p-0 px-4">
+      {/* Вынос должен совпадать с отступами панели, иначе растушёвка
+          обрывается не у края и полоса выглядит обрезанной, а не
+          прокручиваемой. Полоса скроллится: семь тем по-русски не
+          помещаются ни в какую ширину. */}
+      <div className="-mx-4 overflow-x-auto border-b [scrollbar-width:none] sm:-mx-6 [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
+        <TabsList className="h-auto w-max justify-start gap-1 rounded-none border-0 bg-transparent p-0 px-4 sm:px-6">
           {tabs.map((tab) => (
             <TabsTrigger
               key={tab.slug}
