@@ -1,4 +1,5 @@
 import { getAllTopics, getDigestDays, getFeed, getProfile } from "@/lib/queries";
+import { planOf } from "@/lib/plans";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ export default async function InterestsPage() {
     <InterestsForm
       total={profile.digest_size}
       inToday={inToday}
+      plan={planOf(profile.plan)}
       chips={topics
         .filter((topic) => topic.active)
         .map((topic) => ({

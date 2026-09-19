@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { Source } from "@/lib/types";
+import type { Plan } from "@/lib/plans";
 
 const KINDS = [
   { value: "rss", label: "RSS", placeholder: "https://example.com/feed", hint: "Адрес фида. Через RSS ходят блоги, YouTube, arXiv, Substack." },
@@ -22,11 +23,12 @@ const KINDS = [
   { value: "hackernews", label: "Hacker News", placeholder: "topstories", hint: "topstories, newstories или beststories." },
 ] as const;
 
-export function SourcesManager({ sources }: { sources: Source[] }) {
+export function SourcesManager({ sources, plan }: { sources: Source[]; plan: Plan }) {
   const [kind, setKind] = useState<string>("rss");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const active = KINDS.find((entry) => entry.value === kind)!;
+  const on = sources.filter((source) => source.active).length;
 
   const dead = sources.filter((source) => source.active && source.last_error);
   const silent = sources.filter(
@@ -81,7 +83,7 @@ export function SourcesManager({ sources }: { sources: Source[] }) {
                   onValueChange={(value: string[]) => value[0] && setKind(value[0])}
                   variant="outline"
                 >
-                  {KINDS.map((entry) => (
+                  {KINDS.filter((entry) => plan.kinds.includes(entry.value)).map((entry) => (
                     <ToggleGroupItem key={entry.value} value={entry.value}>
                       {entry.label}
                     </ToggleGroupItem>
@@ -113,7 +115,9 @@ export function SourcesManager({ sources }: { sources: Source[] }) {
       <Card>
         <CardHeader>
           <CardTitle>Источники</CardTitle>
-          <CardDescription>{sources.filter((s) => s.active).length} включено из {sources.length}</CardDescription>
+          <CardDescription>
+            {on} включено из {sources.length} · тариф «{plan.label}» опрашивает {plan.maxSources}
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
           {sources.map((source, index) => (
@@ -123,7 +127,10 @@ export function SourcesManager({ sources }: { sources: Source[] }) {
                 <Switch
                   checked={source.active}
                   onCheckedChange={(checked: boolean) =>
-                    startTransition(() => setSourceActive(source.id, checked))
+                    startTransition(async () => {
+                      const result = await setSourceActive(source.id, checked);
+                      if (result && "error" in result) toast.error(result.error);
+                    })
                   }
                 />
                 <div className="flex min-w-0 flex-1 flex-col">

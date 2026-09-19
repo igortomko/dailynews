@@ -11,6 +11,7 @@ import { enrichImages } from "./og";
 import { scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "../src/lib/voice";
+import { maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
 
 /** Цена Jev, $ за миллион токенов. Выход не тарифицируется. */
 const JEV_INPUT_PRICE = 0.042;
@@ -65,7 +66,15 @@ async function main() {
   const topics = await sql<Topic[]>`
     select * from dailynews.topics where active order by position, id
   `;
-  const sources = await sql<Source[]>`select * from dailynews.sources where active order by id`;
+  const all = await sql<Source[]>`select * from dailynews.sources where active order by id`;
+  // Тариф решает не только форма настроек: понижение оставляет лишние
+  // источники включёнными в каталоге, и опрашивать их всё равно нельзя —
+  // X платный, и счёт приходит за сбор, а не за галочку в интерфейсе.
+  const plan = planOf(profile.plan);
+  const sources = sourcesForPlan(all, plan);
+  if (sources.length < all.length) {
+    log(`   тариф «${plan.label}»: опрашиваем ${sources.length} из ${all.length} включённых`);
+  }
 
   if (topics.length === 0) {
     log("Интересы не заданы — пройди онбординг. Прогон отменён.");
@@ -135,7 +144,8 @@ async function main() {
   // Запрос вынесен в select.ts, чтобы db/verify.ts гонял ровно его,
   // а не свою копию: перекос в дележе мест — это правильный на вид
   // дайджест не о том, и на глаз он неотличим от верного.
-  const survivors = await selectSurvivors(sql, profile.digest_size);
+  const digestSize = Math.min(profile.digest_size, maxDigestOf(plan));
+  const survivors = await selectSurvivors(sql, digestSize);
   log(`   отобрано: ${survivors.length} из ${pending.length}`);
 
   if (survivors.length === 0) {

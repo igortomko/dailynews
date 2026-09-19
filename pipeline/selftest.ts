@@ -359,4 +359,75 @@ import { existsSync } from "node:fs";
 assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
-console.log("Самопроверка пройдена: 85 утверждений");
+
+// --- тарифы -----------------------------------------------------------------
+// Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
+// им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
+// решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
+import { PLAN_IDS, PLANS, maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
+import type { Source } from "../src/lib/types";
+
+assert.equal(planOf("pro").id, "pro", "известный тариф читается как он сам");
+assert.equal(planOf("нет такого").id, "free", "незнакомый тариф откатывается к бесплатному");
+assert.equal(planOf(null).id, "free", "пустой тариф откатывается к бесплатному");
+assert.ok(!PLANS.free.kinds.includes("x"), "X не должен быть доступен на бесплатном");
+assert.ok(!PLANS.plus.kinds.includes("x"), "X не должен быть доступен на Plus");
+assert.ok(PLANS.pro.kinds.includes("x"), "X — признак Pro");
+assert.ok(
+  maxDigestOf(PLANS.free) < maxDigestOf(PLANS.plus) &&
+    maxDigestOf(PLANS.plus) < maxDigestOf(PLANS.pro),
+  "размер выпуска должен расти с тарифом",
+);
+
+const source = (id: number, kind: Source["kind"], active = true) =>
+  ({ id, kind, active, label: `s${id}`, url: `https://e/${id}`, config: {},
+     last_ok_at: null, last_count: null, last_error: null } as unknown as Source);
+
+const catalogue = [
+  source(3, "x"), source(1, "rss"), source(2, "hackernews"),
+  source(4, "rss", false), source(5, "rss"), source(6, "rss"),
+  source(7, "rss"), source(8, "rss"), source(9, "rss"),
+];
+
+const onPlus = sourcesForPlan(catalogue, PLANS.plus);
+assert.ok(!onPlus.some((s) => s.kind === "x"), "прогон на Plus не должен опрашивать X");
+assert.ok(!onPlus.some((s) => s.id === 4), "выключенный источник не опрашивается");
+
+const onFree = sourcesForPlan(catalogue, PLANS.free);
+assert.equal(onFree.length, PLANS.free.maxSources, "бесплатный тариф режет до своего предела");
+assert.deepEqual(
+  onFree.map((s) => s.id),
+  [1, 2, 5, 6, 7],
+  "остаются заведённые раньше, иначе набор пляшет от прогона к прогону",
+);
+assert.ok(
+  !sourcesForPlan(catalogue, PLANS.free).some((s) => s.kind === "x"),
+  "запрещённый вид отсекается до предела по числу, а не занимает место",
+);
+
+import { GATED, allows, cheapestWith } from "../src/lib/plans";
+
+assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
+assert.ok(allows(PLANS.pro, "subscription"), "свой ключ — признак Pro");
+assert.ok(!allows(PLANS.plus, "subscription"), "на Plus своего ключа нет");
+assert.ok(
+  allows(PLANS.plus, "personalization") && allows(PLANS.pro, "personalization"),
+  "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
+);
+for (const section of GATED) {
+  // Заглушка зовёт cheapestWith и печатает его подпись: раздел, которого
+  // нет ни в одном тарифе, показал бы «на тарифе Pro» и никогда не открылся.
+  assert.ok(
+    allows(cheapestWith(section), section),
+    `раздел ${section} должен быть хоть на одном тарифе`,
+  );
+}
+
+// Перечень в миграции и перечень в коде расходятся молча: база примет
+// значение, которого код не знает, и planOf молча отдаст бесплатный тариф.
+const planSql = readFileSync("db/migrations/0019_plan.sql", "utf8");
+for (const id of PLAN_IDS) {
+  assert.ok(planSql.includes(`'${id}'`), `тариф ${id} должен быть разрешён миграцией`);
+}
+
+console.log("Самопроверка пройдена: 107 утверждений");

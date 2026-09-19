@@ -69,6 +69,8 @@ export type Profile = {
   /** Манера письма. Незнакомое значение читается как «нейтральный». */
   style: string;
   weights: Weights;
+  /** Тариф: пределы по источникам, интересам и размеру выпуска (src/lib/plans.ts). */
+  plan: string;
   onboarded_at: string | null;
   llm: { base_url?: string; model?: string; api_key?: string; reasoning_effort?: string };
 };
