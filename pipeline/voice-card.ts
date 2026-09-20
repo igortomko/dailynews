@@ -95,6 +95,22 @@ const MAX_POSTS = 40;
 const MAX_CHARS = 1200;
 
 /**
+ * Сколько пунктов берётся из одного ключа карточки.
+ *
+ * Отсечка стоит и на разборе ответа модели, и на чтении из базы, и это один
+ * и тот же потолок: карточка уходит в промпт на каждое нажатие, и двадцать
+ * пунктов «голоса» оплачиваются столько раз, сколько он нажмёт. Две копии
+ * такой отсечки расходятся молча.
+ */
+const MAX_LINES = 12;
+
+/** Массив строк из чего угодно: не массив — пусто, пустые пункты выброшены. */
+const lines = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.map((entry) => String(entry).trim()).filter(Boolean).slice(0, MAX_LINES)
+    : [];
+
+/**
  * Прочитать его собственные посты.
  *
  * Читается только то, что площадка отдаёт: публичный канал Telegram
@@ -365,11 +381,6 @@ export function parseCard(
   if (opens < 0) throw new Error(`модель вернула не JSON: ${answer.slice(0, 200)}`);
   const json = cleaned.match(/\{[\s\S]*\}/)?.[0] ?? cleaned.slice(opens);
 
-  const lines = (value: unknown): string[] =>
-    Array.isArray(value)
-      ? value.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 12)
-      : [];
-
   /**
    * Разбор, переживающий кривой JSON.
    *
@@ -397,7 +408,7 @@ export function parseCard(
         }
       })
       .filter(Boolean)
-      .slice(0, 12);
+      .slice(0, MAX_LINES);
   };
 
   let parsed: Partial<Record<"voice" | "structure" | "hooks" | "frame" | "taboo", unknown>>;
@@ -478,8 +489,6 @@ export function cardFromVoice(voice: Voice): VoiceCard {
  */
 export function asCard(row: unknown): VoiceCard | undefined {
   const raw = (row ?? {}) as Partial<Record<keyof VoiceCard, unknown>>;
-  const lines = (value: unknown): string[] =>
-    Array.isArray(value) ? value.map((entry) => String(entry).trim()).filter(Boolean) : [];
 
   const voice = lines(raw.voice);
   if (voice.length === 0) return undefined;
