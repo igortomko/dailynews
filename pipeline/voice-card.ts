@@ -95,6 +95,22 @@ const MAX_POSTS = 40;
 const MAX_CHARS = 1200;
 
 /**
+ * Сколько пунктов берётся из одного ключа карточки.
+ *
+ * Отсечка стоит и на разборе ответа модели, и на чтении из базы, и это один
+ * и тот же потолок: карточка уходит в промпт на каждое нажатие, и двадцать
+ * пунктов «голоса» оплачиваются столько раз, сколько он нажмёт. Две копии
+ * такой отсечки расходятся молча.
+ */
+const MAX_LINES = 12;
+
+/** Массив строк из чего угодно: не массив — пусто, пустые пункты выброшены. */
+const lines = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.map((entry) => String(entry).trim()).filter(Boolean).slice(0, MAX_LINES)
+    : [];
+
+/**
  * Прочитать его собственные посты.
  *
  * Читается только то, что площадка отдаёт: публичный канал Telegram
@@ -365,11 +381,6 @@ export function parseCard(
   if (opens < 0) throw new Error(`модель вернула не JSON: ${answer.slice(0, 200)}`);
   const json = cleaned.match(/\{[\s\S]*\}/)?.[0] ?? cleaned.slice(opens);
 
-  const lines = (value: unknown): string[] =>
-    Array.isArray(value)
-      ? value.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 12)
-      : [];
-
   /**
    * Разбор, переживающий кривой JSON.
    *
@@ -397,7 +408,7 @@ export function parseCard(
         }
       })
       .filter(Boolean)
-      .slice(0, 12);
+      .slice(0, MAX_LINES);
   };
 
   let parsed: Partial<Record<"voice" | "structure" | "hooks" | "frame" | "taboo", unknown>>;
@@ -457,6 +468,41 @@ export function cardFromVoice(voice: Voice): VoiceCard {
     built_from: 0,
     sources: [],
     ranked: false,
+  };
+}
+
+/**
+ * Карточка из базы — в сегодняшнюю форму.
+ *
+ * В jsonb лежит то, что записала версия кода, стоявшая в день сборки:
+ * карточки до 19 сентября 2026 не знают ни `structure`, ни `hooks`,
+ * ни `samples`. Приведение `as VoiceCard` уверяло, что поля есть, и первое
+ * же `card.structure.length` роняло нажатие с «Cannot read properties
+ * of undefined» — отказ, в котором не видно ни карточки, ни версии.
+ *
+ * Недостающее становится пустым массивом, а не поводом выбросить карточку
+ * целиком: голос и табу в ней настоящие, а про форму `cardBlock` тогда
+ * честно скажет, что не знает её, и мотатка позовёт собрать заново.
+ *
+ * Пустой голос — это не карточка: по нему и отличается настоящая
+ * от запасной.
+ */
+export function asCard(row: unknown): VoiceCard | undefined {
+  const raw = (row ?? {}) as Partial<Record<keyof VoiceCard, unknown>>;
+
+  const voice = lines(raw.voice);
+  if (voice.length === 0) return undefined;
+
+  return {
+    voice,
+    structure: lines(raw.structure),
+    hooks: lines(raw.hooks),
+    samples: lines(raw.samples),
+    frame: lines(raw.frame),
+    taboo: lines(raw.taboo),
+    built_from: typeof raw.built_from === "number" ? raw.built_from : 0,
+    sources: lines(raw.sources),
+    ranked: raw.ranked === true,
   };
 }
 

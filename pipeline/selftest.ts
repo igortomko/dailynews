@@ -70,7 +70,7 @@ import {
   NETWORK_IDS, NETWORKS, overLimit, postLength, readableOf, tabsOf,
 } from "../src/lib/networks";
 import { parseDrafts, unverifiedNumbers } from "./post";
-import { cardBlock, cardFromVoice, corpusOf, medianViews, parseCard } from "./voice-card";
+import { asCard, cardBlock, cardFromVoice, corpusOf, medianViews, parseCard } from "./voice-card";
 import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 
 const weights: Weights = {
@@ -1738,6 +1738,34 @@ assert.deepEqual(readableOf(["linkedin", "threads"]).map((n) => n.id), [],
     }).includes("сравнением его же постов по просмотрам"),
     "каркас в промпте назван тем, чем он является: сравнением его постов",
   );
+}
+
+// Карточка, записанная прежней версией: голос и каркас есть, формы, приёмов
+// и примеров нет — их тогда не собирали. Ровно так выглядела единственная
+// живая карточка 20 сентября 2026, и нажатие «Своё мнение» отвечало
+// «Cannot read properties of undefined (reading 'length')» вместо поста.
+{
+  const stored = asCard({
+    voice: ["короткие фразы"], frame: ["в верхних число в первой строке"],
+    taboo: ["без эмодзи"], built_from: 21, sources: ["telegram"], ranked: true,
+  });
+  assert.ok(stored, "карточка прежней версии остаётся карточкой, а не выбрасывается");
+  assert.deepEqual(stored.structure, [], "недостающее поле — пустой массив, а не undefined");
+  assert.equal(stored.built_from, 21, "прочитанное число постов сохраняется");
+  assert.ok(
+    cardBlock(stored).includes("Формы его постов мы не знаем"),
+    "промпт собирается и честно говорит, что формы не знает",
+  );
+  assert.ok(cardBlock(stored).includes("короткие фразы"), "голос из старой карточки доезжает");
+  // Отсечка одна и та же на разборе и на чтении: карточка уходит в промпт
+  // на каждое нажатие, и лишние пункты оплачиваются каждый раз.
+  assert.equal(
+    asCard({ voice: Array.from({ length: 30 }, (_, i) => `пункт ${i}`) })!.voice.length,
+    12,
+    "из базы берётся столько же пунктов, сколько из ответа модели",
+  );
+  assert.equal(asCard(null), undefined, "карточки нет — нет и карточки");
+  assert.equal(asCard({ voice: [] }), undefined, "пустой голос — это не карточка, а запасная");
 }
 
 // Медиана и зрелость. Просмотры добираются двое суток, и без поправки
