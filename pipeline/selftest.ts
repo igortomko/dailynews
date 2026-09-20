@@ -36,6 +36,7 @@ import { appOrigin } from "../src/lib/auth";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
+import { dupVerdict, sameStoryQuestion } from "./dedup";
 import { composite } from "./score";
 import { matchWritten, parseDigest } from "./digest";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
@@ -138,6 +139,45 @@ assert.notEqual(
 assert.ok(
   normalizeTitle("datasette 1.0a40").includes("10a40"),
   "номер версии должен пережить нормализацию одним токеном",
+);
+
+// --- дедуп серой зоны ------------------------------------------------------
+// Вопрос собирается из шортлиста, и ключ варианта обязан вести обратно
+// к номеру материала: разъедется ключ с разбором — дубль пометится
+// оригиналом соседа, и заметить это будет нечем.
+const greyQuestion = sameStoryQuestion(
+  { id: 900, title: "AI hallucination nearly triggers US Military operation", excerpt: "…" },
+  [
+    { id: 26, title: "US Military had close call after using AI", excerpt: "…" },
+    { id: 44, title: "OpenJev", excerpt: "…" },
+  ],
+);
+assert.deepEqual(
+  Object.keys(greyQuestion.questions.same.criteria),
+  ["o26", "o44", "none"],
+  "варианты — шортлист и «ни один»",
+);
+assert.equal(
+  dupVerdict({ choice: "o26", probabilities: { o26: 0.82, o44: 0.1, none: 0.08 } }),
+  26,
+  "уверенный выбор — это номер оригинала",
+);
+assert.equal(
+  dupVerdict({ choice: "none", probabilities: { o26: 0.3, o44: 0.1, none: 0.6 } }),
+  null,
+  "«ни один» — не дубль",
+);
+// Дубль прячет новость у всех и навсегда, поэтому неуверенность
+// читается как «разные новости», а не как «наверное, дубль».
+assert.equal(
+  dupVerdict({ choice: "o26", probabilities: { o26: 0.45, o44: 0.3, none: 0.25 } }),
+  null,
+  "неуверенный выбор не помечает дубль",
+);
+assert.equal(
+  dupVerdict({ choice: "o26", probabilities: {} }),
+  null,
+  "выбор без вероятности — не ответ",
 );
 
 // --- составной скор --------------------------------------------------------
