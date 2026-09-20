@@ -94,7 +94,7 @@ async function main() {
   await assertOwn(local, async (text) => (await sql.unsafe(text))[0] as { token?: string });
   const queries = await import("../src/lib/queries");
   const readers = await import("../src/lib/readers");
-  const { markDuplicates } = await import("../pipeline/dedup");
+  const { markDuplicates, shortlist } = await import("../pipeline/dedup");
   const { candidates, selectSurvivors, targetsOf } = await import("../pipeline/select");
   const { normalizeTitle, canonUrl } = await import("../pipeline/normalize");
   const { DEFAULT_WEIGHTS } = await import("../src/lib/types");
@@ -220,6 +220,9 @@ async function main() {
       ["https://b.example.com/gpt-6", "OpenAI Ships GPT-6 With 10x Context!"], // дубль по заголовку
       ["https://c.example.com/uranium", "Uranium spot price hits $140"],
       ["https://d.example.com/therapy", "New RCT on CBT for insomnia"],
+      // Серая зона: та же новость, но заголовок переписан целиком.
+      // Триграммы такую пару не сводят — её разбирает вопрос к Jev.
+      ["https://e.example.com/uranium", "Nuclear fuel costs climb as uranium tops $140 a pound"],
     ];
     const ids: number[] = [];
     for (const [url, title] of rows) {
@@ -230,7 +233,7 @@ async function main() {
       `;
       ids.push(row.id);
     }
-    assert.equal(ids.length, 4);
+    assert.equal(ids.length, 5);
 
     // --- дедуп ---------------------------------------------------------------
     const marked = await markDuplicates(sql, ids);
@@ -240,6 +243,37 @@ async function main() {
     `;
     assert.equal(dup.dup_of, ids[0], "второй заголовок должен указывать на первый");
     console.log("  дедуп: перепечатка поймана по pg_trgm");
+
+    // Шортлист серой зоны — тот же запрос, что уходит в Jev, но без Jev.
+    // Ломается он молча: нетипизированный массив уезжает в int мимо bigint,
+    // а нестрогая верхняя граница погнала бы в вопрос уже помеченное.
+    const grey = await shortlist(sql, ids);
+    // Числами, а не строками: id приходит из bigint, и без каста в запросе
+    // «#68 < #700» сравнивалось бы лексически и молча давало бы ложь.
+    const num = ids.map(Number);
+    assert.ok(
+      grey.every((job) => typeof job.item.id === "number"),
+      "id материала обязан приехать числом, а не строкой из bigint",
+    );
+    const uranium = grey.find((job) => job.item.id === num[4]);
+    assert.ok(uranium, "переписанный заголовок должен попасть в серую зону");
+    assert.ok(
+      uranium.candidates.some((candidate) => candidate.id === num[2]),
+      "в шортлисте должна быть исходная новость про уран",
+    );
+    assert.ok(
+      uranium.candidates.every((candidate) => candidate.id < uranium.item.id),
+      "оригиналом считается только более ранний материал",
+    );
+    assert.ok(
+      !grey.some((job) => job.item.id === num[1]),
+      "помеченный первым слоем второй раз не спрашивается",
+    );
+    assert.ok(
+      grey.every((job) => job.candidates.every((c) => c.id !== num[1])),
+      "дубль не предлагается оригиналом",
+    );
+    console.log(`  дедуп: серая зона — ${grey.length} вопрос(а) к Jev`);
 
     // --- оценки и выпуски ------------------------------------------------------
     const axes = (topic: string, kind: string, extra = {}) => ({
@@ -449,7 +483,7 @@ async function main() {
     const health = await queries.getSourceHealth(owner.id);
     assert.equal(health.length, sources.length, "в отдаче должны быть все источники, включая пустые");
     const used = health.find((row) => row.id === source.id)!;
-    assert.equal(used.items, 4, `материалов ${used.items}, вставлено 4`);
+    assert.equal(used.items, 5, `материалов ${used.items}, вставлено 5`);
     assert.equal(used.duplicates, 1, "перепечатка должна попасть в долю дублей");
     assert.equal(used.in_digest, 3, `в дайджест дошло ${used.in_digest}, ожидалось 3`);
     assert.equal(used.mean_score, 91.7, `средний скор ${used.mean_score}, ожидалось 91.7`);
@@ -722,7 +756,7 @@ async function main() {
     // значения стирает чужие вместе с их строками.
     const stages = [
       "score", "digest", "summary", "translate", "translation-quality",
-      "video", "voice", "post", "post-quality", "interests",
+      "video", "voice", "post", "post-quality", "interests", "dedup",
     ];
     for (const stage of stages) {
       await readers.recordCall({

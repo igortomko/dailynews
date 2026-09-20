@@ -6,7 +6,7 @@ import {
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
-import { markDuplicates } from "./dedup";
+import { askDuplicates, markDuplicates } from "./dedup";
 import { composite, scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
@@ -543,8 +543,29 @@ async function main() {
      where dup_of is null
        and collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
   `;
-  const duplicates = await markDuplicates(sql, pending_dedup.map((row) => row.id));
-  log(`   помечено дублей: ${duplicates}`);
+  const dedupIds = pending_dedup.map((row) => row.id);
+  const duplicates = await markDuplicates(sql, dedupIds);
+  log(`   помечено дублей по заголовку: ${duplicates}`);
+
+  // Серая зона: заголовки разошлись, а новость одна. Спрашивается уже
+  // после первого слоя — по тем, кто его пережил, — и обязательно
+  // до скоринга: помеченный здесь дубль не уедет в Jev восемью вопросами.
+  const asked = await askDuplicates(sql, dedupIds);
+  if (asked.asked > 0) {
+    const dedupCost = jevCost(asked.usage.input);
+    await recordCall({
+      readerId: null, stage: "dedup", model: asked.model,
+      tokensIn: asked.usage.input, tokensOut: asked.usage.output, costUsd: dedupCost,
+    });
+    log(`   спрошено у Jev: ${asked.asked} из ${asked.questions}, дубли: ${asked.marked}, $${dedupCost.toFixed(4)}`);
+  }
+  // Отказавший слой обязан сказать это вслух. Каждый упавший вопрос ловится
+  // своим catch-ом, и без этой строки сломанный ключ, сменившаяся подпись
+  // вопроса или недоступный Jev выглядели бы как «серой зоны сегодня нет»:
+  // прогон идёт дальше, выпуск приходит, повторы возвращаются молча.
+  if (asked.questions > asked.asked) {
+    log(`   ! серая зона не разобрана: ${asked.questions - asked.asked} вопрос(ов) без ответа`);
+  }
 
   // Оценка общая: семь осей из восьми про сам материал, восьмая
   // классифицирует его по общему справочнику. Сто читателей стоят здесь

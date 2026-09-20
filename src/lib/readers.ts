@@ -167,6 +167,8 @@ export type CallRecord = {
   stage:
     | "score" | "digest" | "summary" | "translate" | "translation-quality"
     | "video" | "interests"
+    // Дедуп спрашивает Jev про серую зону, и это такой же оплаченный вызов.
+    | "dedup"
     // Карточка автора и пост — такие же оплаченные вызовы, и потолок
     // читателя считается по той же таблице.
     | "voice" | "post" | "post-quality";
