@@ -26,7 +26,7 @@
  */
 import postgres from "postgres";
 import { readFileSync, readdirSync } from "node:fs";
-import { promised, schemaGaps } from "./schema-gap";
+import { numberCollisions, promised, schemaGaps } from "./schema-gap";
 import { sql } from "../src/lib/db";
 
 const OWNER = process.env.SUPABASE_DB_URL;
@@ -94,6 +94,13 @@ async function main() {
     const foreign = [...known].filter((name) => !files.includes(`${name}.sql`));
     if (foreign.length > 0) {
       console.log(`В журнале есть записи без файлов: ${foreign.join(", ")}`);
+    }
+
+    // Номер, уже занятый в журнале другим файлом. Проверка обещана
+    // в AGENTS.md, а её не было: так в базу попало три файла под номером
+    // 0036, и два из них переопределяли одно ограничение.
+    for (const { file, taken } of numberCollisions(pending, known)) {
+      console.log(`! номер ${file.slice(0, 4)} уже занят: ${taken.join(", ")}`);
     }
 
     // Какой файл за какой разрыв отвечает: если разрывов у файла нет,
