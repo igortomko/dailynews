@@ -22,6 +22,7 @@ import { sql } from "../src/lib/db";
 import { getReader, allReaders } from "../src/lib/readers";
 import type { Reader } from "../src/lib/types";
 import { writeDigest, type Survivor } from "./digest";
+import { effectiveVoice } from "../src/lib/lemon";
 import { scoreSummaries, type SummaryQuality } from "./summary-quality";
 import { readability } from "./lexicon";
 import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "../src/lib/voice";
@@ -100,8 +101,10 @@ async function main() {
        and di.summary is not null and di.summary <> ''
   `;
 
+  // Язык — по тарифу, как в самом прогоне: иначе повтор сравнивал бы
+  // не тот текст, который читатель получил бы на самом деле.
   const voice = {
-    language: profile.language ?? "русском",
+    ...effectiveVoice(profile),
     complexity: asked(flag("complexity") ?? profile.complexity),
     style: flag("style") ?? profile.style ?? DEFAULT_STYLE,
   };

@@ -22,6 +22,7 @@ import { LANGUAGES, DEFAULT_COMPLEXITY, DEFAULT_STYLE, STYLES, complexityAt, sty
 import type { Reader } from "@/lib/types";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { PaywallCrown, usePaywall } from "@/components/paywall";
+import { queueRebuild } from "@/components/rebuild-queue";
 
 export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
   // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
@@ -40,12 +41,42 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   const [style, setStyle] = useState(profile?.style ?? DEFAULT_STYLE);
   const [language, setLanguage] = useState(profile?.language ?? "русском");
 
+  // Каким голосом написан сегодняшний выпуск. Сравниваем с ним, а не с прошлым
+  // сохранением: покрутить ползунок туда-обратно — не изменение, и платить
+  // за пересборку в этом случае не за что.
+  const written = useRef({
+    language: profile?.language ?? "русском",
+    complexity: profile?.complexity ?? DEFAULT_COMPLEXITY,
+    style: profile?.style ?? DEFAULT_STYLE,
+    reader_context: profile?.reader_context ?? "",
+  });
+
   const save = () => {
     const node = form.current;
     if (!node) return;
+    const data = new FormData(node);
     startTransition(async () => {
-      await savePersonalization(new FormData(node));
+      await savePersonalization(data);
       setSaved(true);
+
+      // Язык, сложность, манера и «кто читает» уезжают в промпт дайджеста:
+      // выпуск, написанный прежними, новой настройке не соответствует.
+      // Пересборка не запускается здесь — она отложена до выхода из настроек,
+      // чтобы не занимать интерфейс на минуту посреди правки.
+      const now = {
+        language: String(data.get("language") ?? ""),
+        complexity: Number(data.get("complexity")),
+        style: String(data.get("style") ?? ""),
+        reader_context: String(data.get("reader_context") ?? ""),
+      };
+      if (
+        now.language !== written.current.language ||
+        now.complexity !== written.current.complexity ||
+        now.style !== written.current.style ||
+        now.reader_context !== written.current.reader_context
+      ) {
+        queueRebuild("voice");
+      }
     });
   };
 
