@@ -18,7 +18,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Лента",
+  title: "Retorta",
   description: "Персональная новостная лента со скорингом по собственным осям",
 };
 

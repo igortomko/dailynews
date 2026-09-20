@@ -26,7 +26,7 @@ export function LoginForm({
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>Лента</CardTitle>
+        <CardTitle>Retorta</CardTitle>
         <CardDescription>
           {expired
             ? "Ссылка устарела — попроси у бота новую"
