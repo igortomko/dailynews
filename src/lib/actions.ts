@@ -9,7 +9,7 @@ import { currentReader, currentReaderId } from "./session";
 import { discover, planFor, type Found } from "../../pipeline/discover";
 import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
-import { writeDigest } from "../../pipeline/digest";
+import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
@@ -24,11 +24,10 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, digestCap, FEATURES, kindDenial, maxDigestOf, sourcesForPlan,
+  allows, cheapestWith, digestCap, kindDenial, maxDigestOf, sourcesForPlan,
   topicsWord, type Gated,
 } from "./plans";
-import { effectivePlan } from "./lemon";
-import { SOURCE_LANGUAGE } from "./voice";
+import { effectivePlan, effectiveVoice } from "./lemon";
 import { toSlug } from "./slug";
 import { starterBySlug } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
@@ -79,11 +78,11 @@ export async function savePersonalization(formData: FormData) {
   const readerId = await currentReaderId();
 
   // Язык — свободный текст: список из трёх выбирал автор формы, а не читатель.
-  const asked_language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
-  // Перевод — платная возможность, и проверяется она здесь, а не только
-  // в форме: поле отправляется по своему адресу мимо погашенного селекта.
-  const plan = effectivePlan(await currentReader());
-  const language = FEATURES.language.has(plan) ? asked_language : SOURCE_LANGUAGE;
+  // Выбор читателя хранится как есть. Перевод — платная возможность, но
+  // гасится он при письме выпуска (effectiveVoice), а не записью в колонку:
+  // подмена здесь необратима — тариф потом откроется, а в колонке останется
+  // «язык источника», и выпуск придёт непереведённым при русском в настройках.
+  const language = String(formData.get("language") ?? "").trim().slice(0, 60) || "русском";
   const readerContext = String(formData.get("reader_context") ?? "").slice(0, 4000);
   // Ползунок шлёт строку, а нечисло превратилось бы в NaN и уронило запрос
   // ограничением, а не подсказкой. Держим в границах колонки здесь же.
@@ -440,6 +439,86 @@ export async function topUpDigest() {
 }
 
 /**
+ * Переписать сегодняшний выпуск нынешним голосом.
+ *
+ * Язык, сложность, манера и «кто читает» уезжают в промпт дайджеста, а выпуск
+ * уже написан прежними: настройка принята, лента прежняя — тот же отказ,
+ * похожий на успех, что и со сменой числа новостей. Двадцатого сентября 2026
+ * выпуск пришёл по-английски, потому что колонка языка была подменена накануне;
+ * исправить настройку было можно, а увидеть исправление — нет.
+ *
+ * Отбор не трогается: меняется то, как написано, а не что выбрано. Поэтому
+ * переписывание не спрашивает ни поток, ни Jev — только письмо описаний,
+ * те же куски, что и в ночном прогоне.
+ */
+export async function rewriteDigest() {
+  const result = await rewriteFor(await currentReader());
+  revalidatePath("/", "layout");
+  return result;
+}
+
+async function rewriteFor(reader: Reader) {
+  const [digest] = await sql<{ id: number; day: string }[]>`
+    select d.id::int as id, d.day::text as day
+      from dailynews.digests d
+     where d.reader_id = ${reader.id}
+     order by d.day desc limit 1
+  `;
+  if (!digest) return { error: "Выпуска ещё нет — переписывать нечего" };
+
+  const survivors = await sql<Survivor[]>`
+    select i.id::int as id, i.title, coalesce(i.excerpt, '') as excerpt, i.url,
+           s.label as source_label, coalesce(t.label, '') as topic_label,
+           di.total, sc.axes
+      from dailynews.digest_items di
+      join dailynews.items i on i.id = di.item_id
+      join dailynews.sources s on s.id = i.source_id
+      join dailynews.scores sc on sc.item_id = i.id
+ left join dailynews.topics t on t.id = sc.topic_id
+     where di.digest_id = ${digest.id}
+     order by di.total desc
+  `;
+  if (survivors.length === 0) return { error: "В выпуске нет материалов" };
+
+  // Тот же потолок, что у догрузки и у ночного прогона: переписывание
+  // стоит ровно столько же, сколько письмо описаний с нуля.
+  const spent = await spentToday(reader.id);
+  if (spent >= reader.daily_cap_usd) {
+    return { error: "Сегодня больше нельзя — завтра лимит обнулится" };
+  }
+
+  const written = await writeDigest(
+    survivors.map((survivor) => ({
+      ...survivor,
+      axes: typeof survivor.axes === "string" ? JSON.parse(survivor.axes) : survivor.axes,
+    })),
+    reader.reader_context,
+    effectiveVoice(reader),
+  );
+  await recordCall({
+    readerId: reader.id, stage: "digest", model: written.model,
+    tokensIn: written.usage.input, tokensOut: written.usage.output,
+    costUsd: llmCost(written.usage),
+  });
+
+  const byId = new Map(written.items.map((item) => [String(item.id), item]));
+  let rewritten = 0;
+  for (const survivor of survivors) {
+    const item = byId.get(String(survivor.id));
+    // Материал, которого модель не вернула, остаётся как был: пустое
+    // описание вместо прежнего — это потеря, а не обновление.
+    if (!item?.title_ru) continue;
+    await sql`
+      update dailynews.digest_items
+         set title = ${item.title_ru}, summary = ${item.summary ?? ""}
+       where digest_id = ${digest.id} and item_id = ${survivor.id}
+    `;
+    rewritten += 1;
+  }
+  return { ok: true as const, rewritten, day: digest.day };
+}
+
+/**
  * Собственно сборка. Отдельно от topUpDigest, потому что последний шаг
  * онбординга зовёт её, не перерисовывая страницу: revalidatePath перерисовал
  * бы сам мастер, а тот, увидев пройденный онбординг, увёл бы читателя
@@ -502,11 +581,7 @@ async function fillDigest(reader: Reader) {
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const written = await writeDigest(survivors, reader.reader_context, {
-    language: reader.language,
-    complexity: reader.complexity,
-    style: reader.style,
-  });
+  const written = await writeDigest(survivors, reader.reader_context, effectiveVoice(reader));
   await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,

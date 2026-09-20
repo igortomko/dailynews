@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { PLANS, planOf, type Plan, type PlanId } from "./plans";
+import { FEATURES, PLANS, planOf, type Plan, type PlanId } from "./plans";
+import { SOURCE_LANGUAGE, type Voice } from "./voice";
 import type { Reader } from "./types";
 
 /**
@@ -60,6 +61,27 @@ export const paymentsConfigured = () => Object.keys(variants()).length > 0;
  * Считается на каждый запрос, а не хранится колонкой: колонку пришлось бы
  * гасить по расписанию, а оно здесь ходит раз в сутки.
  */
+/**
+ * Голос выпуска с учётом тарифа.
+ *
+ * Язык хранится таким, каким его выбрал читатель, а применяется по тарифу —
+ * ровно как сам тариф: в колонке лежит купленное, а действует посчитанное.
+ * Раньше сохранение подменяло колонку на «язык источника», если перевод
+ * тарифом не открыт. Подмена необратима: тариф потом открывается, а в колонке
+ * остаётся чужой выбор, и следующий выпуск приходит непереведённым.
+ * Двадцатого сентября 2026 так и вышло — выпуск на сорок материалов
+ * по-английски, при том что в настройках стоял русский, а в коде перевода
+ * ничего не ломалось.
+ */
+export function effectiveVoice(reader: Reader, now = new Date()): Voice {
+  const translates = FEATURES.language.has(effectivePlan(reader, now));
+  return {
+    language: translates ? reader.language || "русском" : SOURCE_LANGUAGE,
+    complexity: reader.complexity,
+    style: reader.style,
+  };
+}
+
 export function effectivePlan(reader: Reader, now = new Date()): Plan {
   // У владельца действует то, что стоит в колонке: подписки он у себя
   // самого не покупает, и проверять её статус не по чему. Так у него

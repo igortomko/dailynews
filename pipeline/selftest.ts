@@ -31,7 +31,9 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
     return typeof value === "function" ? count(value) : value;
   },
 }) as typeof assertStrict;
-import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import {
+  effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
+} from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -2092,6 +2094,7 @@ const UI_FILES = [
   "src/app/api/telegram/route.ts",
   "src/app/api/kindle/route.ts",
   "src/components/collect-now.tsx",
+  "src/components/rebuild-queue.tsx",
   "src/components/item-card.tsx",
   "src/components/feed-tabs.tsx",
   "src/components/topic-chips.tsx",
@@ -2134,3 +2137,29 @@ for (const file of UI_FILES) {
 assert.deepEqual(apologyHits, [], `извинения вместо выхода:\n${apologyHits.join("\n")}`);
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
+
+// --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
+// Подмена колонки при сохранении была необратимой: тариф открывается обратно,
+// а в базе остаётся «язык источника». Двадцатого сентября 2026 выпуск пришёл
+// на сорок материалов по-английски при русском в настройках.
+{
+  const reader = (extra: object) =>
+    ({ language: "русском", complexity: 3, style: "нейтральный", ...extra }) as never;
+
+  assert.equal(
+    effectiveVoice(reader({ plan: "free", owner: false })).language,
+    SOURCE_LANGUAGE,
+    "на бесплатном тарифе выпуск пишется языком источника",
+  );
+  assert.equal(
+    effectiveVoice(reader({ plan: "pro", owner: false, subscription_status: "active" })).language,
+    "русском",
+    "на платном — языком читателя",
+  );
+  const stored = { language: "русском", complexity: 3, style: "нейтральный", plan: "free", owner: false };
+  assert.equal(
+    effectiveVoice(stored as never).language !== stored.language && stored.language === "русском",
+    true,
+    "сам выбор при этом остаётся: гасится применение, а не колонка",
+  );
+}
