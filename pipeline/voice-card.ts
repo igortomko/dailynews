@@ -461,6 +461,43 @@ export function cardFromVoice(voice: Voice): VoiceCard {
 }
 
 /**
+ * Карточка из базы — в сегодняшнюю форму.
+ *
+ * В jsonb лежит то, что записала версия кода, стоявшая в день сборки:
+ * карточки до 19 сентября 2026 не знают ни `structure`, ни `hooks`,
+ * ни `samples`. Приведение `as VoiceCard` уверяло, что поля есть, и первое
+ * же `card.structure.length` роняло нажатие с «Cannot read properties
+ * of undefined» — отказ, в котором не видно ни карточки, ни версии.
+ *
+ * Недостающее становится пустым массивом, а не поводом выбросить карточку
+ * целиком: голос и табу в ней настоящие, а про форму `cardBlock` тогда
+ * честно скажет, что не знает её, и мотатка позовёт собрать заново.
+ *
+ * Пустой голос — это не карточка: по нему и отличается настоящая
+ * от запасной.
+ */
+export function asCard(row: unknown): VoiceCard | undefined {
+  const raw = (row ?? {}) as Partial<Record<keyof VoiceCard, unknown>>;
+  const lines = (value: unknown): string[] =>
+    Array.isArray(value) ? value.map((entry) => String(entry).trim()).filter(Boolean) : [];
+
+  const voice = lines(raw.voice);
+  if (voice.length === 0) return undefined;
+
+  return {
+    voice,
+    structure: lines(raw.structure),
+    hooks: lines(raw.hooks),
+    samples: lines(raw.samples),
+    frame: lines(raw.frame),
+    taboo: lines(raw.taboo),
+    built_from: typeof raw.built_from === "number" ? raw.built_from : 0,
+    sources: lines(raw.sources),
+    ranked: raw.ranked === true,
+  };
+}
+
+/**
  * Блок карточки в промпте. Один и тот же для настоящей и для запасной.
  *
  * Порядок не случайный: сначала форма, потом приёмы входа, потом слова,

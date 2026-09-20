@@ -17,7 +17,7 @@ import {
   readerSources, recordCall, saveChannel, saveVoiceCard, saveVoiceSample, spentToday,
 } from "./readers";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
-import { buildVoiceCard, cardFromVoice, readOwnPosts, type VoiceCard } from "../../pipeline/voice-card";
+import { asCard, buildVoiceCard, cardFromVoice, readOwnPosts } from "../../pipeline/voice-card";
 import { writePost } from "../../pipeline/post";
 import { NETWORK_IDS, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
@@ -758,13 +758,16 @@ export async function writeOpinion(itemId: number): Promise<
   // Карточка есть — пишем его голосом. Нет — настройками подачи, и мотатка
   // обязана сказать это вслух: иначе он прочтёт общий черновик и решит,
   // что возможность не работает.
-  const card = reader.voice_card?.voice?.length
-    ? (reader.voice_card as VoiceCard)
-    : cardFromVoice({
-        language: reader.language,
-        complexity: reader.complexity,
-        style: reader.style,
-      });
+  //
+  // Через `asCard`, а не приведением: в базе лежит форма того дня, когда
+  // карточку собирали, и приведение уверяло, что поля новее её.
+  const card =
+    asCard(reader.voice_card) ??
+    cardFromVoice({
+      language: reader.language,
+      complexity: reader.complexity,
+      style: reader.style,
+    });
 
   try {
     const written = await writePost(item, card, networks.map((network) => network.id));
