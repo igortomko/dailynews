@@ -168,3 +168,39 @@ export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]>
       .map((entry): Gap => ({ kind: "ограничение", name: entry.name, from: entry.from })),
   ];
 }
+
+/**
+ * Номера, занятые дважды: файл, который вот-вот применится, и запись
+ * в журнале под тем же номером, но с другим именем.
+ *
+ * Чистая функция, потому что проверка обещана в AGENTS.md с тех пор, как
+ * 0019 разошлась на три ветки, — а в коде её не было. В журнале живой базы
+ * 19 сентября 2026 оказалось три файла под номером 0036 (`blogger`,
+ * `interests_stage`, `item_transcribed`), и два из них переопределяли одно
+ * и то же ограничение. Разошлись они бы молча: на живой базе порядок решает
+ * время применения, на чистой — имя файла, и совпало это по удаче.
+ *
+ * Не отказ, а окрик. Остановиться значит оставить схему без миграции,
+ * которую код на проде уже ждёт, — это хуже самого столкновения.
+ */
+export function numberCollisions(
+  pending: string[],
+  journal: Iterable<string>,
+): { file: string; taken: string[] }[] {
+  const numberOf = (name: string) => name.slice(0, 4);
+  const byNumber = new Map<string, string[]>();
+  for (const name of journal) {
+    const key = numberOf(name);
+    byNumber.set(key, [...(byNumber.get(key) ?? []), name]);
+  }
+  return pending
+    .map((file) => ({
+      file,
+      // Своё имя из списка убираем: файл, уже стоящий в журнале, сам с собой
+      // не сталкивается — он просто применён.
+      taken: (byNumber.get(numberOf(file)) ?? []).filter(
+        (name) => name !== file.replace(/\.sql$/, ""),
+      ),
+    }))
+    .filter((row) => row.taken.length > 0);
+}

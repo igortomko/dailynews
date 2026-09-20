@@ -31,8 +31,11 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
     return typeof value === "function" ? count(value) : value;
   },
 }) as typeof assertStrict;
-import { effectivePlan, readEvent, signatureValid, checkoutUrl, endingAt } from "../src/lib/lemon";
+import {
+  effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
+} from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
+import { numberCollisions } from "../db/schema-gap";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -1759,6 +1762,36 @@ assert.equal(form(21), "материал");
 assert.equal(form(22), "материала");
 assert.equal(form(0), "материалов");
 
+// --- номер миграции, занятый дважды -------------------------------------------
+// Проверка была обещана в AGENTS.md с тех пор, как 0019 разошлась на три
+// ветки, а в коде её не было: 19 сентября 2026 в журнал живой базы попало
+// три файла под номером 0036, и два из них переопределяли одно ограничение.
+// На живой базе порядок решает время применения, на чистой — имя файла,
+// и совпало это по удаче.
+{
+  const journal = ["0035_video_stage", "0036_blogger"];
+  assert.deepEqual(
+    numberCollisions(["0036_interests_stage.sql"], journal),
+    [{ file: "0036_interests_stage.sql", taken: ["0036_blogger"] }],
+    "занятый номер называется вместе с тем, кто его занял",
+  );
+  assert.deepEqual(
+    numberCollisions(["0037_next.sql"], journal), [],
+    "свободный номер молчит",
+  );
+  // Файл, уже стоящий в журнале, сам с собой не сталкивается: он применён,
+  // а не ждёт применения.
+  assert.deepEqual(
+    numberCollisions(["0036_blogger.sql"], journal), [],
+    "своё же имя в журнале — не столкновение",
+  );
+  assert.deepEqual(
+    numberCollisions(["0036_a.sql"], ["0036_b", "0036_c"]),
+    [{ file: "0036_a.sql", taken: ["0036_b", "0036_c"] }],
+    "называются все занявшие, а не первый",
+  );
+}
+
 // --- адрес, на который приземляет ссылка входа --------------------------------
 // В standalone-сборке за обратным прокси nextUrl.origin — это адрес
 // прослушивания контейнера. Ссылка из бота приземлялась на
@@ -2113,6 +2146,7 @@ const UI_FILES = [
   "src/app/api/telegram/route.ts",
   "src/app/api/kindle/route.ts",
   "src/components/collect-now.tsx",
+  "src/components/rebuild-queue.tsx",
   "src/components/item-card.tsx",
   "src/components/feed-tabs.tsx",
   "src/components/topic-chips.tsx",
@@ -2155,3 +2189,29 @@ for (const file of UI_FILES) {
 assert.deepEqual(apologyHits, [], `извинения вместо выхода:\n${apologyHits.join("\n")}`);
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
+
+// --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
+// Подмена колонки при сохранении была необратимой: тариф открывается обратно,
+// а в базе остаётся «язык источника». Двадцатого сентября 2026 выпуск пришёл
+// на сорок материалов по-английски при русском в настройках.
+{
+  const reader = (extra: object) =>
+    ({ language: "русском", complexity: 3, style: "нейтральный", ...extra }) as never;
+
+  assert.equal(
+    effectiveVoice(reader({ plan: "free", owner: false })).language,
+    SOURCE_LANGUAGE,
+    "на бесплатном тарифе выпуск пишется языком источника",
+  );
+  assert.equal(
+    effectiveVoice(reader({ plan: "pro", owner: false, subscription_status: "active" })).language,
+    "русском",
+    "на платном — языком читателя",
+  );
+  const stored = { language: "русском", complexity: 3, style: "нейтральный", plan: "free", owner: false };
+  assert.equal(
+    effectiveVoice(stored as never).language !== stored.language && stored.language === "русском",
+    true,
+    "сам выбор при этом остаётся: гасится применение, а не колонка",
+  );
+}

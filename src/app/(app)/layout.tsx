@@ -1,3 +1,5 @@
+import { RebuildOnLeave } from "@/components/rebuild-queue";
+
 /**
  * Серая страница, белая колонка: белое становится местом для чтения,
  * а не фоном по умолчанию. Шапку рисует каждый раздел — в ленте это дата
@@ -5,5 +7,13 @@
  * означала бы шестерёнку внутри настроек, которая никуда не ведёт.
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-svh">{children}</div>;
+  return (
+    <div className="min-h-svh">
+      {children}
+      {/* Пересборка выпуска начинается при выходе из настроек и идёт фоном.
+          Сторож стоит здесь, а не в самих настройках: тот компонент к этому
+          моменту уже размонтирован — его уход и есть сигнал. */}
+      <RebuildOnLeave />
+    </div>
+  );
 }

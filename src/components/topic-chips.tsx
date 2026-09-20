@@ -1,7 +1,6 @@
 "use client";
 
-import { Fragment, useRef, useState, useTransition } from "react";
-import { toast } from "sonner";
+import { Fragment, useRef, useState } from "react";
 import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +13,8 @@ import { maxDigestOf, topicsWord, PLANS, type Plan } from "@/lib/plans";
 import { usePaywall, PaywallCrown } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
-import { topUpDigest, type ChipInput } from "@/lib/actions";
+import { type ChipInput } from "@/lib/actions";
+import { queueRebuild } from "@/components/rebuild-queue";
 
 export function TopicChips({
   initial,
@@ -31,7 +31,6 @@ export function TopicChips({
   inToday: number;
   onChange?: () => void;
 }) {
-  const [, startTopUp] = useTransition();
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
   // и без приведения полоса показывала бы не тот дайджест, который придёт.
   const [chips, setChipsState] = useState<ChipInput[]>(() =>
@@ -52,34 +51,19 @@ export function TopicChips({
     const size = Math.min(maxDigestOf(plan), Math.max(3, Math.round(next) || 3));
     setTotalState(size);
     setChips(withCounts(chips, normalize(chips.map((chip) => chip.count), size)));
-    if (size > inToday) offerTopUp(size);
+    offerTopUp(size);
   };
 
   /**
    * Новый размер сам по себе ничего не меняет до полуночи: сегодняшний выпуск
-   * уже отобран. Поэтому спрашиваем прямо здесь, а не оставляем читателя
-   * гадать, почему в ленте по-прежнему двадцать материалов.
+   * уже отобран. Раньше здесь же спрашивали «добавить?» и ждали ответа минуту
+   * с лишним — всё это время интерфейс был занят, а читатель сидел в настройках
+   * и смотрел на спиннер. Теперь правка просто откладывается: догрузка начнётся,
+   * когда из настроек выйдут, и пойдёт фоном.
    */
-  const offerTopUp = (size: number) =>
-    toast(`Сейчас в выпуске ${inToday}. Добавить ещё ${size - inToday}?`, {
-      description: "Займёт пару минут",
-      action: {
-        label: "Добавить",
-        onClick: () =>
-          startTopUp(async () => {
-            const running = toast.loading("Добавляю новости…");
-            const result = await topUpDigest();
-            toast.dismiss(running);
-            if (result?.error) {
-              toast.error(result.error);
-            } else if (result?.added) {
-              toast.success(`Добавлено: ${result.added}`);
-            } else {
-              toast.info(result?.note ?? "Больше свежих новостей нет");
-            }
-          }),
-      },
-    });
+  const offerTopUp = (size: number) => {
+    if (size > inToday) queueRebuild("size");
+  };
 
   const [draft, setDraft] = useState("");
   // Куда вернуть фокус, когда убранный чип унесёт его с собой.

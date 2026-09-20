@@ -19,7 +19,7 @@ import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
 import { digestCap, issuesToday, sourcesForPlan } from "../src/lib/plans";
-import { effectivePlan } from "../src/lib/lemon";
+import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
 
 const log = (msg: string) => console.log(msg);
@@ -275,11 +275,7 @@ async function runForReader(
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const digest = await writeDigest(survivors, reader.reader_context, {
-    language: reader.language,
-    complexity: reader.complexity,
-    style: reader.style,
-  });
+  const digest = await writeDigest(survivors, reader.reader_context, effectiveVoice(reader));
   const digestCost = llmCost(digest.usage);
   await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
