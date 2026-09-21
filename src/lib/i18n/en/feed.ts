@@ -39,7 +39,49 @@ export const feed = {
     kbdAnd: "and",
     kbdBetween: "between stories",
     kbdOpen: "open",
+    kbdOverview: "add to overview",
     kbdSearch: "search digests",
+  },
+
+  /** Личные правила поверх готового выпуска: feed-tabs.tsx и item-card.tsx */
+  rules: {
+    hiddenBefore: (n: number) => `${n} ${n === 1 ? "card" : "cards"} hidden by your`,
+    hiddenLink: "exclusions",
+    allHiddenTitle: "Everything is hidden by exclusions",
+    allHiddenDescription: (n: number) =>
+      `The digest has ${n} ${n === 1 ? "card" : "cards"}, and each mentions something from your list. The digest isn't rebuilt — freed slots aren't refilled.`,
+    fixExclusions: "Adjust exclusions",
+    followedTitle: "From your “What to follow” list",
+  },
+
+  overview: {
+    add: (title: string) => `Add to overview: ${title}`,
+    remove: (title: string) => `Remove from overview: ${title}`,
+    tooltipAdd: "Add to an overview for colleagues",
+    tooltipRemove: "Remove from overview",
+    toolbarLabel: "Selected stories",
+    selected: (n: number) => `Selected: ${n}`,
+    clearAria: "Clear selection",
+    clearTooltip: "Unselect all cards",
+    build: "Build overview",
+    dialogTitle: "Build overview",
+    issueOf: (date: string, n: number) => `Digest of ${date} · ${story(n)}`,
+    defaultTitle: (date: string) => `Overview for ${date}`,
+    titleLabel: "Overview title",
+    introLabel: "Introduction",
+    introPlaceholder: "Introduction — optional",
+    empty: "No stories left in the overview — tick cards in the feed.",
+    up: "Move up",
+    down: "Move down",
+    removeBlock: "Remove from overview",
+    blockTitleLabel: "Story title",
+    blockSummaryLabel: "Summary",
+    fallbackLabel: "Overview text to copy by hand",
+    copyMarkdown: "Copy Markdown",
+    copy: "Copy overview",
+    copied: "Overview copied",
+    clipboardDeniedTitle: "The browser denied clipboard access",
+    clipboardDeniedDescription: "The text below is selected — press Ctrl+C or ⌘C",
   },
 
   /** src/components/item-card.tsx */
@@ -65,6 +107,7 @@ export const feed = {
     upvoteTooltip: "More like this in future digests",
     downvoteLabel: "Hide and show less like this",
     thisCard: "this card",
+    summaryUnavailable: "The summary is not available yet. Open the original using the headline link.",
   },
 
   /** Поле и кнопка поиска: src/components/feed-search.tsx, search-form.tsx, search-memory.tsx */

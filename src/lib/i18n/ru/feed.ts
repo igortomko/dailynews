@@ -38,7 +38,49 @@ export const feed: typeof En = {
     kbdAnd: "и",
     kbdBetween: "между материалами",
     kbdOpen: "открыть",
+    kbdOverview: "в обзор",
     kbdSearch: "поиск по выпускам",
+  },
+
+  rules: {
+    hiddenBefore: (n: number) =>
+      `${count(n, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим`,
+    hiddenLink: "исключениям",
+    allHiddenTitle: "Всё скрыто исключениями",
+    allHiddenDescription: (n: number) =>
+      `В выпуске ${count(n, "карточка", "карточки", "карточек")}, и в каждой есть что-то из твоего списка. Выпуск не пересобирается — освободившиеся места не добираются.`,
+    fixExclusions: "Поправить исключения",
+    followedTitle: "Из твоего списка «За чем следить»",
+  },
+
+  overview: {
+    add: (title: string) => `Добавить в обзор: ${title}`,
+    remove: (title: string) => `Убрать из обзора: ${title}`,
+    tooltipAdd: "Добавить в обзор для коллег",
+    tooltipRemove: "Убрать из обзора",
+    toolbarLabel: "Выбранные новости",
+    selected: (n: number) => `Выбрано: ${n}`,
+    clearAria: "Очистить выбор",
+    clearTooltip: "Снять выбор со всех карточек",
+    build: "Собрать обзор",
+    dialogTitle: "Собрать обзор",
+    issueOf: (date: string, n: number) => `Выпуск за ${date} · ${count(n, "новость", "новости", "новостей")}`,
+    defaultTitle: (date: string) => `Обзор за ${date}`,
+    titleLabel: "Заголовок обзора",
+    introLabel: "Вступление",
+    introPlaceholder: "Вступление — необязательно",
+    empty: "В обзоре не осталось новостей — отметь карточки в ленте.",
+    up: "Выше",
+    down: "Ниже",
+    removeBlock: "Убрать из обзора",
+    blockTitleLabel: "Заголовок новости",
+    blockSummaryLabel: "Описание",
+    fallbackLabel: "Текст обзора для копирования руками",
+    copyMarkdown: "Скопировать Markdown",
+    copy: "Скопировать обзор",
+    copied: "Обзор скопирован",
+    clipboardDeniedTitle: "Браузер не дал доступ к буферу",
+    clipboardDeniedDescription: "Текст ниже выделен — нажми Ctrl+C или ⌘C",
   },
 
   item: {
@@ -63,6 +105,7 @@ export const feed: typeof En = {
     upvoteTooltip: "Больше такого в следующих выпусках",
     downvoteLabel: "Скрыть и меньше такого",
     thisCard: "эта карточка",
+    summaryUnavailable: "Выжимка пока недоступна. Оригинал — по ссылке в заголовке.",
   },
 
   search: {

@@ -149,6 +149,7 @@ export default async function FeedPage({
 
   return (
     <FeedTabs
+      day={day}
       topics={topics}
       items={items}
       hidden={hidden}

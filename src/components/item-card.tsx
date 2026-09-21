@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -106,12 +107,20 @@ export function ItemCard({
   showTopic,
   plan,
   networks,
+  selected,
+  selecting,
+  onSelectedChange,
 }: {
   item: FeedCard;
   showTopic: boolean;
   plan: Plan;
   /** Сети, отмеченные в «Моих площадках»: сколько их — столько табов. */
   networks: NetworkId[];
+  /** Отмечена ли карточка для обзора. Состояние держит лента, не карточка. */
+  selected: boolean;
+  /** Идёт ли выбор: пока в выпуске есть хоть одна отметка, чекбоксы видны у всех. */
+  selecting: boolean;
+  onSelectedChange: (next: boolean) => void;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
@@ -207,10 +216,19 @@ export function ItemCard({
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
 
+  // Скрытая карточка выходит и из обзора: в ленте её больше нет, и блок
+  // из неё в черновике был бы новостью, которую читатель только что убрал.
+  const hide = () => {
+    setVote("down");
+    report({ item_id: item.id, event: "down" });
+    if (selected) onSelectedChange(false);
+  };
+
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
   const reading = parseStoredReading(item.summary_document);
-  const seconds = reading ? reading.seconds : cardChars(item.title_ru || item.title, item.summary) / DEFAULT_CHARS_PER_MINUTE * 60;
+  const hasSummary = Boolean(item.summary?.trim());
+  const seconds = reading ? reading.seconds : hasSummary ? cardChars(item.title_ru || item.title, item.summary) / DEFAULT_CHARS_PER_MINUTE * 60 : 0;
   const minutes = seconds > 0 ? summaryTime(seconds, t.feed.time) : null;
   const others = otherSources(item.story, item.source_id);
   const lines = others > 0 ? storyLines(item.story, t.feed.story) : [];
@@ -266,6 +284,10 @@ export function ItemCard({
    * заголовком, ради которого лента и листается.
    */
   const meta: { key: string; node: ReactNode; quiet?: true }[] = [
+    // shrink-0 с потолком в ширину строки: издание не уступает место теме
+    // и времени, но и за край карточки не выходит. Без потолка название
+    // длиннее строки на телефоне уезжало за правый край без многоточия —
+    // и вместе с ним уезжали кнопки действий.
     {
       key: "source",
       node: site ? (
@@ -273,12 +295,12 @@ export function ItemCard({
           href={site}
           target="_blank"
           rel="noreferrer noopener"
-          className="shrink-0 text-[0.75rem] font-medium text-muted-foreground hover:text-foreground focus-visible:text-foreground hover:underline"
+          className="max-w-full shrink-0 truncate text-[0.75rem] font-medium text-muted-foreground hover:text-foreground focus-visible:text-foreground hover:underline"
         >
           {item.source_label}
         </a>
       ) : (
-        <span className="shrink-0 text-[0.75rem] font-medium text-muted-foreground">
+        <span className="max-w-full shrink-0 truncate text-[0.75rem] font-medium text-muted-foreground">
           {item.source_label}
         </span>
       ),
@@ -298,12 +320,15 @@ export function ItemCard({
       ? [{
           key: "followed",
           node: (
+            // min-w-0 и truncate, как у темы рядом: написание — текст читателя
+            // длиной до 80 знаков, и без обрезки оно наезжало бы на кнопки
+            // на узком экране.
             <span
-              className="inline-flex shrink-0 items-center gap-1"
-              title="Из твоего списка «За чем следить»"
+              className="inline-flex min-w-0 items-center gap-1"
+              title={t.feed.rules.followedTitle}
             >
-              <EyeIcon className="size-3" aria-hidden />
-              {item.followed}
+              <EyeIcon className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{item.followed}</span>
             </span>
           ),
           quiet: true as const,
@@ -331,7 +356,15 @@ export function ItemCard({
   return (
     <article
       ref={article}
-      className="group border-b py-5 transition-opacity duration-150 last:border-0"
+      data-selected={selected || undefined}
+      className={cn(
+        "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0",
+        // Отмеченная карточка подсвечена всей строкой до краёв контейнера,
+        // а не рамкой вокруг текста: рамка внутри полей читалась бы как
+        // коробка в коробке. Фон приглушённый и постоянный — выбор должен
+        // быть виден издалека, но не спорить с заголовком.
+        selected && "-mx-4 bg-muted/70 px-4 sm:-mx-6 sm:px-6",
+      )}
     >
       {/* Одна строка, а не две. Прежде метаданные проявлялись по наведению,
           а в покое их место занимало время чтения — и получалось два ряда,
@@ -349,6 +382,36 @@ export function ItemCard({
           с иллюстрацией и без неё стояли в разных местах. Теперь они
           всегда в правом верхнем углу, а картинка начинается под ними. */}
       <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        {/* Отметка для обзора. Место под неё держится всегда — источник
+            и заголовок не переезжают, когда она проявляется по наведению.
+            Показывается как остальное тихое: под курсором, под фокусом
+            и на тапе; а как только в выпуске отмечена хоть одна карточка —
+            у всех, иначе выбор второй карточки начинался бы с поиска
+            невидимого квадрата.
+
+            Не внутри ссылки на издание и не рядом с её текстом: нажатие
+            на отметку не открывает ничего и не считается чтением —
+            ни `opened`, ни `outbound` отсюда не уходят. */}
+        <Tooltip>
+          {/* Подсказка висит на обёртке, а не на самом чекбоксе: у него свои
+              дети (галочка), и render-слот подменил бы их пустотой. */}
+          <TooltipTrigger render={<span className="flex shrink-0" />}>
+            <Checkbox
+              checked={selected}
+              onCheckedChange={(next) => onSelectedChange(next)}
+              aria-label={selected ? t.feed.overview.remove(title) : t.feed.overview.add(title)}
+              className={cn(
+                "size-4 bg-card transition-[opacity,background-color,border-color] duration-150",
+                // На тапе цель под палец — сорок пикселей вокруг.
+                "[@media(hover:none)]:after:-inset-3",
+                selected || selecting ? "opacity-100" : QUIET,
+              )}
+            />
+          </TooltipTrigger>
+          <TooltipContent>
+            {selected ? t.feed.overview.tooltipRemove : t.feed.overview.tooltipAdd}
+          </TooltipContent>
+        </Tooltip>
         {/* Разделитель между кусками, а не пробел: «Hacker News ~7 мин
             AI-инфра» читается одной строкой, в которой издание, время
             и тема слипаются в чужое название. Точка с пробелами по бокам
@@ -475,13 +538,7 @@ export function ItemCard({
                 <ThumbsUpIcon />
                 {t.feed.item.upvoteLabel}
               </DropdownMenuCheckboxItem>
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => {
-                  setVote("down");
-                  report({ item_id: item.id, event: "down" });
-                }}
-              >
+              <DropdownMenuItem variant="destructive" onClick={hide}>
                 <ThumbsDownIcon />
                 {t.feed.item.downvoteLabel}
               </DropdownMenuItem>
@@ -595,10 +652,7 @@ export function ItemCard({
                 <button
                   type="button"
                   aria-label={t.feed.item.downvoteLabel}
-                  onClick={() => {
-                    setVote("down");
-                    report({ item_id: item.id, event: "down" });
-                  }}
+                  onClick={hide}
                   className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
                 />
               }
@@ -641,7 +695,7 @@ export function ItemCard({
             </a>
           </h3>
 
-          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : item.summary ? (
+          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : hasSummary ? (
             <p
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст
@@ -652,9 +706,9 @@ export function ItemCard({
               // Приглушённый основной текст читается как черновик.
               className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
             >
-              {typography(item.summary)}
+              {typography(item.summary ?? "")}
             </p>
-          ) : null}
+          ) : <p className="mt-3 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">{t.feed.item.summaryUnavailable}</p>}
 
           {/* Работа дедупа, названная вслух. Не «важно» и не «подтверждено»:
               пять изданий, пересказавших один пресс-релиз, ничего

@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useT, useLocale } from "@/components/i18n-provider";
+import { formatDay } from "@/lib/relative-time";
 
 /**
  * Стрелка, которая сообщает о работе. Выпуск — серверная страница, и между
@@ -43,7 +44,6 @@ const toDay = (date: Date) =>
 export function DateNav({ day, days }: { day: string; days: string[] }) {
   const t = useT();
   const locale = useLocale();
-  const FORMAT = new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric" });
   const [open, setOpen] = useState(false);
   const [going, startGoing] = useTransition();
   const router = useRouter();
@@ -96,7 +96,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
           }
         >
             {going ? <Spinner className="size-4" /> : null}
-          {FORMAT.format(new Date(`${day}T12:00:00`))}
+          {formatDay(day, locale)}
         </PopoverTrigger>
         {/* Календарь прибит к экрану, а не к странице: кнопка даты живёт
             в прибитой шапке и при прокрутке остаётся на месте, а слежение

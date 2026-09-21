@@ -59,7 +59,8 @@ import {
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import {
-  applyRules, asNames, cleanRules, compile, mentionText, NO_RULES, RULE_LIMITS, rulesOf, splitNames,
+  applyRules, asNames, cleanRules, compile, mentionText, mergeDraft, NO_RULES, RULE_LIMITS, rulesOf,
+  splitNames, withVariants,
 } from "../src/lib/rules";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
@@ -68,6 +69,8 @@ import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
 import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
 import { recentFrom, remember } from "../src/lib/search-history";
+import { blockOf, move, overviewMarkdown, overviewText, reconcile } from "../src/lib/overview";
+import { formatDay } from "../src/lib/relative-time";
 import {
   ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
 } from "../src/lib/source-health";
@@ -715,6 +718,11 @@ assert.deepEqual(
   ["Figma", "Framer", "Webflow"],
   "запятая и перевод строки делят; повтор без регистра и пустое выбрасываются",
 );
+assert.deepEqual(
+  splitNames("Figma，Фигма; Ｆramer、x"),
+  ["Figma", "Фигма", "Framer", "x"],
+  "полноширинная запятая, точка с запятой и идеографическая запятая — тоже разделители",
+);
 
 assert.deepEqual(
   cleanRules("follow", ["Figma", ["Framer", " framer ", "Фреймер"]]),
@@ -758,6 +766,54 @@ assert.equal(ruleNames.test("axxxb"), false, "текст читателя не �
 assert.equal(ruleNames.test("literal a.*b here"), true, "и находится буквально");
 assert.equal(ruleNames.find("Hacker News on Go"), "Hacker News", "называется первое найденное по тексту");
 assert.equal(ruleNames.find("nothing here"), null, "нет упоминания — нет имени");
+
+// Граница ставится только с той стороны, где написание кончается словесным
+// знаком: «.NET» и «C++» читатель ждёт «как написано», а не только между
+// пробелами. Подчёркивание — словесный знак: «go_router» не про Go.
+const edgeNames = compile([[".NET"], ["C++"], ["Go"]]);
+assert.equal(edgeNames.test("ASP.NET Core"), true, ".NET находится в ASP.NET: слева у него точка");
+assert.equal(edgeNames.test("C++17 modules"), true, "C++ находится в C++17: справа у него плюс");
+assert.equal(edgeNames.test("go_router update"), false, "подчёркивание — часть слова, Go не находится");
+assert.equal(edgeNames.test("abc++"), false, "C++ внутри слова по-прежнему не считается");
+assert.equal(edgeNames.test("Go go go"), true, "обычная граница на месте");
+
+// Слияние набранного и написания раскрытого правила — те же функции,
+// что зовут кнопки, скрытое поле формы и onChange: непринятое остаётся
+// в поле, а не пропадает.
+const mergedDraft = mergeDraft([["Figma"]], `Framer, figma, ${"x".repeat(81)}`, 20);
+assert.deepEqual(mergedDraft.next, [["Figma"], ["Framer"]], "принятое становится правилами");
+assert.equal(mergedDraft.stopped, "«figma» уже есть", "первая причина отказа словами");
+assert.deepEqual(mergedDraft.rejected, ["figma", "x".repeat(81)], "непринятое возвращается целиком");
+const untouched = [["Figma"]];
+assert.equal(mergeDraft(untouched, "figma", 20).next, untouched, "нечего добавить — тот же массив");
+assert.equal(mergeDraft(manyRules(20), "ещё одно", 20).stopped?.startsWith("Не больше 20"), true, "предел называется");
+assert.deepEqual(mergeDraft(manyRules(20), "ещё одно", 20).rejected, ["ещё одно"], "и лишнее остаётся в поле");
+assert.deepEqual(
+  withVariants([["Figma"], ["Framer"]], 0, "Фигма, figma.com, Figma").next,
+  [["Figma", "Фигма", "figma.com"], ["Framer"]],
+  "написания добавляются к имени, само имя не задваивается",
+);
+assert.equal(
+  withVariants([["Figma"], ["Framer"]], 0, "framer").stopped,
+  "«framer» уже есть в другом правиле",
+  "написание из другого правила — отказ с причиной",
+);
+assert.equal(
+  withVariants([["Figma"]], 0, "a, b, c, d, e").stopped?.startsWith("Не больше 5"), true,
+  "шестое написание — отказ",
+);
+const sameRules = [["Figma", "Фигма"]];
+assert.equal(withVariants(sameRules, 0, "Фигма").next, sameRules, "без изменений — тот же массив");
+assert.equal(withVariants(sameRules, 3, "x").next, sameRules, "нет такого правила — ничего не меняется");
+// Форма без поля или с битым JSON отдаёт не-массив, и это отказ,
+// а не пустой список: иначе старая вкладка стирала бы сохранённое.
+assert.ok("error" in cleanRules("follow", {}), "не-массив от формы — отказ, а не «правил нет»");
+
+// Пересекающиеся написания: пометка называет самое длинное совпавшее,
+// а не то, что стояло в списке раньше.
+const nested = compile([["Figma"], ["Figma Design"]]);
+assert.equal(nested.find("Figma Design ships"), "Figma Design", "длинное написание называет себя, а не свой префикс");
+assert.equal(nested.find("Figma ships"), "Figma", "короткое находится, когда длинного нет");
 
 const foldedNames = compile([["Фёдор"], ["Figma"]]);
 assert.equal(foldedNames.test("ФЕДОР пришёл"), true, "регистр и ё/е сходятся");
@@ -3375,5 +3431,68 @@ assert.equal(isDay(["2026-09-21", "2026-09-20"]), false, "повторённый
 assert.equal(isDay(undefined), false, "нет параметра — нет дня");
 assert.ok(isDay("0026-01-01"), "год ниже сотни — тоже день: Date.UTC читал бы его как 1926");
 assert.equal(isDay("0000-02-30"), false, "календарь проверяется и у таких лет");
+
+// --- Обзор для коллег: сводка блоков с выбором и тексты для копирования ---
+{
+  const card = (id: number, title: string, summary: string | null = "Описание") => ({
+    id, title, title_ru: null, summary, source_label: `Источник ${id}`, url: `https://s${id}.test/a`,
+  });
+  const feed = [card(1, "Первая"), card(2, "Вторая"), card(3, "Третья")].map(blockOf);
+
+  // Первое открытие: порядок выпуска, а не порядок нажатий.
+  assert.deepEqual(reconcile([], [feed[0], feed[2]]).map((b) => b.id), [1, 3]);
+
+  // Правки и порядок оставшихся переживают смену выбора; новые — в конец.
+  const edited = [{ ...feed[2], title: "Моя третья" }, feed[0]];
+  const next = reconcile(edited, feed);
+  assert.deepEqual(next.map((b) => b.id), [3, 1, 2]);
+  assert.equal(next[0].title, "Моя третья");
+
+  // Снятое уходит, повтор не заводится.
+  assert.deepEqual(reconcile(edited, [feed[0]]).map((b) => b.id), [1]);
+  assert.deepEqual(reconcile([feed[0], feed[0]], [feed[0], feed[0]]).map((b) => b.id), [1]);
+
+  // Перестановка за край не двигает ничего и отдаёт тот же массив.
+  assert.deepEqual(move([1, 2, 3], 0, 1), [2, 1, 3]);
+  assert.deepEqual(move([1, 2, 3], 2, 1), [1, 3, 2]);
+  const same = [1, 2, 3];
+  assert.equal(move(same, 0, -1), same);
+  assert.equal(move(same, 2, 3), same);
+
+  // Персональный заголовок выпуска, а не исходный; пустое описание — пустая строка.
+  assert.equal(blockOf({ ...card(4, "Orig", null), title_ru: "Перевод" }).title, "Перевод");
+  assert.equal(blockOf(card(4, "Orig", null)).summary, "");
+
+  // Дата выпуска на языке читателя, одна на шапку и на обзор.
+  assert.equal(formatDay("2026-09-21", "ru"), "21 сентября 2026 г.");
+  assert.equal(formatDay("2026-09-21", "en"), "September 21, 2026");
+
+  // Текст: каждая новость один раз, со ссылкой; пустое вступление
+  // не оставляет пустого абзаца.
+  const text = overviewText({ title: "Обзор", intro: "", blocks: [feed[1], feed[0]] });
+  assert.equal(
+    text,
+    [
+      "Обзор",
+      "1. Вторая\nОписание\nИсточник 2: https://s2.test/a",
+      "2. Первая\nОписание\nИсточник 1: https://s1.test/a",
+    ].join("\n\n"),
+  );
+  assert.ok(overviewText({ title: "  ", intro: "Вступление", blocks: [] }).startsWith("Вступление"));
+  // Стёртый заголовок блока подменяется источником — строка с одним номером
+  // читалась бы как обрыв.
+  assert.ok(overviewText({ title: "", intro: "", blocks: [{ ...feed[0], title: " " }] }).startsWith("1. Источник 1"));
+
+  // Markdown из тех же данных: заголовки, ссылка словами, скобка в адресе закодирована.
+  const md = overviewMarkdown({
+    title: "Обзор", intro: "Коротко.", blocks: [{ ...feed[0], url: "https://s1.test/a_(b)" }],
+  });
+  assert.equal(md, "# Обзор\n\nКоротко.\n\n## 1. Первая\n\nОписание\n\n[Источник 1](https://s1.test/a_%28b%29)");
+  // Скобка в названии источника закрыла бы ссылку раньше времени.
+  assert.ok(
+    overviewMarkdown({ title: "", intro: "", blocks: [{ ...feed[0], source: "A]B[C", url: "https://s1.test/a b" }] })
+      .endsWith("[A\\]B\\[C](https://s1.test/a%20b)"),
+  );
+}
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

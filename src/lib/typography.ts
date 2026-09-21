@@ -14,5 +14,5 @@ export function summaryTime(seconds: number, labels = { summaryMinute: "мин",
   const rounded = Math.max(10, Math.ceil(seconds / 10) * 10);
   const minutes = Math.floor(rounded / 60);
   const rest = rounded % 60;
-  return `≈\u00a0${minutes ? `${minutes}\u00a0${labels.summaryMinute}` : ""}${minutes && rest ? " " : ""}${rest ? `${rest}\u00a0${labels.summarySecond}` : ""}`;
+  return `${minutes ? `${minutes}\u00a0${labels.summaryMinute}` : ""}${minutes && rest ? " " : ""}${rest ? `${rest}\u00a0${labels.summarySecond}` : ""}`;
 }
