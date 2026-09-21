@@ -59,13 +59,14 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
+import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
 import {
   ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
 } from "../src/lib/source-health";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -469,12 +470,22 @@ assert.ok(
   [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
   "у каждого варианта должны быть и подпись для читателя, и требование для модели",
 );
-// Манеру выбирают по первой фразе, а не по названию: «Разбор» и «Ровно»
-// различаются только примером. Манера без примера выглядит в ряду пустой
-// карточкой — и выбирают соседнюю, потому что про неё понятно.
+// Названия и подписи не повторяются: две одинаковые строки в ряду означают,
+// что выбирать не из чего, — а деления при этом разные.
+for (const field of ["label", "hint"] as const) {
+  assert.equal(
+    new Set([...COMPLEXITY, ...STYLES].map((entry) => entry[field])).size,
+    COMPLEXITY.length + STYLES.length,
+    `${field}: повтор означает два неразличимых варианта в одном ряду`,
+  );
+}
+
+// У каждого языка есть флажок. Словарь повторяет список строками, и язык,
+// добавленный только в список, остался бы в строю без значка — молча
+// и ровно у одного пункта.
 assert.ok(
-  STYLES.every((entry) => (entry.example ?? "").trim().length > 0),
-  "у каждой манеры должен быть пример того, как начнётся описание",
+  LANGUAGES.every((entry) => flagOf(entry).length > 0),
+  "язык без флажка: словарь разъехался со списком",
 );
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
@@ -2100,13 +2111,20 @@ for (const prop of ["left", "right"]) {
   const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
   assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
 }
-// А требование key держится на том, что они соседи. Разведут по разным
-// родителям — проверка выше станет суеверием, и упасть она должна здесь.
-assert.match(
-  readFileSync("src/components/feed-tabs.tsx", "utf8"),
-  /\{left\}\s*\{right\}/,
-  "left и right стоят соседями — иначе key им не нужен",
-);
+// А требование key держится на том, что каждый стоит не один. Соседями
+// они быть перестали, когда между ними встал поиск: left соседствует
+// с блоком кнопок, right — с кнопкой поиска внутри него. Останется
+// который-нибудь из них единственным ребёнком — проверка выше станет
+// суеверием, и упасть она должна здесь.
+const tabsSource = readFileSync("src/components/feed-tabs.tsx", "utf8");
+const rowFrom = tabsSource.indexOf("{left}");
+const rowTo = tabsSource.indexOf("</header>");
+// Оба конца названы явно: indexOf отдаёт -1, а slice с -1 молча вернёт
+// хвост файла — проверка осталась бы зелёной, не посмотрев на шапку вовсе.
+assert.ok(rowFrom >= 0 && rowTo > rowFrom, "шапку ленты рисует feed-tabs");
+const headerRow = tabsSource.slice(rowFrom, rowTo);
+assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left стоит рядом с кнопками");
+assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 
 
 // —————————————————————————————————————————————————————————————————————————
@@ -2581,6 +2599,92 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     refusedForGood("не смог забрать текст (direct: fetch failed; reader: текста меньше 120 слов)"),
     false,
     "и не отменяется тем, что запасной уровень дошёл до разбора",
+  );
+}
+
+// --- поиск по прошлым выпускам ------------------------------------------------
+// Отрывок приходит из ts_headline с метками внутри текста статьи. Метки —
+// управляющие символы, а не разметка: вставить в чужой текст <b> значит
+// однажды отрисовать оттуда же чужой <script>.
+{
+  const plain = highlight("просто текст");
+  assert.deepEqual(plain, [{ text: "просто текст", mark: false }], "текст без меток идёт целиком");
+
+  const marked = highlight(`про ${HL_START}уран${HL_END} и дальше`);
+  assert.deepEqual(
+    marked,
+    [
+      { text: "про ", mark: false },
+      { text: "уран", mark: true },
+      { text: " и дальше", mark: false },
+    ],
+    "метки режут отрывок на обычный текст и найденное",
+  );
+  assert.ok(
+    !marked.some((part) => part.text.includes(HL_START) || part.text.includes(HL_END)),
+    "сами метки в вывод не уезжают: иначе они видны на странице",
+  );
+
+  // Отрывок обрезается по словам, и закрывающая метка может не доехать.
+  // Подсветить остаток значит залить половину карточки.
+  const cut = highlight(`начало ${HL_START}уран`);
+  assert.deepEqual(
+    cut,
+    [{ text: "начало ", mark: false }, { text: "уран", mark: false }],
+    "незакрытая метка не подсвечивает хвост",
+  );
+
+  const marks = (text: string) => highlight(text).filter((part) => part.mark).length;
+  assert.equal(marks(`${HL_START}раз${HL_END} и ${HL_START}два${HL_END}`), 2, "меток бывает несколько");
+  assert.deepEqual(highlight(""), [], "пустой отрывок не даёт пустого куска");
+
+  // Ищут вопросом, а не ключевыми словами: «где я видел про uranium
+  // и дата-центры». Все слова разом требуют «видел», которого в тексте нет.
+  assert.equal(anyOf("uranium"), null, "одно слово ослаблять нечем");
+  assert.equal(anyOf("  "), null, "пустой запрос ослаблять нечем");
+  assert.equal(anyOf("uranium дата-центры"), "uranium or дата-центры");
+  assert.equal(
+    anyOf("  где я видел  про uranium "),
+    "где or я or видел or про or uranium",
+    "лишние пробелы не делают пустых слов",
+  );
+  // Оператор самого websearch, а не подмена «&» на «|» в готовом tsquery:
+  // в запросе бывает «AT&T», и такая подмена ломает не оператор, а слово.
+  assert.equal(anyOf("AT&T Verizon"), "AT&T or Verizon", "слово с амперсандом остаётся словом");
+
+  // Запрет остаётся запретом: «уран ИЛИ НЕ обогащение» отвечает почти всем
+  // архивом — ровно обратное тому, о чём просили.
+  assert.equal(anyOf("уран -обогащение"), null, "запрещённое слово в ослабление не идёт");
+  assert.equal(anyOf("уран реактор -обогащение"), "уран or реактор");
+  assert.equal(anyOf("дата-центры уран"), "дата-центры or уран", "дефис внутри слова остаётся");
+  // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
+  assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
+
+  // Словарь решает, сводятся ли словоформы, и заметно это только
+  // по ненайденному.
+  assert.equal(tsConfigFor("русском"), "russian");
+  assert.equal(tsConfigFor("английском"), "english");
+  assert.equal(tsConfigFor("португальском (бразильский вариант)"), "portuguese");
+  assert.equal(
+    tsConfigFor(SOURCE_LANGUAGE),
+    "russian",
+    "язык источника заранее неизвестен: русская конфигурация разбирает и латиницу",
+  );
+  assert.equal(
+    tsConfigFor("японском"),
+    "russian",
+    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
+  );
+  assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
+  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
+  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
+  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
+  // в списке обязан получить словарь или попасть сюда осознанно, иначе
+  // он молча уедет на русский.
+  assert.deepEqual(
+    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
+    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
+    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
   );
 }
 

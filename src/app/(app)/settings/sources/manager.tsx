@@ -146,7 +146,7 @@ function openUrlOf(source: SourceHealth): string | null {
 function troubleOf(source: SourceHealth): string | null {
   // Прогон его ещё не видел: ни удачи, ни ошибки.
   if (!source.last_ok_at && !source.last_error) {
-    return "добавлен — первые новости придут ночью";
+    return "добавлен, первые новости придут ночью";
   }
   // Про ошибку уже сказал бейдж и подсказка под ним. Добавить сюда «за 30
   // дней ни одной новости» значит сказать рядом с «не отвечает», что
@@ -167,7 +167,7 @@ function yieldOf(source: SourceHealth): string {
   // Прогон его ещё не видел: ни удачи, ни ошибки. Написать такому «за 30 дней
   // ни одного материала» — той же фразой, что и заброшенному, — значит
   // сообщить, что он бесполезен, через минуту после того, как его завели.
-  if (!source.last_ok_at && !source.last_error) return "добавлен — первые новости придут ночью";
+  if (!source.last_ok_at && !source.last_error) return "добавлен, первые новости придут ночью";
   if (source.items === 0) return "за 30 дней ни одной новости";
   // Ряд идёт по пути новости: сколько пришло, сколько дошло до выпуска,
   // сколько открыто. Открытия стоят последними не для красоты — это
@@ -260,7 +260,7 @@ export function SourcesManager({
             {/*
               Список обрезан: при полусотне сломанных источников склейка
               через точку превращала тревогу в абзац, который не читают.
-              Остальные видны в списке — он теперь сортирован сломанным вверх.
+              Остальные видны в списке, он теперь сортирован сломанным вверх.
             */}
             {listOf(dead.map((source) => `${source.label}: ${source.last_error}`))}
           </AlertDescription>
@@ -348,7 +348,7 @@ export function SourcesManager({
                 </a>
                 {found.fresh === 0 ? (
                   <span className="text-muted-foreground text-xs">
-                    Новости есть, но все старые — похоже, источник забросили.
+                    Новости есть, но все старые. Похоже, источник забросили.
                   </span>
                 ) : null}
               </div>
@@ -415,7 +415,7 @@ export function SourcesManager({
                     <FieldError>{error}</FieldError>
                   ) : (
                     <FieldDescription>
-                      Сайт, блог, канал на YouTube или в Telegram — вставь ссылку
+                      Вставь ссылку на сайт, блог, канал на YouTube или в Telegram
                     </FieldDescription>
                   )}
                 </Field>
@@ -423,7 +423,7 @@ export function SourcesManager({
                 {found && !plan.kinds.includes(found.kind) ? (
                   <Alert>
                     <AlertTitle className="flex items-center gap-1.5">
-                      Посты из X — только на тарифе «{PLANS.pro.label}»
+                      Посты из X только на тарифе «{PLANS.pro.label}»
                       <PaywallCrown feature="x" plan={plan} />
                     </AlertTitle>
                     <AlertDescription>
@@ -484,6 +484,11 @@ export function SourcesManager({
                     // «Убрать» без него — один и тот же вопрос без ответа,
                     // какую из них он читает.
                     aria-label={`Убрать ${source.label} из ленты`}
+                    // Красное под курсором — тот же знак, что у корзины
+                    // в списке ниже: кнопка, которая что-то уносит, обязана
+                    // краснеть в обоих местах одинаково, иначе в одном
+                    // из них она выглядит безобидной.
+                    className="hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => remove(source.id)}
                   >
                     Убрать
@@ -508,7 +513,7 @@ export function SourcesManager({
               <EmptyHeader>
                 <EmptyTitle>Пока ни одного источника</EmptyTitle>
                 <EmptyDescription>
-                  Вставь ссылку выше — на блог, канал, рассылку. Пока источников нет,
+                  Вставь ссылку выше: на блог, канал или рассылку. Пока источников нет,
                   выпуск собирать не из чего.
                 </EmptyDescription>
               </EmptyHeader>
@@ -627,7 +632,7 @@ export function SourcesManager({
                   </TooltipTrigger>
                   {/* Своя подсказка вместо title: браузерная выезжает через
                       секунду с лишним и рисуется системным шрифтом. */}
-                  <TooltipContent>Убрать из ленты — отменить можно</TooltipContent>
+                  <TooltipContent>Убрать из ленты, отменить можно</TooltipContent>
                 </Tooltip>
               </div>
             </div>
