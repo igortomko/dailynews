@@ -30,7 +30,6 @@ import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedCard } from "@/lib/queries";
 import { alsoLine, otherSources, storyLines, storyTitle } from "@/lib/story";
-import { HORIZON, KIND } from "@/lib/axis-labels";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
 const SEEN_MS = 1500;
@@ -212,8 +211,6 @@ export function ItemCard({
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
-  const kind = item.axes?.kind?.choice ? KIND[item.axes.kind.choice] : undefined;
-  const horizon = item.axes?.horizon?.choice ? HORIZON[item.axes.horizon.choice] : undefined;
   const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
 
   if (vote === "down") {
@@ -245,12 +242,19 @@ export function ItemCard({
       ref={article}
       className="group border-b py-5 transition-opacity duration-150 last:border-0"
     >
-      {/* В покое остаётся только источник. Время, тема и метки нужны,
-          когда уже присматриваешься к материалу, а в списке они тянут
-          строку и спорят с заголовком. Место под них держится всегда,
+      {/* В покое остаётся только источник. Время и тема нужны, когда уже
+          присматриваешься к материалу, а в списке они тянут строку
+          и спорят с заголовком. Место под них держится всегда,
           поэтому строка не дёргается при наведении.
           Разделитель — запятая: точки с пробелами по бокам растягивали
           ряд сильнее, чем несли смысла.
+
+          Тип материала и горизонт отсюда убраны. «Факт» стоял у 58%
+          карточек выпуска, «месяцы» у 44%: метка, которая есть почти
+          у всех, ничего не отличает — она только удлиняет строку
+          и говорит на языке нашей шкалы, а не читателя. В отборе
+          и в «Калибровке» обе оси работают по-прежнему. Метка остаётся
+          там, где сообщает об отклонении, — «кликбейт» ниже.
 
           Шапка во всю ширину карточки, а не внутри текстовой колонки:
           там её правый край упирался в картинку, и кнопки у карточек
@@ -300,9 +304,7 @@ export function ItemCard({
               </TooltipTrigger>
               <TooltipContent>{EXACT.format(new Date(item.published_at))}</TooltipContent>
             </Tooltip>
-            {[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).length > 0
-              ? `, ${[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).join(", ")}`
-              : ""}
+            {showTopic && item.topic_label ? `, ${item.topic_label}` : ""}
           </span>
         </span>
 
