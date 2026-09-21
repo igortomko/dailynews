@@ -58,6 +58,9 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
+import {
+  ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupReason, type SourceYield,
+} from "../src/lib/source-health";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -2351,6 +2354,98 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.deepEqual(
     dropStrayReady(request("E"), junk), junk,
     "неразобранный ответ проходит как есть",
+  );
+}
+
+// --- что убрать из подписок ---------------------------------------------------
+// Ручной аудит подписок не делает никто, поэтому решение принимает код —
+// и ошибается он в обе стороны одинаково молча: промолчал о мусорном
+// источнике (ничего не случилось) или предложил убрать живой (читатель
+// убрал и больше его не увидит).
+{
+  const src = (over: Partial<SourceYield> = {}): SourceYield => ({
+    items: 42, duplicates: 2, in_my_digests: 12, shown: 12, opened: 4, ...over,
+  });
+
+  assert.equal(cleanupReason(src()), null, "источник, который читают, убирать не предлагают");
+
+  // Порог показов: ниже него ноль открытий — совпадение, а не сигнал.
+  assert.equal(
+    cleanupReason(src({ shown: ENOUGH_SHOWN - 1, opened: 0 })), null,
+    "неделя показов мимо — ещё не приговор источнику",
+  );
+  assert.equal(
+    cleanupReason(src({ shown: ENOUGH_SHOWN, opened: 0 })),
+    "ни одного открытия на 10 показанных новостей",
+    "с десятого показа ноль открытий уже значит",
+  );
+  // Ровно на минимуме кандидатом остаётся только чистый ноль: одно открытие
+  // из десяти — это уже не «не читаю», а «читаю редко», и убирать за это
+  // нельзя.
+  assert.equal(
+    cleanupReason(src({ shown: ENOUGH_SHOWN, opened: 1 })), null,
+    "одно открытие из десяти держит источник в ленте",
+  );
+
+  // Не строгий ноль: одно открытие за сорок два показа — тот же ответ,
+  // а правило по нулю снималось бы единственным случайным нажатием.
+  assert.equal(
+    cleanupReason(src({ shown: 42, opened: 1 })),
+    "1 открытие на 42 показанные новости",
+    "одно открытие за сорок два показа не делает источник читаемым",
+  );
+  assert.equal(
+    cleanupReason(src({ shown: 12, opened: 3 })), null,
+    "каждая четвёртая открыта — источник читают",
+  );
+  assert.equal(
+    cleanupReason(src({ shown: 14, opened: 1 })),
+    "1 открытие на 14 показанных новостей",
+    "а одно открытие из четырнадцати уже нет (живой случай: PsyPost)",
+  );
+
+  // Согласование после числительного: «21 новость попалось» — машинный текст,
+  // а проверяют такие строки на двенадцати, где всё сходится само.
+  assert.equal(
+    cleanupReason(src({ shown: 21, opened: 0 })),
+    "ни одного открытия на 21 показанную новость",
+    "после 21 идёт единственное число",
+  );
+  assert.equal(
+    cleanupReason(src({ shown: 22, opened: 0 })),
+    "ни одного открытия на 22 показанные новости",
+    "после 22 — другая форма, чем после 25",
+  );
+
+  // Второй повод: половина потока — перепечатки. Ниже половины тревоги нет:
+  // горящая на обычном состоянии ничем не отличается от выключенной.
+  assert.equal(
+    cleanupReason(src({ items: 42, duplicates: 21, shown: 0, opened: 0 })),
+    "21 из 42 новостей — перепечатки: то же самое приходит из других источников",
+    "половина перепечаток — повод убрать",
+  );
+  assert.equal(
+    cleanupReason(src({ items: 42, duplicates: 18, shown: 0, opened: 0 })), null,
+    `ниже ${MOSTLY_DUPLICATES * 100}% перепечаток источник не трогаем`,
+  );
+  assert.equal(
+    cleanupReason(src({ items: 4, duplicates: 4, shown: 0, opened: 0 })), null,
+    "четыре материала подряд — не доля, а случай",
+  );
+
+  // Источник без единого показа не кандидат ни по какому поводу: читатель
+  // мог просто не заходить, а убирать источник за чужой отпуск нельзя.
+  assert.equal(
+    cleanupReason(src({ shown: 0, opened: 0, duplicates: 0 })), null,
+    "без показов судить не по чему",
+  );
+
+  // Непрочитанное сильнее повторов: перепечатка, которую открывают, ленте
+  // не мешает, а место в выпуске занимает именно непрочитанный.
+  assert.match(
+    cleanupReason(src({ items: 42, duplicates: 40, shown: 12, opened: 0 }))!,
+    /открытия/,
+    "при двух поводах сразу называется тот, что сильнее",
   );
 }
 
