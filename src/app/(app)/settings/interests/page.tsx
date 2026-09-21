@@ -1,24 +1,30 @@
-import { getDigestDays, getFeed } from "@/lib/queries";
-import { getReaderTopics } from "@/lib/readers";
+import { digestProgress, getReaderTopics, perCardOf } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { minutesOf } from "@/lib/reading-time";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
 
 export default async function InterestsPage() {
   const reader = await currentReader();
-  const [topics, days] = await Promise.all([
+  const [topics, digest] = await Promise.all([
     getReaderTopics(reader.id),
-    getDigestDays(reader.id),
+    // Сколько времени в последнем выпуске: по нему решается, есть ли что
+    // догружать после того, как заказ подняли. По всему выпуску, а не по
+    // видимой ленте: скрытая пальцем вниз карточка предлагала бы добрать
+    // то, что читатель только что убрал.
+    digestProgress(reader.id, null),
   ]);
-  // Сколько материалов в последнем выпуске: по нему решается, есть ли что
-  // догружать после смены числа новостей.
-  const inToday = days[0] ? (await getFeed(reader.id, days[0])).length : 0;
+  const voice = effectiveVoice(reader);
+  const inToday = minutesOf(digest.chars, voice);
   return (
     <InterestsForm
-      total={reader.digest_size}
+      minutes={reader.digest_minutes}
+      // Мерка этого читателя: его же описания за месяц. Форма делит ею
+      // заказ на места — той же функцией, что и прогон.
+      perCard={await perCardOf(reader)}
       inToday={inToday}
       plan={effectivePlan(reader)}
       chips={topics.map((topic) => ({
