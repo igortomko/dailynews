@@ -252,6 +252,9 @@ export function FeedTabs({
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Пока открыт редактор обзора, лента за ним не слушает: j и k
+      // прокручивали бы её под окном, а x отмечал бы карточку мимо черновика.
+      if (editing) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (
@@ -306,7 +309,7 @@ export function FeedTabs({
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [editing]);
 
   const forTab = (slug: string) =>
     slug === "all"

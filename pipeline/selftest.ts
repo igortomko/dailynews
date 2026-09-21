@@ -3134,7 +3134,6 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   );
 }
 
-
 // --- Обзор для коллег: сводка блоков с выбором и тексты для копирования ---
 {
   const card = (id: number, title: string, summary: string | null = "Описание") => ({
