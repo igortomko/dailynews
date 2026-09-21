@@ -6,7 +6,7 @@ import {
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
-import { askDuplicates, markDuplicates } from "./dedup";
+import { askDuplicates, flattenDupChains, markDuplicates } from "./dedup";
 import { enrichArticles } from "./enrich";
 import { composite, scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
@@ -578,6 +578,14 @@ async function main() {
     });
     log(`   спрошено у Jev: ${asked.asked} из ${asked.questions}, дубли: ${asked.marked}, $${dedupCost.toFixed(4)}`);
   }
+
+  // После обоих слоёв, а не после каждого: цепочка рождается и внутри
+  // одного `update` первого слоя, и между работниками второго. Сюжет,
+  // у которого повтор указывает на повтор, делится надвое — счётчик
+  // недосчитывает, а материал с ключом-серединой без оценки уходит
+  // из отбора молча.
+  const flattened = await flattenDupChains(sql);
+  if (flattened > 0) log(`   выпрямлено цепочек дублей: ${flattened}`);
   // Отказавший слой обязан сказать это вслух. Каждый упавший вопрос ловится
   // своим catch-ом, и без этой строки сломанный ключ, сменившаяся подпись
   // вопроса или недоступный Jev выглядели бы как «серой зоны сегодня нет»:

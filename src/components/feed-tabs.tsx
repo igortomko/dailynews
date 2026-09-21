@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemCard } from "@/components/item-card";
 import { SearchButton, SearchField } from "@/components/feed-search";
-import type { FeedItem } from "@/lib/queries";
+import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { NetworkId } from "@/lib/networks";
@@ -75,7 +75,7 @@ export function FeedTabs({
   right,
 }: {
   topics: ReaderTopic[];
-  items: FeedItem[];
+  items: FeedCard[];
   /** Действующий тариф: от него зависят корона и кнопка «Своё мнение». */
   plan: Plan;
   networks: NetworkId[];
@@ -227,7 +227,15 @@ export function FeedTabs({
               <TabsTrigger
                 key={tab.slug}
                 value={tab.slug}
-                className="px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
+                /* after:bottom-0 вместо штатных −5px: полоса вкладок
+                   прокручивается, а прокрутка по горизонтали обрезает и по
+                   вертикали — подчёркивание, вынесенное под нижний край
+                   вкладки, не рисовалось вовсе, и активная вкладка
+                   отличалась от соседних только насыщенностью текста.
+                   h-full вместо штатных calc(100%-1px): вкладка на пиксель
+                   ниже полосы да ещё по центру не доставала до низа, и между
+                   подчёркиванием и границей шапки оставался уступ. */
+                className="h-full px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground group-data-horizontal/tabs:after:bottom-0 sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
               >
                 {tab.label}
                 <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>

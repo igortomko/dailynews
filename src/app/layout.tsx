@@ -18,8 +18,27 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Retorta",
-  description: "Персональная новостная лента со скорингом по собственным осям",
+  metadataBase: new URL("https://news.tomko.io"),
+  title: "Reporta",
+  description: "Персональная новостная лента, которая отбирает сигнал из потока",
+  icons: {
+    icon: [
+      { url: "/brand/favicon.svg", type: "image/svg+xml" },
+      { url: "/brand/favicon-32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: "/brand/favicon-180.png",
+  },
+  openGraph: {
+    title: "Reporta",
+    description: "Персональная новостная лента, которая отбирает сигнал из потока",
+    images: [{ url: "/brand/social-preview.png", width: 1200, height: 630, alt: "Reporta brand mark" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Reporta",
+    description: "Персональная новостная лента, которая отбирает сигнал из потока",
+    images: ["/brand/social-preview.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

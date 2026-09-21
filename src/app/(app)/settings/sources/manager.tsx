@@ -15,6 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
+import { cleanupOf } from "@/lib/source-health";
 import { PLANS, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
 import type { Found } from "../../../../../pipeline/discover";
@@ -154,7 +155,7 @@ function troubleOf(source: SourceHealth): string | null {
   if (source.items === 0) return "за 30 дней ни одной новости";
   // Новости даёт, но ни одна не доходит до выпуска: источник есть, толку нет,
   // и по одному числу последнего прогона этого не увидеть.
-  if (source.in_digest === 0) return "за 30 дней ни одна новость не дошла до выпуска";
+  if (source.in_my_digests === 0) return "за 30 дней ни одна новость не дошла до выпуска";
   return null;
 }
 
@@ -168,7 +169,12 @@ function yieldOf(source: SourceHealth): string {
   // сообщить, что он бесполезен, через минуту после того, как его завели.
   if (!source.last_ok_at && !source.last_error) return "добавлен — первые новости придут ночью";
   if (source.items === 0) return "за 30 дней ни одной новости";
-  const parts = [`за 30 дней: ${source.items} → ${source.in_digest} в выпусках`];
+  // Ряд идёт по пути новости: сколько пришло, сколько дошло до выпуска,
+  // сколько открыто. Открытия стоят последними не для красоты — это
+  // единственное число здесь, которое ставит сам читатель, и по нему
+  // решают, убирать ли источник.
+  const parts = [`за 30 дней: ${source.items} → ${source.in_my_digests} в выпусках`];
+  if (source.in_my_digests > 0) parts.push(`открыто ${source.opened}`);
   if (source.mean_score !== null) {
     parts.push(`оценка ${String(source.mean_score).replace(".", ",")}`);
   }
@@ -197,6 +203,17 @@ export function SourcesManager({
   const silent = sources.filter(
     (source) => !source.last_error && (source.silent_days ?? 0) >= SILENT_DAYS,
   );
+  /*
+    Кандидаты на удаление. Ручной аудит подписок не делает никто: тридцать
+    строк, у каждой числа в подсказке, и чтобы понять, кто здесь лишний,
+    надо навести на все тридцать и сравнить в уме. Поэтому сравнение делает
+    код, а строка называет, что именно не так с этим источником, — «дал 42,
+    ни одного открытия» решается за секунду, «полезность источника низкая»
+    не решается вовсе.
+  */
+  const cleanup = sources
+    .map((source) => ({ source, why: cleanupOf(source) }))
+    .filter((row): row is { source: SourceHealth; why: string } => row.why !== null);
 
   /**
    * Убрать источник — с отменой прямо в сообщении.
@@ -421,6 +438,63 @@ export function SourcesManager({
         )}
       </Card>
 
+      {cleanup.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Что убрать</CardTitle>
+            {/*
+              Про то, что у соседа источник остаётся, здесь не сказано
+              намеренно: это устройство каталога, а не ответ на вопрос
+              читателя. Он не знает, что каталог общий, — и «убрать только
+              у себя» задаёт ему вопрос вместо того, чтобы снять.
+              Что убранное возвращается, говорит само сообщение после
+              нажатия: там это и нужно, а не за минуту до.
+            */}
+            <CardDescription>Эти источники месяц занимали место зря.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-1">
+            {cleanup.map(({ source, why }, index) => (
+              <div key={source.id}>
+                {index > 0 ? <Separator className="my-1" /> : null}
+                <div className="flex items-center gap-3 py-1.5">
+                  <div className="flex min-w-0 flex-1 items-start gap-3">
+                    <SourceIcon kind={source.kind} url={source.url} className="mt-0.5 size-4" />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-medium">{source.label}</span>
+                      {/*
+                        Одни числа: «ты его не читаешь» над «20 показано,
+                        0 открыто» — это одна и та же мысль дважды, и вторая
+                        строка сильнее, потому что доказывает первую.
+                      */}
+                      <span className="text-muted-foreground text-xs">{why}</span>
+                    </div>
+                  </div>
+                  {/*
+                    Кнопка словом и без корзины: в списке ниже корзина стоит
+                    у каждой строки и значит «убрать этот», а здесь решение
+                    предложено нами — и предложение обязано называть себя.
+                    Та же иконка рядом с тем же словом делает их одинаковыми
+                    на глаз, то есть отменяет всю разницу.
+                  */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pending}
+                    // Имя источника в подписи: диктору две соседние кнопки
+                    // «Убрать» без него — один и тот же вопрос без ответа,
+                    // какую из них он читает.
+                    aria-label={`Убрать ${source.label} из ленты`}
+                    onClick={() => remove(source.id)}
+                  >
+                    Убрать
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Источники</CardTitle>
@@ -553,9 +627,7 @@ export function SourcesManager({
                   </TooltipTrigger>
                   {/* Своя подсказка вместо title: браузерная выезжает через
                       секунду с лишним и рисуется системным шрифтом. */}
-                  <TooltipContent>
-                    Убрать из ленты — у соседа он останется, и отменить можно
-                  </TooltipContent>
+                  <TooltipContent>Убрать из ленты — отменить можно</TooltipContent>
                 </Tooltip>
               </div>
             </div>
