@@ -368,7 +368,7 @@ export function FeedTabs({
               <Link
                 href="/"
                 aria-label="Reporta"
-                className="col-span-2 col-start-1 row-start-1 w-40 justify-self-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:col-span-1 lg:col-start-2"
+                className="col-span-2 col-start-1 row-start-1 w-35 translate-y-1 justify-self-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:col-span-1 lg:col-start-2"
               >
                 {/* Both themes use the approved vector, retaining the red snake. */}
                 {/* eslint-disable @next/next/no-img-element */}
