@@ -83,7 +83,7 @@ export async function sendToKindle(options: {
       text: `Выпуск за ${options.day} — во вложении.`,
       attachments: [
         {
-          filename: `retorta-${options.day}.html`,
+          filename: `reporta-${options.day}.html`,
           content: Buffer.from(html, "utf8").toString("base64"),
         },
       ],
