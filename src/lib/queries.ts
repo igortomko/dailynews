@@ -1,7 +1,10 @@
 import "server-only";
 import { sql } from "./db";
+import { effectiveVoice } from "./lemon";
+import { anyOf, HL_END, HL_OPTIONS, HL_START, tsConfigFor } from "./search";
 import type { SourceYield } from "./source-health";
-import type { Axes, Source } from "./types";
+import type { Axes, Reader, Source } from "./types";
+import type { Publication } from "./story";
 
 /**
  * Запросы ленты. У каждого первым аргументом идёт читатель, и это не
@@ -19,6 +22,8 @@ export type FeedItem = {
   summary: string | null;
   image_url: string | null;
   source_label: string;
+  /** Нужен сюжету: источник, повторивший сам себя, — не «ещё один источник». */
+  source_id: number;
   topic_slug: string | null;
   topic_label: string | null;
   total: number;
@@ -48,6 +53,13 @@ export type FeedItem = {
    */
   seen: boolean;
 };
+
+/**
+ * Карточка ленты вместе со своим сюжетом: материал и его повторы
+ * в источниках этого читателя. Пустой сюжет — обычный случай: повтор
+ * есть у единиц.
+ */
+export type FeedCard = FeedItem & { story: Publication[] };
 
 export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`
@@ -151,7 +163,7 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
 export async function getFeed(readerId: number, day: string): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
     select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
-           s.label as source_label,
+           s.label as source_label, s.id as source_id,
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
            d.day::text as day,
@@ -191,10 +203,78 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
   // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт
   // ожидаемый OID колонки. Если axes придёт строкой, карточка молча
   // покажет прочерк вместо каждого бейджа — отказ, который не заметен.
+  //
+  // Number обязателен, хотя тип и обещает число: id и source_id — bigint,
+  // и драйвер отдаёт их строкой. Сюжет карточки, разложенный по числовым
+  // ключам, не находился ни разу — ни ошибки, ни пустого места, строка
+  // «о том же написали» просто не появлялась. Приводим здесь, а не ::int
+  // в запросе: каст сузил бы bigint до int4 и однажды уронил бы всю ленту
+  // целиком, а глобальная подмена типа в драйвере уже ломала запись
+  // («to: 20 шлёт int8 в колонки int»).
   return rows.map((row) => ({
     ...row,
+    id: Number(row.id),
+    source_id: Number(row.source_id),
     axes: typeof row.axes === "string" ? JSON.parse(row.axes) : row.axes,
   }));
+}
+
+/**
+ * Сюжеты для карточек ленты: что ещё выходило про то же самое.
+ *
+ * Ключ сюжета — coalesce(dup_of, id): у оригинала это он сам, у повтора —
+ * его оригинал. Одним выражением, а не «оригинал или его повторы»: обе
+ * половины сюжета обязаны находиться одним условием, под индексом 0040.
+ *
+ * Читатель здесь не отдельным аргументом, а списком его источников — тем же,
+ * которым отбирается выпуск (`sourcesForPlan`). Это не послабление правила
+ * про reader_id, а его же исполнение: изоляцию даёт именно этот список,
+ * и взять его шире значило бы показать в «твоих источниках» чужие. Тариф
+ * в нём уже учтён — ссылка на источник, выключенный понижением тарифа,
+ * была бы предложением, на которое нельзя нажать.
+ *
+ * Один запрос на ленту, а не на карточку: сорок карточек — это сорок
+ * обращений, и заметно это станет не на владельце.
+ */
+export async function getStories(
+  sourceIds: number[],
+  itemIds: number[],
+): Promise<Map<number, Publication[]>> {
+  const stories = new Map<number, Publication[]>();
+  if (sourceIds.length === 0 || itemIds.length === 0) return stories;
+
+  const rows = await sql<(Publication & { card_id: number })[]>`
+    with cards as (
+      -- Каст обязателен: items.id — bigint, а нетипизированный массив
+      -- уходит в int и не совпадает ни с одной строкой.
+      select id, coalesce(dup_of, id) as story_id
+        from dailynews.items
+       where id = any(${itemIds}::bigint[])
+    )
+    select c.id as card_id,
+           p.id as item_id, p.url,
+           p.source_id as source_id, s.label as source_label, s.kind,
+           p.published_at, p.points
+      from cards c
+      join dailynews.items p on coalesce(p.dup_of, p.id) = c.story_id
+      join dailynews.sources s on s.id = p.source_id
+     where p.source_id = any(${sourceIds}::bigint[])
+     order by c.id, p.id
+  `;
+
+  // Number на границе, как и в ленте: bigint приезжает строкой, а ключом
+  // Map и слагаемым счётчика источников обязано быть число.
+  for (const { card_id, ...publication } of rows) {
+    const key = Number(card_id);
+    const story = stories.get(key) ?? [];
+    story.push({
+      ...publication,
+      item_id: Number(publication.item_id),
+      source_id: Number(publication.source_id),
+    });
+    stories.set(key, story);
+  }
+  return stories;
 }
 
 export type SummaryQualityRow = {
@@ -380,4 +460,165 @@ export async function catalogFor(
      order by count(distinct i.id) desc, s.label
      limit ${limit}
   `;
+}
+
+export type ArchiveHit = {
+  item_id: number;
+  url: string;
+  /** Заголовок из выпуска — его языком. Пустой бывает у старых строк. */
+  title: string;
+  /** Отрывок с метками подсветки: режется `highlight` из lib/search. */
+  snippet: string;
+  source_label: string;
+  topic_label: string | null;
+  day: string;
+};
+
+/**
+ * Поиск по тому, что этому читателю уже присылали.
+ *
+ * Не архив интернета: только материалы его выпусков — отобранные из его
+ * источников и написанные его языком. Поэтому первый аргумент читатель,
+ * а не строка поиска: запрос без него отдал бы чужой выпуск вовремя,
+ * без ошибок и совершенно не тот.
+ *
+ * Ищется сразу по двум текстам — по написанному для читателя
+ * (`digest_items`) и по исходному (`items`). Одно без другого половинчато:
+ * «uranium» стоит в заголовке источника, а «уран» — в описании выпуска,
+ * и человек ищет тем словом, которое запомнил.
+ *
+ * Индекса нет намеренно: на тысячах строк это доли секунды, а выражение
+ * пришлось бы считать по двум таблицам сразу — один GIN на digest_items
+ * покрыл бы только половину запроса. Понадобится — материализованный
+ * tsvector на digest_items плюс отдельный на items, и объединение.
+ *
+ * Словарь один на весь запрос и выбран по языку выпуска: и текст, и запрос,
+ * и отрывок обязаны разбираться одинаково, иначе запрос ищет слова, которых
+ * в разобранном тексте нет по построению.
+ */
+async function found(readerId: number, query: string, config: string): Promise<ArchiveHit[]> {
+  return sql<ArchiveHit[]>`
+    with q as (select websearch_to_tsquery(${config}::regconfig, ${query}) as tsq),
+    hits as (
+      select i.id::int as item_id, i.url,
+             coalesce(nullif(di.title, ''), i.title) as title,
+             v.doc as body,
+             s.label as source_label,
+             t.label as topic_label,
+             d.day::text as day,
+             ts_rank_cd(v.tsv, q.tsq) as rank
+        from q
+        join dailynews.digests d on d.reader_id = ${readerId}
+        join dailynews.digest_items di on di.digest_id = d.id
+        join dailynews.items i on i.id = di.item_id
+        join dailynews.sources s on s.id = i.source_id
+   left join dailynews.scores sc on sc.item_id = i.id
+   left join dailynews.topics t on t.id = sc.topic_id
+  -- Ищется по всему, отрывок режется из всего, кроме заголовка выпуска.
+  --
+  -- Разница ровно в нём, и она не косметическая с обеих сторон. Искать
+  -- по заголовку источника обязательно: «uranium» стоит там, а «уран» —
+  -- в описании. Резать отрывок из заголовка выпуска незачем: он и так
+  -- стоит строкой выше, и совпадение в нём видно там — а в отрывке
+  -- он выходил повторением самого себя, на каждой карточке.
+  cross join lateral (
+               -- btrim обязателен: пустая колонка оставляет в склейке
+               -- висячий пробел, а отрывок приходит без него — и проверка
+               -- «до конца ли дочитано» становится всегда ложной. Многоточие
+               -- при этом стоит на каждом отрывке и означает уже ничего.
+               select btrim(concat_ws(' ', di.summary, i.title, i.excerpt)) as doc,
+                      btrim(concat_ws(' ', di.title, di.summary, i.title, i.excerpt)) as searched
+             ) d0
+  cross join lateral (
+               select d0.doc, to_tsvector(${config}::regconfig, d0.searched) as tsv
+             ) v
+       where v.tsv @@ q.tsq
+         -- Скрытое пальцем вниз не возвращается и здесь: иначе «убрать
+         -- из ленты» означало бы «убрать с одной страницы из двух».
+         and not exists (
+           select 1 from dailynews.reads r
+            where r.item_id = i.id and r.reader_id = ${readerId} and r.event = 'down'
+         )
+       order by rank desc, d.day desc
+       limit 40
+    )
+    -- Отрывок считается уже после отбора и предела: ts_headline разбирает
+    -- текст заново на каждой строке, и считать его по всему архиву значит
+    -- платить за то, чего никто не увидит.
+    select item_id, url, title, source_label, topic_label, day,
+           -- Многоточие ставится по краям, которых отрывок не достал.
+           -- Без него вырезанный кусок начинается со строчной буквы
+           -- и обрывается на полуслове — и читается как поломка, а не
+           -- как цитата. Ставить его всегда — врать на тех отрывках,
+           -- что начинаются с начала описания.
+           case when left(e.body, length(m.plain)) = m.plain then '' else '…' end
+             || h.snippet
+             || case when right(e.body, length(m.plain)) = m.plain then '' else '…' end
+             as snippet
+      from hits e,
+           lateral (
+             select ts_headline(${config}::regconfig, e.body, (select tsq from q), ${HL_OPTIONS})
+                      as snippet
+           ) h,
+           -- Тот же отрывок без меток: сравнивать с описанием надо текст,
+           -- а не текст вперемешку с управляющими символами.
+           lateral (
+             select replace(replace(h.snippet, ${HL_START}, ''), ${HL_END}, '') as plain
+           ) m
+     order by e.rank desc, e.day desc
+  `;
+}
+
+/**
+ * Найденное и то, пришлось ли ослаблять запрос.
+ *
+ * Два захода, а не один: сначала все слова, и только если не нашлось
+ * ничего — хотя бы одно. Обратный порядок утопил бы точное совпадение
+ * в материалах, где сошлось одно слово из четырёх.
+ */
+export async function searchArchive(
+  reader: Reader,
+  query: string,
+): Promise<{ hits: ArchiveHit[]; loose: boolean }> {
+  // Читатель целиком, а не его номер: словарь решает не колонка, а тариф,
+  // и с номером язык добывался бы на стороне вызова — первый же вызов
+  // взял бы reader.language вместо действующего.
+  //
+  // Словарь берётся по тому, как читателю пишут сейчас, а не по тому, как
+  // был написан каждый выпуск: своего языка выпуск не хранит. Сменившему
+  // язык старые выпуски ищутся точной формой — «цены» уже не найдут «цена».
+  // Колонка на выпуск это чинит, и заводить её стоит тогда, когда язык
+  // начнут менять, а не заранее: пока меняют тариф, а он язык не трогает.
+  const config = tsConfigFor(effectiveVoice(reader).language);
+
+  const strict = await found(reader.id, query, config);
+  if (strict.length > 0) return { hits: strict, loose: false };
+
+  const loose = anyOf(query);
+  if (!loose) return { hits: strict, loose: false };
+
+  const hits = await found(reader.id, loose, config);
+  return { hits, loose: hits.length > 0 };
+}
+
+/**
+ * Размер архива этого читателя. Стоит на пустом поиске вместо «введите
+ * запрос»: «ищу по 340 материалам из 28 выпусков» отвечает на вопрос,
+ * который возникает раньше, — есть ли вообще в чём искать.
+ */
+export async function archiveSize(readerId: number): Promise<{ items: number; days: number }> {
+  const [row] = await sql<{ items: number; days: number }[]>`
+    select count(*)::int as items, count(distinct d.day)::int as days
+      from dailynews.digests d
+      join dailynews.digest_items di on di.digest_id = d.id
+     where d.reader_id = ${readerId}
+       -- Скрытое пальцем вниз не ищется, значит и не считается: число
+       -- стоит рядом со словами «искали по», и завышать его — врать
+       -- ровно там, где оно и приведено как честный ответ.
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.item_id = di.item_id and r.reader_id = ${readerId} and r.event = 'down'
+       )
+  `;
+  return row ?? { items: 0, days: 0 };
 }
