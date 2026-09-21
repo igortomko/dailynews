@@ -36,11 +36,12 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
-import { numberCollisions } from "../db/schema-gap";
+import { declaringFiles, numberCollisions } from "../db/schema-gap";
+import { readingTime } from "../src/lib/relative-time";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { dupVerdict, sameStoryQuestion } from "./dedup";
 import { composite } from "./score";
@@ -2682,6 +2683,43 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
   assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
   assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
+}
+
+// --- какие миграции сверка формы схемы вообще может проверить ------------------
+// Молчание сверки о файле, который ей ничего не обещал, — не ответ. Пока
+// эти две причины были одной, миграция из одних индексов уходила в журнал
+// мимо базы (0041), а миграция данных — вместе с тринадцатью источниками,
+// которые должна была убрать (0031).
+{
+  const declares = declaringFiles();
+  assert.ok(declares.has("0002_tables.sql"), "файл с таблицами обещает форме схемы");
+  assert.ok(declares.has("0039_item_enriched.sql"), "файл с колонкой обещает форме схемы");
+  assert.ok(
+    !declares.has("0041_story_index.sql"),
+    "файл из одних индексов не обещает форме схемы ничего — его нельзя считать применённым по её молчанию",
+  );
+  // Каталог, а не список: перечисленные руками файлы расходятся с папкой
+  // ровно тогда, когда в неё добавляют новый.
+  const files = readdirSync("db/migrations").filter((name) => name.endsWith(".sql"));
+  assert.ok(
+    [...declares].every((file) => files.includes(file)),
+    "обещания приписаны только существующим файлам",
+  );
+}
+
+// --- время чтения --------------------------------------------------------------
+// Число, похожее на измеренное, но придуманное, — худший вид подписи:
+// проверить его читателю нечем до самого перехода по ссылке.
+{
+  assert.equal(readingTime(null), null, "текста нет — времени нет");
+  assert.equal(readingTime(0), null, "пустой текст времени не даёт");
+  assert.equal(readingTime(599), null, "анонс короче порога остаётся без подписи");
+  assert.equal(readingTime(600), "≈1 мин", "минута — нижняя граница, а не ноль");
+  assert.equal(readingTime(7760), "≈6 мин", "медианная статья живого потока");
+  assert.equal(readingTime(28574), "≈24 мин");
+  // Выше часа — в часах: «≈151 мин» читатель пересчитывает в уме.
+  assert.equal(readingTime(72000), "≈1 ч");
+  assert.equal(readingTime(180988), "≈3 ч", "самая длинная статья потока");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

@@ -23,10 +23,17 @@
  * записывается как применённый без выполнения — иначе журнал, заведённый
  * позже самих миграций, никогда не догонит базу. Каждый такой случай
  * печатается: тихо считать миграцию применённой нельзя.
+ *
+ * Но «обещания выполнены» и «обещаний нет» — разные вещи, и раньше они
+ * были одним. Индекс, `update` и `comment on` в форму схемы не входят,
+ * поэтому разрыва у такого файла не бывает никогда: сверка молчит не потому,
+ * что он применён, а потому, что ей нечего искать. Такие файлы выполняются.
+ * 0041_story_index прошла в журнал мимо базы 21 сентября 2026, 0031 — ещё
+ * 19-го, вместе с тринадцатью источниками, которые должна была убрать.
  */
 import postgres from "postgres";
 import { readFileSync, readdirSync } from "node:fs";
-import { numberCollisions, promised, schemaGaps } from "./schema-gap";
+import { declaringFiles, numberCollisions, promised, schemaGaps } from "./schema-gap";
 import { sql } from "../src/lib/db";
 
 const OWNER = process.env.SUPABASE_DB_URL;
@@ -106,19 +113,34 @@ async function main() {
     // Какой файл за какой разрыв отвечает: если разрывов у файла нет,
     // его обещания в базе уже выполнены.
     const owed = new Set(gapsBefore.map((gap) => gap.from));
+    // ...но только если обещания вообще были. Молчание сверки о файле,
+    // который ей ничего не обещал, — это не ответ.
+    const declares = declaringFiles();
+    let blind = 0;
 
     for (const file of pending) {
       const name = file.replace(/\.sql$/, "");
-      if (!owed.has(file)) {
+      if (!owed.has(file) && declares.has(file)) {
         console.log(`  ${file}: обещанное в базе уже есть — записываю в журнал, не выполняя`);
         await owner`insert into dailynews.migrations (name) values (${name}) on conflict (name) do nothing`;
         recorded++;
         continue;
       }
-      console.log(`→ ${file}`);
+      const unchecked = !declares.has(file);
+      console.log(`→ ${file}${unchecked ? " (форме схемы ничего не обещает)" : ""}`);
       await owner.unsafe(readFileSync(`db/migrations/${file}`, "utf8"));
       console.log("  применена");
       applied++;
+      if (unchecked) blind++;
+    }
+
+    // Сверка ниже такие файлы не покроет, и молчать об этом нельзя:
+    // «разрывов не осталось» про них не утверждает ничего.
+    if (blind > 0) {
+      console.log(
+        `\n  ${blind} из них форме схемы ничего не обещает — сверка их не проверит.\n` +
+        "  Индекс смотреть в pg_indexes, изменения данных — запросом.",
+      );
     }
   } finally {
     await owner.end({ timeout: 10 }).catch(() => {});

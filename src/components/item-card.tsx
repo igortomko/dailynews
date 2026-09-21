@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { relativeTime } from "@/lib/relative-time";
+import { readingTime, relativeTime } from "@/lib/relative-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { OpinionDialog } from "@/components/opinion-dialog";
@@ -207,6 +207,7 @@ export function ItemCard({
 
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
+  const minutes = readingTime(item.body_chars);
   const others = otherSources(item.story, item.source_id);
   const lines = others > 0 ? storyLines(item.story) : [];
 
@@ -277,6 +278,14 @@ export function ItemCard({
               не дёргалась при наведении, — и «кликбейт» за этим местом
               висел в пустоте, оторванный от того, к чему относится. */}
           {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
+          {/* Время чтения остаётся на виду вместе с источником, а не уезжает
+              к скрытым меткам. Тема и горизонт отвечают на «про что это»
+              и нужны, когда уже присматриваешься; «≈6 мин» отвечает
+              на «открывать ли сейчас» — то есть на вопрос, который задают
+              раньше и чаще. Пусто, когда текста статьи у нас нет: у 124
+              карточек из 200 его не бывает, и выдуманное число там было бы
+              неотличимо от измеренного. */}
+          {minutes ? <span className="shrink-0">{minutes}</span> : null}
           {/* min-w-0 обязателен: truncate обрезает только то, чему разрешили
               сузиться, а гибкий элемент по умолчанию не уже своего
               содержимого. Строка в одну линию держала ширину всей карточки,

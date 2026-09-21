@@ -25,6 +25,7 @@ import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
 import { otherSources, storyLines } from "../src/lib/story";
+import { readingTime } from "../src/lib/relative-time";
 import { cleanupReason } from "../src/lib/source-health";
 
 
@@ -1339,7 +1340,22 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
+    // Время чтения считается из длины текста статьи. Колонка, заведённая
+    // миграцией, но не выбранная лентой, ничем себя не выдаёт: подписи
+    // просто не будет, и выглядит это как «у материала нет текста».
+    await sql`update dailynews.items set body = ${"т".repeat(7760)} where id = ${myItem}`;
     const storyFeed = await queries.getFeed(owner.id, storyDay);
+    assert.equal(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
+    assert.equal(readingTime(storyFeed[0].body_chars), "≈6 мин", "и она превращается в минуты");
+
+    // У ролика текст — пересказ субтитров, а не то, что откроется
+    // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
+    await sql`update dailynews.items set transcribed_at = now() where id = ${myItem}`;
+    assert.equal(
+      (await queries.getFeed(owner.id, storyDay))[0].body_chars, null,
+      "у ролика времени чтения не бывает",
+    );
+    await sql`update dailynews.items set transcribed_at = null where id = ${myItem}`;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",

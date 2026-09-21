@@ -106,6 +106,30 @@ export function promised(dir = "db/migrations") {
   return { tables, columns, constraints };
 }
 
+/**
+ * Файлы, которые хоть что-то обещают форме схемы.
+ *
+ * Нужны, чтобы отличить две причины, по которым сверка молчит. Первая:
+ * миграция обещала колонку, колонка есть — значит она применена, и такой
+ * файл можно записать в журнал не выполняя (журнал завели позже самих
+ * миграций, и без этого он не догнал бы базу никогда). Вторая: файл форме
+ * схемы не обещает ничего вовсе — индекс, `update`, `comment on`, — и сверке
+ * просто нечего искать. Её молчание тогда не значит ровным счётом ничего.
+ *
+ * До этой развилки вторые проскакивали как первые. 21 сентября 2026 так
+ * прошла 0041_story_index: журнал пополнился, индекса в базе не появилось.
+ * Раньше, 19 сентября, тем же путём прошла 0031 — она убирала тринадцать
+ * источников, и они остались на месте.
+ */
+export function declaringFiles(dir = "db/migrations"): Set<string> {
+  const { tables, columns, constraints } = promised(dir);
+  return new Set([
+    ...tables.map((row) => row.from),
+    ...columns.map((row) => row.from),
+    ...constraints.map((row) => row.from),
+  ]);
+}
+
 export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]> {
   const { tables, columns, constraints } = promised(dir);
 
