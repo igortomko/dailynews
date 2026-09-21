@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { colorAt, handleLeft, moveBoundary } from "@/lib/topic-budget";
 import { cn } from "@/lib/utils";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Дайджест одной полосой: каждая тема — свой кусок, граница между соседями
@@ -30,6 +31,7 @@ export function TopicBudgetBar({
   counts: number[];
   onChange: (next: number[]) => void;
 }) {
+  const t = useT();
   const bar = useRef<HTMLDivElement>(null);
   const total = counts.reduce((sum, count) => sum + count, 0);
   const upTo = (index: number) => counts.slice(0, index + 1).reduce((sum, count) => sum + count, 0);
@@ -101,7 +103,7 @@ export function TopicBudgetBar({
             key={`handle-${boundary}`}
             role="separator"
             tabIndex={0}
-            aria-label={`Граница: ${labels[boundary]} и ${labels[boundary + 1]}`}
+            aria-label={t.settings.topicBudgetBar.boundaryAria(labels[boundary], labels[boundary + 1])}
             aria-valuenow={counts[boundary]}
             aria-valuemin={1}
             aria-valuemax={counts[boundary] + counts[boundary + 1] - 1}
@@ -138,7 +140,7 @@ export function TopicBudgetBar({
             </div>
             <div className="text-sm leading-tight font-medium tabular-nums">
               {count}
-              <span className="sr-only"> из {total}</span>
+              <span className="sr-only">{t.settings.topicBudgetBar.ofTotalSuffix(total)}</span>
             </div>
           </div>
         ))}

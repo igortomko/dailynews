@@ -28,6 +28,8 @@ import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
 import { readingTime } from "../src/lib/relative-time";
 import { cleanupOf } from "../src/lib/source-health";
+import { applyRules, rulesOf } from "../src/lib/rules";
+import { toSlug } from "../src/lib/slug";
 
 
 
@@ -128,8 +130,27 @@ async function main() {
      * тоже остаётся: `ReadyForQuery` там полагается по спецификации,
      * то есть отказ идёт путём, который не зависит от правки вовсе.
      */
-    const rejects = async (statement: string, pattern: RegExp, why: string) => {
-      await assert.rejects(sql.unsafe(statement), pattern, why);
+    const rejects = async (
+      statement: string,
+      /**
+       * Регулярное выражение по тексту — или код SQLSTATE строкой.
+       *
+       * Код переживает и локаль кластера, и переписанное между версиями
+       * сообщение; в самом тексте ошибки его нет, он лежит отдельным полем,
+       * поэтому сверяется он не выражением, а проверкой.
+       */
+      pattern: RegExp | string,
+      why: string,
+      /** Значения для $1…$n: часть отказов бывает только у параметра. */
+      params: Parameters<typeof sql.unsafe>[1] = [],
+    ) => {
+      await assert.rejects(
+        sql.unsafe(statement, params),
+        typeof pattern === "string"
+          ? (error: unknown) => (error as { code?: string }).code === pattern
+          : pattern,
+        why,
+      );
       const [alive] = await sql<{ v: string }[]>`select 'ok'::text as v`;
       assert.equal(
         alive?.v,
@@ -373,13 +394,68 @@ async function main() {
       return digest.id;
     };
 
+    /**
+     * Две формы запроса из сборки выпуска, которые не работали ни разу.
+     *
+     * `jsonb_build_object` принимает "any", и тип нетипизированного параметра
+     * Postgres вывести не может — запрос падает на разборе, до единой строки.
+     * У `digest_items` нет столбца `id`: ключ составной, и `returning id`
+     * падал на каждой вставке. Обе видны были только как вежливое
+     * «не получилось собрать первый выпуск»: у нового читателя первый выпуск
+     * не собирался вовсе, а ночной прогон пишет выпуск своим кодом и потому
+     * работал.
+     */
+    const shapes = async (digestId: number, itemId: number) => {
+      await rejects(
+        "select jsonb_build_object('reading_target', $1) as j",
+        // Код, а не английский текст: сообщение переписывают между версиями,
+        // а на локализованном кластере его не будет вовсе.
+        "42P18", // тип параметра не определён
+        "без каста параметр в jsonb_build_object не типизируется — это и было причиной",
+        [1.5],
+      );
+      await sql`
+        update dailynews.digests
+           set stats = coalesce(stats, '{}'::jsonb)
+                     || jsonb_build_object('reading_target', ${1.5}::real)
+         where id = ${digestId}
+      `;
+      const [{ target }] = await sql<{ target: number }[]>`
+        select (stats->>'reading_target')::float as target
+          from dailynews.digests where id = ${digestId}`;
+      assert.equal(target, 1.5, "заказ дня ложится в stats, а не теряется");
+
+      const back = await sql<{ item_id: number }[]>`
+        insert into dailynews.digest_items (digest_id, item_id, total, position, title, summary)
+        values (${digestId}, ${itemId}, 1, 99, 'проба', 'S')
+        on conflict (digest_id, item_id) do nothing
+        returning item_id::int as item_id
+      `;
+      assert.equal(back.length, 0, "уже лежащий материал не вставляется второй раз");
+      await rejects(
+        `insert into dailynews.digest_items
+           (digest_id, item_id, total, position, title, summary)
+         values ($1, $2, 1, 98, 'проба', 'S')
+         on conflict (digest_id, item_id) do nothing
+         returning id::int as id`,
+        "42703", // столбца нет
+        "у digest_items нет собственного ключа — returning id падал на каждой вставке",
+        [digestId, itemId],
+      );
+      // Убираем за собой: заказ дня — предмет отдельной проверки ниже,
+      // и оставленное здесь значение сделало бы её бессмысленной.
+      await sql`update dailynews.digests set stats = stats - 'reading_target' where id = ${digestId}`;
+      console.log("  формы запросов сборки: каст и составной ключ на месте");
+    };
+
     const today = new Date().toISOString().slice(0, 10);
     // Владельцу — два материала, второму читателю — один, и подписи разные:
     // текст персонален, потому что язык и манера персональны.
-    await makeDigest(owner.id, today, [
+    const ownerDigest = await makeDigest(owner.id, today, [
       { id: ids[0], total: 120, title: "Владелец: GPT-6" },
       { id: ids[2], total: 95, title: "Владелец: уран" },
     ]);
+    await shapes(ownerDigest, ids[0]);
     await makeDigest(second.id, today, [{ id: ids[3], total: 60, title: "Vera: CBT" }]);
 
     // Материал старше своего выпуска: без этого проверка ниже проходила бы
@@ -1204,6 +1280,115 @@ async function main() {
     );
     console.log(`  цели персональны: ${budget[1].topic.label} — ${secondShare} мест у второго`);
 
+    // --- личные правила: за чем следить и что исключать ------------------------
+    // Правило личное: у владельца оно есть, у второго читателя нет, и один
+    // и тот же поток должен разойтись по-разному. Ломается это молча —
+    // выпуск приходит вовремя, просто с тем, что просили не показывать,
+    // — поэтому проверяется настоящий отбор и настоящая лента.
+    const [ruleSource] = await sql<{ id: number }[]>`
+      insert into dailynews.sources (kind, label, url, config)
+      values ('rss', 'Правила: издание', 'https://rules.example.com/feed', '{}'::jsonb)
+      returning id::int as id
+    `;
+    const ruleItem = async (topic: typeof topics[number], title: string, total: number, extra = {}) => {
+      const url = `https://rules.example.com/${toSlug(title)}`;
+      const [row] = await sql<{ id: number }[]>`
+        insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+        values (${ruleSource.id}, ${url}, ${url}, ${title}, ${normalizeTitle(title)}, '')
+        returning id::int as id
+      `;
+      await sql`
+        insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+        values (
+          ${row.id}, ${topic.id}, ${total}, 0.8,
+          ${sql.json(axes(topic.slug, "fact", extra) as unknown as Parameters<typeof sql.json>[0])},
+          'jev-latest'
+        )
+      `;
+      return row.id;
+    };
+    // Figma — середина очереди дизайна по скору: без правила в шесть мест
+    // не попадает, с правилом обязана встать первой. Musk — лучший
+    // материал потока: без правила берётся у любого читателя.
+    const figmaItem = await ruleItem(budget[1].topic, "Figma raises a round", 60, { clickbait: { noul: 0.35 } });
+    const muskItem = await ruleItem(budget[2].topic, "Musk buys the chain", 130, { depth: { score: 2, max: 2, confidence: 0.9 } });
+    const ruleSources = [...everySource, ruleSource.id];
+
+    const ownerRules = { follow: [["Figma", "Фигма"]], exclude: [["Musk"]] };
+    await readers.saveRules(sql, owner.id, ownerRules);
+    const ownerRuled = (await readers.getReader(owner.id))!;
+    assert.deepEqual(ownerRuled.follow_rules, ownerRules.follow, "слежение приезжает массивом, а не строкой jsonb");
+    assert.deepEqual(ownerRuled.exclude_rules, ownerRules.exclude, "исключения приезжают массивом");
+    const secondRuled = (await readers.getReader(second.id))!;
+    assert.deepEqual(secondRuled.exclude_rules, [], "у второго читателя правил нет: старые читатели получают пустую настройку");
+    await rejects(
+      `update dailynews.readers set follow_rules = '"Figma"'::jsonb where id = ${owner.id}`,
+      /readers_follow_rules_array/,
+      "строка вместо массива (урок 0005) отвергается самой базой",
+    );
+
+    const ownerTargets = targetsOf(await readers.getReaderTopics(owner.id));
+    const unruledPick = await selectSurvivors(sql, owner.id, owner.weights, ownerTargets, 12, ruleSources);
+    assert.ok(unruledPick.some((s) => Number(s.id) === muskItem), "без правил лучший материал берётся");
+    assert.ok(!unruledPick.some((s) => Number(s.id) === figmaItem), "без правил середина очереди в шесть мест не попадает");
+
+    const ruledPick = await selectSurvivors(
+      sql, owner.id, owner.weights, ownerTargets, 12, ruleSources, 0, rulesOf(ownerRuled),
+    );
+    assert.ok(!ruledPick.some((s) => Number(s.id) === muskItem), "исключённое не попадает в выпуск владельца");
+    const designPicked = ruledPick.filter((s) => s.topic_label === budget[1].topic.label);
+    assert.equal(Number(designPicked[0]?.id), figmaItem, "упомянутое встаёт первым в своей теме");
+    assert.equal(
+      designPicked.length,
+      unruledPick.filter((s) => s.topic_label === budget[1].topic.label).length,
+      "доля темы от слежения не растёт: приоритет — порядок внутри очереди, а не лишние места",
+    );
+
+    // Сорок мест, а не двенадцать: у второго цель «Дизайн» — двадцать, и круг
+    // отдаёт дизайну двадцать мест раньше, чем блокчейн получит первое.
+    // Проверяется изоляция правил, а не бюджет тем.
+    const secondPick = await selectSurvivors(
+      sql, second.id, second.weights, targetsOf(await readers.getReaderTopics(second.id)), 40, ruleSources, 0,
+      rulesOf(secondRuled),
+    );
+    assert.ok(secondPick.some((s) => Number(s.id) === muskItem), "исключение владельца не трогает выпуск соседа");
+    console.log("  правила отбора: исключённое ушло, упомянутое первое, сосед не задет");
+
+    // Готовый выпуск: исключение прячет карточку без пересборки, у соседа
+    // та же карточка остаётся. Пометка слежения находится по написанию
+    // из выпуска — «Фигма» ловится вторым написанием, называется первым.
+    const rulesDay = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
+    const ruleCards = [
+      { id: muskItem, total: 130, title: "Владелец: Маск покупает" },
+      { id: figmaItem, total: 60, title: "Владелец: Фигма подняла раунд" },
+    ];
+    await makeDigest(owner.id, rulesDay, ruleCards);
+    await makeDigest(second.id, rulesDay, ruleCards);
+    const ownerShown = applyRules(await queries.getFeed(owner.id, rulesDay), rulesOf(ownerRuled));
+    assert.deepEqual(ownerShown.visible.map((c) => Number(c.id)), [figmaItem], "исключённая карточка спрятана из готового выпуска");
+    assert.equal(ownerShown.hidden, 1, "скрытое посчитано");
+    assert.equal(ownerShown.visible[0].followed, "Figma", "пометка называет первое написание правила");
+    const secondShown = applyRules(await queries.getFeed(second.id, rulesDay), rulesOf(secondRuled));
+    assert.equal(secondShown.hidden, 0, "у соседа ничего не спрятано");
+    assert.equal(secondShown.visible.length, 2, "у соседа обе карточки на месте");
+    // Снятое правило возвращает карточку как была — без пересборки.
+    await readers.saveRules(sql, owner.id, { follow: [], exclude: [] });
+    const ownerFreed = applyRules(
+      await queries.getFeed(owner.id, rulesDay), rulesOf((await readers.getReader(owner.id))!),
+    );
+    assert.equal(ownerFreed.visible.length, 2, "снятое исключение возвращает карточку");
+    assert.equal(ownerFreed.visible[0].followed, null, "без слежения пометки нет");
+    console.log("  правила в ленте: спрятано без пересборки, возвращается снятием правила");
+    // Выпуск и источник этой проверки убираются: дальше мерка карточки
+    // и архив считаются по выпускам владельца, а список источников —
+    // по каталогу, и лишний день или лишняя активная строка сдвинули бы их.
+    // Материалы и оценки уходят каскадом за источником.
+    await sql`
+      delete from dailynews.digests
+       where day = ${rulesDay}::date and reader_id in (${owner.id}, ${second.id})
+    `;
+    await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
+
     // --- потолок расходов -------------------------------------------------------
     assert.equal(await readers.spentToday(second.id), 0, "новый читатель ничего не потратил");
     await readers.recordCall({
@@ -1690,6 +1875,73 @@ async function main() {
     `;
     assert.equal(chainsLeft.n, 0, "отбор выпрямляет цепочки сам, а не надеется на прогон");
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
+
+    // Reading cache isolation, idempotent settlement and concurrent budget reservations.
+    const readingStore = await import("../pipeline/reading-store");
+    const budgetReader = await readers.ensureReader(BIG_TELEGRAM_ID + 99, "reading-test");
+    await sql`update dailynews.readers set daily_cap_usd=0.10 where id=${budgetReader.id}`;
+    const reservations = await Promise.allSettled([
+      readingStore.reserveCall(sql, budgetReader.id, 0.07, "verify", "test-model"),
+      readingStore.reserveCall(sql, budgetReader.id, 0.07, "verify", "test-model"),
+    ]);
+    assert.equal(reservations.filter((r) => r.status === "fulfilled").length, 1, "parallel reservations cannot both spend the remaining budget");
+    const accepted = reservations.find((r) => r.status === "fulfilled");
+    assert.ok(accepted?.status === "fulfilled");
+    const callId = accepted.value;
+    await readingStore.settleCall(sql, budgetReader.id, callId, { input: 10, output: 5, cached: 3, reasoning: 0, requests: 1 }, 0.01, 100);
+    await readingStore.settleCall(sql, budgetReader.id, callId, null, null, 100);
+    assert.ok(Math.abs((await readers.spentToday(budgetReader.id)) - 0.01) < 0.000001, "settlement is idempotent and releases the unused reservation");
+    const uncertain = await readingStore.reserveCall(sql, budgetReader.id, 0.08, "compose", "test-model");
+    await readingStore.settleCall(sql, budgetReader.id, uncertain, null, null, 100);
+    assert.ok(Math.abs((await readers.spentToday(budgetReader.id)) - 0.09) < 0.000001, "uncertain paid calls retain a conservative charge");
+    const record = { version: 2 as const, sourceVersion: "test-v", availability: "excerpt_only" as const, status: "unavailable" as const, document: null, notice: "Test", seconds: 0 };
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", record);
+    assert.deepEqual(await readingStore.getDocument(sql, owner.id, "reading-private-key"), record);
+    assert.equal(await readingStore.getDocument(sql, second.id, "reading-private-key"), null, "another reader cannot fetch a private summary by its key");
+    const lease = await readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v");
+    assert.ok(lease.token);
+    await assert.rejects(() => readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v"), readingStore.ReadingBusyError);
+    await readingStore.finishAnalysis(sql, "reading-shared-key", lease.token, null);
+    const renewed = await readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v");
+    assert.ok(renewed.token, "failed analysis can be retried");
+    await readingStore.finishAnalysis(sql, "reading-shared-key", renewed.token, null);
+    assert.equal((await readingStore.recentBaselines(sql, second.id, deep[0], "new story")).length, 0);
+    const beforeUnavailable = await readers.digestProgress(owner.id, null);
+    const [latestDigest] = await sql<{ id: number }[]>`select id::int from dailynews.digests where reader_id=${owner.id} order by day desc limit 1`;
+    const [placeholder] = await sql<{ item_id: number }[]>`select item_id::int from dailynews.digest_items where digest_id=${latestDigest.id} limit 1`;
+    if (placeholder) {
+      await sql`update dailynews.digest_items set summary_document=${sql.json(record)} where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
+      const afterUnavailable = await readers.digestProgress(owner.id, null);
+      assert.equal(afterUnavailable.items, beforeUnavailable.items - 1, "unavailable summaries do not fill usable card capacity");
+      await sql`update dailynews.digest_items set summary_document=null where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
+    }
+    const good = { ...record, status: "verified" as const };
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", good);
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", record);
+    assert.equal((await readingStore.getDocument(sql, owner.id, "reading-private-key"))?.status, "verified", "a concurrent failure cannot downgrade a verified private cache entry");
+    console.log("  reading: scoped caches, analysis lease, reservations, settlement and new queries verified");
+
+    // Full source access can reveal an exclusion missing from the RSS teaser.
+    const { writeReadingDigest } = await import("../pipeline/reading");
+    const { compile: compileReadingRules, applyRules: applyReadingRules, NO_MATCH: noReadingMatch } = await import("../src/lib/rules");
+    const excludedNames = [["FictionalBlockedVendor"]];
+    await sql`update dailynews.readers set exclude_rules=${sql.json(excludedNames)} where id=${owner.id}`;
+    await sql`update dailynews.items set body='<p>FictionalBlockedVendor is named only in the full article.</p>', source_content_kind='article_text' where id=${deep[0]}`;
+    const filtered = await writeReadingDigest(sql, [{ id: deep[0], title: 'Neutral title', excerpt: 'Neutral teaser', body: null,
+      url: 'https://example.com/full-source', source_label: 'Source', topic_label: 'Topic', total: 0, axes: {} as import("../src/lib/types").Axes }],
+      '', { language: 'русском', complexity: 3, style: 'нейтральный' }, { readerId: owner.id });
+    assert.deepEqual(filtered.excludedIds, [deep[0]]);
+    assert.equal(filtered.items.length, 0, "excluded full sources never become unavailable placeholders");
+    assert.equal(filtered.usage.requests, 0, "excluded sources do not spend the generation budget");
+    if (placeholder) {
+      await sql`update dailynews.items set body='<p>FictionalBlockedVendor appears only here.</p>' where id=${placeholder.item_id}`;
+      const feed = await queries.getFeed(owner.id, null);
+      const visibility = applyReadingRules(feed, { follow: noReadingMatch, exclude: compileReadingRules(excludedNames) });
+      assert.ok(feed.some(item => item.id === placeholder.item_id), "the existing card remains stored");
+      assert.ok(!visibility.visible.some(item => item.id === placeholder.item_id), "full-source exclusions also hide existing cards");
+    }
+    await sql`update dailynews.readers set exclude_rules='[]'::jsonb where id=${owner.id}`;
+    console.log("  reading: full-source exclusions prevent generation and hide existing cards");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {

@@ -1,8 +1,11 @@
 import { sql } from "./db";
 import type { Reader, ReaderChannel, ReaderTopic, Source, Topic, VoiceCardRow } from "./types";
 import { kindleSenderName } from "./kindle-setup";
+import { DEFAULT_LOCALE, type Locale } from "./i18n/locale";
 import { effectiveVoice } from "./lemon";
 import { cardMinutes } from "./reading-time";
+import type { Rules } from "./rules";
+import type { Sql, TransactionSql } from "postgres";
 
 /**
  * Всё, что знает о читателях. Живёт отдельно от queries.ts, потому что нужно
@@ -26,13 +29,14 @@ import { cardMinutes } from "./reading-time";
  */
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
-  reader_context, digest_minutes, weights, language, complexity, style,
+  reader_context, reading_v2_enabled, digest_minutes, weights, language, ui_language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
   paused_at, sleep_asked_at, resume_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
-  voice_card, voice_built_at, voice_sample
+  voice_card, voice_built_at, voice_sample,
+  follow_rules, exclude_rules
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -124,6 +128,16 @@ export async function freezeKindleSender(
 export async function ensureReader(
   telegramId: number,
   username: string | null,
+  /**
+   * Язык интерфейса из Telegram. Ставится только при заведении: читатель
+   * мог выбрать другой в настройках, и перезаписывать его выбор тем,
+   * что стоит у него в телефоне, — значит отменять решение без спроса.
+   *
+   * Тип, а не строка: в базе на колонке check по списку словарей, и
+   * ненормализованный «en-US» уронил бы вставку вместо ошибки компиляции —
+   * то есть не пустил бы читателя вовсе.
+   */
+  locale?: Locale,
 ): Promise<Reader> {
   // Владелец забирает строку, перенесённую из profile: в ней его контекст,
   // веса и пройденный онбординг. Иначе он завёлся бы вторым читателем
@@ -138,8 +152,8 @@ export async function ensureReader(
   }
 
   const [reader] = await sql<Reader[]>`
-    insert into dailynews.readers (telegram_id, username)
-    values (${telegramId}, ${username})
+    insert into dailynews.readers (telegram_id, username, ui_language)
+    values (${telegramId}, ${username}, ${locale ?? DEFAULT_LOCALE})
     on conflict (telegram_id) do update
       set username = excluded.username, updated_at = now()
     returning ${COLUMNS}
@@ -207,6 +221,7 @@ export async function digestProgress(
            coalesce(max(di.total), 0)::float as best
       from dailynews.digests d
  left join dailynews.digest_items di on di.digest_id = d.id
+       and coalesce(di.summary_document->>'status','verified') <> 'unavailable'
      -- Каст обязателен: у нетипизированного параметра Postgres выбирает
      -- тип по колонке и падает на null там, где null означает «любой день».
      where d.reader_id = ${readerId}
@@ -248,10 +263,10 @@ export async function cardCharsOf(readerId: number): Promise<number> {
  *  бесплатный и мгновенный, и сто аккаунтов заводятся за вечер. */
 export async function spentToday(readerId: number): Promise<number> {
   const [row] = await sql<{ spent: number }[]>`
-    select coalesce(sum(cost_usd), 0)::float as spent
-      from dailynews.model_calls
-     where reader_id = ${readerId}
-       and at >= date_trunc('day', now())
+    select (coalesce((select sum(cost_usd) from dailynews.model_calls
+      where reader_id=${readerId} and at>=date_trunc('day',now())),0)
+      + coalesce((select sum(reserved_usd) from dailynews.reading_calls
+      where reader_id=${readerId} and status='reserved' and at>=date_trunc('day',now())),0))::float as spent
   `;
   return row?.spent ?? 0;
 }
@@ -495,6 +510,29 @@ export async function saveVoiceCard(readerId: number, card: VoiceCardRow): Promi
     update dailynews.readers
        set voice_card = ${sql.json(card as unknown as Parameters<typeof sql.json>[0])},
            voice_built_at = now(),
+           updated_at = now()
+     where id = ${readerId}
+  `;
+}
+
+/**
+ * Личные правила отбора. Объектом через `sql.json`, как и карточка автора:
+ * строка в jsonb молча превратила бы список в текст, который отбор читает
+ * как «правил нет», — теперь такую запись отвергает и сама база
+ * (`readers_follow_rules_array`).
+ *
+ * Пишется в переданное соединение: форма интересов сохраняет темы и правила
+ * одной транзакцией, а онбординг — той же функцией, что и форма.
+ */
+export async function saveRules(
+  db: Sql | TransactionSql,
+  readerId: number,
+  rules: Rules,
+): Promise<void> {
+  await db`
+    update dailynews.readers
+       set follow_rules = ${sql.json(rules.follow)},
+           exclude_rules = ${sql.json(rules.exclude)},
            updated_at = now()
      where id = ${readerId}
   `;

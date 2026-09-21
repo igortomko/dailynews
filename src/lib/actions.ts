@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
+import { dictOf, localeOf, type Dict } from "./i18n";
+import { getDict } from "./i18n/server";
 import { discover, planFor, type Found } from "../../pipeline/discover";
 import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
@@ -14,9 +16,10 @@ import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
   addReaderSource, deleteChannel, digestProgress, freezeKindleSender, getChannels,
-  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveVoiceCard,
-  saveVoiceSample, spentToday,
+  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules,
+  saveVoiceCard, saveVoiceSample, spentToday,
 } from "./readers";
+import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { asCard, buildVoiceCard, cardFromVoice, readOwnPosts } from "../../pipeline/voice-card";
 import { writePost } from "../../pipeline/post";
@@ -26,7 +29,7 @@ import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestWith, kindDenial, MIN_READING_MINUTES, minutesCap, READING_MINUTES,
-  sourcesForPlan, targetMinutes, topicsWord, type Gated,
+  sourcesForPlan, targetMinutes, type Gated,
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
@@ -41,13 +44,16 @@ import { resolveSuggestions } from "./onboarding";
  */
 export async function login(_prev: unknown, formData: FormData) {
   const password = String(formData.get("password") ?? "");
+  // Словарь по умолчанию: на этом экране читатель ещё не опознан,
+  // и спросить, на каком языке с ним говорить, некого.
+  const t = dictOf(undefined);
   if (!(await checkPassword(password))) {
-    return { error: "Пароль не подходит" };
+    return { error: t.errors.wrongPassword };
   }
   const [owner] = await sql<{ id: number }[]>`
     select id::int as id from dailynews.readers where owner
   `;
-  if (!owner) return { error: "Такого входа сейчас нет — войди через бота" };
+  if (!owner) return { error: t.errors.noSuchEntrance };
 
   const session = await issueSession(owner.id);
   (await cookies()).set(session.name, session.value, session.options);
@@ -73,7 +79,31 @@ export type ChipInput = { slug: string; label: string; hint: string; count: numb
 async function denyBySection(section: Gated): Promise<{ error: string } | null> {
   const plan = effectivePlan(await currentReader());
   if (allows(plan, section)) return null;
-  return { error: `Раздел доступен на тарифе «${cheapestWith(section).label}»` };
+  const t = await getDict();
+  return { error: t.errors.sectionLocked(cheapestWith(section).label) };
+}
+
+/**
+ * Язык интерфейса. Отдельным действием, а не полем формы настроек:
+ * переключатель стоит в шапке и работает на любой странице, в том числе
+ * там, где формы нет вовсе.
+ *
+ * Значение прижимается к известным: колонка свободная, а в базе стоит check,
+ * и незнакомая строка уронила бы запись вместо того, чтобы ничего не менять.
+ */
+export async function setUiLanguage(value: string) {
+  const readerId = await currentReaderId();
+  const locale = localeOf(value);
+  await sql`
+    update dailynews.readers
+       set ui_language = ${locale}, updated_at = now()
+     where id = ${readerId}
+  `;
+  // Раскладка перерисовывается целиком: язык читают и шапка, и разделы,
+  // и страница — обновить что-то одно значило бы оставить половину экрана
+  // на прежнем языке.
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }
 
 export async function savePersonalization(formData: FormData) {
@@ -115,7 +145,7 @@ export async function savePersonalization(formData: FormData) {
 export async function saveInterests(formData: FormData) {
   const readerId = await currentReaderId();
   const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
-  if (chips.length === 0) return { error: "Добавь хотя бы один интерес" };
+  if (chips.length === 0) return { error: (await getDict()).errors.pickOneTopic };
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
@@ -123,9 +153,7 @@ export async function saveInterests(formData: FormData) {
   const plan = effectivePlan(reader);
   if (chips.length > plan.maxTopics) {
     return {
-      error:
-        `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
-        `а выбрано ${chips.length}`,
+      error: (await getDict()).errors.tooManyTopics(plan.label, plan.maxTopics, chips.length),
     };
   }
 
@@ -135,7 +163,7 @@ export async function saveInterests(formData: FormData) {
   // и цель первой темы теряется. Сумма целей молча перестаёт равняться
   // размеру дайджеста — полоса показывает одно, приходит другое.
   if (new Set(slugs).size !== slugs.length) {
-    return { error: "Такой интерес уже есть — назови иначе" };
+    return { error: (await getDict()).errors.duplicateTopic };
   }
   // Предел минут — тоже серверная проверка, а не только корона в форме:
   // форму рисует браузер, а платит за лишние описания владелец ключа.
@@ -157,10 +185,45 @@ export async function saveInterests(formData: FormData) {
     places,
   );
 
-  await writeTopics(readerId, chips, slugs, counts, minutes, true);
+  // За чем следить и что исключать живут в той же форме: это одно решение
+  // об отборе, и сохраняется оно одной кнопкой. Пределы проверяет сервер —
+  // форму рисует браузер.
+  const rules = readRules(formData, (await getDict()).rules);
+  if ("error" in rules) return { error: rules.error };
+
+  await writeTopics(readerId, chips, slugs, counts, minutes, true, rules);
 
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/**
+ * Личные правила из формы. Поля обязаны присутствовать: их рисует та же
+ * форма, что и темы, и пустой список означает «правил нет», а не «поле
+ * забыли» — иначе форма, где поля нет, молча стирала бы список.
+ */
+function readRules(formData: FormData, words: Dict["rules"]): Rules | { error: string } {
+  const parse = (field: string): unknown => {
+    const raw = formData.get(field);
+    // Поля нет — это не «правил нет»: вкладка со старой сборкой после
+    // развёртывания не рисует скрытых полей, и пустой список стёр бы
+    // сохранённое молча. Не разобралось — тоже отказ, а не пустота:
+    // не-массив доходит до cleanRules, и тот называет причину.
+    if (raw === null) return {};
+    try {
+      // Разобранный null — тот же отказ, а не «правил нет»: cleanRules
+      // читает null как пустой список, и он стёр бы сохранённое молча.
+      const parsed: unknown = JSON.parse(String(raw));
+      return parsed === null ? {} : parsed;
+    } catch {
+      return {};
+    }
+  };
+  const follow = cleanRules("follow", parse("follow"), words);
+  if ("error" in follow) return follow;
+  const exclude = cleanRules("exclude", parse("exclude"), words);
+  if ("error" in exclude) return exclude;
+  return { follow: follow.rules, exclude: exclude.rules };
 }
 
 
@@ -183,6 +246,8 @@ async function writeTopics(
   counts: number[],
   minutes: number,
   finish: boolean,
+  /** За чем следить и что исключать — в той же транзакции, что и темы. */
+  rules: Rules,
 ): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`
@@ -192,6 +257,7 @@ async function writeTopics(
              updated_at = now()
        where id = ${readerId}
     `;
+    await saveRules(tx, readerId, rules);
 
     const ids: number[] = [];
     for (const [index, chip] of chips.entries()) {
@@ -273,9 +339,9 @@ export async function saveKindleAddress(formData: FormData) {
 
   const readerId = await currentReaderId();
   const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
-  if (!address) return { error: "Впиши адрес читалки" };
+  if (!address) return { error: (await getDict()).errors.kindleAddressEmpty };
   if (!/^[^@\s]+@kindle\.com$/.test(address)) {
-    return { error: "Адрес должен заканчиваться на @kindle.com" };
+    return { error: (await getDict()).errors.kindleAddressSuffix };
   }
 
   await sql`
@@ -345,7 +411,7 @@ export async function discoverSource(input: string): Promise<
   { ok: true; found: Found } | { ok: false; error: string }
 > {
   const raw = input.trim().slice(0, 500);
-  if (!raw) return { ok: false, error: "Пустая строка" };
+  if (!raw) return { ok: false, error: (await getDict()).errors.emptyLine };
 
   // Тариф спрашивается до сети. Какой это будет вид, planFor знает без
   // единого запроса, а разбор ссылки X — уже платный запрос к twitterapi.io:
@@ -379,8 +445,8 @@ export async function addSource(formData: FormData) {
   const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
   const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
-  if (!isKnownKind(kind)) return { error: "Сначала проверь ссылку" };
-  if (!url) return { error: "Вставь ссылку" };
+  if (!isKnownKind(kind)) return { error: (await getDict()).errors.checkLinkFirst };
+  if (!url) return { error: (await getDict()).errors.pasteLink };
 
   // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
   // чем сходить за фидом и отказать после.
@@ -388,7 +454,7 @@ export async function addSource(formData: FormData) {
   if (denied) return { error: denied };
 
   const probe = await probeOne(kind, url, inputUrl);
-  if (!probe.ok) return { error: `Источник больше не отвечает: ${probe.error}` };
+  if (!probe.ok) return { error: (await getDict()).errors.sourceGone(probe.error) };
 
   const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
@@ -421,7 +487,7 @@ export async function deleteSource(id: number) {
      returning s.label
   `;
   revalidatePath("/settings/sources");
-  return row ? { ok: true as const, label: row.label } : { error: "Источник уже убран" };
+  return row ? { ok: true as const, label: row.label } : { error: (await getDict()).errors.sourceAlreadyGone };
 }
 
 /** Отмена: возвращает источник в ленту. Каталог его и не терял. */
@@ -476,27 +542,28 @@ async function rewriteFor(reader: Reader) {
      where d.reader_id = ${reader.id}
      order by d.day desc limit 1
   `;
-  if (!digest) return { error: "Выпуска ещё нет — переписывать нечего" };
+  if (!digest) return { error: (await getDict()).errors.noDigestYet };
 
   const survivors = await sql<Survivor[]>`
-    select i.id::int as id, i.title, coalesce(i.excerpt, '') as excerpt, i.url,
+    select i.id::int as id, i.title, coalesce(i.excerpt, '') as excerpt, i.body, i.url,
            s.label as source_label, coalesce(t.label, '') as topic_label,
            di.total, sc.axes
       from dailynews.digest_items di
       join dailynews.items i on i.id = di.item_id
       join dailynews.sources s on s.id = i.source_id
-      join dailynews.scores sc on sc.item_id = i.id
+      join dailynews.scores sc on sc.item_id = coalesce(i.dup_of, i.id)
+      join dailynews.digests own_digest on own_digest.id = di.digest_id
  left join dailynews.topics t on t.id = sc.topic_id
-     where di.digest_id = ${digest.id}
+     where di.digest_id = ${digest.id} and own_digest.reader_id = ${reader.id}
      order by di.total desc
   `;
-  if (survivors.length === 0) return { error: "В выпуске нет материалов" };
+  if (survivors.length === 0) return { error: (await getDict()).errors.digestEmpty };
 
   // Тот же потолок, что у догрузки и у ночного прогона: переписывание
   // стоит ровно столько же, сколько письмо описаний с нуля.
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: "Сегодня больше нельзя — завтра лимит обнулится" };
+    return { error: (await getDict()).errors.capReachedRewrite };
   }
 
   const written = await writeDigest(
@@ -506,8 +573,9 @@ async function rewriteFor(reader: Reader) {
     })),
     reader.reader_context,
     effectiveVoice(reader),
+    { readerId: reader.id },
   );
-  await recordCall({
+  if (!written.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,
     costUsd: llmCost(written.usage),
@@ -515,19 +583,24 @@ async function rewriteFor(reader: Reader) {
 
   const byId = new Map(written.items.map((item) => [String(item.id), item]));
   let rewritten = 0;
+  let retained = 0;
   for (const survivor of survivors) {
+    if (written.excludedIds?.includes(survivor.id)) continue;
+    if (written.retainedIds?.includes(survivor.id)) { retained++; continue; }
     const item = byId.get(String(survivor.id));
     // Материал, которого модель не вернула, остаётся как был: пустое
     // описание вместо прежнего — это потеря, а не обновление.
-    if (!item?.title_ru) continue;
-    await sql`
+    if (!item?.title_ru || item.reading?.status === 'unavailable') { retained++; continue; }
+    const updated = await sql`
       update dailynews.digest_items
-         set title = ${item.title_ru}, summary = ${item.summary ?? ""}
+         set title = ${item.title_ru}, summary = ${item.summary ?? ""},
+             summary_document = ${item.reading ? sql.json(item.reading) : null}
        where digest_id = ${digest.id} and item_id = ${survivor.id}
+       returning item_id
     `;
-    rewritten += 1;
+    rewritten += updated.length;
   }
-  return { ok: true as const, rewritten, day: digest.day };
+  return { ok: true as const, rewritten, retained, day: digest.day };
 }
 
 /**
@@ -567,7 +640,7 @@ async function fillDigest(reader: Reader) {
   // те же деньги, и обходить его ей незачем.
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: "Сегодня больше добавить нельзя — завтра лимит обнулится" };
+    return { error: (await getDict()).errors.capReachedTopUp };
   }
 
   // selectSurvivors сам исключает всё, что уже попало в выпуски этого
@@ -581,6 +654,9 @@ async function fillDigest(reader: Reader) {
     // среди оставшихся: иначе кнопка «добрать» приносила бы ровно тех,
     // кого ночной отбор отверг, и тем громче, чем чаще на неё нажимать.
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, existing.best,
+    // Те же личные правила, что и ночью: первый выпуск и догрузка идут
+    // через эту функцию, и кнопка не должна приносить исключённое.
+    rulesOf(reader),
   );
   if (survivors.length === 0) {
     // Первому выпуску и догрузке нужны разные слова: «больше нет» в ответ
@@ -589,8 +665,8 @@ async function fillDigest(reader: Reader) {
       ok: true as const,
       added: 0,
       note: existing.day
-        ? "Больше свежих новостей нет"
-        : "Свежих новостей пока нет — первые придут ночью",
+        ? (await getDict()).errors.noMoreFreshNews
+        : (await getDict()).errors.noFreshNewsYet,
     };
   }
 
@@ -602,8 +678,9 @@ async function fillDigest(reader: Reader) {
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const written = await writeDigest(survivors, reader.reader_context, voice);
-  await recordCall({
+  const written = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
+  if (survivors.every(item => written.excludedIds?.includes(item.id))) return { ok: true as const, added: 0 };
+  if (!written.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,
     costUsd: llmCost(written.usage),
@@ -611,19 +688,36 @@ async function fillDigest(reader: Reader) {
 
   // Вторая петля измерения не пропускается: иначе догруженные описания
   // не попадут в ряд по дням, и ряд начнёт врать о том, что читатель видел.
-  const quality = await scoreSummaries(
-    written.items.map((item) => ({
-      id: Number(item.id), title: item.title_ru, summary: item.summary,
-    })),
-    reader.reader_context,
-  );
-  await recordCall({
-    readerId: reader.id, stage: "summary", model: quality.model,
-    tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
-  });
+  //
+  // Но и уронить выпуск она не должна. Петля меряет наш промпт — она про нас,
+  // а не про читателя, — и стоит после того, как описания уже написаны
+  // и оплачены. Без этой обёртки молчащий Jev забирал с собой весь первый
+  // выпуск нового читателя: текст есть, деньги потрачены, в базе ничего.
+  // Ряд по дням в такой день просто короче, и это видно.
+  let quality: Awaited<ReturnType<typeof scoreSummaries>> | null = null;
+  try {
+    quality = written.accounted ? null : await scoreSummaries(
+      written.items.map((item) => ({
+        id: Number(item.id), title: item.title_ru, summary: item.summary,
+      })),
+      reader.reader_context,
+    );
+  } catch (error) {
+    console.error(`качество описаний не измерено: ${(error as Error).message}`);
+  }
+  // Отдельно от самого измерения: упавшая запись расхода — это потраченные
+  // деньги без следа, и называться она должна своей причиной, а не чужой.
+  try {
+    if (quality) await recordCall({
+      readerId: reader.id, stage: "summary", model: quality.model,
+      tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
+    });
+  } catch (error) {
+    console.error(`расход на измерение не записан: ${(error as Error).message}`);
+  }
 
   const writtenById = new Map(written.items.map((item) => [String(item.id), item]));
-  const qualityById = new Map(quality.scored.map((row) => [String(row.item_id), row]));
+  const qualityById = new Map((quality?.scored ?? []).map((row) => [String(row.item_id), row]));
 
   /*
     Всё письмо в базу — одной транзакцией. Врозь оно коммитится по шагу,
@@ -668,14 +762,20 @@ async function fillDigest(reader: Reader) {
     await tx`
       update dailynews.digests
          set stats = coalesce(stats, '{}'::jsonb)
-                   || jsonb_build_object('reading_target', ${Number(target.toFixed(1))})
+                   -- Каст обязателен: у jsonb_build_object аргумент
+                   -- полиморфный ("any"), и тип нетипизированного параметра
+                   -- Postgres вывести не может — запрос падает на разборе,
+                   -- до единой строки данных. Тот же урок, что с date - ?.
+                   || jsonb_build_object('reading_target', ${Number(target.toFixed(1))}::real)
        where id = ${digestId}
     `;
 
-    const [{ taken, chars }] = await tx<{ taken: number; chars: number }[]>`
-      select count(*)::int as taken,
+    const [{ taken, chars, last }] = await tx<{ taken: number; chars: number; last: number }[]>`
+      select count(*) filter (where coalesce(summary_document->>'status','verified') <> 'unavailable')::int as taken,
+             coalesce(max(position),0)::int as last,
              coalesce(sum(
-               char_length(coalesce(title, '')) + char_length(coalesce(summary, ''))
+               case when summary_document->>'status'='unavailable' then 0
+                 else char_length(coalesce(title, '')) + char_length(coalesce(summary, '')) end
              ), 0)::int as chars
         from dailynews.digest_items where digest_id = ${digestId}
     `;
@@ -692,6 +792,7 @@ async function fillDigest(reader: Reader) {
     let filled = minutesOf(chars, voice);
     for (const survivor of survivors) {
       if (filled >= target || taken + fitting.length >= plan.maxItems) break;
+      if (written.excludedIds?.includes(survivor.id)) continue;
       const text = writtenById.get(String(survivor.id));
       fitting.push(survivor);
       filled += minutesOf(cardChars(text?.title_ru ?? survivor.title, text?.summary ?? ""), voice);
@@ -703,17 +804,25 @@ async function fillDigest(reader: Reader) {
     for (const [index, survivor] of fitting.entries()) {
       const text = writtenById.get(String(survivor.id));
       const scored = qualityById.get(String(survivor.id));
-      const inserted = await tx<{ id: number }[]>`
+      // Возвращаем item_id, а не id: у digest_items нет собственного ключа,
+      // он составной — (digest_id, item_id). `returning id` падал здесь
+      // на каждом вызове, и видно это было только по вежливому «не получилось
+      // собрать выпуск»: у нового читателя первый выпуск не собирался вовсе.
+      const inserted = await tx<{ item_id: number }[]>`
         insert into dailynews.digest_items
-          (digest_id, item_id, total, position, title, summary, summary_axes, summary_score)
+          (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score)
         values (
-          ${digestId}, ${survivor.id}, ${survivor.total}, ${taken + index + 1},
+          ${digestId}, ${survivor.id}, ${survivor.total}, ${last + index + 1},
           ${text?.title_ru ?? survivor.title}, ${text?.summary ?? ""},
+          ${text?.reading ? tx.json(text.reading) : null},
           ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
           ${scored?.total ?? null}
         )
-        on conflict (digest_id, item_id) do nothing
-        returning id::int as id
+        on conflict (digest_id, item_id) do update
+        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document
+        where dailynews.digest_items.summary_document->>'status'='unavailable'
+          and excluded.summary_document->>'status'='verified'
+        returning item_id::int as item_id
       `;
       rows += inserted.length;
     }
@@ -759,7 +868,7 @@ export async function addChannel(input: string): Promise<{ ok: true; network: Ne
 
   const network = NETWORK_BY_KIND[found.found.kind];
   if (!network) {
-    return { error: "Это похоже на рассылку, а не на твой канал: нужен канал Telegram, аккаунт X или блог" };
+    return { error: (await getDict()).errors.notANewsletter };
   }
 
   await saveChannel(readerId, network, {
@@ -776,7 +885,7 @@ export async function toggleChannel(network: string, on: boolean) {
   const denied = await denyBySection("posts");
   if (denied) return denied;
   const readerId = await currentReaderId();
-  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: "Неизвестная сеть" };
+  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: (await getDict()).errors.unknownNetwork };
 
   if (on) await saveChannel(readerId, network);
   else await deleteChannel(readerId, network);
@@ -814,7 +923,7 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
 
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd) };
   }
 
   const channels = await getChannels(reader.id);
@@ -825,19 +934,16 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
   if (posts.length === 0) {
     return {
       error: failed.length
-        ? `Ни одна площадка не ответила: ${failed.map((entry) => `${entry.network} — ${entry.why}`).join("; ")}`
-        : "Читать нечего: добавь канал ссылкой или вставь три своих поста",
+        ? (await getDict()).errors.noChannelAnswered(
+            failed.map((entry) => `${entry.network} — ${entry.why}`).join("; "),
+          )
+        : (await getDict()).errors.nothingToReadFromYou,
     };
   }
 
   try {
-    const built = await buildVoiceCard(posts);
+    const built = await buildVoiceCard(posts, reader.id);
     await saveVoiceCard(reader.id, built.card);
-    await recordCall({
-      readerId: reader.id, stage: "voice", model: built.model,
-      tokensIn: built.usage.input, tokensOut: built.usage.output,
-      costUsd: llmCost(built.usage),
-    });
     revalidatePath("/settings/channels");
     return {
       ok: true as const,
@@ -846,7 +952,7 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
       failed: failed.map((entry) => `${entry.network}: ${entry.why}`),
     };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Не собралось" };
+    return { error: error instanceof Error ? error.message : (await getDict()).errors.voiceNotBuilt };
   }
 }
 
@@ -867,16 +973,16 @@ export async function writeOpinion(itemId: number): Promise<
 
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd) };
   }
 
   const item = await postSourceFor(reader.id, itemId);
-  if (!item) return { error: "Этого материала в твоих выпусках нет" };
+  if (!item) return { error: (await getDict()).errors.itemNotYours };
 
   const channels = await getChannels(reader.id);
   const networks = tabsOf(channels.map((channel) => channel.network));
   if (networks.length === 0) {
-    return { error: "Сначала отметь в настройках, где ты публикуешь" };
+    return { error: (await getDict()).errors.noChannelsYet };
   }
 
   // Карточка есть — пишем его голосом. Нет — настройками подачи, и мотатка
@@ -894,12 +1000,7 @@ export async function writeOpinion(itemId: number): Promise<
     });
 
   try {
-    const written = await writePost(item, card, networks.map((network) => network.id));
-    await recordCall({
-      readerId: reader.id, stage: "post", model: written.model,
-      tokensIn: written.usage.input, tokensOut: written.usage.output,
-      costUsd: llmCost(written.usage),
-    });
+    const written = await writePost(item, card, networks.map((network) => network.id), reader.id);
     const saved = await saveDrafts(reader.id, item.id, written.drafts);
     return {
       ok: true as const,
@@ -910,7 +1011,7 @@ export async function writeOpinion(itemId: number): Promise<
       built_from: card.built_from,
     };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Не написалось" };
+    return { error: error instanceof Error ? error.message : (await getDict()).errors.postNotWritten };
   }
 }
 
@@ -918,7 +1019,7 @@ export async function writeOpinion(itemId: number): Promise<
 export async function takeOpinion(postId: number, text: string) {
   const readerId = await currentReaderId();
   const ok = await takeDraft(readerId, postId, text.slice(0, 10_000));
-  return ok ? { ok: true as const } : { error: "Черновик не найден" };
+  return ok ? { ok: true as const } : { error: (await getDict()).errors.draftNotFound };
 }
 
 /**
@@ -932,9 +1033,25 @@ export async function takeOpinion(postId: number, text: string) {
  * Размер выпуска здесь не спрашивается: на первом экране это третье решение
  * подряд, а тариф и так знает свой. Поменять его можно в «Интересах».
  */
-export async function saveOnboardingInterests(slugs: string[], custom: string[]) {
+export async function saveOnboardingInterests(
+  slugs: string[],
+  custom: string[],
+  // Необязательные блоки первого экрана. Сохраняются здесь же, до сборки
+  // первого выпуска: он собирается на последнем шаге и обязан их учесть.
+  // Пустое по умолчанию, а не отказ, как у формы настроек: на первом
+  // экране правил у читателя ещё нет, и стирать здесь нечего, — а вкладка
+  // со старой сборкой должна пройти онбординг, а не упереться в ошибку.
+  follow: unknown = [],
+  exclude: unknown = [],
+) {
   const reader = await currentReader();
   const plan = effectivePlan(reader);
+
+  const words = (await getDict()).rules;
+  const followRules = cleanRules("follow", follow, words);
+  if ("error" in followRules) return { error: followRules.error };
+  const excludeRules = cleanRules("exclude", exclude, words);
+  if ("error" in excludeRules) return { error: excludeRules.error };
 
   const picked = slugs
     .map((slug) => starterBySlug.get(slug))
@@ -952,12 +1069,10 @@ export async function saveOnboardingInterests(slugs: string[], custom: string[])
     (chip, index, all) => chip.slug && all.findIndex((other) => other.slug === chip.slug) === index,
   );
 
-  if (chips.length === 0) return { error: "Выбери хотя бы один интерес" };
+  if (chips.length === 0) return { error: (await getDict()).errors.pickAnyTopic };
   if (chips.length > plan.maxTopics) {
     return {
-      error:
-        `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
-        `а выбрано ${chips.length}`,
+      error: (await getDict()).errors.tooManyTopics(plan.label, plan.maxTopics, chips.length),
     };
   }
 
@@ -972,6 +1087,7 @@ export async function saveOnboardingInterests(slugs: string[], custom: string[])
     normalize(chips.map(() => MIN_PER_TOPIC), places),
     minutes,
     false,
+    { follow: followRules.rules, exclude: excludeRules.rules },
   );
   revalidatePath("/", "layout");
   return { ok: true as const };
@@ -1001,7 +1117,7 @@ export async function saveOnboardingSources(keys: string[]) {
     plan,
     keys.slice(0, 100),
   );
-  if (chosen.length === 0) return { error: "Выбери хотя бы один источник" };
+  if (chosen.length === 0) return { error: (await getDict()).errors.pickOneSource };
 
   let added = 0;
   for (const feed of chosen) {
@@ -1052,6 +1168,6 @@ export async function finishOnboarding() {
     // и на упавшем обещании он остался бы крутить спиннер до закрытия
     // вкладки. Настройка при этом уже сохранена — терять её не за что.
     console.error(`первый выпуск: ${(error as Error).message}`);
-    return { error: "Не получилось собрать первый выпуск — соберу ночью" };
+    return { error: (await getDict()).errors.firstIssueFailed };
   }
 }

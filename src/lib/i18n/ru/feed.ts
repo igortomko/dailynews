@@ -1,0 +1,200 @@
+import type { feed as En } from "../en/feed";
+import { count, plural } from "@/lib/plural";
+
+const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
+
+const story = (n: number) => count(n, "материал", "материала", "материалов");
+const storySearched = (n: number) => count(n, "материалу", "материалам", "материалам");
+const digest = (n: number) => count(n, "выпуск", "выпуска", "выпусков");
+
+export const feed: typeof En = {
+  page: {
+    empty: {
+      title: "Первый выпуск придёт ночью",
+      body: "Лента собирается раз в сутки, ночью. Пока можно",
+      or: "или",
+      fixInterests: "поправить интересы",
+      addSources: "добавить источники",
+      collectNow: "Собрать прямо сейчас:",
+    },
+    settingsHint: "Настройки: интересы, источники, доставка",
+  },
+
+  dateNav: {
+    previous: "Предыдущий выпуск",
+    next: "Следующий выпуск",
+    pickDate: "Выбрать дату",
+  },
+
+  tabs: {
+    all: "Все",
+    other: "Прочее",
+    toTopAria: "Наверх",
+    toTopTooltip: "Наверх, к датам и вкладкам",
+    emptyTitle: "Пока пусто",
+    emptyDescription: "В этот выпуск по этой теме ничего не попало",
+    showAll: "Показать весь выпуск",
+    readUpToHere: "досюда ты дочитал",
+    kbdAnd: "и",
+    kbdBetween: "между материалами",
+    kbdOpen: "открыть",
+    kbdOverview: "в обзор",
+    kbdSearch: "поиск по выпускам",
+  },
+
+  rules: {
+    hiddenBefore: (n: number) =>
+      `${count(n, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим`,
+    hiddenLink: "исключениям",
+    allHiddenTitle: "Всё скрыто исключениями",
+    allHiddenDescription: (n: number) =>
+      `В выпуске ${count(n, "карточка", "карточки", "карточек")}, и в каждой есть что-то из твоего списка. Выпуск не пересобирается — освободившиеся места не добираются.`,
+    fixExclusions: "Поправить исключения",
+    followedTitle: "Из твоего списка «За чем следить»",
+  },
+
+  overview: {
+    add: (title: string) => `Добавить в обзор: ${title}`,
+    remove: (title: string) => `Убрать из обзора: ${title}`,
+    tooltipAdd: "В обзор",
+    tooltipRemove: "Убрать из обзора",
+    toolbarLabel: "Выбранные новости",
+    selected: (n: number) => `Выбрано: ${n}`,
+    clearAria: "Снять выбор",
+    clearTooltip: "Снять выбор",
+    build: "Собрать обзор",
+    dialogTitle: "Обзор для коллег",
+    issueOf: (date: string, n: number) => `Выпуск за ${date} · ${count(n, "новость", "новости", "новостей")}`,
+    defaultTitle: (date: string) => `Обзор за ${date}`,
+    titleLabel: "Название",
+    introLabel: "Вступление",
+    introPlaceholder: "Пара слов от тебя, если нужно",
+    empty: "Пока пусто — отметь новости в ленте, и они появятся здесь",
+    up: "Выше",
+    down: "Ниже",
+    removeBlock: "Убрать",
+    blockTitleLabel: "Заголовок",
+    blockSummaryLabel: "Текст",
+    fallbackLabel: "Текст обзора",
+    copyMarkdown: "Скопировать как Markdown",
+    copy: "Скопировать",
+    copied: "Скопировано",
+    copiedHint: "Вставляй в чат или письмо",
+    clipboardDeniedTitle: "Не получилось скопировать",
+    clipboardDeniedDescription: "Текст уже выделен ниже — нажми ⌘C или Ctrl+C",
+  },
+
+  item: {
+    hidden: (title: string) => `Скрыто: ${title}`,
+    undo: "Вернуть",
+    clickbait: "кликбейт",
+    actionsLabel: "Действия с материалом",
+    opinion: "Своё мнение",
+    opinionAria: "Своё мнение: готовый пост твоим голосом",
+    opinionTooltipReady: "Пост твоим голосом для твоих сетей",
+    opinionTooltipLocked: "Своё мнение — на тарифе «Pro»",
+    pickNetworksFirst: "Сначала отметь, где ты публикуешь",
+    kindleSending: "Отправляю…",
+    kindleSent: "Уже на читалке",
+    kindleSend: "Отправить на читалку",
+    kindleAria: "Отправить на Kindle",
+    kindleTooltip: "Отправить статью на читалку",
+    kindleToastTitle: "Статья ушла на Kindle",
+    kindleToastDescription: "Придёт примерно через минуту",
+    kindleError: "Не отправилось на Kindle — попробуй ещё раз",
+    upvoteLabel: "Больше такого",
+    upvoteTooltip: "Больше такого в следующих выпусках",
+    downvoteLabel: "Скрыть и меньше такого",
+    thisCard: "эта карточка",
+    summaryUnavailable: "Выжимка пока недоступна. Оригинал — по ссылке в заголовке.",
+  },
+
+  search: {
+    label: "Поиск по выпускам",
+    submit: "Найти",
+    openHint: "Поиск по прошлым выпускам — клавиша /",
+    fieldPlaceholder: "Найти в прошлых выпусках: uranium дата-центры",
+    close: "Закрыть поиск",
+    recent: "недавнее",
+  },
+
+  searchPage: {
+    backToFeedAria: "К ленте",
+    placeholder: "Например: uranium дата-центры",
+    digestOf: (date: string) => `выпуск ${date}`,
+    emptyArchiveTitle: "Искать пока не в чем",
+    emptyArchiveBody: "Поиск идёт по твоим выпускам. Первый ещё не приходил —",
+    backToFeedLink: "вернуться в ленту",
+    noQueryTitle: "Ищу по твоим выпускам",
+    noQueryBody: "Это не поиск по интернету: только то, что лента тебе присылала, —",
+    over: "за",
+    matchExplainer:
+      "Слова ищутся и в описании выпуска, и в исходном заголовке: «уран» и «uranium» найдут одно и то же.",
+    noResultsTitle: "Ничего не нашлось",
+    noResultsBody: (query: string) =>
+      `По запросу «${query}» в твоих выпусках пусто. Материал, которого лента не присылала, здесь не найдётся: искали по`,
+    storiesCount: story,
+    storiesSearchedCount: storySearched,
+    digestsCount: digest,
+    looseNote: " — по всем словам разом ничего, это по любому из них",
+  },
+
+  collectNow: {
+    noNews: "Свежих новостей пока нет",
+    added: (n: number) => `Собрали: ${n}`,
+    error: "Не получилось собрать выпуск — попробуй ещё раз",
+    collecting: "Собираю…",
+    collect: "Собрать сейчас",
+    takesAMinute: "Займёт пару минут",
+  },
+
+  rebuild: {
+    stillUpdatingTitle: "Сохранили. Выпуск ещё обновляется",
+    stillUpdatingDescription: "Нажми «Сохранить» ещё раз, когда закончим",
+    savedNoChangeTitle: "Настройки сохранены",
+    savedNoChangeDescription: "Следующие выпуски придут уже с ними",
+    countdownTitle: "Обновлю сегодняшний выпуск",
+    countdownDescription: (seconds: number) => `Начну через ${seconds} с, пока можно отменить`,
+    cancelAction: "Отменить",
+    cancelledToast: "Отменили. Сегодняшний выпуск остался прежним",
+    workingTitle: "Обновляю сегодняшний выпуск…",
+    workingDescription: "Это 1–2 минуты, можно читать дальше",
+    added: (n: number) => `добавили ${n}`,
+    rewrote: (n: number) => `переписали ${n}`,
+    partiallyRewritten: (updated: number, retained: number) => `Обновили ${updated}; у ${retained} сохранили прежние выжимки — обработку завершить не удалось`,
+    noChangeTodayTitle: "Сегодняшний выпуск уже такой",
+    noChangeTodayDescription: "Следующие придут с новыми настройками",
+    updated: (summary: string) => `Сегодняшний выпуск обновили: ${summary}`,
+    updatedDescription: "Следующие соберутся по новым настройкам",
+    failed: "Не удалось обновить выпуск",
+  },
+
+  story: {
+    discussion: "обсуждение",
+    discussionPoints: (points: number): string => `обсуждение: ${points} points`,
+    original: "первоисточник",
+    sameTime: "тогда же",
+    laterMinutes: (n: number): string => `${count(n, "минуту", "минуты", "минут")} позже`,
+    laterHours: (n: number): string => `${count(n, "час", "часа", "часов")} позже`,
+    laterDays: (n: number): string => `${count(n, "день", "дня", "дней")} позже`,
+    alsoLine: (n: number): string => `Ещё ${count(n, "источник", "источника", "источников")}`,
+    storyTitle: (n: number): string => `Один сюжет, ${count(n, "публикация", "публикации", "публикаций")}`,
+  },
+  reading: {
+    equals: "равно", then: "затем", step: "Шаг", stage: "Этап",
+    planned: "предстоит", done: "завершён", current: "сейчас", unspecified: "",
+  },
+  time: {
+    summaryMinute: "мин", summarySecond: "с",
+    now: "сейчас",
+    minutesAgo: (n: number) => `${n}м`,
+    hoursAgo: (n: number) => `${n}ч`,
+    daysAgo: (n: number) => `${n}д`,
+    readingMinutes: (n: number) => `~${n} мин`,
+    readingHours: (n: number) => `~${n} ч`,
+    minutesLong: (n: number): string => `~${n} ${plural(n, "минута", "минуты", "минут")}`,
+    shortfall: (have: string, target: number): string =>
+      `${have} из ${target}: сегодня больше действительно важного нет`,
+    monthDay: (date: Date): string => MONTH.format(date),
+  },
+};

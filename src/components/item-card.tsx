@@ -13,9 +13,11 @@ import {
   PenLineIcon,
   CrownIcon,
   ChevronDownIcon,
+  EyeIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -25,9 +27,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { readingTime } from "@/lib/relative-time";
+import { QUIET } from "@/lib/quiet";
+import { parseStoredReading } from "@/lib/reading-document";
+import { ReadingSummary } from "@/components/reading-summary";
+import { typography, summaryTime } from "@/lib/typography";
+import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
+import { useT } from "@/components/i18n-provider";
 import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedCard } from "@/lib/queries";
@@ -79,15 +86,6 @@ const swap = (shown: boolean) =>
     shown ? "scale-100 opacity-100 blur-0" : "scale-[0.25] opacity-0 blur-[4px]",
   );
 
-/**
- * Что показывается только по наведению.
- *
- * Прозрачностью, а не `hidden`: погашенный кусок остаётся в потоке, держит
- * своё место, и строка не переезжает под курсором. На тапе наведения нет —
- * там видно всё сразу, иначе спрятанное было бы спрятано навсегда.
- */
-const QUIET =
-  "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
 
 /** Домен издания: источник ведёт на издание, заголовок — на сам материал. */
 function siteOf(url: string): string | null {
@@ -134,13 +132,22 @@ export function ItemCard({
   showTopic,
   plan,
   networks,
+  selected,
+  selecting,
+  onSelectedChange,
 }: {
   item: FeedCard;
   showTopic: boolean;
   plan: Plan;
   /** Сети, отмеченные в «Моих площадках»: сколько их — столько табов. */
   networks: NetworkId[];
+  /** Отмечена ли карточка для обзора. Состояние держит лента, не карточка. */
+  selected: boolean;
+  /** Идёт ли выбор: пока в выпуске есть хоть одна отметка, чекбоксы видны у всех. */
+  selecting: boolean;
+  onSelectedChange: (next: boolean) => void;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   // Своё состояние, а не expanded: раскрытие описания считается чтением
   // материала и уезжает в калибровку событием «opened». Список повторов —
@@ -193,7 +200,7 @@ export function ItemCard({
       },
       { threshold: 0.6 },
     );
-    observer.observe(node);
+    observer.observe(node.querySelector("h3") ?? node);
     return () => {
       if (timer) clearTimeout(timer);
       observer.disconnect();
@@ -226,27 +233,38 @@ export function ItemCard({
         body: JSON.stringify({ item_id: item.id }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? "Не отправилось на Kindle — попробуй ещё раз");
+      if (!res.ok) throw new Error(body?.error ?? t.feed.item.kindleError);
       setKindle("sent");
       // Честно про время: статья забирается и переводится целиком. Обещать
       // мгновенность — значит получить второй тап через десять секунд.
-      toast.success("Статья ушла на Kindle", {
-        description: "Придёт примерно через минуту",
+      toast.success(t.feed.item.kindleToastTitle, {
+        description: t.feed.item.kindleToastDescription,
       });
     } catch (error) {
       setKindle("idle");
-      toast.error(error instanceof Error ? error.message : "Не отправилось на Kindle — попробуй ещё раз");
+      toast.error(error instanceof Error ? error.message : t.feed.item.kindleError);
     }
   };
 
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
 
+  // Скрытая карточка выходит и из обзора: в ленте её больше нет, и блок
+  // из неё в черновике был бы новостью, которую читатель только что убрал.
+  const hide = () => {
+    setVote("down");
+    report({ item_id: item.id, event: "down" });
+    if (selected) onSelectedChange(false);
+  };
+
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
-  const minutes = readingTime(item.body_chars);
+  const reading = parseStoredReading(item.summary_document);
+  const hasSummary = Boolean(item.summary?.trim());
+  const seconds = reading ? reading.seconds : hasSummary ? cardChars(item.title_ru || item.title, item.summary) / DEFAULT_CHARS_PER_MINUTE * 60 : 0;
+  const minutes = seconds > 0 ? summaryTime(seconds, t.feed.time) : null;
   const others = otherSources(item.story, item.source_id);
-  const lines = others > 0 ? storyLines(item.story) : [];
+  const lines = others > 0 ? storyLines(item.story, t.feed.story) : [];
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
@@ -265,12 +283,12 @@ export function ItemCard({
   const menuIcon =
     vote === "up" ? <ThumbsUpIcon className="size-4 text-foreground" /> : <EllipsisIcon className="size-4" />;
   const menuButton =
-    "hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground [@media(hover:none)]:flex";
+    "flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
 
   if (vote === "down") {
     return (
       <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
-        <span className="truncate">Скрыто: {title}</span>
+        <span className="truncate">{t.feed.item.hidden(title)}</span>
         <button
           type="button"
           onClick={() => {
@@ -285,7 +303,7 @@ export function ItemCard({
           className="flex shrink-0 cursor-pointer items-center gap-1 hover:text-foreground"
         >
           <UndoIcon className="size-3.5" />
-          Вернуть
+          {t.feed.item.undo}
         </button>
       </article>
     );
@@ -305,6 +323,10 @@ export function ItemCard({
    * заголовком, ради которого лента и листается.
    */
   const meta: { key: string; node: ReactNode; quiet?: true }[] = [
+    // shrink-0 с потолком в ширину строки: издание не уступает место теме
+    // и времени, но и за край карточки не выходит. Без потолка название
+    // длиннее строки на телефоне уезжало за правый край без многоточия —
+    // и вместе с ним уезжали кнопки действий.
     {
       key: "source",
       node: site ? (
@@ -312,12 +334,12 @@ export function ItemCard({
           href={site}
           target="_blank"
           rel="noreferrer noopener"
-          className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
+          className="max-w-full shrink-0 truncate text-[0.75rem] font-medium text-muted-foreground hover:text-foreground focus-visible:text-foreground hover:underline"
         >
           {item.source_label}
         </a>
       ) : (
-        <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
+        <span className="max-w-full shrink-0 truncate text-[0.75rem] font-medium text-muted-foreground">
           {item.source_label}
         </span>
       ),
@@ -327,7 +349,29 @@ export function ItemCard({
     // и «кликбейт» за этим местом висел в пустоте, оторванный от того,
     // к чему относится.
     ...(clickbait
-      ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">кликбейт</span> }]
+      ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">{t.feed.item.clickbait}</span> }]
+      : []),
+    // Написание из «За чем следить», найденное в материале. Правило
+    // работает при отборе и молча; пометка — единственное, по чему видно,
+    // что оно сработало. Только упоминание, как и обещано в настройках:
+    // без слов «про Figma» — про что материал, решает читатель.
+    ...(item.followed
+      ? [{
+          key: "followed",
+          node: (
+            // min-w-0 и truncate, как у темы рядом: написание — текст читателя
+            // длиной до 80 знаков, и без обрезки оно наезжало бы на кнопки
+            // на узком экране.
+            <span
+              className="inline-flex min-w-0 items-center gap-1"
+              title={t.feed.rules.followedTitle}
+            >
+              <EyeIcon className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{item.followed}</span>
+            </span>
+          ),
+          quiet: true as const,
+        }]
       : []),
     // min-w-0 обязателен: truncate обрезает только то, чему разрешили
     // сузиться, а гибкий элемент по умолчанию не уже своего содержимого.
@@ -357,12 +401,20 @@ export function ItemCard({
         // на издание она первая в обходе), не пересобирает её под собой.
         if (!(event.target as HTMLElement).closest("[data-hint]")) setHot(true);
       }}
-      // content-visibility: браузер не раскладывает и не рисует карточки
-      // за пределами экрана, пока до них не докрутили. React их всё равно
-      // собирает, но стиль и раскладка полусотни карточек — заметная доля
-      // времени переключения дня. Размер-заготовка — под обычную карточку;
-      // после первого показа браузер помнит настоящий.
-      className="group border-b py-5 transition-opacity duration-150 last:border-0 [content-visibility:auto] [contain-intrinsic-size:auto_220px]"
+      data-selected={selected || undefined}
+      className={cn(
+        // content-visibility: браузер не раскладывает и не рисует карточки
+        // за пределами экрана, пока до них не докрутили. React их всё равно
+        // собирает, но стиль и раскладка полусотни карточек — заметная доля
+        // времени переключения дня. Размер-заготовка — под обычную карточку;
+        // после первого показа браузер помнит настоящий.
+        "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0 [content-visibility:auto] [contain-intrinsic-size:auto_220px]",
+        // Отмеченная карточка подсвечена всей строкой до краёв контейнера,
+        // а не рамкой вокруг текста: рамка внутри полей читалась бы как
+        // коробка в коробке. Фон приглушённый и постоянный — выбор должен
+        // быть виден издалека, но не спорить с заголовком.
+        selected && "-mx-4 bg-muted/70 px-4 sm:-mx-6 sm:px-6",
+      )}
     >
       {/* Одна строка, а не две. Прежде метаданные проявлялись по наведению,
           а в покое их место занимало время чтения — и получалось два ряда,
@@ -380,6 +432,36 @@ export function ItemCard({
           с иллюстрацией и без неё стояли в разных местах. Теперь они
           всегда в правом верхнем углу, а картинка начинается под ними. */}
       <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        {/* Отметка для обзора. Место под неё держится всегда — источник
+            и заголовок не переезжают, когда она проявляется по наведению.
+            Показывается как остальное тихое: под курсором, под фокусом
+            и на тапе; а как только в выпуске отмечена хоть одна карточка —
+            у всех, иначе выбор второй карточки начинался бы с поиска
+            невидимого квадрата.
+
+            Не внутри ссылки на издание и не рядом с её текстом: нажатие
+            на отметку не открывает ничего и не считается чтением —
+            ни `opened`, ни `outbound` отсюда не уходят. */}
+        <Tooltip>
+          {/* Подсказка висит на обёртке, а не на самом чекбоксе: у него свои
+              дети (галочка), и render-слот подменил бы их пустотой. */}
+          <TooltipTrigger render={<span className="flex shrink-0" />}>
+            <Checkbox
+              checked={selected}
+              onCheckedChange={(next) => onSelectedChange(next)}
+              aria-label={selected ? t.feed.overview.remove(title) : t.feed.overview.add(title)}
+              className={cn(
+                "size-4 bg-card transition-[opacity,background-color,border-color] duration-150",
+                // На тапе цель под палец — сорок пикселей вокруг.
+                "[@media(hover:none)]:after:-inset-3",
+                selected || selecting ? "opacity-100" : QUIET,
+              )}
+            />
+          </TooltipTrigger>
+          <TooltipContent>
+            {selected ? t.feed.overview.tooltipRemove : t.feed.overview.tooltipAdd}
+          </TooltipContent>
+        </Tooltip>
         {/* Разделитель между кусками, а не пробел: «Hacker News ~7 мин
             AI-инфра» читается одной строкой, в которой издание, время
             и тема слипаются в чужое название. Точка с пробелами по бокам
@@ -414,7 +496,7 @@ export function ItemCard({
                   а `shrink-0` у времени и `truncate` у темы оказываются
                   на строчном потомке, где не значат ничего. Время сжималось
                   бы многоточием на узком экране, а тема — перестала бы. */}
-              {quiet ? <span className={cn("flex min-w-0", QUIET)}>{node}</span> : node}
+              {quiet ? <span className={cn(key === "minutes" ? "flex shrink-0" : "flex min-w-0", QUIET)}>{node}</span> : node}
             </Fragment>
           ))}
         </span>
@@ -435,7 +517,7 @@ export function ItemCard({
           {menuLive ? (
           <DropdownMenu defaultOpen>
             <DropdownMenuTrigger
-              render={<button type="button" aria-label="Действия с материалом" className={menuButton} />}
+              render={<button type="button" aria-label={t.feed.item.actionsLabel} className={menuButton} />}
             >
               {menuIcon}
             </DropdownMenuTrigger>
@@ -455,8 +537,8 @@ export function ItemCard({
                     return;
                   }
                   if (networks.length === 0) {
-                    toast.info("Сначала отметь, где ты публикуешь", {
-                      description: "Настройки → Мои площадки",
+                    toast.info(t.feed.item.pickNetworksFirst, {
+                      description: `${t.nav.settings} → ${t.nav.channels}`,
                     });
                     return;
                   }
@@ -464,7 +546,7 @@ export function ItemCard({
                 }}
               >
                 <PenLineIcon />
-                Своё мнение
+                {t.feed.item.opinion}
                 {canPost ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -479,10 +561,10 @@ export function ItemCard({
                   <BookOpenIcon />
                 )}
                 {kindle === "sending"
-                  ? "Отправляю…"
+                  ? t.feed.item.kindleSending
                   : kindle === "sent"
-                    ? "Уже на читалке"
-                    : "Отправить на читалку"}
+                    ? t.feed.item.kindleSent
+                    : t.feed.item.kindleSend}
               </DropdownMenuItem>
               <DropdownMenuCheckboxItem
                 checked={vote === "up"}
@@ -492,17 +574,11 @@ export function ItemCard({
                 }}
               >
                 <ThumbsUpIcon />
-                Больше такого
+                {t.feed.item.upvoteLabel}
               </DropdownMenuCheckboxItem>
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => {
-                  setVote("down");
-                  report({ item_id: item.id, event: "down" });
-                }}
-              >
+              <DropdownMenuItem variant="destructive" onClick={hide}>
                 <ThumbsDownIcon />
-                Скрыть и меньше такого
+                {t.feed.item.downvoteLabel}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -511,7 +587,7 @@ export function ItemCard({
             // уже открытым (`defaultOpen`), дальше оно живёт как обычно.
             <button
               type="button"
-              aria-label="Действия с материалом"
+              aria-label={t.feed.item.actionsLabel}
               aria-haspopup="menu"
               aria-expanded={false}
               onClick={() => setMenuLive(true)}
@@ -526,7 +602,7 @@ export function ItemCard({
             "group-hover:opacity-100 group-focus-within:opacity-100",
             vote === "up" && "opacity-100",
             // На тапе этого ряда нет вовсе — там меню.
-            "[@media(hover:none)]:hidden",
+            "max-sm:hidden [@media(hover:none)]:hidden",
           )}
         >
           {/* Иконка без подписи опознаётся только по догадке. Подпись
@@ -538,19 +614,19 @@ export function ItemCard({
               кнопка: спрятанное не даёт понять, за что предлагают платить. */}
           <Hint
             live={hot}
-            tip={canPost ? "Пост твоим голосом для твоих сетей" : "Своё мнение — на тарифе «Pro»"}
+            tip={canPost ? t.feed.item.opinionTooltipReady : t.feed.item.opinionTooltipLocked}
             button={
               <button
                 type="button"
-                aria-label="Своё мнение: готовый пост твоим голосом"
+                aria-label={t.feed.item.opinionAria}
                 onClick={() => {
                   if (!canPost) {
                     paywall.open();
                     return;
                   }
                   if (networks.length === 0) {
-                    toast.info("Сначала отметь, где ты публикуешь", {
-                      description: "Настройки → Мои площадки",
+                    toast.info(t.feed.item.pickNetworksFirst, {
+                      description: `${t.nav.settings} → ${t.nav.channels}`,
                     });
                     return;
                   }
@@ -565,11 +641,11 @@ export function ItemCard({
 
           <Hint
             live={hot}
-            tip="Отправить статью на читалку"
+            tip={t.feed.item.kindleTooltip}
             button={
               <button
                 type="button"
-                aria-label="Отправить на Kindle"
+                aria-label={t.feed.item.kindleAria}
                 // aria-disabled, а не disabled: браузер снимает фокус
                 // с выключенной кнопки, и с клавиатуры место в списке
                 // теряется ровно в момент нажатия. Заодно остаётся
@@ -594,11 +670,11 @@ export function ItemCard({
 
           <Hint
             live={hot}
-            tip="Больше такого в следующих выпусках"
+            tip={t.feed.item.upvoteTooltip}
             button={
               <button
                 type="button"
-                aria-label="Больше такого"
+                aria-label={t.feed.item.upvoteLabel}
                 aria-pressed={vote === "up"}
                 onClick={() => {
                   setVote(vote === "up" ? null : "up");
@@ -619,15 +695,12 @@ export function ItemCard({
               отличает его от соседних двух до нажатия, а не после. */}
           <Hint
             live={hot}
-            tip="Скрыть и меньше такого"
+            tip={t.feed.item.downvoteLabel}
             button={
               <button
                 type="button"
-                aria-label="Скрыть и меньше такого"
-                onClick={() => {
-                  setVote("down");
-                  report({ item_id: item.id, event: "down" });
-                }}
+                aria-label={t.feed.item.downvoteLabel}
+                onClick={hide}
                 className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
               />
             }
@@ -664,11 +737,11 @@ export function ItemCard({
               className="decoration-muted-foreground/40 underline-offset-4 hover:underline"
               onClick={() => report({ item_id: item.id, event: "outbound" })}
             >
-              {title}
+              {typography(title)}
             </a>
           </h3>
 
-          {item.summary ? (
+          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : hasSummary ? (
             <p
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст
@@ -679,9 +752,9 @@ export function ItemCard({
               // Приглушённый основной текст читается как черновик.
               className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
             >
-              {item.summary}
+              {typography(item.summary ?? "")}
             </p>
-          ) : null}
+          ) : <p className="mt-3 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">{t.feed.item.summaryUnavailable}</p>}
 
           {/* Работа дедупа, названная вслух. Не «важно» и не «подтверждено»:
               пять изданий, пересказавших один пресс-релиз, ничего
@@ -695,14 +768,14 @@ export function ItemCard({
                 onClick={() => setStoryOpen((value) => !value)}
                 className="flex cursor-pointer items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
               >
-                {alsoLine(others)}
+                {alsoLine(others, t.feed.story)}
                 <ChevronDownIcon
                   className={cn("size-3.5 transition-transform duration-200", storyOpen && "rotate-180")}
                 />
               </button>
               {storyOpen ? (
                 <div className="mt-2 max-w-[68ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
-                  <p className="mb-1.5 font-medium">{storyTitle(lines.length)}</p>
+                  <p className="mb-1.5 font-medium">{storyTitle(lines.length, t.feed.story)}</p>
                   <ul className="space-y-1">
                     {lines.map((line) => (
                       <li key={line.item_id} className="flex flex-wrap items-baseline gap-x-1.5">
@@ -729,7 +802,7 @@ export function ItemCard({
                             как ошибка отбора: «почему первым не тот, кого
                             мне показали». */}
                         {line.item_id === item.id ? (
-                          <span className="text-muted-foreground/70">· эта карточка</span>
+                          <span className="text-muted-foreground/70">· {t.feed.item.thisCard}</span>
                         ) : null}
                       </li>
                     ))}

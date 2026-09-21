@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "./db";
 import { anyOf, HL_END, HL_OPTIONS, HL_START, SEARCH_CONFIG } from "./search";
 import { isDay } from "./day";
+import { stripHtml } from "../../pipeline/fetch";
 import type { SourceYield } from "./source-health";
 import type { Axes, Source } from "./types";
 import type { Publication } from "./story";
@@ -18,8 +19,17 @@ export type FeedItem = {
   id: number;
   url: string;
   title: string;
+  /**
+   * Описание из фида. В карточке не показывается — нужно личным правилам:
+   * исключение проверяется по тому же тексту, по которому шёл отбор,
+   * плюс по написанному языком читателя. Текст статьи сюда не едет:
+   * сорок статей на каждый показ ленты — это мегабайты ради проверки,
+   * которую отбор уже сделал.
+   */
+  excerpt: string;
   title_ru: string | null;
   summary: string | null;
+  summary_document?: unknown;
   image_url: string | null;
   source_label: string;
   /** Нужен сюжету: источник, повторивший сам себя, — не «ещё один источник». */
@@ -69,9 +79,18 @@ export type FeedItem = {
  * Без осей: карточка читает из восьми одну — кликбейт, — а полный объект
  * ехал в браузер с каждой из пятидесяти карточек и весил треть полезной
  * нагрузки ленты (33 КБ из 91). Решение принимает сервер, в браузер уходит
- * ответ.
+ * ответ. Описание из фида по той же причине остаётся на сервере: его
+ * читают только личные правила, и читают до отправки.
+ *
+ * `followed` — написание из списка «За чем следить», которое в материале
+ * нашлось. Правило работает молча, в отборе, и без этой пометки читателю
+ * неоткуда узнать, что оно вообще сработало.
  */
-export type FeedCard = Omit<FeedItem, "axes"> & { story: Publication[]; clickbait: boolean };
+export type FeedCard = Omit<FeedItem, "axes" | "excerpt"> & {
+  story: Publication[];
+  clickbait: boolean;
+  followed: string | null;
+};
 
 export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`
@@ -182,8 +201,11 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
   // Проверка повторяется здесь, а не только у вызывающего: параметр назван
   // как в адресе, и однажды сюда придёт сырой — в каст к date он уйти не должен.
   const safeDay = isDay(day) ? day : null;
-  const rows = await sql<FeedItem[]>`
-    select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
+  const rows = await sql<(FeedItem & { rule_body: string | null })[]>`
+    select i.id, i.url, i.title, i.excerpt, di.title as title_ru, di.summary, di.summary_document, i.image_url,
+           case when exists(select 1 from dailynews.readers r
+             where r.id=${readerId} and jsonb_array_length(r.exclude_rules)>0)
+             then i.body end as rule_body,
            s.label as source_label, s.id as source_id,
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
@@ -247,8 +269,9 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
   // в запросе: каст сузил бы bigint до int4 и однажды уронил бы всю ленту
   // целиком, а глобальная подмена типа в драйвере уже ломала запись
   // («to: 20 шлёт int8 в колонки int»).
-  return rows.map((row) => ({
+  return rows.map(({ rule_body, ...row }) => ({
     ...row,
+    excerpt: [row.excerpt, rule_body ? stripHtml(rule_body) : null].filter(Boolean).join("\n"),
     id: Number(row.id),
     source_id: Number(row.source_id),
     axes: typeof row.axes === "string" ? JSON.parse(row.axes) : row.axes,

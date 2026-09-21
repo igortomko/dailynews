@@ -3,12 +3,13 @@ import { ChevronLeftIcon } from "lucide-react";
 import { archiveSize, searchArchive, type ArchiveHit } from "@/lib/queries";
 import { highlight } from "@/lib/search";
 import { currentReader } from "@/lib/session";
-import { count } from "@/lib/plural";
-import { dayInWords, digestsWord } from "@/lib/telegram";
+import { dayInWords } from "@/lib/telegram";
 import { PageHeader } from "@/components/page-header";
 import { SearchForm } from "@/components/search-form";
 import { RememberQuery } from "@/components/search-memory";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { getDict } from "@/lib/i18n/server";
+import type { Dict } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -32,14 +33,14 @@ function dayLabel(day: string): string {
   return words === day ? day : `${words} ${day.slice(0, 4)}`;
 }
 
-function Hit({ hit }: { hit: ArchiveHit }) {
+function Hit({ hit, t }: { hit: ArchiveHit; t: Dict }) {
   return (
     <article className="border-b py-4 last:border-0">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         {/* Выпуск, а не только статья: «где я это видел» — вопрос и про
             соседние новости того дня тоже. */}
         <Link href={`/?day=${hit.day}`} className="hover:text-foreground">
-          выпуск {dayLabel(hit.day)}
+          {t.feed.searchPage.digestOf(dayLabel(hit.day))}
         </Link>
         <span aria-hidden>·</span>
         <span>{hit.source_label}</span>
@@ -91,20 +92,22 @@ function Results({
   archive,
   query,
   found,
+  t,
 }: {
   archive: Archive;
   query: string;
   found: Found | null;
+  t: Dict;
 }) {
   if (archive.items === 0) {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>Искать пока не в чем</EmptyTitle>
+          <EmptyTitle>{t.feed.searchPage.emptyArchiveTitle}</EmptyTitle>
           <EmptyDescription>
-            Поиск идёт по твоим выпускам. Первый ещё не приходил —{" "}
+            {t.feed.searchPage.emptyArchiveBody}{" "}
             <Link href="/" className="underline underline-offset-4">
-              вернуться в ленту
+              {t.feed.searchPage.backToFeedLink}
             </Link>
             .
           </EmptyDescription>
@@ -117,15 +120,14 @@ function Results({
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>Ищу по твоим выпускам</EmptyTitle>
+          <EmptyTitle>{t.feed.searchPage.noQueryTitle}</EmptyTitle>
           <EmptyDescription>
             {/* Настоящее число, а не «по всему архиву»: оно отвечает
                 на вопрос, который возникает раньше запроса, — есть ли
                 вообще в чём искать. */}
-            Это не поиск по интернету: только то, что лента тебе присылала, —{" "}
-            {count(archive.items, "материал", "материала", "материалов")} за{" "}
-            {archive.days} {digestsWord(archive.days)}. Слова ищутся и в описании
-            выпуска, и в исходном заголовке: «уран» и «uranium» найдут одно и то же.
+            {t.feed.searchPage.noQueryBody}{" "}
+            {t.feed.searchPage.storiesCount(archive.items)} {t.feed.searchPage.over}{" "}
+            {t.feed.searchPage.digestsCount(archive.days)}. {t.feed.searchPage.matchExplainer}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -136,12 +138,11 @@ function Results({
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>Ничего не нашлось</EmptyTitle>
+          <EmptyTitle>{t.feed.searchPage.noResultsTitle}</EmptyTitle>
           <EmptyDescription>
-            По запросу «{query}» в твоих выпусках пусто. Материал, которого лента
-            не присылала, здесь не найдётся: искали по{" "}
-            {count(archive.items, "материалу", "материалам", "материалам")} за{" "}
-            {archive.days} {digestsWord(archive.days)}.
+            {t.feed.searchPage.noResultsBody(query)}{" "}
+            {t.feed.searchPage.storiesSearchedCount(archive.items)} {t.feed.searchPage.over}{" "}
+            {t.feed.searchPage.digestsCount(archive.days)}.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -151,15 +152,15 @@ function Results({
   return (
     <>
       <p className="px-1 pb-2 text-xs text-muted-foreground">
-        {count(found.hits.length, "материал", "материала", "материалов")}
+        {t.feed.searchPage.storiesCount(found.hits.length)}
         {/* Ослабленный запрос называется вслух: молча показать выдачу
             по одному слову из четырёх — значит выдать другое за то же
             самое. */}
-        {found.loose ? " — по всем словам разом ничего, это по любому из них" : null}
+        {found.loose ? t.feed.searchPage.looseNote : null}
       </p>
       <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
         {found.hits.map((hit) => (
-          <Hit key={`${hit.day}-${hit.item_id}`} hit={hit} />
+          <Hit key={`${hit.day}-${hit.item_id}`} hit={hit} t={t} />
         ))}
       </div>
     </>
@@ -181,7 +182,7 @@ export default async function SearchPage({
   // отдаёт 500 вместо выдачи.
   searchParams: Promise<{ q?: string | string[] }>;
 }) {
-  const [reader, { q }] = await Promise.all([currentReader(), searchParams]);
+  const [reader, { q }, t] = await Promise.all([currentReader(), searchParams, getDict()]);
   const query = ((Array.isArray(q) ? q[0] : q) ?? "").trim();
   const [archive, found] = await Promise.all([
     archiveSize(reader.id),
@@ -199,7 +200,7 @@ export default async function SearchPage({
           <div className="flex w-full items-center gap-2">
             <Link
               href="/"
-              aria-label="К ленте"
+              aria-label={t.feed.searchPage.backToFeedAria}
               className="flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:size-8"
             >
               <ChevronLeftIcon className="size-5 sm:size-4" />
@@ -211,7 +212,9 @@ export default async function SearchPage({
             <SearchForm
               defaultValue={query}
               autoFocus
-              placeholder="Например: uranium дата-центры"
+              placeholder={t.feed.searchPage.placeholder}
+              label={t.feed.search.label}
+              submitLabel={t.feed.search.submit}
               className="flex-1"
             />
           </div>
@@ -219,7 +222,7 @@ export default async function SearchPage({
       />
 
       <div className="mx-auto w-full max-w-page px-4 py-4 sm:py-6">
-        <Results archive={archive} query={query} found={found} />
+        <Results archive={archive} query={query} found={found} t={t} />
       </div>
     </>
   );

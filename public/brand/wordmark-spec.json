@@ -1,55 +1,69 @@
 {
-  "font": "Bodoni Moda",
-  "weight": 700,
-  "opticalSize": 96,
+  "font": "DM Serif Display",
+  "weight": 400,
   "text": "Reporta",
   "shaper": "HarfBuzz",
-  "unitsPerEm": 2000,
+  "unitsPerEm": 1000,
   "pairPositioning": [
     {
       "letter": "R",
-      "advance": 1485,
-      "nominalAdvance": 1485,
-      "kerning": 0
+      "pair": "Re",
+      "advance": 606,
+      "nominalAdvance": 628,
+      "nativeKerning": -16,
+      "opticalAdjustment": -6
     },
     {
       "letter": "e",
-      "advance": 1065,
-      "nominalAdvance": 1065,
-      "kerning": 0
+      "pair": "ep",
+      "advance": 485,
+      "nominalAdvance": 507,
+      "nativeKerning": -10,
+      "opticalAdjustment": -12
     },
     {
       "letter": "p",
-      "advance": 1260,
-      "nominalAdvance": 1260,
-      "kerning": 0
+      "pair": "po",
+      "advance": 562,
+      "nominalAdvance": 578,
+      "nativeKerning": 6,
+      "opticalAdjustment": -22
     },
     {
       "letter": "o",
-      "advance": 1120,
-      "nominalAdvance": 1120,
-      "kerning": 0
+      "pair": "or",
+      "advance": 535,
+      "nominalAdvance": 545,
+      "nativeKerning": 0,
+      "opticalAdjustment": -10
     },
     {
       "letter": "r",
-      "advance": 973,
-      "nominalAdvance": 973,
-      "kerning": 0
+      "pair": "rt",
+      "advance": 462,
+      "nominalAdvance": 441,
+      "nativeKerning": 9,
+      "opticalAdjustment": 12
     },
     {
       "letter": "t",
-      "advance": 749,
-      "nominalAdvance": 739,
-      "kerning": 10
+      "pair": "ta",
+      "advance": 347,
+      "nominalAdvance": 361,
+      "nativeKerning": 0,
+      "opticalAdjustment": -14
     },
     {
       "letter": "a",
-      "advance": 1160,
-      "nominalAdvance": 1160,
-      "kerning": 0
+      "pair": null,
+      "advance": 518,
+      "nominalAdvance": 518,
+      "nativeKerning": 0,
+      "opticalAdjustment": 0
     }
   ],
   "tracking": 0,
+  "opticalKerning": true,
   "outlines": true,
-  "note": "Native font kerning retained. Wordmark is newly typeset; snake body reconstructed as a continuous Bezier, head traced from approved reference."
+  "note": "User-selected DM Serif Display Regular with manual pair adjustments added to native kerning. Comparisons share the same type scale. No synthetic bold or nonuniform scaling. Snake flows through R, p and o counters with right-stroke foreground crossings and a level exit past a. The neck expands smoothly into an upward-facing head inspired by the standalone mark; cyan eyes follow its tilt."
 }

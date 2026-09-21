@@ -15,6 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { takeOpinion, writeOpinion } from "@/lib/actions";
 import { NETWORKS, overLimit, postLength, type NetworkId } from "@/lib/networks";
+import { useT } from "@/components/i18n-provider";
 import type { SavedDraft } from "@/lib/posts";
 
 /**
@@ -57,6 +58,7 @@ export function OpinionDialog({
   const [variant, setVariant] = useState("1");
   const [copied, setCopied] = useState<number | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const t = useT();
 
   // Один запрос на монтирование: ref, а не состояние, — иначе повторный
   // рендер мотатки заказал бы второй пост за те же деньги.
@@ -94,13 +96,13 @@ export function OpinionDialog({
     setCopied(draft.id);
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Скопировано");
+      toast.success(t.onboarding.opinionDialog.copied);
     } catch {
       // Выделяем сами: «скопируй руками» без выделенного текста — это
       // предложение сделать работу за нас.
       field.current?.select();
-      toast.warning("Браузер не дал доступ к буферу", {
-        description: "Текст выделен — нажми ⌘C",
+      toast.warning(t.onboarding.opinionDialog.clipboardDenied, {
+        description: t.onboarding.opinionDialog.clipboardDeniedDescription,
       });
     }
   };
@@ -109,25 +111,25 @@ export function OpinionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Своё мнение</DialogTitle>
+          <DialogTitle>{t.onboarding.opinionDialog.title}</DialogTitle>
           <DialogDescription className="line-clamp-2">{title}</DialogDescription>
           {/* Каким приёмом открыт пост — видно до чтения: не понравился вход,
               второй вариант заходит иначе, и это его выбор, а не догадка. */}
           {state.kind === "ready" && state.hook ? (
-            <span className="text-xs text-muted-foreground">Вход: {state.hook}</span>
+            <span className="text-xs text-muted-foreground">{t.onboarding.opinionDialog.hook(state.hook)}</span>
           ) : null}
         </DialogHeader>
 
         {state.kind === "writing" ? (
           <div className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
             <Spinner />
-            Пишу твоим голосом — это занимает несколько секунд
+            {t.onboarding.opinionDialog.writing}
           </div>
         ) : null}
 
         {state.kind === "failed" ? (
           <Alert variant="destructive">
-            <AlertTitle>Не написалось</AlertTitle>
+            <AlertTitle>{t.onboarding.opinionDialog.failedTitle}</AlertTitle>
             <AlertDescription>{state.error}</AlertDescription>
           </Alert>
         ) : null}
@@ -136,19 +138,16 @@ export function OpinionDialog({
           <div className="flex flex-col gap-3">
             {state.fallback ? (
               <Alert>
-                <AlertTitle>Голос ещё не собран</AlertTitle>
-                <AlertDescription>
-                  Это написано твоими настройками подачи, а не твоим голосом. Добавь
-                  канал в «Моих площадках» и собери голос — посты станут твоими.
-                </AlertDescription>
+                <AlertTitle>{t.onboarding.opinionDialog.voiceNotBuiltTitle}</AlertTitle>
+                <AlertDescription>{t.onboarding.opinionDialog.voiceNotBuiltDescription}</AlertDescription>
               </Alert>
             ) : null}
 
             {state.added.length ? (
               <Alert variant="destructive">
-                <AlertTitle>Проверь перед публикацией</AlertTitle>
+                <AlertTitle>{t.onboarding.opinionDialog.checkBeforePublishTitle}</AlertTitle>
                 <AlertDescription>
-                  Добавлено сверх материала:
+                  {t.onboarding.opinionDialog.addedBeyondSource}
                   <ul className="mt-1 flex flex-col gap-0.5">
                     {state.added.map((line) => (
                       <li key={line}>— {line}</li>
@@ -163,7 +162,7 @@ export function OpinionDialog({
                 <TabsList variant="line" className="h-auto p-0">
                   {tabs.map((id) => (
                     <TabsTrigger key={id} value={id}>
-                      {NETWORKS[id].label}
+                      {t.onboarding.networks[id]}
                     </TabsTrigger>
                   ))}
                 </TabsList>
@@ -175,8 +174,8 @@ export function OpinionDialog({
                   onValueChange={(value) => setVariant(String(value[0] ?? "1"))}
                   className="shrink-0"
                 >
-                  <ToggleGroupItem value="1" aria-label="Первый вариант">1</ToggleGroupItem>
-                  <ToggleGroupItem value="2" aria-label="Второй вариант">2</ToggleGroupItem>
+                  <ToggleGroupItem value="1" aria-label={t.onboarding.opinionDialog.variant1}>1</ToggleGroupItem>
+                  <ToggleGroupItem value="2" aria-label={t.onboarding.opinionDialog.variant2}>2</ToggleGroupItem>
                 </ToggleGroup>
               </div>
 
@@ -189,7 +188,7 @@ export function OpinionDialog({
                   return (
                     <TabsContent key={id} value={id}>
                       <p className="py-6 text-sm text-muted-foreground">
-                        Для этой сети модель ничего не дала — попробуй ещё раз.
+                        {t.onboarding.opinionDialog.noDraftForNetwork}
                       </p>
                     </TabsContent>
                   );
@@ -202,9 +201,9 @@ export function OpinionDialog({
                   <TabsContent key={id} value={id} className="flex flex-col gap-2 pt-3">
                     {draft.unverified.length ? (
                       <Alert variant="destructive">
-                        <AlertTitle>Числа, которых нет в материале</AlertTitle>
+                        <AlertTitle>{t.onboarding.opinionDialog.unverifiedTitle}</AlertTitle>
                         <AlertDescription>
-                          {draft.unverified.join(", ")} — проверь по источнику или убери.
+                          {t.onboarding.opinionDialog.unverifiedDescription(draft.unverified.join(", "))}
                         </AlertDescription>
                       </Alert>
                     ) : null}
@@ -226,8 +225,8 @@ export function OpinionDialog({
                           over ? "text-destructive" : "text-muted-foreground",
                         )}
                       >
-                        {length} из {network.limit}
-                        {network.id === "x" ? " (ссылка считается за 23)" : ""}
+                        {t.onboarding.opinionDialog.counter(length, network.limit)}
+                        {network.id === "x" ? t.onboarding.opinionDialog.xLinkNote : ""}
                       </span>
                       <div className="flex items-center gap-2">
                         {network.intent ? (
@@ -243,12 +242,12 @@ export function OpinionDialog({
                             }
                           >
                             <ExternalLinkIcon />
-                            Открыть в {network.label}
+                            {t.onboarding.opinionDialog.openIn(t.onboarding.networks[id])}
                           </Button>
                         ) : null}
                         <Button size="sm" onClick={() => copy(draft, text)}>
                           {copied === draft.id ? <CheckIcon /> : <CopyIcon />}
-                          Скопировать
+                          {t.onboarding.opinionDialog.copy}
                         </Button>
                       </div>
                     </div>

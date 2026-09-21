@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getDigestDays, getFeed, getStories } from "@/lib/queries";
+import { applyRules, rulesOf } from "@/lib/rules";
 import { isDay } from "@/lib/day";
 import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
@@ -17,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { dictOf } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +33,11 @@ export default async function FeedPage({
   const reader = await currentReader();
   // Первый заход идёт своим путём: интересы, источники, первый выпуск.
   if (!reader.onboarded_at) redirect("/welcome");
+
+  // Словарь — из уже загруженной строки, а не отдельным запросом: соединений
+  // в пуле пять, и ещё один круг ради того, что уже в руках, поставил бы
+  // ленту в очередь за самой собой.
+  const t = dictOf(reader.ui_language);
 
   const { day: param } = await searchParams;
   // Похожее на день, но не день («2026-02-31», пустая строка, массив) —
@@ -68,24 +75,24 @@ export default async function FeedPage({
     return (
       <Empty className="mx-auto max-w-page">
         <EmptyHeader>
-          <EmptyTitle>Первый выпуск придёт ночью</EmptyTitle>
+          <EmptyTitle>{t.feed.page.empty.title}</EmptyTitle>
           <EmptyDescription>
             {/* Читателю — когда ждать и чем занять это время. Команда
                 в терминал — инструкция разработчику, и показывать её всем
                 значит отвечать на вопрос «что делать» тем, чего человек
                 сделать не может. Владельцу она остаётся: он-то может. */}
-            Лента собирается раз в сутки, ночью. Пока можно{" "}
+            {t.feed.page.empty.body}{" "}
             <Link href="/settings/interests" className="underline underline-offset-4">
-              поправить интересы
+              {t.feed.page.empty.fixInterests}
             </Link>{" "}
-            или{" "}
+            {t.feed.page.empty.or}{" "}
             <Link href="/settings/sources" className="underline underline-offset-4">
-              добавить источники
+              {t.feed.page.empty.addSources}
             </Link>
             .
             {reader.owner ? (
               <span className="mt-2 block">
-                Собрать прямо сейчас:
+                {t.feed.page.empty.collectNow}
                 <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">npm run pipeline</code>
               </span>
             ) : null}
@@ -123,11 +130,18 @@ export default async function FeedPage({
   // Ничего лишнего это не открывает — сама карточка уже на странице.
   //
   // Number: sources.id приезжает из bigint строкой, а сюжет считает числами.
+  // Личные правила поверх готового выпуска: исключённое прячется без
+  // пересборки, упомянутое из «За чем следить» получает пометку.
+  // Сама проверка — в `applyRules`, той же, что проверяют тесты.
+  const { visible, hidden } = applyRules(feed, rulesOf(reader));
+
   const mine = sourcesForPlan(sources, plan).map((source) => Number(source.id));
-  const shown = feed.map((item) => item.source_id);
-  const stories = await getStories([...new Set([...mine, ...shown])], feed.map((item) => item.id));
+  const shown = visible.map((item) => item.source_id);
+  const stories = await getStories([...new Set([...mine, ...shown])], visible.map((item) => item.id));
   // Оси остаются на сервере: карточке нужен один ответ — кликбейт ли это.
-  const items = feed.map(({ axes, ...item }) => ({
+  // Описание из фида тоже: оно нужно было правилам, а правила уже применены.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- excerpt снимается с карточки, а не читается
+  const items = visible.map(({ axes, excerpt, ...item }) => ({
     ...item,
     clickbait: (axes?.clickbait?.noul ?? 0) > CLICKBAIT_LABEL_NOUL,
     story: stories.get(item.id) ?? [],
@@ -135,8 +149,10 @@ export default async function FeedPage({
 
   return (
     <FeedTabs
+      day={day}
       topics={topics}
       items={items}
+      hidden={hidden}
       plan={plan}
       networks={networks}
       // Заказ отдаём только для последнего выпуска: фраза недобора говорит
@@ -161,7 +177,7 @@ export default async function FeedPage({
                 nativeButton={false}
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Настройки"
+                aria-label={t.nav.settings}
                 className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
                 // Настройки подгружаются заранее, пока читают ленту: страница
                 // динамическая, и без этого каждое нажатие на шестерёнку ждало
@@ -173,7 +189,7 @@ export default async function FeedPage({
           >
             <SettingsIcon />
           </TooltipTrigger>
-          <TooltipContent>Настройки: интересы, источники, доставка</TooltipContent>
+          <TooltipContent>{t.feed.page.settingsHint}</TooltipContent>
         </Tooltip>
         </div>
       }

@@ -3,6 +3,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { HISTORY_KEY, recentFrom, remember } from "@/lib/search-history";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Недавние запросы — в браузере, а не в базе.
@@ -83,6 +84,7 @@ export function RememberQuery({ query }: { query: string }) {
  * человек его не читает вовсе.
  */
 export function SearchHints() {
+  const t = useT();
   // localStorage нет на сервере, и читать его в рендере — значит разойтись
   // с разметкой, приехавшей оттуда. Снимок с сервера — null: сначала пустое
   // место нужной высоты, содержимое — после появления в браузере. Иначе
@@ -95,7 +97,7 @@ export function SearchHints() {
 
   return (
     <div className="mx-auto flex h-9 max-w-page items-center gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <span className="shrink-0 text-xs text-muted-foreground/70">недавнее</span>
+      <span className="shrink-0 text-xs text-muted-foreground/70">{t.feed.search.recent}</span>
       {recent.map((query) => (
         <Link
           key={query}

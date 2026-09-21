@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { TrashIcon, PlusIcon, ExternalLinkIcon, GlobeIcon } from "lucide-react";
+import { useT } from "@/components/i18n-provider";
 import { addSource, deleteSource, discoverSource, restoreSource } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import type { SourceHealth } from "@/lib/queries";
 import { cleanupOf } from "@/lib/source-health";
 import { PLANS, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
+import type { Dict } from "@/lib/i18n";
 import type { Found } from "../../../../../pipeline/discover";
 
 /**
@@ -91,9 +93,9 @@ function SourceIcon({
  * не читают, то есть тревога, переставшая работать. Первые три называются,
  * остальные считаются: список рядом всё равно сортирован сломанным вверх.
  */
-function listOf(names: string[], limit = 3): string {
+function listOf(names: string[], t: Dict["sources"], limit = 3): string {
   if (names.length <= limit) return names.join(", ");
-  return `${names.slice(0, limit).join(", ")} и ещё ${names.length - limit}`;
+  return `${names.slice(0, limit).join(", ")} ${t.banners.andMore(names.length - limit)}`;
 }
 
 /**
@@ -143,19 +145,19 @@ function openUrlOf(source: SourceHealth): string | null {
  * на экране из десяти. Читают её, только когда с источником что-то не то;
  * в остальное время она есть в подсказке у числа последнего прогона.
  */
-function troubleOf(source: SourceHealth): string | null {
+function troubleOf(source: SourceHealth, t: Dict["sources"]): string | null {
   // Прогон его ещё не видел: ни удачи, ни ошибки.
   if (!source.last_ok_at && !source.last_error) {
-    return "добавлен, первые новости придут ночью";
+    return t.health.added;
   }
   // Про ошибку уже сказал бейдж и подсказка под ним. Добавить сюда «за 30
   // дней ни одной новости» значит сказать рядом с «не отвечает», что
   // источник отвечает и молчит, — две разные беды одной строкой.
   if (source.last_error) return null;
-  if (source.items === 0) return "за 30 дней ни одной новости";
+  if (source.items === 0) return t.health.noNews;
   // Новости даёт, но ни одна не доходит до выпуска: источник есть, толку нет,
   // и по одному числу последнего прогона этого не увидеть.
-  if (source.in_my_digests === 0) return "за 30 дней ни одна новость не дошла до выпуска";
+  if (source.in_my_digests === 0) return t.health.notInDigest;
   return null;
 }
 
@@ -163,23 +165,23 @@ function troubleOf(source: SourceHealth): string | null {
  * Отдача источника за тридцать дней. Само по себе «дал 124 материала» ничего
  * не значит: важно, сколько из них дошло до выпусков и не перепечатки ли это.
  */
-function yieldOf(source: SourceHealth): string {
+function yieldOf(source: SourceHealth, t: Dict["sources"]): string {
   // Прогон его ещё не видел: ни удачи, ни ошибки. Написать такому «за 30 дней
   // ни одного материала» — той же фразой, что и заброшенному, — значит
   // сообщить, что он бесполезен, через минуту после того, как его завели.
-  if (!source.last_ok_at && !source.last_error) return "добавлен, первые новости придут ночью";
-  if (source.items === 0) return "за 30 дней ни одной новости";
+  if (!source.last_ok_at && !source.last_error) return t.health.added;
+  if (source.items === 0) return t.health.noNews;
   // Ряд идёт по пути новости: сколько пришло, сколько дошло до выпуска,
   // сколько открыто. Открытия стоят последними не для красоты — это
   // единственное число здесь, которое ставит сам читатель, и по нему
   // решают, убирать ли источник.
-  const parts = [`за 30 дней: ${source.items} → ${source.in_my_digests} в выпусках`];
-  if (source.in_my_digests > 0) parts.push(`открыто ${source.opened}`);
+  const parts = [t.health.summary(source.items, source.in_my_digests)];
+  if (source.in_my_digests > 0) parts.push(t.health.opened(source.opened));
   if (source.mean_score !== null) {
-    parts.push(`оценка ${String(source.mean_score).replace(".", ",")}`);
+    parts.push(t.health.score(source.mean_score));
   }
   if (source.duplicates > 0) {
-    parts.push(`повторов ${Math.round((source.duplicates / source.items) * 100)}%`);
+    parts.push(t.health.duplicatesPercent(Math.round((source.duplicates / source.items) * 100)));
   }
   return parts.join(" · ");
 }
@@ -194,6 +196,7 @@ export function SourcesManager({
   sources,
   plan,
 }: { sources: SourceHealth[]; plan: Plan }) {
+  const t = useT();
   const [pending, startTransition] = useTransition();
   const [input, setInput] = useState("");
   const [found, setFound] = useState<Found | null>(null);
@@ -212,7 +215,7 @@ export function SourcesManager({
     не решается вовсе.
   */
   const cleanup = sources
-    .map((source) => ({ source, why: cleanupOf(source) }))
+    .map((source) => ({ source, why: cleanupOf(source, t.sources.cleanup) }))
     .filter((row): row is { source: SourceHealth; why: string } => row.why !== null);
 
   /**
@@ -226,18 +229,21 @@ export function SourcesManager({
   const remove = (id: number) =>
     startTransition(async () => {
       const result = await deleteSource(id);
-      if (result?.error) {
+      // Через `in`, а не по `result.error`: у удачной ветки такого поля нет
+      // вовсе, и проверка на его пустоту не сужает тип — имя источника
+      // ниже оказывалось «строка или ничего».
+      if ("error" in result) {
         toast.error(result.error);
         return;
       }
       // Корзина, а не зелёная галочка: галочка говорит «получилось»,
       // и над строкой об убранном источнике читается как «добавлено».
       // Значок здесь называет само действие, а не его исход.
-      toast.success(`${result.label} убран из ленты`, {
+      toast.success(t.sources.toast.removed(result.label), {
         icon: <TrashIcon className="size-4" />,
         duration: 10_000,
         action: {
-          label: "Отменить",
+          label: t.sources.toast.undo,
           onClick: () => startTransition(() => void restoreSource(id)),
         },
       });
@@ -259,25 +265,29 @@ export function SourcesManager({
     <div className="flex flex-col gap-6">
       {dead.length > 0 ? (
         <Alert variant="destructive">
-          <AlertTitle>Источники с ошибкой: {dead.length}</AlertTitle>
+          <AlertTitle>{t.sources.banners.errorTitle(dead.length)}</AlertTitle>
           <AlertDescription>
             {/*
               Список обрезан: при полусотне сломанных источников склейка
               через точку превращала тревогу в абзац, который не читают.
               Остальные видны в списке, он теперь сортирован сломанным вверх.
             */}
-            {listOf(dead.map((source) => `${source.label}: ${source.last_error}`))}
+            {listOf(dead.map((source) => `${source.label}: ${source.last_error}`), t.sources)}
           </AlertDescription>
         </Alert>
       ) : null}
 
       {silent.length > 0 ? (
         <Alert>
-          <AlertTitle>Отвечают, но молчат: {silent.length}</AlertTitle>
+          <AlertTitle>{t.sources.banners.quietTitle(silent.length)}</AlertTitle>
           <AlertDescription>
-            {listOf(silent.map((source) => `${source.label} (${source.silent_days} дн.)`))} —
-            источник жив и отвечает, но {SILENT_DAYS} дней подряд не даёт ни одного свежего
-            материала. Обычно это значит, что его забросили.
+            {listOf(
+              silent.map(
+                (source) => `${source.label} (${t.sources.banners.quietDays(source.silent_days ?? 0)})`,
+              ),
+              t.sources,
+            )}{" "}
+            — {t.sources.banners.quietExplain(SILENT_DAYS)}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -297,7 +307,7 @@ export function SourcesManager({
                 setFound(null);
                 setInput("");
                 toast.success(
-                  result?.created ? "Источник добавлен" : "Этот источник уже был в списке",
+                  result?.created ? t.sources.toast.added : t.sources.toast.alreadyAdded,
                 );
               })
             }
@@ -321,11 +331,11 @@ export function SourcesManager({
                     name="label"
                     defaultValue={found.label}
                     key={found.url}
-                    aria-label="Название источника"
+                    aria-label={t.sources.found.nameLabel}
                     className="font-heading h-auto border-transparent bg-transparent px-2 py-1 text-2xl leading-tight font-semibold hover:border-input"
                   />
                   <CardDescription className="px-2">
-                    {found.via} · свежих {found.fresh} из {found.entries}
+                    {t.sources.found.stats(found.via, found.fresh, found.entries)}
                   </CardDescription>
                 </div>
               </div>
@@ -348,11 +358,11 @@ export function SourcesManager({
                   className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm"
                 >
                   <ExternalLinkIcon className="size-3.5 shrink-0" />
-                  <span className="truncate">последняя запись: {found.sample}</span>
+                  <span className="truncate">{t.sources.found.lastEntry(found.sample)}</span>
                 </a>
                 {found.fresh === 0 ? (
                   <span className="text-muted-foreground text-xs">
-                    Новости есть, но все старые. Похоже, источник забросили.
+                    {t.sources.found.stale}
                   </span>
                 ) : null}
               </div>
@@ -360,14 +370,14 @@ export function SourcesManager({
               <div className="flex items-center gap-2">
                 <Button type="submit" disabled={pending}>
                   <PlusIcon data-icon="inline-start" />
-                  Добавить
+                  {t.sources.found.add}
                 </Button>
                 {/*
                   Выход обязателен: без него разобранная не та ссылка запирает
                   карточку до перезагрузки страницы.
                 */}
                 <Button type="button" variant="ghost" onClick={() => setFound(null)}>
-                  Отмена
+                  {t.sources.found.cancel}
                 </Button>
               </div>
             </CardContent>
@@ -375,7 +385,7 @@ export function SourcesManager({
         ) : (
           <>
             <CardHeader>
-              <CardTitle>Добавить источник</CardTitle>
+              <CardTitle>{t.sources.addForm.title}</CardTitle>
             </CardHeader>
             <CardContent>
               <FieldGroup>
@@ -386,7 +396,7 @@ export function SourcesManager({
                       // Подписи над полем нет, а имя у него быть обязано:
                       // плейсхолдер исчезает при вводе и экранному диктору
                       // именем не служит.
-                      aria-label="Ссылка на источник"
+                      aria-label={t.sources.addForm.linkLabel}
                       value={input}
                       onChange={(event) => setInput(event.target.value)}
                       onKeyDown={(event) => {
@@ -395,7 +405,7 @@ export function SourcesManager({
                           parse();
                         }
                       }}
-                      placeholder="https://www.youtube.com/@канал"
+                      placeholder={t.sources.addForm.placeholder}
                       aria-invalid={error ? true : undefined}
                     />
                     {/*
@@ -405,7 +415,7 @@ export function SourcesManager({
                     */}
                     <Button type="button" onClick={parse} disabled={pending || !input.trim()}>
                       <PlusIcon data-icon="inline-start" />
-                      {pending ? "Проверяю…" : "Добавить"}
+                      {pending ? t.sources.addForm.checking : t.sources.addForm.add}
                     </Button>
                   </div>
                   {/*
@@ -419,7 +429,7 @@ export function SourcesManager({
                     <FieldError>{error}</FieldError>
                   ) : (
                     <FieldDescription>
-                      Вставь ссылку на сайт, блог, канал на YouTube или в Telegram
+                      {t.sources.addForm.hint}
                     </FieldDescription>
                   )}
                 </Field>
@@ -427,12 +437,11 @@ export function SourcesManager({
                 {found && !plan.kinds.includes(found.kind) ? (
                   <Alert>
                     <AlertTitle className="flex items-center gap-1.5">
-                      Посты из X только на тарифе «{PLANS.pro.label}»
+                      {t.sources.paywall.xTitle(PLANS.pro.label)}
                       <PaywallCrown feature="x" plan={plan} />
                     </AlertTitle>
                     <AlertDescription>
-                      Нашли: {found.label}. X берёт деньги за доступ к постам,
-                      поэтому они только на Pro.
+                      {t.sources.paywall.xBody(found.label)}
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -445,7 +454,7 @@ export function SourcesManager({
       {cleanup.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Что убрать</CardTitle>
+            <CardTitle>{t.sources.cleanup.title}</CardTitle>
             {/*
               Про то, что у соседа источник остаётся, здесь не сказано
               намеренно: это устройство каталога, а не ответ на вопрос
@@ -454,7 +463,7 @@ export function SourcesManager({
               Что убранное возвращается, говорит само сообщение после
               нажатия: там это и нужно, а не за минуту до.
             */}
-            <CardDescription>Эти источники месяц занимали место зря.</CardDescription>
+            <CardDescription>{t.sources.cleanup.description}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-1">
             {cleanup.map(({ source, why }, index) => (
@@ -487,7 +496,7 @@ export function SourcesManager({
                     // Имя источника в подписи: диктору две соседние кнопки
                     // «Убрать» без него — один и тот же вопрос без ответа,
                     // какую из них он читает.
-                    aria-label={`Убрать ${source.label} из ленты`}
+                    aria-label={t.sources.cleanup.removeAria(source.label)}
                     // Красное под курсором — тот же знак, что у корзины
                     // в списке ниже: кнопка, которая что-то уносит, обязана
                     // краснеть в обоих местах одинаково, иначе в одном
@@ -495,7 +504,7 @@ export function SourcesManager({
                     className="hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => remove(source.id)}
                   >
-                    Убрать
+                    {t.sources.cleanup.remove}
                   </Button>
                 </div>
               </div>
@@ -506,19 +515,18 @@ export function SourcesManager({
 
       <Card>
         <CardHeader>
-          <CardTitle>Источники</CardTitle>
+          <CardTitle>{t.sources.list.title}</CardTitle>
           <CardDescription>
-            {sources.length} из {plan.maxSources} на тарифе «{plan.label}»
+            {t.sources.list.count(sources.length, plan.maxSources, t.plans.label[plan.id])}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
           {sources.length === 0 ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>Пока ни одного источника</EmptyTitle>
+                <EmptyTitle>{t.sources.list.emptyTitle}</EmptyTitle>
                 <EmptyDescription>
-                  Вставь ссылку выше: на блог, канал или рассылку. Пока источников нет,
-                  выпуск собирать не из чего.
+                  {t.sources.list.emptyDescription}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -567,9 +575,9 @@ export function SourcesManager({
                           : ""}
                       </span>
                     )}
-                    {troubleOf(source) ? (
+                    {troubleOf(source, t.sources) ? (
                       <span className="truncate text-xs text-muted-foreground">
-                        {troubleOf(source)}
+                        {troubleOf(source, t.sources)}
                       </span>
                     ) : null}
                   </div>
@@ -586,16 +594,16 @@ export function SourcesManager({
                   // наверху страницы, поэтому наведение здесь — короткий путь,
                   // а не единственный.
                   <Tooltip>
-                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>ошибка</TooltipTrigger>
+                    <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>{t.sources.list.error}</TooltipTrigger>
                     <TooltipContent>{source.last_error}</TooltipContent>
                   </Tooltip>
                 ) : (source.silent_days ?? 0) >= SILENT_DAYS ? (
                   <Tooltip>
                     <TooltipTrigger render={<Badge variant="destructive" className="cursor-help" />}>
-                      молчит {source.silent_days} дн.
+                      {t.sources.list.quietBadge(source.silent_days ?? 0)}
                     </TooltipTrigger>
                     <TooltipContent>
-                      Отвечает, но {SILENT_DAYS} дней подряд не даёт ничего свежего
+                      {t.sources.list.quietTooltip(SILENT_DAYS)}
                     </TooltipContent>
                   </Tooltip>
                 ) : source.last_count !== null ? (
@@ -609,14 +617,14 @@ export function SourcesManager({
                         <Badge
                           variant="secondary"
                           className="cursor-help"
-                          aria-label={`Прошлой ночью отсюда пришло новостей: ${source.last_count}`}
+                          aria-label={t.sources.list.lastCountAria(source.last_count)}
                         />
                       }
                     >
                       {source.last_count}
                     </TooltipTrigger>
                     <TooltipContent>
-                      Пришло прошлой ночью · {yieldOf(source)}
+                      {t.sources.list.lastCountTooltip(yieldOf(source, t.sources))}
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
@@ -626,7 +634,7 @@ export function SourcesManager({
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={`Убрать ${source.label} из ленты`}
+                        aria-label={t.sources.list.removeAria(source.label)}
                         onClick={() => startTransition(() => remove(source.id))}
                         className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       />
@@ -636,7 +644,7 @@ export function SourcesManager({
                   </TooltipTrigger>
                   {/* Своя подсказка вместо title: браузерная выезжает через
                       секунду с лишним и рисуется системным шрифтом. */}
-                  <TooltipContent>Убрать из ленты, отменить можно</TooltipContent>
+                  <TooltipContent>{t.sources.list.removeTooltip}</TooltipContent>
                 </Tooltip>
               </div>
             </div>

@@ -1,0 +1,36 @@
+import type { rules as En } from "../en/rules";
+
+/** Русский повторяет раскладку английского файл в файл. */
+export const rules: typeof En = {
+  follow: {
+    label: "За чем следить",
+    description:
+      "Компании, продукты, люди. Упомянутое встанет в своей теме первым — в пределах выпуска, не сверх него. Ищется по написанию: «Figma» не найдёт «Фигму», добавь оба.",
+    placeholder: "Figma, Framer, Webflow",
+    limit: (max: number) => `Следить можно не больше чем за ${max}`,
+  },
+  exclude: {
+    label: "Что исключать",
+    description:
+      "Имена, продукты, фразы. Упомянутое в выпуск не попадёт, а из готового спрячется. Тоже по написанию, без перевода.",
+    placeholder: "Название компании, имя, фраза",
+    limit: (max: number) => `Исключений может быть не больше ${max}`,
+  },
+  optional: "необязательно",
+  counter: (n: number, limit: number) => `${n} из ${limit}`,
+  add: "Добавить",
+  remove: "Убрать",
+  removeAria: (name: string) => `Убрать ${name}`,
+  chipAria: (name: string, others: string[]) =>
+    others.length > 0 ? `${name}, ещё ${others.length}: ${others.join(", ")}` : name,
+  more: (n: number) => `+${n}`,
+  variantsAria: (name: string) => `Другие написания для «${name}»`,
+  variantsPlaceholder: "Другие написания через запятую: Фигма, figma.com",
+  variantsHelp: (max: number) => `Ищется каждое написание, буквально. До ${max} на одно название`,
+  limitReached: (max: number) => `Не больше ${max}. Убери одно, чтобы добавить другое`,
+  tooLong: (name: string, max: number) => `«${name}…» длиннее ${max} знаков`,
+  exists: (name: string) => `«${name}» уже есть`,
+  existsElsewhere: (name: string) => `«${name}» уже есть в другом правиле`,
+  tooManyVariants: (max: number) => `Не больше ${max} написаний на одно название`,
+  badList: "Список не разобрался — обнови страницу и попробуй ещё раз",
+};

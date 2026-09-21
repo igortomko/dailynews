@@ -3,13 +3,15 @@
 import Link, { useLinkStatus } from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { ru } from "react-day-picker/locale";
+import { ru, enUS } from "react-day-picker/locale";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Spinner } from "@/components/ui/spinner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useT, useLocale } from "@/components/i18n-provider";
+import { formatDay } from "@/lib/relative-time";
 
 /**
  * Стрелка, которая сообщает о работе. Выпуск — серверная страница, и между
@@ -28,8 +30,6 @@ function Arrow({ icon: Icon }: { icon: typeof ChevronLeftIcon }) {
   );
 }
 
-const FORMAT = new Intl.DateTimeFormat("ru", { day: "numeric", month: "long", year: "numeric" });
-
 /** Локальная дата без часового пояса: «2026-09-19» — это день, а не момент. */
 const toDay = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -42,6 +42,8 @@ const toDay = (date: Date) =>
  * приводит на пустую страницу и выглядит поломкой.
  */
 export function DateNav({ day, days }: { day: string; days: string[] }) {
+  const t = useT();
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [going, startGoing] = useTransition();
   const router = useRouter();
@@ -68,14 +70,14 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             render={
               <Link
                 href={`/?day=${older}`}
-                aria-label="Предыдущий выпуск"
+                aria-label={t.feed.dateNav.previous}
                 className={cn(arrow, "hover:bg-muted")}
               />
             }
           >
             <Arrow icon={ChevronLeftIcon} />
           </TooltipTrigger>
-          <TooltipContent>Предыдущий выпуск</TooltipContent>
+          <TooltipContent>{t.feed.dateNav.previous}</TooltipContent>
         </Tooltip>
       ) : (
         <span aria-hidden className={cn(arrow, "text-muted-foreground/30")}>
@@ -88,13 +90,13 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
           render={
             <button
               type="button"
-              aria-label="Выбрать дату"
+              aria-label={t.feed.dateNav.pickDate}
               className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2 tabular-nums transition-colors hover:bg-muted sm:px-1.5 sm:py-0.5"
             />
           }
         >
             {going ? <Spinner className="size-4" /> : null}
-          {FORMAT.format(new Date(`${day}T12:00:00`))}
+          {formatDay(day, locale)}
         </PopoverTrigger>
         {/* Календарь прибит к экрану, а не к странице: кнопка даты живёт
             в прибитой шапке и при прокрутке остаётся на месте, а слежение
@@ -109,7 +111,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
         >
           <Calendar
             mode="single"
-            locale={ru}
+            locale={locale === "ru" ? ru : enUS}
             defaultMonth={new Date(`${day}T12:00:00`)}
             selected={new Date(`${day}T12:00:00`)}
             disabled={(date) => !available.has(toDay(date))}
@@ -131,14 +133,14 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             render={
               <Link
                 href={`/?day=${newer}`}
-                aria-label="Следующий выпуск"
+                aria-label={t.feed.dateNav.next}
                 className={cn(arrow, "hover:bg-muted")}
               />
             }
           >
             <Arrow icon={ChevronRightIcon} />
           </TooltipTrigger>
-          <TooltipContent>Следующий выпуск</TooltipContent>
+          <TooltipContent>{t.feed.dateNav.next}</TooltipContent>
         </Tooltip>
       ) : (
         <span aria-hidden className={cn(arrow, "text-muted-foreground/30")}>
