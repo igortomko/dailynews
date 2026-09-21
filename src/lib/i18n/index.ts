@@ -3,7 +3,7 @@ import { ru } from "./ru/index";
 import { localeOf, type Locale } from "./locale";
 
 export type { Dict };
-export { LOCALES, LOCALE_LABELS, LOCALE_SHORT, DEFAULT_LOCALE, localeOf } from "./locale";
+export { LOCALES, LOCALE_LABELS, DEFAULT_LOCALE, localeOf } from "./locale";
 export type { Locale } from "./locale";
 
 const DICTS: Record<Locale, Dict> = { en, ru };

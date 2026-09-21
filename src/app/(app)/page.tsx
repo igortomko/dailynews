@@ -14,7 +14,6 @@ import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { LocaleToggle } from "@/components/locale-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
@@ -169,9 +168,6 @@ export default async function FeedPage({
         // Тема и настройки — одна пара: и то и другое про то, как выглядит
         // и работает лента, а не про сам выпуск.
         <div key="actions" className="flex items-center gap-2">
-        {/* Язык интерфейса слева от темы: обе — настройки окружения,
-            а не содержимого, и живут одной парой. */}
-        <LocaleToggle className="size-10 sm:size-8" />
         <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
         <Tooltip>
           <TooltipTrigger
