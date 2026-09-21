@@ -61,6 +61,7 @@ import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
 import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
+import { recentFrom, remember } from "../src/lib/search-history";
 import {
   ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
 } from "../src/lib/source-health";
@@ -2895,6 +2896,33 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
     "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
   );
+
+  // Недавние запросы лежат в браузере, и что там лежит — знает не наш код:
+  // ключ переживает наши правки и правится из консоли. Разбор обязан
+  // отвечать пустой историей, а не исключением посреди отрисовки шапки.
+  assert.deepEqual(recentFrom(null), [], "пустое хранилище — пустая история");
+  assert.deepEqual(recentFrom("не json"), [], "мусор в ключе не роняет шапку");
+  assert.deepEqual(recentFrom('{"q":"уран"}'), [], "объект вместо списка — тоже мусор");
+  assert.deepEqual(recentFrom('["уран", 7, null, "гпу"]'), ["уран", "гпу"], "не строки выбрасываются");
+  assert.deepEqual(
+    recentFrom('["1","2","3","4","5","6","7"]').length,
+    5,
+    "длинный список подрезается: подсказок ровно столько, сколько помещается",
+  );
+  // Строка рисуется списком, и два одинаковых запроса — это два одинаковых
+  // ключа React и одна и та же подсказка дважды. Наша запись повторов
+  // не делает, но ключ правят и снаружи.
+  assert.deepEqual(recentFrom('["Уран","уран","гпу"]'), ["Уран", "гпу"], "повторы не доезжают до строки");
+  assert.deepEqual(recentFrom('["", "  ", "уран"]'), ["уран"], "пустая подсказка вела бы в поиск без запроса");
+
+  assert.deepEqual(remember(["гпу"], "уран"), ["уран", "гпу"], "свежий запрос идёт первым");
+  assert.deepEqual(remember(["уран", "гпу"], "гпу"), ["гпу", "уран"], "повтор поднимается, а не удваивается");
+  // Регистр не различие: «Uranium» следом за «uranium» — это один поиск,
+  // и две подсказки вместо одной съедают место, ничего не добавляя.
+  assert.deepEqual(remember(["uranium"], "Uranium"), ["Uranium"], "регистр не заводит второй подсказки");
+  assert.deepEqual(remember(["уран"], "   "), ["уран"], "пустой запрос историю не трогает");
+  assert.deepEqual(remember(["уран"], "  гпу "), ["гпу", "уран"], "пробелы по краям в подсказку не едут");
+  assert.equal(remember(["1", "2", "3", "4", "5"], "6").length, 5, "история не растёт");
 }
 
 // Сюжет: дедуп сделан видимым.
