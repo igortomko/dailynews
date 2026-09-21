@@ -3,9 +3,8 @@
 import Link, { useLinkStatus } from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { ru, enUS } from "react-day-picker/locale";
+import dynamic from "next/dynamic";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
-import { Calendar } from "@/components/ui/calendar";
 import { Spinner } from "@/components/ui/spinner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -30,9 +29,20 @@ function Arrow({ icon: Icon }: { icon: typeof ChevronLeftIcon }) {
   );
 }
 
-/** Локальная дата без часового пояса: «2026-09-19» — это день, а не момент. */
-const toDay = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+/**
+ * Календарь приезжает отдельным куском по первому открытию: 180 КБ
+ * react-day-picker не нужны тому, кто листает дни стрелками. ssr: false —
+ * содержимое поповера и так рисуется только в браузере. Заглушка держит
+ * место календаря, чтобы поповер не подпрыгивал, когда кусок доедет.
+ */
+const DayPicker = dynamic(() => import("@/components/day-picker").then((m) => m.DayPicker), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-72 w-64 items-center justify-center">
+      <Spinner />
+    </div>
+  ),
+});
 
 /**
  * Выпуски листаются датами. Стрелками — соседние, календарём — далёкие:
@@ -109,19 +119,16 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
           disableAnchorTracking
           className="w-auto p-0"
         >
-          <Calendar
-            mode="single"
-            locale={locale === "ru" ? ru : enUS}
-            defaultMonth={new Date(`${day}T12:00:00`)}
-            selected={new Date(`${day}T12:00:00`)}
-            disabled={(date) => !available.has(toDay(date))}
-            onSelect={(date) => {
-              if (!date) return;
+          <DayPicker
+            day={day}
+            available={available}
+            locale={locale}
+            onPick={(picked) => {
               setOpen(false);
               // Переход в переходе: выпуск за другой день собирается
               // на сервере, и до его прихода страница остаётся прежней.
               // Без признака работы это выглядит как «календарь не сработал».
-              startGoing(() => router.push(`/?day=${toDay(date)}`));
+              startGoing(() => router.push(`/?day=${picked}`));
             }}
           />
         </PopoverContent>

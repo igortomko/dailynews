@@ -1177,19 +1177,19 @@ assert.ok(
   );
 }
 
-// --- расположение middleware ------------------------------------------------
-// Проект использует srcDirectory, и Next подключает middleware только из src/.
+// --- расположение proxy (бывшего middleware) ------------------------------------------------
+// Проект использует srcDirectory, и Next подключает proxy только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
 // просто отдаются всем. Один раз так и было.
 import { existsSync } from "node:fs";
-assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
+assert.ok(existsSync("src/proxy.ts"), "proxy должен лежать в src/");
 
 // Вебхук за проверкой сессии отвечает редиректом на логин, а отправитель
 // читает 307 как успех и не повторяет доставку. Платёж при этом проходит,
 // а тариф не выдаётся — отказ, который виден только по жалобе.
-const middleware = readFileSync("src/middleware.ts", "utf8");
+const proxy = readFileSync("src/proxy.ts", "utf8");
 for (const hook of ["/api/telegram", "/api/lemon"]) {
-  assert.ok(middleware.includes(`"${hook}"`), `${hook} должен быть открыт в middleware`);
+  assert.ok(proxy.includes(`"${hook}"`), `${hook} должен быть открыт в proxy`);
   assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
 }
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");

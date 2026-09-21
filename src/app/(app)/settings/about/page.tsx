@@ -89,10 +89,12 @@ function FlowGrid({
 export default async function AboutPage() {
   const reader = await currentReader();
   const plan = effectivePlan(reader);
-  const t = await getDict();
+  // Словарь, каталог и мерка читателя не зависят друг от друга — одним
+  // кругом; за сутками ходим уже по каталогу, сузив его тарифом.
+  const [t, catalog, chars] = await Promise.all([getDict(), getSources(), cardCharsOf(reader.id)]);
   // Те же источники, что опрашивает прогон: картинка обязана считать
   // по тому, что читателю на его тарифе и правда собирают.
-  const mine = sourcesForPlan(await getSources(), plan).map((source) => source.id);
+  const mine = sourcesForPlan(catalog, plan).map((source) => source.id);
   const collected = await getCollectedLast24h(mine);
   // Потолок тарифа, а не сохранённое число: после понижения `digest_minutes`
   // остаётся от прежнего тарифа, и картинка обещала бы час там, где доходит
@@ -101,7 +103,7 @@ export default async function AboutPage() {
   // Клетки считаются в материалах: поток меряется штуками, и рисовать его
   // минутами значило бы сравнивать несравнимое. Перевод тот же, что в прогоне.
   const inDigest = itemsForMinutes(
-    minutes, cardMinutes(await cardCharsOf(reader.id), effectiveVoice(reader)), plan.maxItems,
+    minutes, cardMinutes(chars, effectiveVoice(reader)), plan.maxItems,
   );
 
   // Следующий тариф, если он есть. На Pro предложения нет: продавать

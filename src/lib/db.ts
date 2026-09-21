@@ -43,3 +43,15 @@ export const sql = postgres(url, {
   idle_timeout: process.env.NEXT_RUNTIME ? 1800 : 20,
   connect_timeout: 15,
 });
+
+// Раз в пять минут веб трогает пул. Соединение, которое не простаивает,
+// не закрывается по idle_timeout, а переоткрытие по max_lifetime (час)
+// приходится на этот тик, а не на первый заход читателя после долгой
+// паузы — он платил за DNS, TCP, TLS и SCRAM 150–500 мс. unref: таймер
+// не держит процесс, и сборка образа (у неё DATABASE_URL — заглушка)
+// его не ждёт; отказ заглушки глотается — это не запрос читателя.
+if (process.env.NEXT_RUNTIME) {
+  setInterval(() => {
+    sql`select 1`.catch(() => {});
+  }, 5 * 60 * 1000).unref();
+}
