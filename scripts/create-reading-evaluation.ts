@@ -104,8 +104,8 @@ async function main() {
   const cases = selectEvaluationSample(cards.map((card): EvaluationCase => {
     const reading = parseStoredReading(card.summary_document);
     return {
-      itemId: card.item_id,
-      position: card.position,
+      itemId: Number(card.item_id),
+      position: Number(card.position),
       title: card.title,
       format: reading?.document?.formatPlan?.format ?? null,
       answer: reading?.document?.answer?.text ?? reading?.document?.lead?.text ?? null,
