@@ -3071,9 +3071,22 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   const deploy = readFileSync("deploy/deploy.sh", "utf8");
   const lock = /^LOCK=\$DIR\/(\S+)$/m.exec(deploy);
   assert.ok(lock, "замок развёртывания лежит внутри $DIR и найден в скрипте");
+  // Ищется внутри самого вызова, а не по всему файлу: исключение, о котором
+  // сказано в комментарии или переехавшее в чужую команду, замок не спасает.
+  const rsync = /^rsync (?:.*\\\n)*.*$/m.exec(deploy)?.[0] ?? "";
   assert.ok(
-    deploy.includes(`--exclude '${lock![1]}'`),
+    rsync.includes("--delete") && rsync.includes(`"$HOST:$DIR/"`),
+    "вызов rsync в deploy.sh найден целиком",
+  );
+  assert.ok(
+    rsync.includes(`--exclude '${lock![1]}'`),
     `rsync --delete сносит ${lock![1]}: замок надо исключить из отправки`,
+  );
+  // --delete-excluded удаляет именно исключённое: с ним замок умирает
+  // снова, а строка исключения остаётся на месте и выглядит защитой.
+  assert.ok(
+    !rsync.includes("--delete-excluded"),
+    "--delete-excluded сносит ровно то, что исключено, вместе с замком",
   );
 }
 
