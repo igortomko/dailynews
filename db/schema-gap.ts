@@ -36,7 +36,22 @@ type Db = typeof import("../src/lib/db")["sql"];
 export type Gap = { kind: "таблица" | "колонка" | "ограничение"; name: string; from: string };
 
 /** Что миграции обещают: таблицы, колонки по таблицам и именованные ограничения. */
+/**
+ * Разбор каталога не меняется в пределах прогона, а спрашивают его трижды:
+ * сверка до накатывания, отбор пропускаемых файлов и сверка после. Парсить
+ * одни и те же сорок файлов три раза незачем.
+ */
+const parsed = new Map<string, ReturnType<typeof parseDir>>();
+
 export function promised(dir = "db/migrations") {
+  const hit = parsed.get(dir);
+  if (hit) return hit;
+  const fresh = parseDir(dir);
+  parsed.set(dir, fresh);
+  return fresh;
+}
+
+function parseDir(dir: string) {
   const tables: { table: string; from: string }[] = [];
   const columns: { table: string; column: string; from: string }[] = [];
   // Таблица у ограничения помнится не ради красоты: увезённая таблица
@@ -107,28 +122,59 @@ export function promised(dir = "db/migrations") {
 }
 
 /**
- * Файлы, которые хоть что-то обещают форме схемы.
+ * Операторы, которых сверка формы схемы не видит вовсе.
  *
- * Нужны, чтобы отличить две причины, по которым сверка молчит. Первая:
- * миграция обещала колонку, колонка есть — значит она применена, и такой
- * файл можно записать в журнал не выполняя (журнал завели позже самих
- * миграций, и без этого он не догнал бы базу никогда). Вторая: файл форме
- * схемы не обещает ничего вовсе — индекс, `update`, `comment on`, — и сверке
- * просто нечего искать. Её молчание тогда не значит ровным счётом ничего.
- *
- * До этой развилки вторые проскакивали как первые. 21 сентября 2026 так
- * прошла 0041_story_index: журнал пополнился, индекса в базе не появилось.
- * Раньше, 19 сентября, тем же путём прошла 0031 — она убирала тринадцать
- * источников, и они остались на месте.
+ * Своя запись в журнал не в счёт: она стоит в конце каждого файла
+ * и про саму миграцию не говорит ничего.
  */
-export function declaringFiles(dir = "db/migrations"): Set<string> {
-  const { tables, columns, constraints } = promised(dir);
-  return new Set([
-    ...tables.map((row) => row.from),
-    ...columns.map((row) => row.from),
-    ...constraints.map((row) => row.from),
-  ]);
+const INVISIBLE =
+  /create\s+(unique\s+)?index|update\s+dailynews\.|delete\s+from\s+dailynews\.|comment\s+on|insert\s+into\s+dailynews\.(?!migrations)/i;
+
+/** Операторы, которые сверка формы схемы умеет проверить. */
+const DECLARING =
+  /create\s+table\s+if\s+not\s+exists\s+dailynews\.|drop\s+table\s+if\s+exists\s+dailynews\.|add\s+column\s+if\s+not\s+exists|drop\s+column\s+if\s+exists|add\s+constraint\s/i;
+
+/**
+ * Что сверка формы схемы может сказать о каждом файле.
+ *
+ * Считается по тексту файла, а не по тому, что от его обещаний осталось
+ * к концу каталога. Разница не теоретическая: ограничение из 0035 позже
+ * переопределяет 0037, и по остатку 0035 выглядела бы файлом без обещаний —
+ * то есть подлежащей выполнению. А выполнить её заново значит вернуть
+ * `model_calls_stage_check` к старому списку этапов и стереть чужие,
+ * ровно как уже было однажды.
+ *
+ * `skippable` — файл можно записать в журнал не выполняя: он что-то обещал
+ * форме схемы, и обещанное в базе есть. Без этой поблажки журнал, заведённый
+ * позже самих миграций, не догнал бы базу никогда.
+ *
+ * `silent` — файл не обещал форме схемы ничего: индекс, `update`,
+ * `comment on`. Её молчание о нём не значит ровным счётом ничего, и до
+ * починки ворот такие уходили в журнал невыполненными. Так прошла
+ * 0041_story_index (индекса в базе не появилось) и 0031 — вместе
+ * с тринадцатью источниками, которые должна была убрать.
+ *
+ * Между ними третий случай: файл делает и то и другое. 0012 заводит
+ * `summary_axes` и индекс по нему, 0030 — `deleted_at` и `sources_live_idx`.
+ * Колонка на месте, индекса может не быть, поэтому такой файл не пропускается
+ * тоже — но и в отчёт о невыполненных не идёт: выполнялся он из-за колонки.
+ */
+export function fileCoverage(dir = "db/migrations"): {
+  skippable: Set<string>;
+  silent: Set<string>;
+} {
+  const skippable = new Set<string>();
+  const silent = new Set<string>();
+  for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) {
+    const text = readFileSync(`${dir}/${file}`, "utf8");
+    if (!DECLARING.test(text)) silent.add(file);
+    else if (!INVISIBLE.test(text)) skippable.add(file);
+  }
+  return { skippable, silent };
 }
+
+/** Короткий вход для тех, кому нужен только первый набор. */
+export const skippableFiles = (dir = "db/migrations") => fileCoverage(dir).skippable;
 
 export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]> {
   const { tables, columns, constraints } = promised(dir);

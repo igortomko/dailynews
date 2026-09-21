@@ -1422,7 +1422,10 @@ async function main() {
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
     `;
     assert.equal(beforeFlatten.n, 1, "цепочка должна быть заведена — иначе проверка ничего не ловит");
-    assert.equal(await flattenDupChains(sql), 1, "выпрямляется ровно одно звено");
+    assert.equal(
+      await flattenDupChains(sql), 1,
+      "считаются исправленные материалы, а не переписывания",
+    );
     const [afterFlatten] = await sql<{ n: number }[]>`
       select count(*)::int as n from dailynews.items c
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
@@ -1433,6 +1436,34 @@ async function main() {
       chainStory.get(chainRoot)?.length, 3,
       "выпрямленный сюжет собирается целиком, а не делится надвое",
     );
+
+    // Цепочка из четырёх материалов правится за два шага, но исправить надо
+    // два из них: третий и четвёртый (второй и так указывает на корень).
+    // Сложенные длины ответов насчитали бы три — число в логе прогона
+    // означало бы не то, что в нём написано.
+    const deep = [
+      await mkItem(mineSource, "deep-0", "Deep chain story zero", 400),
+      await mkItem(mineSource, "deep-1", "Deep chain story one", 350),
+      await mkItem(mineSource, "deep-2", "Deep chain story two", 300),
+      await mkItem(mineSource, "deep-3", "Deep chain story three", 250),
+    ];
+    for (let i = 1; i < deep.length; i++) {
+      await sql`update dailynews.items set dup_of = ${deep[i - 1]} where id = ${deep[i]}`;
+    }
+    assert.equal(await flattenDupChains(sql), 2, "два материала, сколько бы шагов ни ушло");
+    const deepStory = await queries.getStories([mineSource], [deep[0]]);
+    assert.equal(deepStory.get(deep[0])?.length, 4, "длинная цепочка сходится в один сюжет");
+
+    // Инвариант обеспечивается там, где потребляется: догрузка выпуска
+    // зовёт selectSurvivors мимо ночного прогона, и цепочка, оставшаяся
+    // с прошлого раза, увела бы ключ сюжета в середину без оценки.
+    await sql`update dailynews.items set dup_of = ${deep[1]} where id = ${deep[3]}`;
+    await selectSurvivors(sql, owner.id, owner.weights, storyTargets, 5, [mineSource]);
+    const [chainsLeft] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(chainsLeft.n, 0, "отбор выпрямляет цепочки сам, а не надеется на прогон");
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

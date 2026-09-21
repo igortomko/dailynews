@@ -86,22 +86,26 @@ export async function markDuplicates(sql: Sql, itemIds: number[]): Promise<numbe
  * из способов об этом узнать.
  */
 export async function flattenDupChains(sql: Sql): Promise<number> {
-  let flattened = 0;
+  // Материалы, а не переписывания: цепочка из трёх звеньев правится двумя
+  // шагами, и сложенные длины ответов насчитали бы вдвое больше, чем было
+  // починено. Число уходит в лог прогона — оно обязано значить то,
+  // что там написано.
+  const touched = new Set<number>();
   for (let step = 0; step < 10; step++) {
-    const rows = await sql`
+    const rows = await sql<{ id: number }[]>`
       update dailynews.items i
          set dup_of = o.dup_of
         from dailynews.items o
        where o.id = i.dup_of and o.dup_of is not null
       returning i.id
     `;
-    if (rows.length === 0) return flattened;
-    flattened += rows.length;
+    if (rows.length === 0) return touched.size;
+    for (const row of rows) touched.add(Number(row.id));
   }
   // Десяти шагов хватает на цепочку из тысячи звеньев: каждый шаг вдвое
   // короче. Дошли сюда — сломан инвариант, а не длина.
   console.error("  ! цепочки dup_of не сошлись за десять шагов: повтор указывает не на меньший id");
-  return flattened;
+  return touched.size;
 }
 
 export type Shortlisted = { id: number; title: string; excerpt: string };

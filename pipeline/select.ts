@@ -1,5 +1,6 @@
 import type { Survivor } from "./digest";
 import { composite } from "./score";
+import { flattenDupChains } from "./dedup";
 import type { Axes, Weights } from "../src/lib/types";
 
 /** Тип соединения берём у самого модуля: подпись обязана совпадать с тем, что передаёт прогон. */
@@ -230,6 +231,14 @@ export async function selectSurvivors(
   digestSize: number,
   sourceIds: number[],
 ): Promise<Survivor[]> {
+  // Ключ сюжета `coalesce(dup_of, id)` верен, только пока повтор указывает
+  // прямо на корень. Обеспечивает это выпрямление цепочек, и звать его
+  // из одного ночного прогона мало: досюда доходит и догрузка выпуска
+  // (`fillDigest`), а цепочка может лежать в базе с прошлого раза. Тогда
+  // ключом стала бы середина без оценки, и сюжет снова выпал бы молча.
+  // Условие обеспечивается там, где оно потребляется; запрос идемпотентен
+  // и на чистой базе стоит один пустой update.
+  await flattenDupChains(sql as unknown as Parameters<typeof flattenDupChains>[0]);
   const survivors = pickSurvivors(
     await candidates(sql, readerId, sourceIds), weights, targets, digestSize,
   );

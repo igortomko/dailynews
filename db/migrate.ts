@@ -33,10 +33,16 @@
  */
 import postgres from "postgres";
 import { readFileSync, readdirSync } from "node:fs";
-import { declaringFiles, numberCollisions, promised, schemaGaps } from "./schema-gap";
+import { fileCoverage, numberCollisions, promised, schemaGaps } from "./schema-gap";
 import { sql } from "../src/lib/db";
 
 const OWNER = process.env.SUPABASE_DB_URL;
+
+/** `npm run migrate -- --force 0041_story_index` — выполнить один файл заново. */
+function forcedName(): string | null {
+  const at = process.argv.indexOf("--force");
+  return at >= 0 ? (process.argv[at + 1] ?? null) : null;
+}
 
 async function main() {
   const gapsBefore = await schemaGaps(sql);
@@ -87,7 +93,47 @@ async function main() {
     const journal = await owner<{ name: string }[]>`select name from dailynews.migrations`;
     const known = new Set(journal.map((row) => row.name));
     const files = readdirSync("db/migrations").filter((file) => file.endsWith(".sql")).sort();
+    // Повторное выполнение по имени: единственный способ починить файл,
+    // который уже лежит в журнале невыполненным. Все миграции писались
+    // идемпотентными, но гнать их пачкой всё равно нельзя (0008 отбивается
+    // на голосах из 0010), поэтому здесь именно один названный файл.
+    const forced = forcedName();
+    if (forced) {
+      const file = files.find((name) => name.replace(/\.sql$/, "") === forced);
+      if (!file) {
+        console.error(`! файла миграции ${forced} нет в db/migrations`);
+        process.exit(1);
+      }
+      console.log(`→ ${file} (принудительно, по имени)`);
+      await owner.unsafe(readFileSync(`db/migrations/${file}`, "utf8"));
+      console.log("  применена");
+      applied++;
+      return;
+    }
+
     const pending = files.filter((file) => !known.has(file.replace(/\.sql$/, "")));
+
+    // Журнал говорит «применена», а сверке о таком файле сказать нечего
+    // вовсе: он не обещал форме схемы ничего. До починки ворот ровно эти
+    // и уходили в журнал невыполненными — так прошли 0041 с индексом
+    // и 0031 с тринадцатью источниками. Задним числом ворота их не лечат:
+    // pending они больше не считаются. Поэтому называются вслух.
+    //
+    // Только такие, а не всё, что сверка не покрывает целиком: файл,
+    // заведший колонку вместе с индексом, почти наверняка выполнялся
+    // из-за колонки, и список из дюжины строк каждый прогон читать
+    // перестанут на второй раз.
+    const { silent } = fileCoverage();
+    const unprovable = files.filter(
+      (file) => known.has(file.replace(/\.sql$/, "")) && silent.has(file),
+    );
+    if (unprovable.length > 0) {
+      console.log(
+        `Журнал считает применёнными ${unprovable.length}, о которых сверка не знает ничего:\n` +
+        unprovable.map((file) => `  ${file}`).join("\n") +
+        "\n  Проверять руками; выполнить заново: npm run migrate -- --force <имя>",
+      );
+    }
 
     if (pending.length === 0) {
       console.log(`Журнал знает все ${files.length} миграций. Накатывать нечего.`);
@@ -113,21 +159,21 @@ async function main() {
     // Какой файл за какой разрыв отвечает: если разрывов у файла нет,
     // его обещания в базе уже выполнены.
     const owed = new Set(gapsBefore.map((gap) => gap.from));
-    // ...но только если обещания вообще были. Молчание сверки о файле,
-    // который ей ничего не обещал, — это не ответ.
-    const declares = declaringFiles();
+    // ...но только если сверка доказывает файл целиком. Её молчание о том,
+    // чего она не умеет искать, — не ответ.
+    const { skippable } = fileCoverage();
     let blind = 0;
 
     for (const file of pending) {
       const name = file.replace(/\.sql$/, "");
-      if (!owed.has(file) && declares.has(file)) {
+      if (!owed.has(file) && skippable.has(file)) {
         console.log(`  ${file}: обещанное в базе уже есть — записываю в журнал, не выполняя`);
         await owner`insert into dailynews.migrations (name) values (${name}) on conflict (name) do nothing`;
         recorded++;
         continue;
       }
-      const unchecked = !declares.has(file);
-      console.log(`→ ${file}${unchecked ? " (форме схемы ничего не обещает)" : ""}`);
+      const unchecked = !skippable.has(file);
+      console.log(`→ ${file}${unchecked ? " (сверка формы схемы его не покроет)" : ""}`);
       await owner.unsafe(readFileSync(`db/migrations/${file}`, "utf8"));
       console.log("  применена");
       applied++;
@@ -138,7 +184,7 @@ async function main() {
     // «разрывов не осталось» про них не утверждает ничего.
     if (blind > 0) {
       console.log(
-        `\n  ${blind} из них форме схемы ничего не обещает — сверка их не проверит.\n` +
+        `\n  ${blind} из них сверка формы схемы не покроет.\n` +
         "  Индекс смотреть в pg_indexes, изменения данных — запросом.",
       );
     }

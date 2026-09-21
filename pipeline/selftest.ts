@@ -36,7 +36,7 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
-import { declaringFiles, numberCollisions } from "../db/schema-gap";
+import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { readingTime } from "../src/lib/relative-time";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
@@ -2691,19 +2691,39 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
 // мимо базы (0041), а миграция данных — вместе с тринадцатью источниками,
 // которые должна была убрать (0031).
 {
-  const declares = declaringFiles();
-  assert.ok(declares.has("0002_tables.sql"), "файл с таблицами обещает форме схемы");
-  assert.ok(declares.has("0039_item_enriched.sql"), "файл с колонкой обещает форме схемы");
+  const { skippable, silent } = fileCoverage();
+  assert.ok(skippable.has("0039_item_enriched.sql"), "файл из одной колонки сверка доказывает целиком");
+  assert.ok(silent.has("0041_story_index.sql"), "файл из одних индексов схеме не обещает ничего");
+  assert.ok(!skippable.has("0041_story_index.sql"), "и пропускать его по молчанию сверки нельзя");
+  assert.ok(silent.has("0003_seed.sql"), "сид — это данные, и сверка формы схемы про них не знает");
+  assert.ok(silent.has("0031_sources_only_added_or_removed.sql"), "update — тоже данные");
+
+  // Файл, который делает и то и другое: колонка есть, индекса может не быть,
+  // и «обещанное уже есть» пропустило бы половину файла. Но и в отчёт
+  // о невыполненных он не идёт — выполнялся он из-за колонки.
+  for (const both of ["0012_summary_quality.sql", "0030_source_soft_delete.sql"]) {
+    assert.ok(!skippable.has(both), `${both}: колонка вместе с индексом не доказывается целиком`);
+    assert.ok(!silent.has(both), `${both}: но обещания форме схемы у него есть`);
+  }
+
+  // Самое важное: файл, чьё ограничение позже переопределили, обязан
+  // остаться пропускаемым. Выполнить 0035 заново значит вернуть
+  // model_calls_stage_check к старому списку этапов и стереть чужие —
+  // это уже случалось.
   assert.ok(
-    !declares.has("0041_story_index.sql"),
-    "файл из одних индексов не обещает форме схемы ничего — его нельзя считать применённым по её молчанию",
+    skippable.has("0035_video_stage.sql"),
+    "переопределённое позже ограничение не делает файл невыполненным",
   );
+
   // Каталог, а не список: перечисленные руками файлы расходятся с папкой
   // ровно тогда, когда в неё добавляют новый.
   const files = readdirSync("db/migrations").filter((name) => name.endsWith(".sql"));
+  for (const file of [...skippable, ...silent]) {
+    assert.ok(files.includes(file), `${file} должен существовать в каталоге`);
+  }
   assert.ok(
-    [...declares].every((file) => files.includes(file)),
-    "обещания приписаны только существующим файлам",
+    [...skippable].every((file) => !silent.has(file)),
+    "наборы не пересекаются: файл либо доказуем целиком, либо схеме ничего не обещал",
   );
 }
 
