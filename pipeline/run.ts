@@ -25,6 +25,7 @@ import {
 } from "../src/lib/reading-time";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
+import { rulesOf } from "../src/lib/rules";
 
 const log = (msg: string) => console.log(msg);
 
@@ -283,6 +284,10 @@ async function runForReader(
     // лучшего среди оставшихся: второй прогон за сутки иначе пустил бы в
     // выпуск ровно тех, кого отверг первый.
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, today.best,
+    // За чем следить и что исключать — тем же правилом, что у первого
+    // выпуска и догрузки: правило, которое работает ночью и не работает
+    // по кнопке, читается как настройка, которая иногда не сохраняется.
+    rulesOf(reader),
   );
   if (survivors.length === 0) {
     log(`  ${name}: свежих материалов нет — пропуск`);
@@ -301,9 +306,11 @@ async function runForReader(
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const digest = await writeDigest(survivors, reader.reader_context, voice);
+  const digest = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
+  const published = survivors.filter(item => !digest.excludedIds?.includes(item.id));
   const digestCost = llmCost(digest.usage);
-  await recordCall({
+  if (!published.length) { log(`  ${name}: полный текст исключён личными правилами; пустой выпуск не создаётся`); return digestCost; }
+  if (!digest.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
     tokensIn: digest.usage.input, tokensOut: digest.usage.output, costUsd: digestCost,
   });
@@ -316,7 +323,7 @@ async function runForReader(
   // описаний у каждого — это один и тот же ответ, оплаченный столько раз,
   // сколько у нас читателей. Ряд по дням от этого не страдает, а вход
   // петли дороже входа самого дайджеста: 3170 токенов на описание против 527.
-  const measuresQuality = reader.owner;
+  const measuresQuality = reader.owner && !digest.accounted;
   const quality = measuresQuality
     ? await scoreSummaries(
         qualitySample(digest.items).map((item: (typeof digest.items)[number]) => ({
@@ -348,7 +355,7 @@ async function runForReader(
    */
   const minutes = minutesOf(
     today.chars +
-      survivors.reduce((chars, survivor) => {
+      published.reduce((chars, survivor) => {
         const text = writtenById.get(String(survivor.id));
         return chars + cardChars(text?.title_ru ?? survivor.title, text?.summary ?? "");
       }, 0),
@@ -382,6 +389,9 @@ async function runForReader(
         // Что на самом деле ушло в провайдера: модель выводит writeDigest,
         // своя копия резолюции разошлась бы с ней на пустой строке.
         digest_model: digest.model,
+        reading_version: reader.reading_v2_enabled ? 2 : null,
+        reading_verified: digest.items.filter(item => item.reading?.status === "verified").length,
+        reading_unavailable: digest.items.filter(item => item.reading?.status === "unavailable").length,
         digest_input_tokens: digest.usage.input,
         digest_cached_tokens: digest.usage.cached,
         digest_output_tokens: digest.usage.output,
@@ -403,7 +413,7 @@ async function runForReader(
 
   const qualityById = new Map((quality?.scored ?? []).map((q) => [String(q.item_id), q]));
 
-  for (const [index, survivor] of survivors.entries()) {
+  for (const [index, survivor] of published.entries()) {
     const written = writtenById.get(String(survivor.id));
     const scored = qualityById.get(String(survivor.id));
     // Текст пишется сюда, а не в items: язык, сложность и манера персональны,
@@ -411,22 +421,26 @@ async function runForReader(
     // первого своим языком.
     await sql`
       insert into dailynews.digest_items
-        (digest_id, item_id, total, position, title, summary, summary_axes, summary_score)
+        (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score)
       values (
         ${row.id}, ${survivor.id}, ${survivor.total}, ${taken + index + 1},
         ${written?.title_ru ?? survivor.title}, ${written?.summary ?? ""},
+        ${written?.reading ? sql.json(written.reading) : null},
         ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
         ${scored?.total ?? null}
       )
-      on conflict (digest_id, item_id) do nothing
+      on conflict (digest_id, item_id) do update
+        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document
+        where dailynews.digest_items.summary_document->>'status'='unavailable'
+          and excluded.summary_document->>'status'='verified'
     `;
   }
 
   log(
     `  ${name}: ${formatMinutes(minutes)} из ${Math.round(target)} заказанных, ` +
-    `${survivors.length} материалов, ` +
+    `${published.length} материалов, ` +
     (meanQuality === null
-      ? "качество не меряли (промпт один на всех), "
+      ? (reader.reading_v2_enabled ? "выжимки сверены с доступным источником, " : "качество не меряли (промпт один на всех), ")
       : `качество ${meanQuality.toFixed(0)} из 85 по ${quality?.scored.length} описаниям, `) +
     `${perSentence.toFixed(1)} слов в предложении (ползунок ${reader.complexity} из 5), ` +
     `$${(digestCost + qualityCost).toFixed(4)}`,
@@ -448,7 +462,7 @@ async function runForReader(
     log(`    недобор: подходящего меньше, чем заказано`);
   }
 
-  await deliver(reader, day, digest.intro, survivors, writtenById, name, { minutes, target });
+  await deliver(reader, day, digest.intro, published, writtenById, name, { minutes, target });
   return digestCost + qualityCost;
 }
 
@@ -458,7 +472,7 @@ async function deliver(
   day: string,
   intro: string,
   survivors: Survivor[],
-  writtenById: Map<string, { title_ru: string; summary: string }>,
+  writtenById: Map<string, { title_ru: string; summary: string; reading?: import("../src/lib/reading-document").StoredReading }>,
   name: string,
   reading: { minutes: number; target: number },
 ): Promise<void> {
@@ -512,6 +526,7 @@ async function deliver(
       articles: survivors.map((s) => ({
         title: titleOf(s),
         summary: writtenById.get(String(s.id))?.summary ?? s.excerpt,
+        reading: writtenById.get(String(s.id))?.reading,
         url: s.url,
         source_label: s.source_label,
         topic_label: s.topic_label,

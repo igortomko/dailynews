@@ -11,6 +11,7 @@ import {
   PenLineIcon,
   CrownIcon,
   ChevronDownIcon,
+  EyeIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
@@ -23,7 +24,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { readingTime } from "@/lib/relative-time";
+import { parseStoredReading } from "@/lib/reading-document";
+import { ReadingSummary } from "@/components/reading-summary";
+import { typography, summaryTime } from "@/lib/typography";
+import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { useT } from "@/components/i18n-provider";
@@ -154,7 +158,7 @@ export function ItemCard({
       },
       { threshold: 0.6 },
     );
-    observer.observe(node);
+    observer.observe(node.querySelector("h3") ?? node);
     return () => {
       if (timer) clearTimeout(timer);
       observer.disconnect();
@@ -205,7 +209,9 @@ export function ItemCard({
 
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
-  const minutes = readingTime(item.body_chars, t.feed.time);
+  const reading = parseStoredReading(item.summary_document);
+  const seconds = reading ? reading.seconds : cardChars(item.title_ru || item.title, item.summary) / DEFAULT_CHARS_PER_MINUTE * 60;
+  const minutes = seconds > 0 ? summaryTime(seconds, t.feed.time) : null;
   const others = otherSources(item.story, item.source_id);
   const lines = others > 0 ? storyLines(item.story, t.feed.story) : [];
 
@@ -267,12 +273,12 @@ export function ItemCard({
           href={site}
           target="_blank"
           rel="noreferrer noopener"
-          className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
+          className="shrink-0 text-[0.75rem] font-medium text-muted-foreground hover:text-foreground focus-visible:text-foreground hover:underline"
         >
           {item.source_label}
         </a>
       ) : (
-        <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
+        <span className="shrink-0 text-[0.75rem] font-medium text-muted-foreground">
           {item.source_label}
         </span>
       ),
@@ -283,6 +289,25 @@ export function ItemCard({
     // к чему относится.
     ...(clickbait
       ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">{t.feed.item.clickbait}</span> }]
+      : []),
+    // Написание из «За чем следить», найденное в материале. Правило
+    // работает при отборе и молча; пометка — единственное, по чему видно,
+    // что оно сработало. Только упоминание, как и обещано в настройках:
+    // без слов «про Figma» — про что материал, решает читатель.
+    ...(item.followed
+      ? [{
+          key: "followed",
+          node: (
+            <span
+              className="inline-flex shrink-0 items-center gap-1"
+              title="Из твоего списка «За чем следить»"
+            >
+              <EyeIcon className="size-3" aria-hidden />
+              {item.followed}
+            </span>
+          ),
+          quiet: true as const,
+        }]
       : []),
     // min-w-0 обязателен: truncate обрезает только то, чему разрешили
     // сузиться, а гибкий элемент по умолчанию не уже своего содержимого.
@@ -358,7 +383,7 @@ export function ItemCard({
                   а `shrink-0` у времени и `truncate` у темы оказываются
                   на строчном потомке, где не значат ничего. Время сжималось
                   бы многоточием на узком экране, а тема — перестала бы. */}
-              {quiet ? <span className={cn("flex min-w-0", QUIET)}>{node}</span> : node}
+              {quiet ? <span className={cn(key === "minutes" ? "flex shrink-0" : "flex min-w-0", QUIET)}>{node}</span> : node}
             </Fragment>
           ))}
         </span>
@@ -382,7 +407,7 @@ export function ItemCard({
                 <button
                   type="button"
                   aria-label={t.feed.item.actionsLabel}
-                  className="hidden size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground [@media(hover:none)]:flex"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex"
                 />
               }
             >
@@ -468,7 +493,7 @@ export function ItemCard({
             "group-hover:opacity-100 group-focus-within:opacity-100",
             vote === "up" && "opacity-100",
             // На тапе этого ряда нет вовсе — там меню.
-            "[@media(hover:none)]:hidden",
+            "max-sm:hidden [@media(hover:none)]:hidden",
           )}
         >
           {/* Иконка без подписи опознаётся только по догадке. Подпись
@@ -612,11 +637,11 @@ export function ItemCard({
               className="decoration-muted-foreground/40 underline-offset-4 hover:underline"
               onClick={() => report({ item_id: item.id, event: "outbound" })}
             >
-              {title}
+              {typography(title)}
             </a>
           </h3>
 
-          {item.summary ? (
+          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : item.summary ? (
             <p
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст
@@ -627,7 +652,7 @@ export function ItemCard({
               // Приглушённый основной текст читается как черновик.
               className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
             >
-              {item.summary}
+              {typography(item.summary)}
             </p>
           ) : null}
 

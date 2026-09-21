@@ -1,3 +1,5 @@
+import type { Names } from "./rules";
+
 /** Общий справочник: по нему Jev классифицирует поток один раз на всех. */
 export type Topic = {
   id: number;
@@ -124,6 +126,7 @@ export type Reader = {
   username: string | null;
   owner: boolean;
   reader_context: string;
+  reading_v2_enabled: boolean;
   /**
    * Сколько минут чтения заказано. Карточек столько, сколько уложится
    * в это время: перевод делает `itemsForMinutes` по длине уже написанных
@@ -188,6 +191,14 @@ export type Reader = {
   voice_built_at: string | null;
   /** Посты, вставленные руками: LinkedIn и Threads наружу не отдают ничего. */
   voice_sample: string;
+  /**
+   * За чем следить: написания одного объекта на правило (`src/lib/rules.ts`).
+   * Личное и дешёвое: применяется в отборе как порядок внутри очереди темы,
+   * в вопрос Jev не уходит, справочник тем не расширяет.
+   */
+  follow_rules: Names[];
+  /** Что исключать: совпадение снимает материал с отбора и с показа. Побеждает слежение. */
+  exclude_rules: Names[];
 };
 
 /**

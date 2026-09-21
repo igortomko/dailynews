@@ -11,6 +11,8 @@
  * ponytail: HTML вместо EPUB — если понадобится обложка и точное
  * разбиение на главы, здесь появится сборка zip.
  */
+import { documentText, type StoredReading } from "../src/lib/reading-document";
+import { typography } from "../src/lib/typography";
 import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { FEATURES } from "../src/lib/plans";
@@ -23,22 +25,22 @@ const DOMAIN = process.env.KINDLE_FROM_DOMAIN?.trim() || "kindle.tomko.io";
 export type Article = {
   title: string;
   summary: string;
+  reading?: StoredReading;
   url: string;
   source_label: string;
   topic_label: string;
 };
 
 const escapeHtml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function digestHtml(day: string, intro: string, articles: Article[]): string {
   const body = articles
     .map((a) =>
       [
-        `<h2>${escapeHtml(a.title)}</h2>`,
-        `<p class="meta">${escapeHtml(a.topic_label)} · ${escapeHtml(a.source_label)}</p>`,
-        `<p>${escapeHtml(a.summary)}</p>`,
-        `<p class="meta"><a href="${escapeHtml(a.url)}">Источник</a></p>`,
+        `<p class="meta"><a href="${escapeHtml(/^https?:\/\//i.test(a.url) ? a.url : "#")}">${escapeHtml(a.source_label)}</a> · ${escapeHtml(a.topic_label)}</p>`,
+        `<h2>${escapeHtml(typography(a.title))}</h2>`,
+        ...(a.reading?.document ? [a.reading.notice, documentText(a.reading.document)] : [a.summary]).filter(Boolean).join("\n\n").split(/\n\n+/).map((p) => `<p>${escapeHtml(typography(p)).replace(/\n/g, "<br>")}</p>`),
       ].join("\n"),
     )
     .join("\n\n");
