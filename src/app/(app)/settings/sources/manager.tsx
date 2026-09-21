@@ -517,7 +517,7 @@ export function SourcesManager({
         <CardHeader>
           <CardTitle>{t.sources.list.title}</CardTitle>
           <CardDescription>
-            {t.sources.list.count(sources.length, plan.maxSources, plan.label)}
+            {t.sources.list.count(sources.length, plan.maxSources, t.plans.label[plan.id])}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">

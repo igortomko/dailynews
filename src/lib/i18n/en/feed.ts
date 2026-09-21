@@ -132,6 +132,17 @@ export const feed = {
   },
 
   /** src/lib/relative-time.ts */
+  story: {
+    discussion: "discussion",
+    discussionPoints: (points: number): string => `discussion: ${points} points`,
+    original: "first to publish",
+    sameTime: "at the same time",
+    laterMinutes: (n: number): string => `${n} ${n === 1 ? "minute" : "minutes"} later`,
+    laterHours: (n: number): string => `${n} ${n === 1 ? "hour" : "hours"} later`,
+    laterDays: (n: number): string => `${n} ${n === 1 ? "day" : "days"} later`,
+    alsoLine: (n: number): string => `${n} more ${n === 1 ? "source" : "sources"}`,
+    storyTitle: (n: number): string => `One story, ${n} ${n === 1 ? "publication" : "publications"}`,
+  },
   time: {
     now: "now",
     minutesAgo: (n: number) => `${n}m`,
@@ -142,6 +153,9 @@ export const feed = {
     // Дальше недели — дата. Форматтер свой у каждого языка: месяц называется
     // словом, и «сент.» рядом с английским текстом читается как опечатка,
     // а не как перевод, которого не хватило.
+    minutesLong: (n: number): string => `~${n} ${n === 1 ? "minute" : "minutes"}`,
+    shortfall: (have: string, target: number): string =>
+      `${have} of ${target}: there is nothing more that really matters today`,
     monthDay: (date: Date): string => MONTH.format(date),
   },
 };

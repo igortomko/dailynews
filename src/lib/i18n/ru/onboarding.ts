@@ -8,6 +8,7 @@ import type { onboarding as En } from "../en/onboarding";
  */
 export const onboarding: typeof En = {
   wizard: {
+    sourceWhyItems: (n: number): string => `${count(n, "материал", "материала", "материалов")} за месяц`,
     steps: ["Интересы", "Источники", "Лента"],
     counter: (picked, limit) => `${picked} из ${limit}`,
     next: "Дальше",

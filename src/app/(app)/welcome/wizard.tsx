@@ -244,7 +244,7 @@ export function InterestsStep({
         </div>
 
         {full ? (
-          <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(plan.label)}</p>
+          <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(t.plans.label[plan.id])}</p>
         ) : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
@@ -342,7 +342,7 @@ export function SourcesStep({
 
         {full ? (
           <p className="mt-2 text-sm text-muted-foreground">
-            {t.onboarding.wizard.sources.full(plan.label, plan.maxSources)}
+            {t.onboarding.wizard.sources.full(t.plans.label[plan.id], plan.maxSources)}
           </p>
         ) : null}
         {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}

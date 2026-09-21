@@ -1,5 +1,5 @@
 import type { feed as En } from "../en/feed";
-import { count } from "@/lib/plural";
+import { count, plural } from "@/lib/plural";
 
 const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
 
@@ -124,6 +124,17 @@ export const feed: typeof En = {
     failed: "Не удалось обновить выпуск",
   },
 
+  story: {
+    discussion: "обсуждение",
+    discussionPoints: (points: number): string => `обсуждение: ${points} points`,
+    original: "первоисточник",
+    sameTime: "тогда же",
+    laterMinutes: (n: number): string => `${count(n, "минуту", "минуты", "минут")} позже`,
+    laterHours: (n: number): string => `${count(n, "час", "часа", "часов")} позже`,
+    laterDays: (n: number): string => `${count(n, "день", "дня", "дней")} позже`,
+    alsoLine: (n: number): string => `Ещё ${count(n, "источник", "источника", "источников")}`,
+    storyTitle: (n: number): string => `Один сюжет, ${count(n, "публикация", "публикации", "публикаций")}`,
+  },
   time: {
     now: "сейчас",
     minutesAgo: (n: number) => `${n}м`,
@@ -131,6 +142,9 @@ export const feed: typeof En = {
     daysAgo: (n: number) => `${n}д`,
     readingMinutes: (n: number) => `~${n} мин`,
     readingHours: (n: number) => `~${n} ч`,
+    minutesLong: (n: number): string => `~${n} ${plural(n, "минута", "минуты", "минут")}`,
+    shortfall: (have: string, target: number): string =>
+      `${have} из ${target}: сегодня больше действительно важного нет`,
     monthDay: (date: Date): string => MONTH.format(date),
   },
 };

@@ -2337,7 +2337,7 @@ assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left �
 assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 assert.match(
   headerRow,
-  /formatMinutes\(reading\.minutes\)/,
+  /formatMinutes\(reading\.minutes[^)]*\)/,
   "время выпуска стоит рядом с его датой: это два факта об одном выпуске",
 );
 

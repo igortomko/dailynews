@@ -4,6 +4,7 @@
  */
 export const onboarding = {
   wizard: {
+    sourceWhyItems: (n: number): string => `${n} ${n === 1 ? "story" : "stories"} a month`,
     steps: ["Interests", "Sources", "Feed"],
     counter: (picked: number, limit: number) => `${picked} of ${limit}`,
     next: "Next",

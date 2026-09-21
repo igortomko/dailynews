@@ -207,7 +207,7 @@ export function ItemCard({
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
   const minutes = readingTime(item.body_chars, t.feed.time);
   const others = otherSources(item.story, item.source_id);
-  const lines = others > 0 ? storyLines(item.story) : [];
+  const lines = others > 0 ? storyLines(item.story, t.feed.story) : [];
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
@@ -643,14 +643,14 @@ export function ItemCard({
                 onClick={() => setStoryOpen((value) => !value)}
                 className="flex cursor-pointer items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
               >
-                {alsoLine(others)}
+                {alsoLine(others, t.feed.story)}
                 <ChevronDownIcon
                   className={cn("size-3.5 transition-transform duration-200", storyOpen && "rotate-180")}
                 />
               </button>
               {storyOpen ? (
                 <div className="mt-2 max-w-[68ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
-                  <p className="mb-1.5 font-medium">{storyTitle(lines.length)}</p>
+                  <p className="mb-1.5 font-medium">{storyTitle(lines.length, t.feed.story)}</p>
                   <ul className="space-y-1">
                     {lines.map((line) => (
                       <li key={line.item_id} className="flex flex-wrap items-baseline gap-x-1.5">

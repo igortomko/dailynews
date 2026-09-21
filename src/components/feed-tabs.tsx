@@ -257,7 +257,7 @@ export function FeedTabs({
                     и том же выпуске. Число карточек осталось на вкладках,
                     где оно и отвечает на свой вопрос — «сколько в этой теме». */}
                 <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-                  {formatMinutes(reading.minutes)}
+                  {formatMinutes(reading.minutes, t.feed.time)}
                 </span>
               </div>
               {/* Поиск рядом с датами: и то и другое — способ добраться
@@ -352,7 +352,7 @@ export function FeedTabs({
             горящая каждый день, ничем не отличается от выключенной. */}
         {reading.target !== null && isShort(reading.minutes, reading.target) ? (
           <p className="mb-3 text-sm text-muted-foreground">
-            {shortfallNote(reading.minutes, reading.target)}.
+            {shortfallNote(reading.minutes, reading.target, t.feed.time)}.
           </p>
         ) : null}
         <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">

@@ -238,7 +238,7 @@ export function TopicChips({
           // Потолок штук упёрся раньше времени — значит, заказанных минут
           // не будет, и сказать об этом должны мы, а не пустое место в ленте.
           <FieldDescription>
-            {tc.capReached(planLabel, plan.maxItems, formatMinutes(places * perCard))}
+            {tc.capReached(planLabel, plan.maxItems, formatMinutes(places * perCard, t.feed.time))}
           </FieldDescription>
         ) : bigger.length > 0 ? (
           // Тарифы названы, а не спрятаны за «в других»: предел без имени
