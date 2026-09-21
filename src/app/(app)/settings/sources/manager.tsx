@@ -15,7 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
-import { cleanupReason } from "@/lib/source-health";
+import { cleanupOf } from "@/lib/source-health";
 import { PLANS, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
 import type { Found } from "../../../../../pipeline/discover";
@@ -212,8 +212,8 @@ export function SourcesManager({
     не решается вовсе.
   */
   const cleanup = sources
-    .map((source) => ({ source, reason: cleanupReason(source) }))
-    .filter((row): row is { source: SourceHealth; reason: string } => row.reason !== null);
+    .map((source) => ({ source, why: cleanupOf(source) }))
+    .filter((row): row is { source: SourceHealth; why: string } => row.why !== null);
 
   /**
    * Убрать источник — с отменой прямо в сообщении.
@@ -442,13 +442,18 @@ export function SourcesManager({
         <Card>
           <CardHeader>
             <CardTitle>Что убрать</CardTitle>
-            <CardDescription>
-              За тридцать дней эти источники ничем не пригодились. Убранный уходит
-              только у тебя, и это можно отменить; что взять вместо — формой выше.
-            </CardDescription>
+            {/*
+              Про то, что у соседа источник остаётся, здесь не сказано
+              намеренно: это устройство каталога, а не ответ на вопрос
+              читателя. Он не знает, что каталог общий, — и «убрать только
+              у себя» задаёт ему вопрос вместо того, чтобы снять.
+              Что убранное возвращается, говорит само сообщение после
+              нажатия: там это и нужно, а не за минуту до.
+            */}
+            <CardDescription>Эти источники месяц занимали место зря.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-1">
-            {cleanup.map(({ source, reason }, index) => (
+            {cleanup.map(({ source, why }, index) => (
               <div key={source.id}>
                 {index > 0 ? <Separator className="my-1" /> : null}
                 <div className="flex items-center gap-3 py-1.5">
@@ -457,12 +462,11 @@ export function SourcesManager({
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate text-sm font-medium">{source.label}</span>
                       {/*
-                        Сначала повод, потом числа: повод — это ответ,
-                        а числа под ним — доказательство, что ответ не выдуман.
-                        В обратном порядке строку читают дважды.
+                        Одни числа: «ты его не читаешь» над «20 показано,
+                        0 открыто» — это одна и та же мысль дважды, и вторая
+                        строка сильнее, потому что доказывает первую.
                       */}
-                      <span className="text-xs">{reason}</span>
-                      <span className="text-muted-foreground text-xs">{yieldOf(source)}</span>
+                      <span className="text-muted-foreground text-xs">{why}</span>
                     </div>
                   </div>
                   {/*
@@ -623,9 +627,7 @@ export function SourcesManager({
                   </TooltipTrigger>
                   {/* Своя подсказка вместо title: браузерная выезжает через
                       секунду с лишним и рисуется системным шрифтом. */}
-                  <TooltipContent>
-                    Убрать из ленты — у соседа он останется, и отменить можно
-                  </TooltipContent>
+                  <TooltipContent>Убрать из ленты — отменить можно</TooltipContent>
                 </Tooltip>
               </div>
             </div>
