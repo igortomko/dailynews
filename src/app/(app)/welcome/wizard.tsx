@@ -23,6 +23,13 @@ import type { Names } from "@/lib/rules";
  * читатель узнаёт от погасшей кнопки, читается как поломка, а тот же предел
  * в счётчике — как правило игры.
  */
+/**
+ * Сколько интересов показать до «ещё». Двенадцать — это примерно экран
+ * телефона: дальше начинается прокрутка, за которой прячется поле
+ * «своими словами», и его перестают находить.
+ */
+const FIRST_SHOWN = 12;
+
 function Shell({
   step,
   title,
@@ -138,6 +145,8 @@ export function InterestsStep({
   const [follow, setFollow] = useState<Names[]>([]);
   const [exclude, setExclude] = useState<Names[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /** Сколько предложений показано. Разворачивается один раз и навсегда. */
+  const [shown, setShown] = useState(FIRST_SHOWN);
 
   // Витрина стартовых интересов переведена в словаре по тому же slug;
   // серверный label остаётся резервом для интереса, которого в витрине нет.
@@ -229,7 +238,7 @@ export function InterestsStep({
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          {rest.map((slug) => (
+          {rest.slice(0, shown).map((slug) => (
             <Chip
               key={slug}
               label={bySlug.get(slug)?.label ?? slug}
@@ -238,6 +247,19 @@ export function InterestsStep({
               onClick={() => toggle(slug)}
             />
           ))}
+          {/* Весь набор сразу — это семь экранов прокрутки на телефоне,
+              и поле «своими словами» уезжает за край. Верх списка и так
+              отранжирован: соседями выбранного и описанием из Telegram,
+              поэтому нужное чаще всего уже видно. */}
+          {rest.length > shown ? (
+            <button
+              type="button"
+              onClick={() => setShown(rest.length)}
+              className="flex h-9 items-center rounded-lg border border-dashed border-border px-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
+            >
+              {t.onboarding.wizard.interests.more(rest.length - shown)}
+            </button>
+          ) : null}
         </div>
 
         <div className="flex gap-2">
@@ -384,9 +406,18 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
   const router = useRouter();
   const t = useT();
   const [state, setState] = useState<"работаю" | "готово" | "пусто">("работаю");
+  // Безымянное ожидание длиннее названного: сорок секунд под спиннером
+  // читаются как «повисло». Секунды настоящие, а не нарисованные.
+  const [seconds, setSeconds] = useState(0);
   const [added, setAdded] = useState(0);
   const [note, setNote] = useState<string | null>(null);
   const once = useRef(false);
+
+  useEffect(() => {
+    if (state !== "работаю") return;
+    const tick = setInterval(() => setSeconds((was) => was + 1), 1000);
+    return () => clearInterval(tick);
+  }, [state]);
 
   useEffect(() => {
     // React в разработке монтирует дважды, а сборка выпуска стоит денег.
@@ -442,7 +473,8 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
       {state === "работаю" ? (
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <Spinner />
-          {t.onboarding.wizard.ready.dontClose}
+          {t.onboarding.wizard.ready.dontClose}{" "}
+          <span className="tabular-nums">{t.onboarding.wizard.ready.elapsed(seconds)}</span>
         </div>
       ) : (
         <div className="flex flex-col gap-2 text-sm text-muted-foreground">
