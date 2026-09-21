@@ -1,0 +1,25 @@
+{
+  "tool": "Potrace 1.16",
+  "supersampling": 4,
+  "note": "Flat-color contours, not raster texture. IoU measures alpha silhouettes at source resolution.",
+  "assets": [
+    {
+      "name": "sources/logo-reporta-traced.svg",
+      "width": 1529,
+      "height": 434,
+      "silhouetteIoU": 0.9978134584586655,
+      "mismatchedBoundaryPixels": 370,
+      "changedPixelsBeyondOnePixelBoundary": 0,
+      "svgBytes": 118112
+    },
+    {
+      "name": "mark-reporta",
+      "width": 300,
+      "height": 152,
+      "silhouetteIoU": 0.9934769053671639,
+      "mismatchedBoundaryPixels": 136,
+      "changedPixelsBeyondOnePixelBoundary": 0,
+      "svgBytes": 8465
+    }
+  ]
+}

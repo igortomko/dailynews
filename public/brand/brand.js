@@ -11,8 +11,31 @@
     button.addEventListener('click', () => {
       const dark = button.dataset.surface === 'dark';
       document.querySelector('#logo-field').classList.toggle('is-dark', dark);
-      document.querySelector('.specimen-top > .meta').textContent = dark ? 'Оригинал / Тёмная поверхность' : 'Оригинал / Светлая поверхность';
+      document.querySelector('#logo-field img').src = dark ? './logo-reporta-dark.svg' : './logo-reporta.svg';
+      document.querySelector('.specimen-top > .meta').textContent = dark ? 'Вектор / Тёмная поверхность' : 'Вектор / Прозрачный фон';
       document.querySelectorAll('[data-surface]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    });
+  });
+  const semanticPreview = document.querySelector('#semantic-preview');
+  function updateSemanticTokens() {
+    const styles = getComputedStyle(semanticPreview);
+    document.querySelectorAll('.semantic-token').forEach(button => {
+      const tone = button.closest('[data-tone]').dataset.tone;
+      const token = `--reporta-${tone}-${button.dataset.role}`;
+      const value = styles.getPropertyValue(token).trim().toUpperCase();
+      button.style.setProperty('--token-color', value);
+      button.dataset.copy = value;
+      button.querySelector('code').textContent = value;
+      button.setAttribute('aria-label', `Скопировать ${token}: ${value}`);
+      button.title = `${token}: ${value}`;
+    });
+  }
+  updateSemanticTokens();
+  document.querySelectorAll('[data-semantic-theme]').forEach(button => {
+    button.addEventListener('click', () => {
+      semanticPreview.dataset.reportaTheme = button.dataset.semanticTheme;
+      document.querySelectorAll('[data-semantic-theme]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      updateSemanticTokens();
     });
   });
   document.querySelectorAll('[data-copy]').forEach(button => {
@@ -92,9 +115,9 @@
   }, { threshold: .6 });
   observer.observe(document.querySelector('#motion-stage'));
   const artDescriptions = {
-    mono: 'Чёрно-белая версия. Базовая иллюстрация для выпуска.',
-    signal: 'Красная редакционная отметка. Один знак, один акцент.',
-    iris: 'Голубое поле. Специальная обложка или тематическая серия.',
+    mono: 'Монохром для читалки и одноцветной печати. Смысл держится на форме.',
+    signal: 'Основная версия: из потока чёрно-белых газет выходит одна красная.',
+    iris: 'Та же метафора на голубом поле. Красный по-прежнему показывает выбранное.',
   };
   document.querySelectorAll('[name="art-mode"]').forEach(input => input.addEventListener('change', () => {
     document.querySelector('.art-composition').dataset.artMode = input.value;
