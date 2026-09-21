@@ -7,12 +7,12 @@ import { fileURLToPath } from 'node:url';
 const brand = resolve(dirname(fileURLToPath(import.meta.url)), '../public/brand');
 const files = [
   'index.html', 'brand.css', 'brand.js', 'tokens.css',
-  'GUIDELINES.md', 'ASSETS.md', 'generation-prompts.json', 'brand-preview.png',
+  'GUIDELINES.md', 'ASSETS.md', 'generation-prompts.json', 'brand-preview.png', 'vector-report.json', 'wordmark-spec.json',
   'logo-reporta-approved-transparent.png', 'logo-reporta.png', 'logo-reporta.svg',
-  'logo-reporta-380.png', 'logo-reporta-190.png', 'logo-reporta-on-dark.png',
+  'logo-reporta-1529.png', 'logo-reporta-380.png', 'logo-reporta-190.png', 'logo-reporta-on-dark.png', 'logo-reporta-dark.svg', 'logo-reporta-dark.png', 'snake-reporta.svg',
   'mark-reporta.png', 'mark-reporta.svg', 'favicon.svg',
   'favicon-16.png', 'favicon-32.png', 'favicon-180.png', 'favicon-512.png',
-  'illustrations', 'photography', 'icons', 'fonts',
+  'illustrations', 'photography', 'icons', 'fonts', 'sources', 'logo-reporta-approved.png',
 ];
 for (const file of files) await access(join(brand, file));
 const temporary = await mkdtemp(join(tmpdir(), 'reporta-kit-'));

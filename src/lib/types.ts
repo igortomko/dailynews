@@ -78,6 +78,14 @@ export type Kind = (typeof KINDS)[number];
 export const HORIZONS = ["noise", "months", "years"] as const;
 export type Horizon = (typeof HORIZONS)[number];
 
+/**
+ * С какой вероятности кликбейта карточка получает метку. Это правило
+ * классификации, а не оформление: ниже метка горела бы на каждой второй
+ * карточке и перестала бы что-либо значить. Лежит рядом с осями, а не
+ * в странице, чтобы вторая метка по той же оси не завела второй порог.
+ */
+export const CLICKBAIT_LABEL_NOUL = 0.6;
+
 /** Ответы Jev по одному материалу, как они ложатся в scores.axes. */
 export type Axes = {
   topic: { choice: string; confidence: number; probabilities: Record<string, number> };

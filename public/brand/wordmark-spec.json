@@ -1,0 +1,55 @@
+{
+  "font": "Bodoni Moda",
+  "weight": 700,
+  "opticalSize": 96,
+  "text": "Reporta",
+  "shaper": "HarfBuzz",
+  "unitsPerEm": 2000,
+  "pairPositioning": [
+    {
+      "letter": "R",
+      "advance": 1485,
+      "nominalAdvance": 1485,
+      "kerning": 0
+    },
+    {
+      "letter": "e",
+      "advance": 1065,
+      "nominalAdvance": 1065,
+      "kerning": 0
+    },
+    {
+      "letter": "p",
+      "advance": 1260,
+      "nominalAdvance": 1260,
+      "kerning": 0
+    },
+    {
+      "letter": "o",
+      "advance": 1120,
+      "nominalAdvance": 1120,
+      "kerning": 0
+    },
+    {
+      "letter": "r",
+      "advance": 973,
+      "nominalAdvance": 973,
+      "kerning": 0
+    },
+    {
+      "letter": "t",
+      "advance": 749,
+      "nominalAdvance": 739,
+      "kerning": 10
+    },
+    {
+      "letter": "a",
+      "advance": 1160,
+      "nominalAdvance": 1160,
+      "kerning": 0
+    }
+  ],
+  "tracking": 0,
+  "outlines": true,
+  "note": "Native font kerning retained. Wordmark is newly typeset; snake body reconstructed as a continuous Bezier, head traced from approved reference."
+}
