@@ -11,6 +11,9 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 
 export const dynamic = "force-dynamic";
 
+type Archive = { items: number; days: number };
+type Found = { hits: ArchiveHit[]; loose: boolean };
+
 /**
  * Дата выпуска в выдаче. `dayInWords` намеренно не пишет год — выпуск
  * приходит в день выпуска, — но здесь смысл обратный: ищут как раз то,
@@ -72,6 +75,90 @@ function Hit({ hit }: { hit: ArchiveHit }) {
 }
 
 /**
+ * Четыре состояния страницы: искать не в чем, ещё не искали, не нашлось,
+ * нашлось. Ранними возвратами, а не лестницей условий: лестницу из четырёх
+ * ступеней читают только целиком, а состояния друг от друга не зависят.
+ */
+function Results({
+  archive,
+  query,
+  found,
+}: {
+  archive: Archive;
+  query: string;
+  found: Found | null;
+}) {
+  if (archive.items === 0) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>Искать пока не в чем</EmptyTitle>
+          <EmptyDescription>
+            Поиск идёт по твоим выпускам. Первый ещё не приходил —{" "}
+            <Link href="/" className="underline underline-offset-4">
+              вернуться в ленту
+            </Link>
+            .
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+
+  if (!found) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>Ищу по твоим выпускам</EmptyTitle>
+          <EmptyDescription>
+            {/* Настоящее число, а не «по всему архиву»: оно отвечает
+                на вопрос, который возникает раньше запроса, — есть ли
+                вообще в чём искать. */}
+            Это не поиск по интернету: только то, что лента тебе присылала, —{" "}
+            {count(archive.items, "материал", "материала", "материалов")} за{" "}
+            {archive.days} {digestsWord(archive.days)}. Слова ищутся и в описании
+            выпуска, и в исходном заголовке: «уран» и «uranium» найдут одно и то же.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+
+  if (found.hits.length === 0) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>Ничего не нашлось</EmptyTitle>
+          <EmptyDescription>
+            По запросу «{query}» в твоих выпусках пусто. Материал, которого лента
+            не присылала, здесь не найдётся: искали по{" "}
+            {count(archive.items, "материалу", "материалам", "материалам")} за{" "}
+            {archive.days} {digestsWord(archive.days)}.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+
+  return (
+    <>
+      <p className="px-1 pb-2 text-xs text-muted-foreground">
+        {count(found.hits.length, "материал", "материала", "материалов")}
+        {/* Ослабленный запрос называется вслух: молча показать выдачу
+            по одному слову из четырёх — значит выдать другое за то же
+            самое. */}
+        {found.loose ? " — по всем словам разом ничего, это по любому из них" : null}
+      </p>
+      <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
+        {found.hits.map((hit) => (
+          <Hit key={`${hit.day}-${hit.item_id}`} hit={hit} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+/**
  * Поиск по тому, что лента уже присылала этому читателю.
  *
  * Обычная форма и обычная ссылка: страница отвечает на адрес с `?q=`,
@@ -81,13 +168,16 @@ function Hit({ hit }: { hit: ArchiveHit }) {
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  // Повторённый параметр (`?q=a&q=b`) приезжает массивом, и объявить его
+  // строкой — значит попросить компилятор промолчать: `trim` на массиве
+  // отдаёт 500 вместо выдачи.
+  searchParams: Promise<{ q?: string | string[] }>;
 }) {
   const [reader, { q }] = await Promise.all([currentReader(), searchParams]);
-  const query = (q ?? "").trim();
-  const [archive, result] = await Promise.all([
+  const query = ((Array.isArray(q) ? q[0] : q) ?? "").trim();
+  const [archive, found] = await Promise.all([
     archiveSize(reader.id),
-    query ? searchArchive(reader.id, query) : null,
+    query ? searchArchive(reader, query) : null,
   ]);
 
   return (
@@ -127,62 +217,7 @@ export default async function SearchPage({
       />
 
       <div className="mx-auto w-full max-w-page px-4 py-4 sm:py-6">
-        {archive.items === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>Искать пока не в чем</EmptyTitle>
-              <EmptyDescription>
-                Поиск идёт по твоим выпускам. Первый ещё не приходил —{" "}
-                <Link href="/" className="underline underline-offset-4">
-                  вернуться в ленту
-                </Link>
-                .
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : !result ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>Ищу по твоим выпускам</EmptyTitle>
-              <EmptyDescription>
-                {/* Настоящее число, а не «по всему архиву»: оно отвечает
-                    на вопрос, который возникает раньше запроса, — есть ли
-                    вообще в чём искать. */}
-                Это не поиск по интернету: только то, что лента тебе присылала, —{" "}
-                {count(archive.items, "материал", "материала", "материалов")} за{" "}
-                {archive.days} {digestsWord(archive.days)}. Слова ищутся и в описании
-                выпуска, и в исходном заголовке: «уран» и «uranium» найдут одно и то же.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : result.hits.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>Ничего не нашлось</EmptyTitle>
-              <EmptyDescription>
-                По запросу «{query}» в твоих выпусках пусто. Материал, которого лента
-                не присылала, здесь не найдётся: искали по{" "}
-                {count(archive.items, "материалу", "материалам", "материалам")} за{" "}
-                {archive.days} {digestsWord(archive.days)}.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <>
-            <p className="px-1 pb-2 text-xs text-muted-foreground">
-              {count(result.hits.length, "материал", "материала", "материалов")}
-              {/* Ослабленный запрос называется вслух: молча показать выдачу
-                  по одному слову из четырёх — значит выдать другое за то же
-                  самое. */}
-              {result.loose ? " — по всем словам разом ничего, это по любому из них" : null}
-            </p>
-            <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
-              {result.hits.map((hit) => (
-                <Hit key={`${hit.day}-${hit.item_id}`} hit={hit} />
-              ))}
-            </div>
-          </>
-        )}
+        <Results archive={archive} query={query} found={found} />
       </div>
     </>
   );

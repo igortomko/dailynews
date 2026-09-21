@@ -485,11 +485,20 @@ async function main() {
     {
       const { HL_START } = await import("../src/lib/search");
       // Описание пишется читателю его языком — по нему и ищут первым делом.
+      const [before] = await sql<{ summary: string | null }[]>`
+        select summary from dailynews.digest_items where item_id = ${ids[2]}
+      `;
       await sql`
         update dailynews.digest_items
            set summary = 'Спотовая цена на уран обновила максимум, дата-центры разгоняют спрос'
          where item_id = ${ids[2]}
       `;
+
+      // Словарь поиска выбирается по языку выпуска, а его решает тариф:
+      // у платного перевод есть, у бесплатного текст остаётся языком
+      // источника. Читатели ниже заявлены явно — иначе проверка меряла бы
+      // тариф из фикстуры, а не поиск.
+      const ru = { ...owner, plan: "pro", language: "русском" };
 
       const archive = await queries.archiveSize(owner.id);
       assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
@@ -499,7 +508,7 @@ async function main() {
         "в чужой архив соседние выпуски не попадают",
       );
 
-      const byRussian = await queries.searchArchive(owner.id, "уран");
+      const byRussian = await queries.searchArchive(ru, "уран");
       assert.equal(byRussian.hits.length, 1, "слово из описания выпуска обязано находиться");
       assert.equal(String(byRussian.hits[0].item_id), String(ids[2]));
       assert.equal(byRussian.loose, false, "по одному слову ослаблять нечего");
@@ -512,32 +521,41 @@ async function main() {
 
       // Ищут тем словом, которое запомнили: «уран» стоит в описании выпуска,
       // «uranium» — в заголовке источника. Одно без другого — половина поиска.
-      const byEnglish = await queries.searchArchive(owner.id, "uranium");
+      const byEnglish = await queries.searchArchive(ru, "uranium");
       assert.equal(byEnglish.hits.length, 1, "исходный заголовок обязан искаться наравне");
       assert.equal(String(byEnglish.hits[0].item_id), String(ids[2]));
 
       // Словоформа, а не подстрока: «цены» и «цена» — одно слово.
       assert.equal(
-        (await queries.searchArchive(owner.id, "цены")).hits.length,
+        (await queries.searchArchive(ru, "цены")).hits.length,
         1,
         "поиск обязан сводить словоформы, иначе он работает только точным попаданием",
       );
+      // Словарь один на оба текста, и это не компромисс: у русской
+      // конфигурации Postgres латиница уходит в английский стеммер.
+      // «цены» находит «цена» в описании выпуска, «prices» — «price»
+      // в заголовке источника, и это один и тот же поиск.
+      assert.equal(
+        (await queries.searchArchive(ru, "prices")).hits.length,
+        1,
+        "словоформа английского заголовка обязана сводиться тем же словарём",
+      );
 
       // Самое дорогое здесь — чужой архив: он приходит вовремя и не твой.
-      const stranger = await queries.searchArchive(second.id, "уран");
+      const stranger = await queries.searchArchive(second, "уран");
       assert.equal(stranger.hits.length, 0, "выпуск соседа в своём поиске не находится");
       assert.equal(
-        (await queries.searchArchive(owner.id, "CBT")).hits.length,
+        (await queries.searchArchive(ru, "CBT")).hits.length,
         0,
         "и в обратную сторону тоже: владелец не ищет по выпуску второго",
       );
 
       // Ищут вопросом: все слова разом дают ноль, хотя ответ лежит в архиве.
-      const asked = await queries.searchArchive(owner.id, "где я видел про uranium");
+      const asked = await queries.searchArchive(ru, "где я видел про uranium");
       assert.equal(asked.loose, true, "ослабление обязано называться вслух");
       assert.equal(String(asked.hits[0].item_id), String(ids[2]));
       assert.equal(
-        (await queries.searchArchive(owner.id, "кварки бозоны")).loose,
+        (await queries.searchArchive(ru, "кварки бозоны")).loose,
         false,
         "ослабление, не нашедшее ничего, ослаблением не объявляется",
       );
@@ -549,11 +567,20 @@ async function main() {
         values (${owner.id}, ${ids[2]}, 'down', 95, 0.8)
       `;
       assert.equal(
-        (await queries.searchArchive(owner.id, "уран")).hits.length,
+        (await queries.searchArchive(ru, "уран")).hits.length,
         0,
         "скрытое пальцем вниз в поиске не всплывает",
       );
-      await sql`delete from dailynews.reads where reader_id = ${owner.id} and event = 'down'`;
+      // Убирается ровно вставленное, и описание возвращается на место:
+      // проверка, оставляющая след, однажды объяснит чужой провал.
+      await sql`
+        delete from dailynews.reads
+         where reader_id = ${owner.id} and item_id = ${ids[2]} and event = 'down'
+      `;
+      await sql`
+        update dailynews.digest_items set summary = ${before?.summary ?? null}
+         where item_id = ${ids[2]}
+      `;
       console.log("  поиск: свой архив находится, чужой — нет");
     }
 

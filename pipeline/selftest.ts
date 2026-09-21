@@ -58,7 +58,7 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
-import { anyOf, highlight, HL_END, HL_START } from "../src/lib/search";
+import { anyOf, highlight, HL_END, HL_START, tsConfigFor } from "../src/lib/search";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -2537,6 +2537,36 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   // Оператор самого websearch, а не подмена «&» на «|» в готовом tsquery:
   // в запросе бывает «AT&T», и такая подмена ломает не оператор, а слово.
   assert.equal(anyOf("AT&T Verizon"), "AT&T or Verizon", "слово с амперсандом остаётся словом");
+
+  // Запрет остаётся запретом: «уран ИЛИ НЕ обогащение» отвечает почти всем
+  // архивом — ровно обратное тому, о чём просили.
+  assert.equal(anyOf("уран -обогащение"), null, "запрещённое слово в ослабление не идёт");
+  assert.equal(anyOf("уран реактор -обогащение"), "уран or реактор");
+  assert.equal(anyOf("дата-центры уран"), "дата-центры or уран", "дефис внутри слова остаётся");
+  // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
+  assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
+
+  // Словарь решает, сводятся ли словоформы, и заметно это только
+  // по ненайденному.
+  assert.equal(tsConfigFor("русском"), "russian");
+  assert.equal(tsConfigFor("английском"), "english");
+  assert.equal(tsConfigFor("португальском (бразильский вариант)"), "portuguese");
+  assert.equal(
+    tsConfigFor(SOURCE_LANGUAGE),
+    "russian",
+    "язык источника заранее неизвестен: русская конфигурация разбирает и латиницу",
+  );
+  assert.equal(
+    tsConfigFor("японском"),
+    "russian",
+    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
+  );
+  assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
+  // Список языков — один на промпт и на поиск. Разойдутся — половина
+  // читателей молча получит разбор без словаря.
+  for (const language of LANGUAGES) {
+    assert.ok(tsConfigFor(language).length > 0, `для «${language}» должен быть словарь`);
+  }
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

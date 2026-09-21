@@ -1,7 +1,8 @@
 import "server-only";
 import { sql } from "./db";
-import { anyOf, HL_END, HL_OPTIONS, HL_START } from "./search";
-import type { Axes, Source } from "./types";
+import { effectiveVoice } from "./lemon";
+import { anyOf, HL_END, HL_OPTIONS, HL_START, tsConfigFor } from "./search";
+import type { Axes, Reader, Source } from "./types";
 
 /**
  * Запросы ленты. У каждого первым аргументом идёт читатель, и это не
@@ -380,7 +381,6 @@ export type ArchiveHit = {
   source_label: string;
   topic_label: string | null;
   day: string;
-  published_at: Date;
 };
 
 /**
@@ -400,10 +400,14 @@ export type ArchiveHit = {
  * пришлось бы считать по двум таблицам сразу — один GIN на digest_items
  * покрыл бы только половину запроса. Понадобится — материализованный
  * tsvector на digest_items плюс отдельный на items, и объединение.
+ *
+ * Словарь один на весь запрос и выбран по языку выпуска: и текст, и запрос,
+ * и отрывок обязаны разбираться одинаково, иначе запрос ищет слова, которых
+ * в разобранном тексте нет по построению.
  */
-async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
+async function found(readerId: number, query: string, config: string): Promise<ArchiveHit[]> {
   return sql<ArchiveHit[]>`
-    with q as (select websearch_to_tsquery('russian', ${query}) as tsq),
+    with q as (select websearch_to_tsquery(${config}::regconfig, ${query}) as tsq),
     hits as (
       select i.id::int as item_id, i.url,
              coalesce(nullif(di.title, ''), i.title) as title,
@@ -411,7 +415,6 @@ async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
              s.label as source_label,
              t.label as topic_label,
              d.day::text as day,
-             coalesce(i.published_at, i.collected_at) as published_at,
              ts_rank_cd(v.tsv, q.tsq) as rank
         from q
         join dailynews.digests d on d.reader_id = ${readerId}
@@ -422,7 +425,7 @@ async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
    left join dailynews.topics t on t.id = sc.topic_id
   cross join lateral (
                select to_tsvector(
-                 'russian',
+                 ${config}::regconfig,
                  concat_ws(' ', di.title, di.summary, i.title, i.excerpt)
                ) as tsv
              ) v
@@ -439,7 +442,7 @@ async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
     -- Отрывок считается уже после отбора и предела: ts_headline разбирает
     -- текст заново на каждой строке, и считать его по всему архиву значит
     -- платить за то, чего никто не увидит.
-    select item_id, url, title, source_label, topic_label, day, published_at,
+    select item_id, url, title, source_label, topic_label, day,
            -- Многоточие ставится по краям, которых отрывок не достал.
            -- Без него вырезанный кусок начинается со строчной буквы
            -- и обрывается на полуслове — и читается как поломка, а не
@@ -451,7 +454,8 @@ async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
              as snippet
       from hits e,
            lateral (
-             select ts_headline('russian', e.body, (select tsq from q), ${HL_OPTIONS}) as snippet
+             select ts_headline(${config}::regconfig, e.body, (select tsq from q), ${HL_OPTIONS})
+                      as snippet
            ) h,
            -- Тот же отрывок без меток: сравнивать с описанием надо текст,
            -- а не текст вперемешку с управляющими символами.
@@ -470,16 +474,22 @@ async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
  * в материалах, где сошлось одно слово из четырёх.
  */
 export async function searchArchive(
-  readerId: number,
+  reader: Reader,
   query: string,
 ): Promise<{ hits: ArchiveHit[]; loose: boolean }> {
-  const strict = await found(readerId, query);
+  // Читатель целиком, а не его номер: словарь поиска обязан совпасть
+  // с языком, которым выпуск написан, а его решает не колонка, а тариф.
+  // Передавай сюда номер — язык пришлось бы добывать на стороне вызова,
+  // и первый же вызов взял бы reader.language вместо действующего.
+  const config = tsConfigFor(effectiveVoice(reader).language);
+
+  const strict = await found(reader.id, query, config);
   if (strict.length > 0) return { hits: strict, loose: false };
 
   const loose = anyOf(query);
   if (!loose) return { hits: strict, loose: false };
 
-  const hits = await found(readerId, loose);
+  const hits = await found(reader.id, loose, config);
   return { hits, loose: hits.length > 0 };
 }
 
