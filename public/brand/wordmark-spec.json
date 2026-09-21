@@ -1,55 +1,55 @@
 {
-  "font": "Bodoni Moda",
-  "weight": 700,
-  "opticalSize": 96,
+  "font": "Literata",
+  "weight": 650,
+  "opticalSize": 18,
   "text": "Reporta",
   "shaper": "HarfBuzz",
-  "unitsPerEm": 2000,
+  "unitsPerEm": 1000,
   "pairPositioning": [
     {
       "letter": "R",
-      "advance": 1485,
-      "nominalAdvance": 1485,
-      "kerning": 0
+      "advance": 720,
+      "nominalAdvance": 740,
+      "kerning": -20
     },
     {
       "letter": "e",
-      "advance": 1065,
-      "nominalAdvance": 1065,
-      "kerning": 0
+      "advance": 545,
+      "nominalAdvance": 555,
+      "kerning": -10
     },
     {
       "letter": "p",
-      "advance": 1260,
-      "nominalAdvance": 1260,
+      "advance": 651,
+      "nominalAdvance": 651,
       "kerning": 0
     },
     {
       "letter": "o",
-      "advance": 1120,
-      "nominalAdvance": 1120,
-      "kerning": 0
+      "advance": 606,
+      "nominalAdvance": 616,
+      "kerning": -10
     },
     {
       "letter": "r",
-      "advance": 973,
-      "nominalAdvance": 973,
+      "advance": 527,
+      "nominalAdvance": 527,
       "kerning": 0
     },
     {
       "letter": "t",
-      "advance": 749,
-      "nominalAdvance": 739,
-      "kerning": 10
+      "advance": 422,
+      "nominalAdvance": 429,
+      "kerning": -7
     },
     {
       "letter": "a",
-      "advance": 1160,
-      "nominalAdvance": 1160,
+      "advance": 569,
+      "nominalAdvance": 569,
       "kerning": 0
     }
   ],
   "tracking": 0,
   "outlines": true,
-  "note": "Native font kerning retained. Wordmark is newly typeset; snake body reconstructed as a continuous Bezier, head traced from approved reference."
+  "note": "User-requested Literata trial. Native font kerning retained; no synthetic bold or nonuniform scaling. Snake body, head and cyan eyes are unchanged vector geometry."
 }

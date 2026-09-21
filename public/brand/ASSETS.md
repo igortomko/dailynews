@@ -1,11 +1,11 @@
 # Reporta / Asset manifest
 
-## Approved identity
+## Current identity
 
 | File | Purpose |
 | --- | --- |
 | logo-reporta-approved-transparent.png | Transparent export of the typeset vector wordmark, 1529 × 434; legacy filename retained |
-| logo-reporta.svg | Bodoni Moda wordmark outlines and independent vector snake layers |
+| logo-reporta.svg | Literata wordmark outlines and independent vector snake layers |
 | logo-reporta.png | Logo, 760 × 216 |
 | logo-reporta-380.png / logo-reporta-190.png | Small logo exports |
 | logo-reporta-dark.svg / logo-reporta-dark.png | Transparent light lettering and red snake for dark backgrounds |
@@ -20,21 +20,22 @@ bitmap and no live text. Their backgrounds are transparent; eye whites are opaqu
 The standalone mark silhouette has 99.35% raster-mask IoU with its reference;
 differences are within a one-pixel source boundary. Its eyes use exact cyan circles
 (#00B8EC). The wordmark is intentionally newly typeset, not a 1:1 trace of old letters.
-Bodoni Moda 700, optical size 96, HarfBuzz kerning, zero tracking. Details are in
+Literata 650, optical size 18, HarfBuzz kerning, zero tracking. Details are in
 `wordmark-spec.json`; trace measurements are in `vector-report.json`.
 
 Original references: `logo-reporta-approved.png`, `sources/mark-reporta-approved.png`.
 `sources/logo-reporta-traced.svg` preserves the old lettering as a traced comparison,
 not as the canonical logo. The continuous wordmark snake is a Bezier reconstruction
-with a traced original head. Flat vector color replaces the original raster texture.
+with a smooth manually drawn Bezier head. No traced head fragments remain.
+Flat vector color replaces the original raster texture.
 
 Rebuild: `node scripts/build-brand-identity.mjs`. Requires Potrace 1.16 and uv;
 fontTools 4.65.0 and uharfbuzz 0.56.2 are pinned in `scripts/brand-font-requirements.txt`.
-The source font is from the official Google Fonts `ofl/bodonimoda` directory;
+The source font is from the official Google Fonts `ofl/literata` directory;
 the TTF and OFL license are included in `fonts/`.
 Legacy `social-preview.*` and `illustration-*.svg` are not canonical and are excluded.
 
-## New editorial series
+## Editorial series / 20 scenes, two themes
 
 | File | Subject | Origin |
 | --- | --- | --- |
@@ -48,14 +49,32 @@ User-supplied engraving references informed the style only. They are not
 redistributed. Each scene uses one instantly readable surreal metaphor. Red is part
 of the scene, not an unrelated overlay. Images depict fiction, not reported events.
 Photograph is an AI-generated art-direction sample, not documentary evidence.
-WebP quality 93 retains the generated compositions without redrawing.
-Exact generation prompts are in `generation-prompts.json`.
+The first three scenes were simplified; 17 more extend the same language.
+`illustrations/catalog.json` lists all 20 titles and intended meanings.
+`illustrations/light/` and `illustrations/dark/` contain 40 transparent PNGs.
+The dark files are deterministic ink substitutions, not regenerated drawings:
+alpha is byte-identical, red stays #FF462A, black becomes #FFFFFF.
+White paper is removed, including the gaps inside objects. No opaque matte.
+`illustrations/preview/` contains 640px lossless WebP previews.
+`illustrations/sources/` preserves AI-generated source PNGs for reproducibility.
+Generation prompts are in `illustrations/generation.json`; earlier art direction
+is retained in `generation-prompts.json`. Run `node scripts/export-brand-illustrations.mjs`
+to rebuild all pairs. Illustrations are raster assets, not vector paths.
+
+`reporta-illustrations.zip` is the standalone 40-PNG download with catalog and usage.
+`type-study/index.html` compares Literata 600, 650 and 700, plus the original
+and earlier candidates. Literata 650 is the current user-requested trial, not
+final font approval. The previous Bodoni master is preserved as
+`type-study/bodoni-moda.svg`. All three Literata samples use optical size 18.
+Rebuild each sample with `scripts/build-brand-wordmark.py --weight WEIGHT
+--output-dir OUTPUT`, then copy its `logo-reporta.svg` into `type-study/`.
 
 ## Fonts and interface assets
 
 WOFF2 files and CSS are self-hosted in `fonts/`, with an OFL license for each
 family. Source: [Google Fonts](https://github.com/google/fonts/tree/main/ofl).
-Families: Bodoni Moda (logo only), Fraunces, Literata, Inter, DM Mono, IBM Plex Mono.
+Families: Literata (logo and Cyrillic headlines), Fraunces, Inter, DM Mono,
+IBM Plex Mono. Bodoni Moda is retained only as a historical comparison.
 
 Interface icons in `icons/` are rendered from the installed lucide-react
 package. Its ISC license is included as `icons/LICENSE`.

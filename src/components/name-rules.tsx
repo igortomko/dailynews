@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useT } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
 import {
   mergeDraft, RULE_LIMITS, splitNames, withVariants, type Names, type RuleKind,
@@ -18,7 +19,7 @@ import {
  * правила ввода (запятая и перевод строки делят, повтор не добавляется,
  * предел объясняется словами) обязаны быть одними, а две копии разошлись бы
  * на первой правке любой из них. Сами правила — в `src/lib/rules.ts`,
- * где их проверяет `npm test`.
+ * где их проверяет `npm test`; слова — в словаре `rules`.
  *
  * Пределы здесь те же числа, что проверяет сервер (`RULE_LIMITS`):
  * форма гасит лишнее до отправки, сервер отвергает то, чего форма не видела.
@@ -32,24 +33,21 @@ import {
 export function NameRules({
   kind,
   initial,
-  label,
-  hint,
-  description,
-  placeholder,
+  optional,
   name,
   onChange,
 }: {
   kind: RuleKind;
   initial: Names[];
-  label: string;
-  /** Короткая пометка у подписи: «необязательно» на первом экране. */
-  hint?: string;
-  description: string;
-  placeholder: string;
+  /** Пометка «необязательно» у подписи: на первом экране. */
+  optional?: boolean;
   /** Имя скрытого поля формы. Пусто — список отдаётся только через onChange. */
   name?: string;
   onChange?: (next: Names[]) => void;
 }) {
+  const t = useT();
+  const words = t.rules;
+  const area = t.rules[kind];
   const [rules, setRulesState] = useState<Names[]>(initial);
   const [draft, setDraft] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -75,8 +73,8 @@ export function NameRules({
     nextVariants: string = variants,
     at: number | null = selected,
   ): Names[] => {
-    const base = at === null ? nextRules : withVariants(nextRules, at, nextVariants).next;
-    return mergeDraft(base, nextDraft, limit).next;
+    const base = at === null ? nextRules : withVariants(nextRules, at, nextVariants, words).next;
+    return mergeDraft(base, nextDraft, limit, words).next;
   };
 
   const report = (...args: Parameters<typeof pending>) => onChange?.(pending(...args));
@@ -89,7 +87,7 @@ export function NameRules({
   /** Добавить всё из поля: каждое название — своё правило. */
   const add = () => {
     if (splitNames(draft).length === 0) return;
-    const { next, stopped, rejected } = mergeDraft(rules, draft, limit);
+    const { next, stopped, rejected } = mergeDraft(rules, draft, limit, words);
     // Поле очищается только от принятого: непринятое остаётся на месте,
     // чтобы его можно было поправить, а не набирать заново.
     const left = rejected.join(", ");
@@ -127,7 +125,7 @@ export function NameRules({
   /** Принять написания раскрытого правила глазами. Первое остаётся именем. */
   const commitVariants = () => {
     if (selected === null) return;
-    const { next, stopped } = withVariants(rules, selected, variants);
+    const { next, stopped } = withVariants(rules, selected, variants, words);
     setNote(stopped);
     if (!stopped && next !== rules) setRules(next);
   };
@@ -136,67 +134,62 @@ export function NameRules({
     <Field ref={box}>
       {name ? <input type="hidden" name={name} value={JSON.stringify(pending())} /> : null}
       <FieldLabel className="flex items-center gap-2">
-        {label}
-        {hint ? <span className="text-xs font-normal text-muted-foreground">{hint}</span> : null}
+        {area.label}
+        {optional ? <span className="text-xs font-normal text-muted-foreground">{words.optional}</span> : null}
         {/* Счётчик появляется вместе с первым названием: «0 из 50» сообщает
             о пределе раньше, чем о нём спросили. */}
         {rules.length > 0 ? (
           <span className="text-xs font-normal text-muted-foreground tabular-nums">
-            {rules.length} из {limit}
+            {words.counter(rules.length, limit)}
           </span>
         ) : null}
       </FieldLabel>
-      <FieldDescription>{description}</FieldDescription>
+      <FieldDescription>{area.description}</FieldDescription>
 
       {rules.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {rules.map((names, index) => (
             <Fragment key={`${names[0]}-${index}`}>
+              {/* Чип — контейнер с двумя настоящими кнопками: раскрыть
+                  и убрать. Одна кнопка-обёртка с кнопкой внутри делала бы
+                  крестик невидимым для диктора и перехватывала бы его Enter. */}
               <div
-                role="button"
-                tabIndex={0}
-                aria-expanded={selected === index}
-                aria-label={
-                  names.length > 1
-                    ? `${names[0]}, ещё ${names.length - 1}: ${names.slice(1).join(", ")}`
-                    : names[0]
-                }
-                onClick={() => open(index)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    open(index);
-                  }
-                }}
+                role="group"
+                aria-label={words.chipAria(names[0], names.slice(1))}
                 className={cn(
-                  "flex h-10 items-center gap-1.5 rounded-lg border bg-card pr-1 pl-3 text-sm transition-colors select-none",
-                  "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-                  selected === index ? "border-foreground/30 bg-muted" : "cursor-pointer hover:bg-muted",
+                  "flex h-10 items-center gap-1.5 rounded-lg border bg-card pr-1 text-sm transition-colors select-none",
+                  selected === index ? "border-foreground/30 bg-muted" : "hover:bg-muted",
                 )}
               >
-                <span>{names[0]}</span>
-                {/* Сколько ещё написаний: раскрытие покажет какие. */}
-                {names.length > 1 ? (
-                  <span className="text-xs text-muted-foreground tabular-nums">+{names.length - 1}</span>
-                ) : null}
+                <button
+                  type="button"
+                  aria-expanded={selected === index}
+                  onClick={() => open(index)}
+                  className="flex h-full cursor-pointer items-center gap-1.5 rounded-lg pl-3 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  <span>{names[0]}</span>
+                  {/* Сколько ещё написаний: раскрытие покажет какие. */}
+                  {names.length > 1 ? (
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {words.more(names.length - 1)}
+                    </span>
+                  ) : null}
+                </button>
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <button
                         type="button"
                         data-rule-remove
-                        aria-label={`Убрать ${names[0]}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          remove(index);
-                        }}
+                        aria-label={words.removeAria(names[0])}
+                        onClick={() => remove(index)}
                         className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       />
                     }
                   >
                     <XIcon className="size-3.5" />
                   </TooltipTrigger>
-                  <TooltipContent>Убрать</TooltipContent>
+                  <TooltipContent>{words.remove}</TooltipContent>
                 </Tooltip>
               </div>
 
@@ -206,8 +199,8 @@ export function NameRules({
                 <div className="w-full">
                   <Input
                     value={variants}
-                    aria-label={`Другие написания для «${names[0]}»`}
-                    placeholder="Другие написания через запятую: Фигма, figma.com"
+                    aria-label={words.variantsAria(names[0])}
+                    placeholder={words.variantsPlaceholder}
                     onChange={(event) => {
                       setVariants(event.target.value);
                       report(rules, draft, event.target.value);
@@ -221,7 +214,7 @@ export function NameRules({
                     }}
                   />
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Ищется каждое написание, буквально. До {RULE_LIMITS.names} на одно название
+                    {words.variantsHelp(RULE_LIMITS.names)}
                   </p>
                 </div>
               ) : null}
@@ -234,8 +227,8 @@ export function NameRules({
         <Input
           ref={draftInput}
           value={draft}
-          aria-label={label}
-          placeholder={placeholder}
+          aria-label={area.label}
+          placeholder={area.placeholder}
           onChange={(event) => {
             setDraft(event.target.value);
             report(rules, event.target.value);
@@ -260,13 +253,11 @@ export function NameRules({
           disabled={full}
         >
           <PlusIcon data-icon="inline-start" />
-          Добавить
+          {words.add}
         </Button>
       </div>
       {note ? <FieldDescription>{note}</FieldDescription> : null}
-      {full && !note ? (
-        <FieldDescription>Не больше {limit}. Убери одно, чтобы добавить другое</FieldDescription>
-      ) : null}
+      {full && !note ? <FieldDescription>{words.limitReached(limit)}</FieldDescription> : null}
     </Field>
   );
 }

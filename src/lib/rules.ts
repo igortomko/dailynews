@@ -15,10 +15,20 @@
  * пользовательский текст, который нельзя исполнять как regex.
  */
 
+import type { rules as EnWords } from "./i18n/en/rules";
+import { rules as ruWords } from "./i18n/ru/rules";
+
 /** Написания одного и того же. Первое показывается, по всем ищется. */
 export type Names = string[];
 export type RuleKind = "follow" | "exclude";
 export type Rules = Record<RuleKind, Names[]>;
+
+/**
+ * Слова отказов. Необязательный довод с русским по умолчанию, как у всех
+ * общих утилит: прогон и тесты словаря не выбирают, а форма и действия
+ * отдают словарь читателя.
+ */
+export type Words = typeof EnWords;
 
 /**
  * Пределы ввода. Одни на все тарифы, а не новые тарифные границы:
@@ -43,13 +53,15 @@ export const fold = (text: string): string =>
 const tidy = (name: string): string => name.replace(/\s+/g, " ").trim();
 
 /**
- * Разбить ввод на названия: через запятую или перевод строки. Пустое
- * и повторы (без регистра) выбрасываются — «Figma, figma, » это одно.
+ * Разбить ввод на названия: через запятую, точку с запятой или перевод
+ * строки. NFKC до разбиения: полноширинная запятая из японской или китайской
+ * раскладки — тоже запятая, и после свёртки она обычная. Пустое и повторы
+ * (без регистра) выбрасываются — «Figma, figma, » это одно.
  */
 export function splitNames(input: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const raw of input.split(/[,\n]/)) {
+  for (const raw of input.normalize("NFKC").split(/[,;、\n]/)) {
     const name = tidy(raw);
     if (!name || seen.has(fold(name))) continue;
     seen.add(fold(name));
@@ -66,19 +78,23 @@ export function splitNames(input: string): string[] {
  * Повтор одного написания в двух правилах — не ошибка, а слияние: второе
  * молча теряет повтор, и одно упоминание не занимает два правила.
  */
-export function cleanRules(kind: RuleKind, raw: unknown): { rules: Names[] } | { error: string } {
+export function cleanRules(
+  kind: RuleKind,
+  raw: unknown,
+  words: Words = ruWords,
+): { rules: Names[] } | { error: string } {
   if (raw === undefined || raw === null) return { rules: [] };
-  if (!Array.isArray(raw)) return { error: "Список не разобрался — обнови страницу и попробуй ещё раз" };
+  if (!Array.isArray(raw)) return { error: words.badList };
   const seen = new Set<string>();
   const rules: Names[] = [];
   for (const entry of raw) {
     const names: string[] = [];
     for (const value of Array.isArray(entry) ? entry : [entry]) {
-      if (typeof value !== "string") return { error: "Список не разобрался — обнови страницу и попробуй ещё раз" };
+      if (typeof value !== "string") return { error: words.badList };
       const name = tidy(value);
       if (!name) continue;
       if (name.length > RULE_LIMITS.chars) {
-        return { error: `«${name.slice(0, 24)}…» длиннее ${RULE_LIMITS.chars} знаков` };
+        return { error: words.tooLong(name.slice(0, 24), RULE_LIMITS.chars) };
       }
       if (seen.has(fold(name))) continue;
       seen.add(fold(name));
@@ -86,14 +102,12 @@ export function cleanRules(kind: RuleKind, raw: unknown): { rules: Names[] } | {
     }
     if (names.length === 0) continue;
     if (names.length > RULE_LIMITS.names) {
-      return { error: `У «${names[0]}» больше ${RULE_LIMITS.names} написаний — оставь главные` };
+      return { error: words.tooManyVariants(RULE_LIMITS.names) };
     }
     rules.push(names);
   }
   const max = RULE_LIMITS.rules[kind];
-  if (rules.length > max) {
-    return { error: `${kind === "follow" ? "Следить можно" : "Исключений может быть"} не больше ${max}` };
-  }
+  if (rules.length > max) return { error: words[kind].limit(max) };
   return { rules };
 }
 
@@ -192,6 +206,7 @@ export function mergeDraft(
   rules: Names[],
   draft: string,
   limit: number,
+  words: Words = ruWords,
 ): { next: Names[]; stopped: string | null; rejected: string[] } {
   const next = [...rules];
   const rejected: string[] = [];
@@ -199,17 +214,17 @@ export function mergeDraft(
   let stopped: string | null = null;
   for (const candidate of splitNames(draft)) {
     if (candidate.length > RULE_LIMITS.chars) {
-      stopped ??= `«${candidate.slice(0, 24)}…» длиннее ${RULE_LIMITS.chars} знаков`;
+      stopped ??= words.tooLong(candidate.slice(0, 24), RULE_LIMITS.chars);
       rejected.push(candidate);
       continue;
     }
     if (next.some((known) => known.some((n) => fold(n) === fold(candidate)))) {
-      stopped ??= `«${candidate}» уже есть`;
+      stopped ??= words.exists(candidate);
       rejected.push(candidate);
       continue;
     }
     if (next.length >= limit) {
-      stopped ??= `Не больше ${limit}. Убери одно, чтобы добавить другое`;
+      stopped ??= words.limitReached(limit);
       rejected.push(candidate);
       continue;
     }
@@ -228,6 +243,7 @@ export function withVariants(
   rules: Names[],
   index: number,
   input: string,
+  words: Words = ruWords,
 ): { next: Names[]; stopped: string | null } {
   const shown = rules[index]?.[0];
   if (shown === undefined) return { next: rules, stopped: null };
@@ -235,11 +251,11 @@ export function withVariants(
   const taken = others.find((name) =>
     rules.some((names, i) => i !== index && names.some((known) => fold(known) === fold(name))),
   );
-  if (taken) return { next: rules, stopped: `«${taken}» уже есть в другом правиле` };
+  if (taken) return { next: rules, stopped: words.existsElsewhere(taken) };
   const long = others.find((name) => name.length > RULE_LIMITS.chars);
-  if (long) return { next: rules, stopped: `«${long.slice(0, 24)}…» длиннее ${RULE_LIMITS.chars} знаков` };
+  if (long) return { next: rules, stopped: words.tooLong(long.slice(0, 24), RULE_LIMITS.chars) };
   if (others.length + 1 > RULE_LIMITS.names) {
-    return { next: rules, stopped: `Не больше ${RULE_LIMITS.names} написаний на одно название` };
+    return { next: rules, stopped: words.tooManyVariants(RULE_LIMITS.names) };
   }
   const names = [shown, ...others];
   if (names.join("\n") === rules[index].join("\n")) return { next: rules, stopped: null };

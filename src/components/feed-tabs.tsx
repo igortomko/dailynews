@@ -3,7 +3,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowUpIcon } from "lucide-react";
-import { count } from "@/lib/plural";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,6 +11,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { ItemCard } from "@/components/item-card";
 import { SearchButton, SearchField } from "@/components/feed-search";
 import { SearchHints } from "@/components/search-memory";
+import { useT } from "@/components/i18n-provider";
 import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
@@ -30,6 +30,7 @@ import type { NetworkId } from "@/lib/networks";
  * две карточки, то есть момент, когда шапка уже ушла.
  */
 function ToTop() {
+  const t = useT();
   const [shown, setShown] = useState(false);
 
   useEffect(() => {
@@ -45,7 +46,7 @@ function ToTop() {
         render={
           <button
             type="button"
-            aria-label="Наверх"
+            aria-label={t.feed.tabs.toTopAria}
             aria-hidden={!shown}
             tabIndex={shown ? 0 : -1}
             onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
@@ -65,7 +66,7 @@ function ToTop() {
       >
         <ArrowUpIcon className="size-4" />
       </TooltipTrigger>
-      <TooltipContent>Наверх, к датам и вкладкам</TooltipContent>
+      <TooltipContent>{t.feed.tabs.toTopTooltip}</TooltipContent>
     </Tooltip>
   );
 }
@@ -132,18 +133,19 @@ export function FeedTabs({
   left: React.ReactNode;
   right: React.ReactNode;
 }) {
+  const t = useT();
   // «Прочее» показывается вкладкой, только если туда что-то попало: пустая
   // вкладка сообщает о системе, а не о новостях.
   const hasOther = items.some((item) => !item.topic_slug);
   const tabs = [
-    { slug: "all", label: "Все", count: items.length },
+    { slug: "all", label: t.feed.tabs.all, count: items.length },
     ...topics.map((topic) => ({
       slug: topic.slug,
       label: topic.label,
       count: items.filter((item) => item.topic_slug === topic.slug).length,
     })),
     ...(hasOther
-      ? [{ slug: "other", label: "Прочее", count: items.filter((item) => !item.topic_slug).length }]
+      ? [{ slug: "other", label: t.feed.tabs.other, count: items.filter((item) => !item.topic_slug).length }]
       : []),
   ];
 
@@ -263,7 +265,7 @@ export function FeedTabs({
                     и том же выпуске. Число карточек осталось на вкладках,
                     где оно и отвечает на свой вопрос — «сколько в этой теме». */}
                 <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-                  {formatMinutes(reading.minutes)}
+                  {formatMinutes(reading.minutes, t.feed.time)}
                 </span>
               </div>
               {/* Поиск рядом с датами: и то и другое — способ добраться
@@ -358,7 +360,7 @@ export function FeedTabs({
             горящая каждый день, ничем не отличается от выключенной. */}
         {reading.target !== null && isShort(reading.minutes, reading.target) ? (
           <p className="mb-3 text-sm text-muted-foreground">
-            {shortfallNote(reading.minutes, reading.target)}.
+            {shortfallNote(reading.minutes, reading.target, t.feed.time)}.
           </p>
         ) : null}
         {/* Скрытое исключениями названо, а не заметено: правило работает
@@ -367,9 +369,9 @@ export function FeedTabs({
             называть — строка на каждом выпуске перестала бы что-либо значить. */}
         {hidden > 0 && items.length > 0 ? (
           <p className="mb-3 text-sm text-muted-foreground">
-            {count(hidden, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим{" "}
+            {t.feed.rules.hiddenBefore(hidden)}
             <Link href="/settings/interests" className="underline underline-offset-4">
-              исключениям
+              {t.feed.rules.hiddenLink}
             </Link>
             .
           </p>
@@ -382,15 +384,11 @@ export function FeedTabs({
         // про весь выпуск, а панели вкладок остаются смонтированными все.
         <Empty>
           <EmptyHeader>
-            <EmptyTitle>Всё скрыто исключениями</EmptyTitle>
-            <EmptyDescription>
-              В выпуске {count(hidden, "карточка", "карточки", "карточек")}, и в каждой есть
-              что-то из твоего списка. Выпуск не пересобирается — освободившиеся места
-              не добираются.
-            </EmptyDescription>
+            <EmptyTitle>{t.feed.rules.allHiddenTitle}</EmptyTitle>
+            <EmptyDescription>{t.feed.rules.allHiddenDescription(hidden)}</EmptyDescription>
           </EmptyHeader>
           <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/settings/interests" />}>
-            Поправить исключения
+            {t.feed.rules.fixExclusions}
           </Button>
         </Empty>
       ) : tabs.map((tab) => {
@@ -408,13 +406,13 @@ export function FeedTabs({
             {list.length === 0 ? (
               <Empty>
                 <EmptyHeader>
-                  <EmptyTitle>Пока пусто</EmptyTitle>
-                  <EmptyDescription>В этот выпуск по этой теме ничего не попало</EmptyDescription>
+                  <EmptyTitle>{t.feed.tabs.emptyTitle}</EmptyTitle>
+                  <EmptyDescription>{t.feed.tabs.emptyDescription}</EmptyDescription>
                 </EmptyHeader>
                 {/* Выход обязателен: пустая вкладка без единой ссылки — это
                     тупик, из которого остаётся только кнопка «назад». */}
                 <Button variant="outline" size="sm" onClick={() => setTab("all")}>
-                  Показать весь выпуск
+                  {t.feed.tabs.showAll}
                 </Button>
               </Empty>
             ) : (
@@ -433,7 +431,7 @@ export function FeedTabs({
                   {item.seen && !list[index + 1]?.seen && index < list.length - 1 ? (
                     <div className="flex items-center gap-3 py-3 text-xs text-muted-foreground">
                       <span className="h-px flex-1 bg-border" />
-                      досюда ты дочитал
+                      {t.feed.tabs.readUpToHere}
                       <span className="h-px flex-1 bg-border" />
                     </div>
                   ) : null}
@@ -447,13 +445,14 @@ export function FeedTabs({
                 на телефоне клавиатуры под рукой нет. */}
             {list.length > 0 ? (
               <p className="hidden py-5 text-center text-xs text-muted-foreground [@media(hover:hover)]:block">
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">j</kbd> и{" "}
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">k</kbd> —
-                между материалами,{" "}
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">o</kbd> —
-                открыть,{" "}
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">/</kbd> —
-                поиск по выпускам
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">j</kbd>{" "}
+                {t.feed.tabs.kbdAnd}{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">k</kbd> —{" "}
+                {t.feed.tabs.kbdBetween},{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">o</kbd> —{" "}
+                {t.feed.tabs.kbdOpen},{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">/</kbd> —{" "}
+                {t.feed.tabs.kbdSearch}
               </p>
             ) : null}
           </TabsContent>

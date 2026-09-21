@@ -1315,7 +1315,10 @@ async function main() {
     // и архив считаются по выпускам владельца, а список источников —
     // по каталогу, и лишний день или лишняя активная строка сдвинули бы их.
     // Материалы и оценки уходят каскадом за источником.
-    await sql`delete from dailynews.digests where day = ${rulesDay}::date`;
+    await sql`
+      delete from dailynews.digests
+       where day = ${rulesDay}::date and reader_id in (${owner.id}, ${second.id})
+    `;
     await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
 
     // --- потолок расходов -------------------------------------------------------

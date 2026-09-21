@@ -6,6 +6,8 @@
  * статья целиком: забрать, перевести, собрать книгу. Минута работы
  * и около цента, поэтому у неё есть журнал, потолок и оценка качества.
  */
+import type { Dict } from "../src/lib/i18n";
+import { ru } from "../src/lib/i18n/ru/index";
 import { sql } from "../src/lib/db";
 import { recordCall, spentToday } from "../src/lib/readers";
 import type { Reader } from "../src/lib/types";
@@ -170,8 +172,10 @@ export async function runArticleSend(
 export async function queueArticleSend(
   reader: Reader,
   itemId: number,
+  /** Язык отказа. По умолчанию русский — тот же уговор, что у `articleBlocker`. */
+  t: Dict["errors"] = ru.errors,
 ): Promise<{ id: number } | { error: string }> {
-  const blocker = articleBlocker(reader, await spentToday(reader.id));
+  const blocker = articleBlocker(reader, await spentToday(reader.id), t);
   if (blocker) return { error: blocker };
 
   await reclaimStale();
@@ -182,6 +186,6 @@ export async function queueArticleSend(
     on conflict do nothing
     returning id
   `;
-  if (!row) return { error: "Эта статья уже в пути" };
+  if (!row) return { error: t.kindleAlreadySending };
   return { id: row.id };
 }

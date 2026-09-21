@@ -26,19 +26,21 @@ import { FEATURES, type Plan } from "@/lib/plans";
 import { PaywallCrown, usePaywall } from "@/components/paywall";
 import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
 import { useSettingsSave } from "@/components/settings-save";
+import { useT } from "@/components/i18n-provider";
 
-/** Флажок и название одной строкой: в поле и в списке это одно и то же. */
-const languageOption = (entry: string) => (
+/** Флажок и показ языка одной строкой: в поле и в списке это одно и то же. */
+const languageOption = (entry: string, display: string) => (
   <span className="flex min-w-0 items-center gap-2">
     <span aria-hidden="true">{flagOf(entry)}</span>
     {/* Поле у́же самого длинного языка, и «португальском (бразильский
         вариант)» вылезал бы за него: обрезаем с многоточием. В списке
         обрезать нечего — он расходится по содержимому. */}
-    <span className="truncate">{entry}</span>
+    <span className="truncate">{display}</span>
   </span>
 );
 
 export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
+  const t = useT();
   // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
   // источника. Селект показывается целиком и погашенным, а не прячется:
   // по нему видно, что именно даёт переход.
@@ -80,7 +82,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
           } catch {
             // Провал записи обязан сказать о себе: молча погашенная кнопка
             // читается как «сохранено», а в базе прежнее.
-            toast.error("Не удалось сохранить. Попробуй ещё раз");
+            toast.error(t.settings.common.saveError);
             return resolve(false);
           }
 
@@ -108,7 +110,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
           resolve(true);
         });
       }),
-    [],
+    [t],
   );
 
   /** Переписать сегодняшний выпуск новым голосом, не дожидаясь полуночи. */
@@ -119,14 +121,9 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{first ? "Настрой ленту" : "Язык и подача"}</CardTitle>
+        <CardTitle>{first ? t.settings.personalization.firstTitle : t.nav.personalization}</CardTitle>
         <CardDescription>
-          {first
-            ? "Скажи, на каком языке и как писать новости. Интересы выберешь следующим шагом."
-            : // Не «как мы подбираем»: отбор здесь ни при чём, он идёт
-              // по интересам и оценкам, общим для всех. Обещать на этом
-              // экране влияние на подбор значит обещать то, чего нет.
-              "На каком языке и как написан твой выпуск. О чём он, выбираешь в «Интересах»."}
+          {first ? t.settings.personalization.firstDescription : t.settings.personalization.description}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -136,8 +133,13 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
               Здесь остаётся только то, как текст написан и для кого. */}
           <FieldGroup>
             <Field>
+              {/* «На каком языке», а не «Язык»: в списке лежит предложный
+                  падеж — форма, которая уезжает в промпт как есть, — и над
+                  «русском» заголовок в именительном не сходится ни с одним
+                  пунктом. Английский интерфейс этой проблемы не знает,
+                  и показывает обычное имя языка — см. languageNames. */}
               <FieldLabel htmlFor="language" className="flex items-center gap-1.5">
-                Язык
+                {t.settings.personalization.languageLabel}
                 {translates ? null : <PaywallCrown feature="language" plan={plan} />}
               </FieldLabel>
               {/* Список из пятнадцати, а колонка осталась свободным текстом:
@@ -163,7 +165,9 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     показывает, за что именно платить. Значение при этом
                     не меняется: окно открывается вместо него. */}
                 <SelectTrigger id="language" className="w-full max-w-xs">
-                  <SelectValue>{languageOption(language)}</SelectValue>
+                  <SelectValue>
+                    {languageOption(language, t.settings.voice.languageNames[language] ?? language)}
+                  </SelectValue>
                 </SelectTrigger>
                 {/* Обычный выпадающий список, а не список, подтянутый выбранным
                     пунктом к полю: на шестнадцати языках он растягивался
@@ -178,7 +182,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 >
                   {(LANGUAGES.includes(language) ? LANGUAGES : [language, ...LANGUAGES]).map((entry) => (
                     <SelectItem key={entry} value={entry}>
-                      {languageOption(entry)}
+                      {languageOption(entry, t.settings.voice.languageNames[entry] ?? entry)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -191,8 +195,8 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
               {languagePaywall.dialog}
               <FieldDescription>
                 {translates
-                  ? "Источники остаются на своих языках, мы переводим и адаптируем."
-                  : "Выпуск приходит на языке источника. Перевод есть на «Plus» и «Pro»."}
+                  ? t.settings.personalization.translatedHint
+                  : t.settings.personalization.notTranslatedHint}
               </FieldDescription>
             </Field>
 
@@ -201,9 +205,9 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 по нему можно только наугад. Скрытое поле держит значение
                 для FormData — группа меняется мимо события формы. */}
             <Field>
-              <FieldLabel>Сложность языка</FieldLabel>
+              <FieldLabel>{t.settings.personalization.complexityLabel}</FieldLabel>
               <ToggleGroup
-                aria-label="Сложность языка"
+                aria-label={t.settings.personalization.complexityLabel}
                 value={[String(complexity)]}
                 onValueChange={(value: string[]) => {
                   if (!value[0]) return;
@@ -219,22 +223,24 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     value={entry.key}
                     className="h-auto min-h-9 min-w-0 px-2 py-1.5 text-center leading-tight whitespace-normal"
                   >
-                    {entry.label}
+                    {t.settings.voice.complexity[entry.key].label}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
               <input type="hidden" name="complexity" value={complexity} />
-              <FieldDescription>{complexityAt(complexity).hint}</FieldDescription>
+              <FieldDescription>
+                {t.settings.voice.complexity[complexityAt(complexity).key].hint}
+              </FieldDescription>
             </Field>
 
             <Field>
-              <FieldLabel>Манера подачи</FieldLabel>
+              <FieldLabel>{t.settings.personalization.styleLabel}</FieldLabel>
               {/* Четыре варианта видны сразу и выделяются так же, как деления
                   сложности над ними: разная заливка у двух соседних групп
                   читается как два разных элемента, и выбранное в одной
                   перестаёт быть похоже на выбранное в другой. */}
               <ToggleGroup
-                aria-label="Манера подачи"
+                aria-label={t.settings.personalization.styleLabel}
                 value={[style]}
                 onValueChange={(value: string[]) => {
                   if (!value[0]) return;
@@ -250,9 +256,9 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     value={entry.key}
                     className="h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal"
                   >
-                    <span className="font-medium">{entry.label}</span>
+                    <span className="font-medium">{t.settings.voice.styles[entry.key].label}</span>
                     <span className="text-xs leading-snug font-normal text-muted-foreground">
-                      {entry.hint}
+                      {t.settings.voice.styles[entry.key].hint}
                     </span>
                   </ToggleGroupItem>
                 ))}
@@ -261,19 +267,19 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="reader_context">О себе и что важно</FieldLabel>
+              <FieldLabel htmlFor="reader_context">{t.settings.personalization.aboutLabel}</FieldLabel>
               <Textarea
                 id="reader_context"
                 name="reader_context"
                 rows={4}
                 defaultValue={profile?.reader_context ?? ""}
-                placeholder="Чем занимаешься, что за продукт, где живёшь и какие новости тебе особенно интересны"
+                placeholder={t.settings.personalization.aboutPlaceholder}
               />
               {/* Про отбор здесь не обещаем: эта строка уходит только в промпт
                   описаний. Зато от неё зависит связь с читателем, самая слабая
                   ось в измерении качества. */}
               <FieldDescription>
-                Чем подробнее напишешь, тем точнее объясним, чем новость важна тебе.
+                {t.settings.personalization.aboutHint}
               </FieldDescription>
             </Field>
 
@@ -299,7 +305,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 }}
               >
                 {pending ? <Spinner data-icon="inline-start" /> : null}
-                {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
+                {FEATURES.posts.has(plan) ? t.settings.personalization.next : t.settings.personalization.done}
               </Button>
             ) : (
               <Button
@@ -312,7 +318,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 onClick={apply}
               >
                 {applying ? <Spinner data-icon="inline-start" /> : null}
-                Сохранить
+                {t.settings.common.save}
               </Button>
             )}
           </FieldGroup>

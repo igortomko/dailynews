@@ -8,9 +8,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  topicsWord, FEATURES, PLAN_IDS, PLANS,
+  FEATURES, PLAN_IDS, PLANS,
   type FeatureId, type Plan, type PlanId,
 } from "@/lib/plans";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Корона и окно с предложением.
@@ -45,6 +46,7 @@ function Offer({
   href?: string;
   recommended: boolean;
 }) {
+  const t = useT();
   return (
     <div
       className={cn(
@@ -53,16 +55,17 @@ function Offer({
       )}
     >
       <div className="flex min-w-0 flex-col">
-        <span className="text-sm font-medium">{plan.label}</span>
+        <span className="text-sm font-medium">{t.plans.label[plan.id]}</span>
         <span className="text-xs text-muted-foreground">
-          {plan.maxSources} источников · {plan.maxTopics} {topicsWord(plan.maxTopics)} · до{" "}
-          {plan.maxMinutes} мин чтения
+          {t.plans.paywall.offerSummary(
+            plan.maxSources, plan.maxTopics, t.plans.topicsWord(plan.maxTopics), plan.maxMinutes,
+          )}
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-3">
         <span className="text-base font-medium tabular-nums">
           ${plan.price}
-          <span className="text-xs font-normal text-muted-foreground">/мес</span>
+          <span className="text-xs font-normal text-muted-foreground">{t.plans.paywall.perMonthShort}</span>
         </span>
         <Button
           size="sm"
@@ -71,7 +74,7 @@ function Offer({
           // в никуда, обещает больше, чем продукт умеет.
           render={<a href={href ?? "/settings/subscription"} />}
         >
-          Выбрать
+          {t.plans.paywall.choose}
         </Button>
       </div>
     </div>
@@ -88,7 +91,8 @@ export function PaywallDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const checkout = useContext(CheckoutContext);
-  const { title, what } = FEATURES[feature];
+  const t = useT();
+  const { title, what } = t.plans.feature[feature];
 
   // Все тарифы, где возможность есть и которые дороже текущего. Показывать
   // один самый дешёвый значит терять место, где читатель мог выбрать Pro:
@@ -123,11 +127,11 @@ export function PaywallDialog({
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Сейчас у тебя «{plan.label}». Полное сравнение — в разделе «Подписка».
+          {t.plans.paywall.currentPlanNote(t.plans.label[plan.id])}
         </p>
 
         <DialogFooter>
-          <DialogClose render={<Button variant="ghost" size="sm" />}>Не сейчас</DialogClose>
+          <DialogClose render={<Button variant="ghost" size="sm" />}>{t.plans.paywall.notNow}</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -146,12 +150,13 @@ export function PaywallCrown({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const t = useT();
 
   return (
     <>
       <button
         type="button"
-        aria-label={`${FEATURES[feature].title} — на платном тарифе`}
+        aria-label={t.plans.paywall.paidFeatureAria(t.plans.feature[feature].title)}
         onClick={(event) => {
           // Корона живёт внутри ссылок и кнопок: без остановки всплытия
           // клик по ней заодно уводит на страницу, которую она закрывает.
