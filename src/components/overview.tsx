@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { QUIET } from "@/lib/quiet";
 import { useLocale, useT } from "@/components/i18n-provider";
 import { formatDay } from "@/lib/relative-time";
 import { move, overviewMarkdown, overviewText, type Overview } from "@/lib/overview";
@@ -98,16 +99,14 @@ function Bar({
         role="toolbar"
         aria-label={t.toolbarLabel}
         className={cn(
-          "pointer-events-auto flex max-w-page flex-wrap items-center justify-end gap-1 rounded-2xl py-1.5 pr-1.5 pl-4",
+          "pointer-events-auto flex max-w-page flex-wrap items-center justify-end gap-1 rounded-2xl p-1.5",
           "bg-foreground text-background shadow-lg shadow-black/20",
           "animate-in fade-in-0 slide-in-from-bottom-2 duration-200 motion-reduce:animate-none",
         )}
       >
-        {/* Живая область: число меняется от каждого нажатия, и диктору
-            об этом надо сказать без перевода фокуса на плашку. */}
-        <span aria-live="polite" className="mr-1 text-sm font-medium tabular-nums">
-          {t.selected(selected)}
-        </span>
+        {/* Крестик с краю, а не между числом и главной кнопкой: рядом
+            с «Собрать» промах пальцем снимал бы весь выбор, а с противоположного
+            конца плашки он читается как «отмена» — там, где её ищут. */}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -123,6 +122,11 @@ function Bar({
           </TooltipTrigger>
           <TooltipContent>{t.clearTooltip}</TooltipContent>
         </Tooltip>
+        {/* Живая область: число меняется от каждого нажатия, и диктору
+            об этом надо сказать без перевода фокуса на плашку. */}
+        <span aria-live="polite" className="mx-1.5 text-sm font-medium tabular-nums">
+          {t.selected(selected)}
+        </span>
         {/* «Собрать», а не «написать»: текст уже готов, модель здесь
             не зовётся, и обещать её работу было бы неправдой. */}
         <button
@@ -137,6 +141,20 @@ function Bar({
     </div>
   );
 }
+
+/**
+ * Поле редактора: без рамки в покое, серое под курсором и в фокусе.
+ *
+ * Обзор читается как документ, а не как анкета: рамка вокруг каждого
+ * абзаца превращала страницу в форму из десяти полей. Что текст правится,
+ * видно ровно тогда, когда к нему тянутся. Кольца фокуса нет намеренно —
+ * его роль играет тот же серый фон.
+ *
+ * Отрицательные поля — чтобы текст поля стоял вровень со строкой над ним,
+ * а серая подложка выходила за него на восемь пикселей в обе стороны.
+ */
+const FIELD =
+  "-mx-2 w-[calc(100%+1rem)] rounded-md border-transparent bg-transparent px-2 shadow-none transition-colors hover:bg-muted focus-visible:border-transparent focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent dark:hover:bg-muted dark:focus-visible:bg-muted";
 
 /**
  * Кнопка в строке блока: стрелка или крестик, с подсказкой.
@@ -254,7 +272,7 @@ export function OverviewDialog({
       // обещала бы то, чего могло не случиться.
       setCopied(format);
       setFallback(null);
-      toast.success(t.copied);
+      toast.success(t.copied, { description: t.copiedHint });
     } catch {
       setCopied(null);
       setFallback(text);
@@ -282,7 +300,7 @@ export function OverviewDialog({
             aria-label={t.titleLabel}
             value={overview.title}
             onChange={(event) => update({ title: event.target.value })}
-            className="font-medium"
+            className={cn(FIELD, "font-medium")}
           />
           {/* Вступление пишет человек. Дописать его за него — значит
               вложить в его уста вывод, которого он не делал. */}
@@ -293,7 +311,7 @@ export function OverviewDialog({
             onChange={(event) => update({ intro: event.target.value })}
             // Свой минимум у каждого поля: с field-sizing: content пустое
             // поле сжимается до одних полей ввода, и `rows` ему не указ.
-            className="min-h-14 leading-relaxed"
+            className={cn(FIELD, "min-h-14 leading-relaxed")}
           />
 
           {blocks.length === 0 ? (
@@ -301,7 +319,7 @@ export function OverviewDialog({
           ) : (
             <ol className="flex flex-col gap-3">
               {blocks.map((block, index) => (
-                <li key={block.id} className="flex flex-col gap-2 rounded-lg border p-3">
+                <li key={block.id} className="group flex flex-col gap-2 rounded-lg border p-3">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="tabular-nums">{index + 1}.</span>
                     <span className="shrink-0 font-medium text-foreground/75">{block.source}</span>
@@ -315,7 +333,7 @@ export function OverviewDialog({
                     >
                       {block.url}
                     </a>
-                    <div className="ml-auto flex shrink-0 items-center">
+                    <div className={cn("ml-auto flex shrink-0 items-center", QUIET)}>
                       <BlockAction
                         label={t.up}
                         icon={ArrowUpIcon}
@@ -344,13 +362,13 @@ export function OverviewDialog({
                     aria-label={t.blockTitleLabel}
                     value={block.title}
                     onChange={(event) => patchBlock(block.id, { title: event.target.value })}
-                    className="min-h-9 font-medium"
+                    className={cn(FIELD, "min-h-9 font-medium")}
                   />
                   <Textarea
                     aria-label={t.blockSummaryLabel}
                     value={block.summary}
                     onChange={(event) => patchBlock(block.id, { summary: event.target.value })}
-                    className="leading-relaxed"
+                    className={cn(FIELD, "leading-relaxed")}
                   />
                 </li>
               ))}

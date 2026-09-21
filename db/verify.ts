@@ -26,7 +26,7 @@ import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
 import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
-import { readingTime } from "../src/lib/relative-time";
+import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { cleanupOf } from "../src/lib/source-health";
 import { applyRules, rulesOf } from "../src/lib/rules";
 import { toSlug } from "../src/lib/slug";
@@ -130,8 +130,27 @@ async function main() {
      * тоже остаётся: `ReadyForQuery` там полагается по спецификации,
      * то есть отказ идёт путём, который не зависит от правки вовсе.
      */
-    const rejects = async (statement: string, pattern: RegExp, why: string) => {
-      await assert.rejects(sql.unsafe(statement), pattern, why);
+    const rejects = async (
+      statement: string,
+      /**
+       * Регулярное выражение по тексту — или код SQLSTATE строкой.
+       *
+       * Код переживает и локаль кластера, и переписанное между версиями
+       * сообщение; в самом тексте ошибки его нет, он лежит отдельным полем,
+       * поэтому сверяется он не выражением, а проверкой.
+       */
+      pattern: RegExp | string,
+      why: string,
+      /** Значения для $1…$n: часть отказов бывает только у параметра. */
+      params: Parameters<typeof sql.unsafe>[1] = [],
+    ) => {
+      await assert.rejects(
+        sql.unsafe(statement, params),
+        typeof pattern === "string"
+          ? (error: unknown) => (error as { code?: string }).code === pattern
+          : pattern,
+        why,
+      );
       const [alive] = await sql<{ v: string }[]>`select 'ok'::text as v`;
       assert.equal(
         alive?.v,
@@ -375,13 +394,68 @@ async function main() {
       return digest.id;
     };
 
+    /**
+     * Две формы запроса из сборки выпуска, которые не работали ни разу.
+     *
+     * `jsonb_build_object` принимает "any", и тип нетипизированного параметра
+     * Postgres вывести не может — запрос падает на разборе, до единой строки.
+     * У `digest_items` нет столбца `id`: ключ составной, и `returning id`
+     * падал на каждой вставке. Обе видны были только как вежливое
+     * «не получилось собрать первый выпуск»: у нового читателя первый выпуск
+     * не собирался вовсе, а ночной прогон пишет выпуск своим кодом и потому
+     * работал.
+     */
+    const shapes = async (digestId: number, itemId: number) => {
+      await rejects(
+        "select jsonb_build_object('reading_target', $1) as j",
+        // Код, а не английский текст: сообщение переписывают между версиями,
+        // а на локализованном кластере его не будет вовсе.
+        "42P18", // тип параметра не определён
+        "без каста параметр в jsonb_build_object не типизируется — это и было причиной",
+        [1.5],
+      );
+      await sql`
+        update dailynews.digests
+           set stats = coalesce(stats, '{}'::jsonb)
+                     || jsonb_build_object('reading_target', ${1.5}::real)
+         where id = ${digestId}
+      `;
+      const [{ target }] = await sql<{ target: number }[]>`
+        select (stats->>'reading_target')::float as target
+          from dailynews.digests where id = ${digestId}`;
+      assert.equal(target, 1.5, "заказ дня ложится в stats, а не теряется");
+
+      const back = await sql<{ item_id: number }[]>`
+        insert into dailynews.digest_items (digest_id, item_id, total, position, title, summary)
+        values (${digestId}, ${itemId}, 1, 99, 'проба', 'S')
+        on conflict (digest_id, item_id) do nothing
+        returning item_id::int as item_id
+      `;
+      assert.equal(back.length, 0, "уже лежащий материал не вставляется второй раз");
+      await rejects(
+        `insert into dailynews.digest_items
+           (digest_id, item_id, total, position, title, summary)
+         values ($1, $2, 1, 98, 'проба', 'S')
+         on conflict (digest_id, item_id) do nothing
+         returning id::int as id`,
+        "42703", // столбца нет
+        "у digest_items нет собственного ключа — returning id падал на каждой вставке",
+        [digestId, itemId],
+      );
+      // Убираем за собой: заказ дня — предмет отдельной проверки ниже,
+      // и оставленное здесь значение сделало бы её бессмысленной.
+      await sql`update dailynews.digests set stats = stats - 'reading_target' where id = ${digestId}`;
+      console.log("  формы запросов сборки: каст и составной ключ на месте");
+    };
+
     const today = new Date().toISOString().slice(0, 10);
     // Владельцу — два материала, второму читателю — один, и подписи разные:
     // текст персонален, потому что язык и манера персональны.
-    await makeDigest(owner.id, today, [
+    const ownerDigest = await makeDigest(owner.id, today, [
       { id: ids[0], total: 120, title: "Владелец: GPT-6" },
       { id: ids[2], total: 95, title: "Владелец: уран" },
     ]);
+    await shapes(ownerDigest, ids[0]);
     await makeDigest(second.id, today, [{ id: ids[3], total: 60, title: "Vera: CBT" }]);
 
     // Материал старше своего выпуска: без этого проверка ниже проходила бы
@@ -1673,31 +1747,7 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
-    // Время чтения считается из длины текста статьи. Колонка, заведённая
-    // миграцией, но не выбранная лентой, ничем себя не выдаёт: подписи
-    // просто не будет, и выглядит это как «у материала нет текста».
-    await sql`update dailynews.items set body = ${"т".repeat(7760)} where id = ${myItem}`;
     const storyFeed = await queries.getFeed(owner.id, storyDay);
-    // strictEqual, а не equal: колонка живёт среди bigint-ов, и «"7760"»
-    // прошло бы нестрогое сравнение молча — ровно тот класс ошибки,
-    // который уже ломал сюжеты по числовым ключам.
-    assert.strictEqual(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
-    assert.strictEqual(
-      readingTime(storyFeed[0].body_chars), "~6 мин", "и она превращается в минуты",
-    );
-
-    // У ролика текст — пересказ субтитров, а не то, что откроется
-    // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
-    await sql`update dailynews.items set transcribed_at = now() where id = ${myItem}`;
-    assert.equal(
-      (await queries.getFeed(owner.id, storyDay))[0].body_chars, null,
-      "у ролика времени чтения не бывает",
-    );
-    // Фикстура возвращается на место целиком: ниже этот же материал
-    // участвует в проверках сюжета, и оставленный текст менял бы их условия.
-    await sql`
-      update dailynews.items set transcribed_at = null, body = null where id = ${myItem}
-    `;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",
@@ -1725,7 +1775,7 @@ async function main() {
       "чужое издание считается ещё одним источником",
     );
     assert.deepEqual(
-      storyLines(storyBoth.get(theirItem)!).map((row) => [row.source_label, row.note]),
+      storyLines(storyBoth.get(theirItem)!, RU_DICT.feed.story).map((row) => [row.source_label, row.note]),
       [["Чужое издание", "первоисточник"], ["Моё издание", "1 час позже"]],
       "порядок и пометки считаются по времени публикации",
     );

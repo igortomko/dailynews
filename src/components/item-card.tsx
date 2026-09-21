@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { QUIET } from "@/lib/quiet";
 import { parseStoredReading } from "@/lib/reading-document";
 import { ReadingSummary } from "@/components/reading-summary";
 import { typography, summaryTime } from "@/lib/typography";
@@ -83,15 +84,6 @@ const swap = (shown: boolean) =>
     shown ? "scale-100 opacity-100 blur-0" : "scale-[0.25] opacity-0 blur-[4px]",
   );
 
-/**
- * Что показывается только по наведению.
- *
- * Прозрачностью, а не `hidden`: погашенный кусок остаётся в потоке, держит
- * своё место, и строка не переезжает под курсором. На тапе наведения нет —
- * там видно всё сразу, иначе спрятанное было бы спрятано навсегда.
- */
-const QUIET =
-  "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
 
 /** Домен издания: источник ведёт на издание, заголовок — на сам материал. */
 function siteOf(url: string): string | null {
