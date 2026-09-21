@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { formatDay } from "@/lib/relative-time";
 
 /**
  * Стрелка, которая сообщает о работе. Выпуск — серверная страница, и между
@@ -27,8 +28,6 @@ function Arrow({ icon: Icon }: { icon: typeof ChevronLeftIcon }) {
     <Icon className="size-5 sm:size-4" />
   );
 }
-
-const FORMAT = new Intl.DateTimeFormat("ru", { day: "numeric", month: "long", year: "numeric" });
 
 /** Локальная дата без часового пояса: «2026-09-19» — это день, а не момент. */
 const toDay = (date: Date) =>
@@ -94,7 +93,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
           }
         >
             {going ? <Spinner className="size-4" /> : null}
-          {FORMAT.format(new Date(`${day}T12:00:00`))}
+          {formatDay(day)}
         </PopoverTrigger>
         {/* Календарь прибит к экрану, а не к странице: кнопка даты живёт
             в прибитой шапке и при прокрутке остаётся на месте, а слежение

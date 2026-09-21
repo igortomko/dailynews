@@ -1,4 +1,13 @@
 const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
+const DAY = new Intl.DateTimeFormat("ru", { day: "numeric", month: "long", year: "numeric" });
+
+/**
+ * «21 сентября 2026 г.» из «2026-09-21». Полдень, а не полночь: день
+ * выпуска — это день, а не момент, и полночь по UTC в западном поясе
+ * уже вчера. Одна функция на шапку ленты и на обзор — дата выпуска
+ * в двух местах обязана читаться одинаково.
+ */
+export const formatDay = (day: string) => DAY.format(new Date(`${day}T12:00:00`));
 
 /**
  * «10ч» вместо «10 часов назад». В строке метаданных время стоит рядом

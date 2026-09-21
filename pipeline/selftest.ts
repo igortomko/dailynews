@@ -63,6 +63,9 @@ import { plural } from "../src/lib/plural";
 import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
 import { recentFrom, remember } from "../src/lib/search-history";
 import {
+  blockOf, defaultTitle, move, overviewMarkdown, overviewText, reconcile,
+} from "../src/lib/overview";
+import {
   ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
 } from "../src/lib/source-health";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
@@ -3129,6 +3132,64 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     rsync.includes(`--exclude '/${made![1]}'`),
     `rsync --delete сносит ${made![1]}: нужно --exclude '/${made![1]}' с косой`,
   );
+}
+
+
+// --- Обзор для коллег: сводка блоков с выбором и тексты для копирования ---
+{
+  const card = (id: number, title: string, summary: string | null = "Описание") => ({
+    id, title, title_ru: null, summary, source_label: `Источник ${id}`, url: `https://s${id}.test/a`,
+  });
+  const feed = [card(1, "Первая"), card(2, "Вторая"), card(3, "Третья")].map(blockOf);
+
+  // Первое открытие: порядок выпуска, а не порядок нажатий.
+  assert.deepEqual(reconcile([], [feed[0], feed[2]]).map((b) => b.id), [1, 3]);
+
+  // Правки и порядок оставшихся переживают смену выбора; новые — в конец.
+  const edited = [{ ...feed[2], title: "Моя третья" }, feed[0]];
+  const next = reconcile(edited, feed);
+  assert.deepEqual(next.map((b) => b.id), [3, 1, 2]);
+  assert.equal(next[0].title, "Моя третья");
+
+  // Снятое уходит, повтор не заводится.
+  assert.deepEqual(reconcile(edited, [feed[0]]).map((b) => b.id), [1]);
+  assert.deepEqual(reconcile([feed[0], feed[0]], [feed[0], feed[0]]).map((b) => b.id), [1]);
+
+  // Перестановка за край не двигает ничего и отдаёт тот же массив.
+  assert.deepEqual(move([1, 2, 3], 0, 1), [2, 1, 3]);
+  assert.deepEqual(move([1, 2, 3], 2, 1), [1, 3, 2]);
+  const same = [1, 2, 3];
+  assert.equal(move(same, 0, -1), same);
+  assert.equal(move(same, 2, 3), same);
+
+  // Персональный заголовок выпуска, а не исходный; пустое описание — пустая строка.
+  assert.equal(blockOf({ ...card(4, "Orig", null), title_ru: "Перевод" }).title, "Перевод");
+  assert.equal(blockOf(card(4, "Orig", null)).summary, "");
+
+  assert.equal(defaultTitle("2026-09-21"), "Обзор за 21 сентября 2026 г.");
+
+  // Текст: каждая новость один раз, со ссылкой; пустое вступление
+  // не оставляет пустого абзаца.
+  const text = overviewText({ title: "Обзор", intro: "", blocks: [feed[1], feed[0]] });
+  assert.equal(
+    text,
+    [
+      "Обзор",
+      "1. Вторая\nОписание\nИсточник 2: https://s2.test/a",
+      "2. Первая\nОписание\nИсточник 1: https://s1.test/a",
+    ].join("\n\n"),
+  );
+  assert.equal(text.split("https://s1.test/a").length, 2);
+  assert.ok(overviewText({ title: "  ", intro: "Вступление", blocks: [] }).startsWith("Вступление"));
+  // Стёртый заголовок блока подменяется источником — строка с одним номером
+  // читалась бы как обрыв.
+  assert.ok(overviewText({ title: "", intro: "", blocks: [{ ...feed[0], title: " " }] }).startsWith("1. Источник 1"));
+
+  // Markdown из тех же данных: заголовки, ссылка словами, скобка в адресе закодирована.
+  const md = overviewMarkdown({
+    title: "Обзор", intro: "Коротко.", blocks: [{ ...feed[0], url: "https://s1.test/a_(b)" }],
+  });
+  assert.equal(md, "# Обзор\n\nКоротко.\n\n## 1. Первая\n\nОписание\n\n[Источник 1](https://s1.test/a_%28b%29)");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

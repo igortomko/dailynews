@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -101,12 +102,20 @@ export function ItemCard({
   showTopic,
   plan,
   networks,
+  selected,
+  selecting,
+  onSelectedChange,
 }: {
   item: FeedCard;
   showTopic: boolean;
   plan: Plan;
   /** Сети, отмеченные в «Моих площадках»: сколько их — столько табов. */
   networks: NetworkId[];
+  /** Отмечена ли карточка для обзора. Состояние держит лента, не карточка. */
+  selected: boolean;
+  /** Идёт ли выбор: пока в выпуске есть хоть одна отметка, чекбоксы видны у всех. */
+  selecting: boolean;
+  onSelectedChange: (next: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   // Своё состояние, а не expanded: раскрытие описания считается чтением
@@ -201,6 +210,14 @@ export function ItemCard({
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
 
+  // Скрытая карточка выходит и из обзора: в ленте её больше нет, и блок
+  // из неё в черновике был бы новостью, которую читатель только что убрал.
+  const hide = () => {
+    setVote("down");
+    report({ item_id: item.id, event: "down" });
+    if (selected) onSelectedChange(false);
+  };
+
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
   const minutes = readingTime(item.body_chars);
@@ -258,6 +275,10 @@ export function ItemCard({
    * заголовком, ради которого лента и листается.
    */
   const meta: { key: string; node: ReactNode; quiet?: true }[] = [
+    // shrink-0 с потолком в ширину строки: издание не уступает место теме
+    // и времени, но и за край карточки не выходит. Без потолка название
+    // длиннее строки на телефоне уезжало за правый край без многоточия —
+    // и вместе с ним уезжали кнопки действий.
     {
       key: "source",
       node: site ? (
@@ -265,12 +286,12 @@ export function ItemCard({
           href={site}
           target="_blank"
           rel="noreferrer noopener"
-          className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
+          className="max-w-full shrink-0 truncate text-[0.75rem] font-medium text-foreground/75 hover:underline"
         >
           {item.source_label}
         </a>
       ) : (
-        <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
+        <span className="max-w-full shrink-0 truncate text-[0.75rem] font-medium text-foreground/75">
           {item.source_label}
         </span>
       ),
@@ -304,7 +325,15 @@ export function ItemCard({
   return (
     <article
       ref={article}
-      className="group border-b py-5 transition-opacity duration-150 last:border-0"
+      data-selected={selected || undefined}
+      className={cn(
+        "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0",
+        // Отмеченная карточка подсвечена всей строкой до краёв контейнера,
+        // а не рамкой вокруг текста: рамка внутри полей читалась бы как
+        // коробка в коробке. Фон приглушённый и постоянный — выбор должен
+        // быть виден издалека, но не спорить с заголовком.
+        selected && "-mx-4 bg-muted/70 px-4 sm:-mx-6 sm:px-6",
+      )}
     >
       {/* Одна строка, а не две. Прежде метаданные проявлялись по наведению,
           а в покое их место занимало время чтения — и получалось два ряда,
@@ -322,6 +351,34 @@ export function ItemCard({
           с иллюстрацией и без неё стояли в разных местах. Теперь они
           всегда в правом верхнем углу, а картинка начинается под ними. */}
       <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        {/* Отметка для обзора. Место под неё держится всегда — источник
+            и заголовок не переезжают, когда она проявляется по наведению.
+            Показывается как остальное тихое: под курсором, под фокусом
+            и на тапе; а как только в выпуске отмечена хоть одна карточка —
+            у всех, иначе выбор второй карточки начинался бы с поиска
+            невидимого квадрата.
+
+            Не внутри ссылки на издание и не рядом с её текстом: нажатие
+            на отметку не открывает ничего и не считается чтением —
+            ни `opened`, ни `outbound` отсюда не уходят. */}
+        <Tooltip>
+          {/* Подсказка висит на обёртке, а не на самом чекбоксе: у него свои
+              дети (галочка), и render-слот подменил бы их пустотой. */}
+          <TooltipTrigger render={<span className="flex shrink-0" />}>
+            <Checkbox
+              checked={selected}
+              onCheckedChange={(next) => onSelectedChange(next)}
+              aria-label={`Добавить в обзор: ${title}`}
+              className={cn(
+                "size-4 bg-card transition-[opacity,background-color,border-color] duration-150",
+                // На тапе цель под палец — сорок пикселей вокруг.
+                "[@media(hover:none)]:after:-inset-3",
+                selected || selecting ? "opacity-100" : QUIET,
+              )}
+            />
+          </TooltipTrigger>
+          <TooltipContent>{selected ? "Убрать из обзора" : "Добавить в обзор для коллег"}</TooltipContent>
+        </Tooltip>
         {/* Разделитель между кусками, а не пробел: «Hacker News ~7 мин
             AI-инфра» читается одной строкой, в которой издание, время
             и тема слипаются в чужое название. Точка с пробелами по бокам
@@ -451,8 +508,7 @@ export function ItemCard({
               <DropdownMenuItem
                 variant="destructive"
                 onClick={() => {
-                  setVote("down");
-                  report({ item_id: item.id, event: "down" });
+                  hide();
                 }}
               >
                 <ThumbsDownIcon />
@@ -568,10 +624,7 @@ export function ItemCard({
                 <button
                   type="button"
                   aria-label="Скрыть и меньше такого"
-                  onClick={() => {
-                    setVote("down");
-                    report({ item_id: item.id, event: "down" });
-                  }}
+                  onClick={hide}
                   className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
                 />
               }
