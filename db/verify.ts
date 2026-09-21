@@ -24,6 +24,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
+import { cleanupReason } from "../src/lib/source-health";
 
 
 
@@ -520,8 +521,34 @@ async function main() {
     const used = health.find((row) => row.id === source.id)!;
     assert.equal(used.items, 5, `материалов ${used.items}, вставлено 5`);
     assert.equal(used.duplicates, 1, "перепечатка должна попасть в долю дублей");
-    assert.equal(used.in_digest, 3, `в дайджест дошло ${used.in_digest}, ожидалось 3`);
+    // Два, а не три: третий материал этого источника стоит в выпуске второго
+    // читателя. Без условия по читателю «дошло до выпуска» означало бы
+    // «дошло до чьего-то выпуска», и бесполезный источник выглядел бы тем
+    // полезнее, чем больше у ленты соседей.
+    assert.equal(
+      used.in_my_digests, 2,
+      `в свои выпуски дошло ${used.in_my_digests}, ожидалось 2 — чужой выпуск не считается`,
+    );
+    // Знаменатель «не читаю этот источник»: что дошло до экрана, а не что
+    // лежало в выпуске. По выпускам источник выглядел бы непрочитанным
+    // у всякого, кто просто неделю не заходил.
+    assert.equal(used.shown, 1, `на глаза попалось ${used.shown}, ожидался 1`);
+    // Один, а не два: у материала два события чтения (opened и outbound),
+    // и через join они дали бы двойку — «открыто больше, чем показано».
+    assert.equal(used.opened, 1, `открыто ${used.opened}, ожидался 1 материал`);
     assert.equal(used.mean_score, 91.7, `средний скор ${used.mean_score}, ожидалось 91.7`);
+    assert.equal(
+      cleanupReason(used), null,
+      "источник, из которого читают, в кандидаты на удаление не попадает",
+    );
+    // Тот же источник с непрочитанным месяцем — уже кандидат, и причина
+    // называет числа: «полезность низкая» не решается, «ни одного открытия
+    // на 12 показанных новостей» решается за секунду.
+    assert.match(
+      cleanupReason({ ...used, shown: 12, opened: 0 }) ?? "",
+      /12 показанных новостей/,
+      "непрочитанный месяц обязан попасть в кандидаты с числами",
+    );
     const empty = health.find((row) => row.id !== source.id)!;
     assert.equal(empty.items, 0, "источник без материалов показывает ноль, а не выпадает из списка");
     assert.equal(empty.silent_days, null, "без отметки тишины дней тишины нет");
@@ -535,7 +562,10 @@ async function main() {
       4,
       "дни тишины считаются от отметки",
     );
-    console.log(`  отдача источника: ${used.items} → ${used.in_digest} в дайджесте, скор ${used.mean_score}`);
+    console.log(
+      `  отдача источника: ${used.items} → ${used.in_my_digests} в своих выпусках,`
+      + ` показано ${used.shown}, открыто ${used.opened}, скор ${used.mean_score}`,
+    );
 
     // --- порядок списка: сломанное сверху --------------------------------------
     // В каталоге из тридцати строк источник с ошибкой, лежащий в середине,
@@ -631,6 +661,16 @@ async function main() {
       (await queries.getSourceHealth(second.id)).map((row) => row.id), [source.id],
       "взятый источник появляется только у взявшего",
     );
+    // Отдача у того же источника своя у каждого: у владельца в выпусках два
+    // материала и один открыт, у второго — один и ни одного. Общее число
+    // здесь означало бы «кто-то это читает», а решение принимается своё.
+    const sharedForSecond = (await queries.getSourceHealth(second.id))[0];
+    assert.equal(
+      sharedForSecond.in_my_digests, 1,
+      `у второго читателя в выпусках ${sharedForSecond.in_my_digests}, ожидался 1`,
+    );
+    assert.equal(sharedForSecond.opened, 1, "своё открытие второй читатель видит");
+    assert.equal(sharedForSecond.shown, 0, "а чужое событие seen ему не засчитывается");
     assert.equal(
       (await queries.getSourceHealth(owner.id)).length, mine.length,
       "и ничего не меняет у соседа",
