@@ -131,7 +131,8 @@ export function NameRules({
   };
 
   return (
-    <Field ref={box}>
+    // Якорь: на него ведёт подсказка у общей темы в «Твоих темах».
+    <Field ref={box} id={`rules-${kind}`}>
       {name ? <input type="hidden" name={name} value={JSON.stringify(pending())} /> : null}
       <FieldLabel className="flex items-center gap-2">
         {area.label}

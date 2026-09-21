@@ -17,7 +17,7 @@ import { enrichImages } from "../../pipeline/og";
 import {
   addReaderSource, deleteChannel, digestProgress, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules,
-  saveVoiceCard, saveVoiceSample, spentToday,
+  saveVoiceCard, saveVoiceSample, spentToday, upsertTopic,
 } from "./readers";
 import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
@@ -65,8 +65,12 @@ export async function logout() {
   redirect("/login");
 }
 
-/** `count` — цель по числу новостей в день; в базе это `reader_topics.weight`. */
-export type ChipInput = { slug: string; label: string; hint: string; count: number };
+/**
+ * `count` — цель по числу новостей в день; в базе это `reader_topics.weight`.
+ * `own` — только для формы: можно ли править название и подсказку. Сервер
+ * ей не верит и решает сам (`upsertTopic`).
+ */
+export type ChipInput = { slug: string; label: string; hint: string; count: number; own?: boolean };
 
 /**
  * Персонализация и интересы — две формы, поэтому два действия. Одна функция
@@ -261,17 +265,15 @@ async function writeTopics(
 
     const ids: number[] = [];
     for (const [index, chip] of chips.entries()) {
-      // Справочник общий: по нему Jev классифицирует поток один раз на всех.
-      // Название и подсказку существующей темы вторым читателем не
-      // переписываем — этим он менял бы критерий классификации всем, и
-      // заметить это можно было бы только по съехавшим темам чужих лент.
-      const [topic] = await tx<{ id: number }[]>`
-        insert into dailynews.topics (slug, label, hint, position)
-        values (${slugs[index]}, ${chip.label}, ${chip.hint ?? ""}, ${index + 1})
-        on conflict (slug) do update set slug = excluded.slug
-        returning id::int as id
-      `;
-      ids.push(topic.id);
+      // Справочник общий, и что в нём можно править, решает `upsertTopic`,
+      // а не флаг из формы: каталожная тема и тема, взятая соседом, остаются
+      // как были, своя — переписывается.
+      ids.push(await upsertTopic(
+        tx,
+        readerId,
+        { slug: slugs[index], label: chip.label, hint: chip.hint ?? "", position: index + 1 },
+        starterBySlug.has(slugs[index]),
+      ));
     }
 
     // Убранная тема — удалённая строка связки, а не флаг: отбор сразу

@@ -20,6 +20,12 @@ export type ReaderTopic = {
   hint: string;
   weight: number;
   position: number;
+  /**
+   * Взял ли эту тему ещё кто-то. Название и подсказка — критерий
+   * классификации для всех, кто её взял, и править их можно только
+   * у темы, которая ничья, кроме твоей (`upsertTopic`).
+   */
+  shared: boolean;
 };
 
 export type Source = {

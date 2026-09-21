@@ -121,7 +121,10 @@ export function TopicChips({
     if (!trimmed) return;
     if (full) return;
     if (chips.some((chip) => chip.label.toLowerCase() === trimmed.toLowerCase())) return;
-    const next = [...chips, { slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC }];
+    // Заведённая руками тема — своя: подсказку и имя можно править сразу.
+    // Совпадёт со взятой соседом — сервер правку отбросит, а после
+    // перезагрузки чип придёт уже общим.
+    const next = [...chips, { slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC, own: true }];
     // Новая тема берёт место у самой крупной, а не растит выпуск:
     // сколько читать, читатель задал отдельно и сам.
     setChips(withCounts(next, normalize(next.map((chip) => chip.count), places)));
@@ -322,8 +325,10 @@ export function TopicChips({
                 />
 
                 {/* Имя правится прямо в чипе: отдельное поле «название темы»
-                    заставляло бы искать, где переименовать то, что уже видно. */}
-                {selected === index ? (
+                    заставляло бы искать, где переименовать то, что уже видно.
+                    Только у своей темы: название каталожной или взятой соседом
+                    общее, и поле, чья правка не сохраняется, — обман. */}
+                {selected === index && chip.own ? (
                   <input
                     value={chip.label}
                     aria-label={tc.topicNameAria}
@@ -368,17 +373,33 @@ export function TopicChips({
                   и он оказывается ровно под своей строкой чипов. */}
               {selected === index ? (
                 <div className="w-full">
-                  <Textarea
-                    id={`hint-${index}`}
-                    rows={2}
-                    value={chip.hint}
-                    aria-label={tc.hintAria(chip.label)}
-                    placeholder={tc.hintPlaceholder}
-                    onChange={(event) => patch(index, { hint: event.target.value })}
-                  />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    {tc.hintHelp}
-                  </p>
+                  {chip.own ? (
+                    <>
+                      <Textarea
+                        id={`hint-${index}`}
+                        rows={2}
+                        value={chip.hint}
+                        aria-label={tc.hintAria(chip.label)}
+                        placeholder={tc.hintPlaceholder}
+                        onChange={(event) => patch(index, { hint: event.target.value })}
+                      />
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        {tc.hintHelp}
+                      </p>
+                    </>
+                  ) : (
+                    // Подсказка темы — критерий классификации Jev, один на всех,
+                    // кто её взял. Поле у общей темы приглашало вписать сюда
+                    // имена и продукты, а правка молча терялась. Вместо поля —
+                    // адрес, куда имена и идут: слежение личное и буквальное.
+                    <p className="text-xs text-muted-foreground">
+                      {tc.sharedNote}{" "}
+                      <a href="#rules-follow" className="underline underline-offset-4">
+                        {tc.sharedLink}
+                      </a>
+                      .
+                    </p>
+                  )}
 
                   {/* То же, что и полоса, но пальцем и с клавиатуры: на узком
                       экране границу шириной в четыре пиксела не поймать. */}

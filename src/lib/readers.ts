@@ -53,12 +53,58 @@ export async function allReaders(): Promise<Reader[]> {
 
 export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> {
   return sql<ReaderTopic[]>`
-    select t.id::int as id, t.slug, t.label, t.hint, rt.weight, rt.position
+    select t.id::int as id, t.slug, t.label, t.hint, rt.weight, rt.position,
+           exists (
+             select 1 from dailynews.reader_topics o
+              where o.topic_id = t.id and o.reader_id <> rt.reader_id
+           ) as shared
       from dailynews.reader_topics rt
       join dailynews.topics t on t.id = rt.topic_id
      where rt.reader_id = ${readerId}
      order by rt.position, t.id
   `;
+}
+
+/**
+ * Тема в общем справочнике: своя правится, каталожная и общая — нет.
+ *
+ * Справочник один на всех: по нему Jev классифицирует поток один раз,
+ * и название с подсказкой — критерий этой классификации. Переписав их
+ * у темы из каталога или у темы, которую взял ещё кто-то, читатель менял бы
+ * ленту соседям, и заметить это можно было бы только по съехавшим темам
+ * чужих выпусков. До сих пор такая правка молча терялась: форма показывала
+ * новую подсказку до перезагрузки, база хранила прежнюю — отказ, похожий
+ * на успех. Теперь своя тема (заведена руками и никем больше не взята)
+ * правится, у остальных форма поля не показывает, а сервер решает сам,
+ * не веря форме: `catalog` — из стартового набора, соседей спрашивает база.
+ *
+ * Отдаёт id темы в любом случае: связка читателя с темой заводится по нему.
+ */
+export async function upsertTopic(
+  db: Sql | TransactionSql,
+  readerId: number,
+  topic: { slug: string; label: string; hint: string; position: number },
+  catalog: boolean,
+): Promise<number> {
+  const [row] = await db<{ id: number }[]>`
+    insert into dailynews.topics (slug, label, hint, position)
+    values (${topic.slug}, ${topic.label}, ${topic.hint}, ${topic.position})
+    on conflict (slug) do update set slug = excluded.slug
+    returning id::int as id
+  `;
+  if (!catalog) {
+    await db`
+      update dailynews.topics t
+         set label = ${topic.label}, hint = ${topic.hint}
+       where t.id = ${row.id}
+         and (t.label, t.hint) is distinct from (${topic.label}, ${topic.hint})
+         and not exists (
+           select 1 from dailynews.reader_topics o
+            where o.topic_id = t.id and o.reader_id <> ${readerId}
+         )
+    `;
+  }
+  return row.id;
 }
 
 /**

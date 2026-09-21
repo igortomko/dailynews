@@ -1321,6 +1321,68 @@ async function main() {
     `;
     await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
 
+    // --- своя тема правится, каталожная и общая — нет ----------------------
+    // Подсказка темы — критерий классификации Jev, один на всех, кто тему
+    // взял. Правка каталожной темы молча терялась: форма показывала новое
+    // до перезагрузки, база хранила прежнее. Решает сервер, а не форма.
+    const [designBefore] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where slug = 'design'
+    `;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "design", label: "Дизайн", hint: "Figma", position: 1 }, true,
+    );
+    const [designAfter] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where slug = 'design'
+    `;
+    assert.deepEqual(designAfter, designBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
+
+    const ownId = await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 }, false,
+    );
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${owner.id}, ${ownId}, 1, 9) on conflict do nothing
+    `;
+    assert.equal(
+      await readers.upsertTopic(
+        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, false,
+      ),
+      ownId,
+      "повторная запись отдаёт ту же тему",
+    );
+    const [ownTopic] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where id = ${ownId}
+    `;
+    assert.deepEqual(ownTopic, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "своя тема правится");
+    assert.equal(
+      (await readers.getReaderTopics(owner.id)).find((topic) => topic.id === ownId)?.shared, false,
+      "тема, которую взял только я, не общая",
+    );
+
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${second.id}, ${ownId}, 1, 1)
+    `;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 }, false,
+    );
+    const [sharedTopic] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where id = ${ownId}
+    `;
+    assert.deepEqual(
+      sharedTopic, { label: "Финтех Бразилии", hint: "Nubank, Pix" },
+      "тема, взятая соседом, больше не правится никем",
+    );
+    assert.equal(
+      (await readers.getReaderTopics(owner.id)).find((topic) => topic.id === ownId)?.shared, true,
+      "и помечена общей",
+    );
+    // Уборка целиком: оценок на эту тему нет, а лишняя тема в справочнике
+    // сдвинула бы счёт тем в проверках ниже.
+    await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
+    await sql`delete from dailynews.topics where id = ${ownId}`;
+    console.log("  темы: каталожная не переписывается, своя правится, взятая соседом — уже нет");
+
     // --- потолок расходов -------------------------------------------------------
     assert.equal(await readers.spentToday(second.id), 0, "новый читатель ничего не потратил");
     await readers.recordCall({
