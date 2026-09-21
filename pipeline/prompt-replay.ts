@@ -74,7 +74,11 @@ async function main() {
       select id, day from dailynews.digests
        where reader_id = ${profile.id} order by day desc limit 1
     )
-    select i.id, i.title, i.excerpt, i.url, s.label as source_label,
+    -- body вместе с excerpt: в промпт уходит догруженная статья, если она
+    -- есть (textFor в digest.ts), и без этой колонки замер мерил бы не тот
+    -- текст, который уедет в выпуск. Проверка, которая меряет не то, что
+    -- работает, — это снова отказ, похожий на успех.
+    select i.id, i.title, i.excerpt, i.body, i.url, s.label as source_label,
            coalesce(t.label, 'Прочее') as topic_label, di.total, sc.axes,
            last_day.day::text as day
       from last_day
