@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowUpIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -97,6 +98,7 @@ export function FeedTabs({
   ];
 
   const [tab, setTab] = useState("all");
+  const router = useRouter();
 
   /**
    * Лента — список, который листают. j и k переводят фокус на соседний
@@ -106,6 +108,10 @@ export function FeedTabs({
    * Смотрим на e.code, а не на e.key: в кириллической раскладке та же
    * клавиша отдаёт «о», «л» и «щ», и проверка по букве молча перестаёт
    * работать ровно у того, кто читает ленту по-русски.
+   *
+   * «/» уводит в поиск по прошлым выпускам — там, где в ленте кончается
+   * память на даты. Проверяются обе стороны: в кириллице та же клавиша
+   * отдаёт «.», а «/» приезжает с другой.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -115,6 +121,11 @@ export function FeedTabs({
         target &&
         (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
       ) {
+        return;
+      }
+      if (event.code === "Slash" || event.key === "/") {
+        event.preventDefault();
+        router.push("/search");
         return;
       }
       if (event.code !== "KeyJ" && event.code !== "KeyK" && event.code !== "KeyO") return;
@@ -147,7 +158,7 @@ export function FeedTabs({
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [router]);
 
   const forTab = (slug: string) =>
     slug === "all"
@@ -264,7 +275,9 @@ export function FeedTabs({
                 <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">k</kbd> —
                 между материалами,{" "}
                 <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">o</kbd> —
-                открыть
+                открыть,{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">/</kbd> —
+                поиск по выпускам
               </p>
             ) : null}
           </TabsContent>

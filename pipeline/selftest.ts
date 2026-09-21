@@ -58,6 +58,7 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
+import { anyOf, highlight, HL_END, HL_START } from "../src/lib/search";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -2356,8 +2357,6 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   );
 }
 
-console.log(`Самопроверка пройдена: ${checks} утверждений`);
-
 // --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
 // Подмена колонки при сохранении была необратимой: тариф открывается обратно,
 // а в базе остаётся «язык источника». Двадцатого сентября 2026 выпуск пришёл
@@ -2487,6 +2486,57 @@ console.log(`Самопроверка пройдена: ${checks} утвержд
     false,
     "и не отменяется тем, что запасной уровень дошёл до разбора",
   );
+}
+
+// --- поиск по прошлым выпускам ------------------------------------------------
+// Отрывок приходит из ts_headline с метками внутри текста статьи. Метки —
+// управляющие символы, а не разметка: вставить в чужой текст <b> значит
+// однажды отрисовать оттуда же чужой <script>.
+{
+  const plain = highlight("просто текст");
+  assert.deepEqual(plain, [{ text: "просто текст", mark: false }], "текст без меток идёт целиком");
+
+  const marked = highlight(`про ${HL_START}уран${HL_END} и дальше`);
+  assert.deepEqual(
+    marked,
+    [
+      { text: "про ", mark: false },
+      { text: "уран", mark: true },
+      { text: " и дальше", mark: false },
+    ],
+    "метки режут отрывок на обычный текст и найденное",
+  );
+  assert.ok(
+    !marked.some((part) => part.text.includes(HL_START) || part.text.includes(HL_END)),
+    "сами метки в вывод не уезжают: иначе они видны на странице",
+  );
+
+  // Отрывок обрезается по словам, и закрывающая метка может не доехать.
+  // Подсветить остаток значит залить половину карточки.
+  const cut = highlight(`начало ${HL_START}уран`);
+  assert.deepEqual(
+    cut,
+    [{ text: "начало ", mark: false }, { text: "уран", mark: false }],
+    "незакрытая метка не подсвечивает хвост",
+  );
+
+  const marks = (text: string) => highlight(text).filter((part) => part.mark).length;
+  assert.equal(marks(`${HL_START}раз${HL_END} и ${HL_START}два${HL_END}`), 2, "меток бывает несколько");
+  assert.deepEqual(highlight(""), [], "пустой отрывок не даёт пустого куска");
+
+  // Ищут вопросом, а не ключевыми словами: «где я видел про uranium
+  // и дата-центры». Все слова разом требуют «видел», которого в тексте нет.
+  assert.equal(anyOf("uranium"), null, "одно слово ослаблять нечем");
+  assert.equal(anyOf("  "), null, "пустой запрос ослаблять нечем");
+  assert.equal(anyOf("uranium дата-центры"), "uranium or дата-центры");
+  assert.equal(
+    anyOf("  где я видел  про uranium "),
+    "где or я or видел or про or uranium",
+    "лишние пробелы не делают пустых слов",
+  );
+  // Оператор самого websearch, а не подмена «&» на «|» в готовом tsquery:
+  // в запросе бывает «AT&T», и такая подмена ломает не оператор, а слово.
+  assert.equal(anyOf("AT&T Verizon"), "AT&T or Verizon", "слово с амперсандом остаётся словом");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

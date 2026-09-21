@@ -478,6 +478,85 @@ async function main() {
       `${secondCalibration.totals.opened}/${secondCalibration.totals.shown} у второго`,
     );
 
+    // --- поиск по прошлым выпускам ----------------------------------------------
+    // «Где я видел про uranium и дата-центры» — вопрос к своему архиву,
+    // а не к интернету. Ошибка здесь той же породы, что и чужая лента:
+    // выдача приходит быстро, выглядит осмысленной и собрана не из твоего.
+    {
+      const { HL_START } = await import("../src/lib/search");
+      // Описание пишется читателю его языком — по нему и ищут первым делом.
+      await sql`
+        update dailynews.digest_items
+           set summary = 'Спотовая цена на уран обновила максимум, дата-центры разгоняют спрос'
+         where item_id = ${ids[2]}
+      `;
+
+      const archive = await queries.archiveSize(owner.id);
+      assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
+      assert.deepEqual(
+        await queries.archiveSize(second.id),
+        { items: 1, days: 1 },
+        "в чужой архив соседние выпуски не попадают",
+      );
+
+      const byRussian = await queries.searchArchive(owner.id, "уран");
+      assert.equal(byRussian.hits.length, 1, "слово из описания выпуска обязано находиться");
+      assert.equal(String(byRussian.hits[0].item_id), String(ids[2]));
+      assert.equal(byRussian.loose, false, "по одному слову ослаблять нечего");
+      assert.ok(
+        byRussian.hits[0].snippet.includes(HL_START),
+        "найденное в отрывке обязано быть отмечено: иначе выдачу нечем читать",
+      );
+      assert.equal(byRussian.hits[0].title, "Владелец: уран", "заголовок берётся из выпуска");
+      assert.equal(byRussian.hits[0].day, today, "у находки есть день выпуска, чтобы вернуться");
+
+      // Ищут тем словом, которое запомнили: «уран» стоит в описании выпуска,
+      // «uranium» — в заголовке источника. Одно без другого — половина поиска.
+      const byEnglish = await queries.searchArchive(owner.id, "uranium");
+      assert.equal(byEnglish.hits.length, 1, "исходный заголовок обязан искаться наравне");
+      assert.equal(String(byEnglish.hits[0].item_id), String(ids[2]));
+
+      // Словоформа, а не подстрока: «цены» и «цена» — одно слово.
+      assert.equal(
+        (await queries.searchArchive(owner.id, "цены")).hits.length,
+        1,
+        "поиск обязан сводить словоформы, иначе он работает только точным попаданием",
+      );
+
+      // Самое дорогое здесь — чужой архив: он приходит вовремя и не твой.
+      const stranger = await queries.searchArchive(second.id, "уран");
+      assert.equal(stranger.hits.length, 0, "выпуск соседа в своём поиске не находится");
+      assert.equal(
+        (await queries.searchArchive(owner.id, "CBT")).hits.length,
+        0,
+        "и в обратную сторону тоже: владелец не ищет по выпуску второго",
+      );
+
+      // Ищут вопросом: все слова разом дают ноль, хотя ответ лежит в архиве.
+      const asked = await queries.searchArchive(owner.id, "где я видел про uranium");
+      assert.equal(asked.loose, true, "ослабление обязано называться вслух");
+      assert.equal(String(asked.hits[0].item_id), String(ids[2]));
+      assert.equal(
+        (await queries.searchArchive(owner.id, "кварки бозоны")).loose,
+        false,
+        "ослабление, не нашедшее ничего, ослаблением не объявляется",
+      );
+
+      // Палец вниз убирает материал из ленты — и из поиска тоже: иначе
+      // «убрать» означало бы «убрать с одной страницы из двух».
+      await sql`
+        insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+        values (${owner.id}, ${ids[2]}, 'down', 95, 0.8)
+      `;
+      assert.equal(
+        (await queries.searchArchive(owner.id, "уран")).hits.length,
+        0,
+        "скрытое пальцем вниз в поиске не всплывает",
+      );
+      await sql`delete from dailynews.reads where reader_id = ${owner.id} and event = 'down'`;
+      console.log("  поиск: свой архив находится, чужой — нет");
+    }
+
     // --- отбор: своё не повторяется, чужое не исчезает ---------------------------
     // Самая дорогая ошибка многопользовательского отбора: первый прогнавшийся
     // читатель вычерпывает поток, а остальные получают остатки. Выпуск при

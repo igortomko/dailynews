@@ -1,5 +1,6 @@
 import "server-only";
 import { sql } from "./db";
+import { anyOf, HL_END, HL_OPTIONS, HL_START } from "./search";
 import type { Axes, Source } from "./types";
 
 /**
@@ -367,4 +368,132 @@ export async function catalogFor(
      order by count(distinct i.id) desc, s.label
      limit ${limit}
   `;
+}
+
+export type ArchiveHit = {
+  item_id: number;
+  url: string;
+  /** Заголовок из выпуска — его языком. Пустой бывает у старых строк. */
+  title: string;
+  /** Отрывок с метками подсветки: режется `highlight` из lib/search. */
+  snippet: string;
+  source_label: string;
+  topic_label: string | null;
+  day: string;
+  published_at: Date;
+};
+
+/**
+ * Поиск по тому, что этому читателю уже присылали.
+ *
+ * Не архив интернета: только материалы его выпусков — отобранные из его
+ * источников и написанные его языком. Поэтому первый аргумент читатель,
+ * а не строка поиска: запрос без него отдал бы чужой выпуск вовремя,
+ * без ошибок и совершенно не тот.
+ *
+ * Ищется сразу по двум текстам — по написанному для читателя
+ * (`digest_items`) и по исходному (`items`). Одно без другого половинчато:
+ * «uranium» стоит в заголовке источника, а «уран» — в описании выпуска,
+ * и человек ищет тем словом, которое запомнил.
+ *
+ * Индекса нет намеренно: на тысячах строк это доли секунды, а выражение
+ * пришлось бы считать по двум таблицам сразу — один GIN на digest_items
+ * покрыл бы только половину запроса. Понадобится — материализованный
+ * tsvector на digest_items плюс отдельный на items, и объединение.
+ */
+async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
+  return sql<ArchiveHit[]>`
+    with q as (select websearch_to_tsquery('russian', ${query}) as tsq),
+    hits as (
+      select i.id::int as item_id, i.url,
+             coalesce(nullif(di.title, ''), i.title) as title,
+             coalesce(nullif(di.summary, ''), nullif(i.excerpt, ''), '') as body,
+             s.label as source_label,
+             t.label as topic_label,
+             d.day::text as day,
+             coalesce(i.published_at, i.collected_at) as published_at,
+             ts_rank_cd(v.tsv, q.tsq) as rank
+        from q
+        join dailynews.digests d on d.reader_id = ${readerId}
+        join dailynews.digest_items di on di.digest_id = d.id
+        join dailynews.items i on i.id = di.item_id
+        join dailynews.sources s on s.id = i.source_id
+   left join dailynews.scores sc on sc.item_id = i.id
+   left join dailynews.topics t on t.id = sc.topic_id
+  cross join lateral (
+               select to_tsvector(
+                 'russian',
+                 concat_ws(' ', di.title, di.summary, i.title, i.excerpt)
+               ) as tsv
+             ) v
+       where v.tsv @@ q.tsq
+         -- Скрытое пальцем вниз не возвращается и здесь: иначе «убрать
+         -- из ленты» означало бы «убрать с одной страницы из двух».
+         and not exists (
+           select 1 from dailynews.reads r
+            where r.item_id = i.id and r.reader_id = ${readerId} and r.event = 'down'
+         )
+       order by rank desc, d.day desc
+       limit 40
+    )
+    -- Отрывок считается уже после отбора и предела: ts_headline разбирает
+    -- текст заново на каждой строке, и считать его по всему архиву значит
+    -- платить за то, чего никто не увидит.
+    select item_id, url, title, source_label, topic_label, day, published_at,
+           -- Многоточие ставится по краям, которых отрывок не достал.
+           -- Без него вырезанный кусок начинается со строчной буквы
+           -- и обрывается на полуслове — и читается как поломка, а не
+           -- как цитата. Ставить его всегда — врать на тех отрывках,
+           -- что начинаются с начала описания.
+           case when left(e.body, length(m.plain)) = m.plain then '' else '…' end
+             || h.snippet
+             || case when right(e.body, length(m.plain)) = m.plain then '' else '…' end
+             as snippet
+      from hits e,
+           lateral (
+             select ts_headline('russian', e.body, (select tsq from q), ${HL_OPTIONS}) as snippet
+           ) h,
+           -- Тот же отрывок без меток: сравнивать с описанием надо текст,
+           -- а не текст вперемешку с управляющими символами.
+           lateral (
+             select replace(replace(h.snippet, ${HL_START}, ''), ${HL_END}, '') as plain
+           ) m
+     order by e.rank desc, e.day desc
+  `;
+}
+
+/**
+ * Найденное и то, пришлось ли ослаблять запрос.
+ *
+ * Два захода, а не один: сначала все слова, и только если не нашлось
+ * ничего — хотя бы одно. Обратный порядок утопил бы точное совпадение
+ * в материалах, где сошлось одно слово из четырёх.
+ */
+export async function searchArchive(
+  readerId: number,
+  query: string,
+): Promise<{ hits: ArchiveHit[]; loose: boolean }> {
+  const strict = await found(readerId, query);
+  if (strict.length > 0) return { hits: strict, loose: false };
+
+  const loose = anyOf(query);
+  if (!loose) return { hits: strict, loose: false };
+
+  const hits = await found(readerId, loose);
+  return { hits, loose: hits.length > 0 };
+}
+
+/**
+ * Размер архива этого читателя. Стоит на пустом поиске вместо «введите
+ * запрос»: «ищу по 340 материалам из 28 выпусков» отвечает на вопрос,
+ * который возникает раньше, — есть ли вообще в чём искать.
+ */
+export async function archiveSize(readerId: number): Promise<{ items: number; days: number }> {
+  const [row] = await sql<{ items: number; days: number }[]>`
+    select count(*)::int as items, count(distinct d.day)::int as days
+      from dailynews.digests d
+      join dailynews.digest_items di on di.digest_id = d.id
+     where d.reader_id = ${readerId}
+  `;
+  return row ?? { items: 0, days: 0 };
 }
