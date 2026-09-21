@@ -3,6 +3,18 @@ import { z } from "zod";
 const text = z.string().trim().min(1).max(2400);
 const ids = z.array(z.string().min(1).max(64)).min(1).max(80);
 export const supported = z.object({ text, claimIds: ids }).strict();
+export const editorialFormat = z.enum([
+  "brief", "story", "bullets", "steps", "data", "quote",
+  "comparison", "timeline", "mechanism", "qa", "continuation", "case",
+  "decision", "myth_reality",
+]);
+export type EditorialFormat = z.infer<typeof editorialFormat>;
+export const formatPlanSchema = z.object({
+  format: editorialFormat,
+  reason: z.string().trim().min(1).max(420),
+  claimIds: ids,
+  fallback: editorialFormat,
+}).strict();
 const block = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paragraph"), content: supported }).strict(),
   z.object({ kind: z.literal("list"), numbering: z.enum(["facts", "bullets"]), items: z.array(supported).min(2).max(6) }).strict(),
@@ -18,10 +30,18 @@ export const documentSchema = z.object({
   schemaVersion: z.literal(2),
   genre: z.enum(["news", "explanation", "research", "narrative", "argument", "investigation"]),
   title: supported.extend({ text: text.max(180) }),
+  // Новые документы содержат короткий ответ, который можно прочитать без
+  // раскрытия деталей. Поле optional для старых карточек, сохранённых до
+  // двухслойного чтения.
+  answer: supported.extend({ text: text.max(600) }).nullable().optional(),
+  formatPlan: formatPlanSchema.optional(),
   lead: supported.nullable(),
   blocks: z.array(block).min(1).max(8),
   evidence: supported.nullable(),
-  application: z.object({ text, condition: text, claimIds: ids, contextQuote: text }).strict().nullable(),
+  application: z.object({
+    kind: z.enum(["risk", "opportunity", "question"]).optional(),
+    text, condition: text, claimIds: ids, contextQuote: text,
+  }).strict().nullable(),
   omitted: z.array(z.object({ claimId: z.string(), reason: text }).strict()).max(160),
   baselineId: z.number().int().positive().nullable(),
 }).strict();
@@ -61,7 +81,7 @@ export const auditDefects = (result: z.infer<typeof auditSchema>) => result.defe
 
 export const isAccent = (b: ReadingBlock) => !["paragraph", "list", "qa"].includes(b.kind);
 export function supportedFields(doc: ReadingDocument): z.infer<typeof supported>[] {
-  const values = [doc.title, ...(doc.lead ? [doc.lead] : [])];
+  const values = [doc.title, ...(doc.answer ? [doc.answer] : []), ...(doc.lead ? [doc.lead] : [])];
   for (const b of doc.blocks) {
     switch (b.kind) {
       case "paragraph": case "takeaway": case "quote": values.push(b.content); break;
@@ -100,7 +120,18 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
     if (visible.has(claim.id) && omitted.has(claim.id)) issues.push(`Claim ${claim.id} is both visible and omitted.`);
   }
   if (doc.application && !normalize(context).includes(normalize(doc.application.contextQuote))) issues.push("Application must cite an exact relevant statement from the reader context, or be null.");
+  if (doc.application && !doc.application.kind) issues.push("Application must name a concrete risk, opportunity or next question, or be null.");
   if (doc.baselineId !== null && !baselineIds.includes(doc.baselineId)) issues.push("Unknown previous article.");
+  if (doc.formatPlan) {
+    for (const id of doc.formatPlan.claimIds) if (!known.has(id)) issues.push(`Unknown format-plan claim ${id}`);
+    if (!known.has(doc.formatPlan.claimIds[0])) issues.push("Format plan must cite at least one source claim.");
+    if (doc.formatPlan.format === "quote" && !doc.blocks.some((b) => b.kind === "quote")) issues.push("Quote format requires a quote block.");
+    if (doc.formatPlan.format === "data" && !doc.blocks.some((b) => b.kind === "metric")) issues.push("Data format requires a metric block.");
+    if (["mechanism"].includes(doc.formatPlan.format) && !doc.blocks.some((b) => b.kind === "flow")) issues.push("Mechanism format requires a flow block.");
+    if (["comparison"].includes(doc.formatPlan.format) && !doc.blocks.some((b) => b.kind === "comparison")) issues.push("Comparison format requires a comparison block.");
+    if (["steps", "timeline"].includes(doc.formatPlan.format) && !doc.blocks.some((b) => b.kind === "steps")) issues.push("Steps/timeline format requires a steps block.");
+    if (doc.formatPlan.format === "qa" && !doc.blocks.some((b) => b.kind === "qa")) issues.push("QA format requires a question-answer block.");
+  }
   for (const b of doc.blocks) if (b.kind === "flow" && b.relations.length !== b.nodes.length - 1) issues.push("One relation is required between adjacent flow nodes.");
   return issues;
 }
@@ -136,7 +167,8 @@ export function blockText(b: ReadingBlock): string {
   }
 }
 export function documentText(doc: ReadingDocument): string {
-  return [doc.lead?.text, ...doc.blocks.map(blockText), doc.application && `${doc.application.condition} ${doc.application.text}`, doc.evidence?.text].filter(Boolean).join("\n\n");
+  const details = doc.lead && doc.lead.text === doc.answer?.text ? null : doc.lead?.text;
+  return [doc.answer?.text, details, ...doc.blocks.map(blockText), doc.application && `${doc.application.condition} ${doc.application.text}`, doc.evidence?.text].filter(Boolean).join("\n\n");
 }
 export function parseStoredReading(value: unknown): StoredReading | null {
   const shape = z.object({

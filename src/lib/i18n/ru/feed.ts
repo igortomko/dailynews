@@ -29,6 +29,8 @@ export const feed: typeof En = {
   tabs: {
     all: "Все",
     other: "Прочее",
+    first: "Сначала",
+    byTopic: "Остальное по темам",
     toTopAria: "Наверх",
     toTopTooltip: "Наверх, к датам и вкладкам",
     emptyTitle: "Пока пусто",
@@ -182,6 +184,7 @@ export const feed: typeof En = {
   reading: {
     equals: "равно", then: "затем", step: "Шаг", stage: "Этап",
     planned: "предстоит", done: "завершён", current: "сейчас", unspecified: "",
+    showDetails: "Детали", hideDetails: "Скрыть детали",
   },
   time: {
     summaryMinute: "мин", summarySecond: "с",

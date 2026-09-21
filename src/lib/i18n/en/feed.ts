@@ -30,6 +30,8 @@ export const feed = {
   tabs: {
     all: "All",
     other: "Other",
+    first: "Read first",
+    byTopic: "More by topic",
     toTopAria: "Back to top",
     toTopTooltip: "Back to top — dates and tabs",
     emptyTitle: "Nothing here yet",
@@ -190,6 +192,7 @@ export const feed = {
   reading: {
     equals: "equals", then: "then", step: "Step", stage: "Stage",
     planned: "planned", done: "completed", current: "current", unspecified: "",
+    showDetails: "Details", hideDetails: "Hide details",
   },
   time: {
     summaryMinute: "min", summarySecond: "s",

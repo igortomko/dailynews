@@ -331,6 +331,35 @@ export function FeedTabs({
         ? items.filter((item) => !item.topic_slug)
         : items.filter((item) => item.topic_slug === slug);
 
+  /**
+   * «Все» — не архив. Сначала показываем немного карточек, за которыми
+   * стоит вернуться сегодня, а оставшееся раскладываем по темам. Порядок
+   * внутри каждой группы остаётся порядком отбора: заголовки меняют путь
+   * чтения, а не переоценивают новости на клиенте.
+   *
+   * При коротком выпуске отдельный «Сначала» только дублировал бы всю
+   * ленту. Нужна хотя бы одна карточка после него, иначе читать нечего.
+   */
+  const sectionsFor = (slug: string): { key: string; label?: string; items: FeedCard[] }[] => {
+    const list = forTab(slug);
+    if (slug !== "all" || list.length < 6) return [{ key: slug, items: list }];
+
+    const priorityCount = Math.min(5, Math.max(3, Math.ceil(list.length * 0.1)));
+    const first = list.slice(0, priorityCount);
+    const rest = list.slice(priorityCount);
+    const grouped = topics.flatMap((topic) => {
+      const topicItems = rest.filter((item) => item.topic_slug === topic.slug);
+      return topicItems.length ? [{ key: `topic-${topic.slug}`, label: topic.label, items: topicItems }] : [];
+    });
+    const other = rest.filter((item) => !item.topic_slug);
+
+    return [
+      { key: "first", label: t.feed.tabs.first, items: first },
+      ...(grouped.length ? [{ key: "by-topic", label: t.feed.tabs.byTopic, items: [] }, ...grouped] : []),
+      ...(other.length ? [{ key: "other", label: t.feed.tabs.other, items: other }] : []),
+    ];
+  };
+
   return (
     <Tabs value={tab} onValueChange={setTab}>
       {/* Шапка живёт внутри Tabs: полоса вкладок и содержимое должны быть
@@ -497,6 +526,7 @@ export function FeedTabs({
         </Empty>
       ) : tabs.map((tab) => {
         const list = forTab(tab.slug);
+        const sections = sectionsFor(tab.slug);
         return (
           <TabsContent
             key={tab.slug}
@@ -526,28 +556,44 @@ export function FeedTabs({
                 </Button>
               </Empty>
             ) : (
-              list.map((item, index) => (
-                <Fragment key={`${item.day}-${item.id}`}>
-                  <ItemCard
-                    item={item}
-                    showTopic={tab.slug === "all"}
-                    plan={plan}
-                    networks={networks}
-                    selected={selectedIds.has(item.id)}
-                    selecting={selecting}
-                    onSelectedChange={(next) => pick(item.id, next)}
-                  />
-                  {/* Граница прошлого захода. Виденное лежит подряд сверху:
-                      ленту читают в том же порядке, в каком она нарисована.
-                      Рисуется только между виденным и новым — в самом низу
-                      она сообщала бы «ты дочитал до конца», что и так видно. */}
-                  {item.seen && !list[index + 1]?.seen && index < list.length - 1 ? (
-                    <div className="flex items-center gap-3 py-3 text-xs text-muted-foreground">
-                      <span className="h-px flex-1 bg-border" />
-                      {t.feed.tabs.readUpToHere}
-                      <span className="h-px flex-1 bg-border" />
-                    </div>
+              sections.map((section) => (
+                <Fragment key={section.key}>
+                  {section.label ? (
+                    section.items.length ? (
+                      <h2 className="pt-6 pb-2 text-sm font-medium text-muted-foreground first:pt-4">
+                        {section.label}
+                      </h2>
+                    ) : (
+                      <h2 className="pt-6 pb-2 text-sm font-medium text-muted-foreground">
+                        {section.label}
+                      </h2>
+                    )
                   ) : null}
+                  {section.items.map((item) => {
+                    const index = list.indexOf(item);
+                    return (
+                      <Fragment key={`${item.day}-${item.id}`}>
+                        <ItemCard
+                          item={item}
+                          showTopic={false}
+                          plan={plan}
+                          networks={networks}
+                          selected={selectedIds.has(item.id)}
+                          selecting={selecting}
+                          onSelectedChange={(next) => pick(item.id, next)}
+                        />
+                        {/* Граница прошлого захода смотрит на полный порядок
+                            выпуска, а не на текущую тематическую секцию. */}
+                        {item.seen && !list[index + 1]?.seen && index < list.length - 1 ? (
+                          <div className="flex items-center gap-3 py-3 text-xs text-muted-foreground">
+                            <span className="h-px flex-1 bg-border" />
+                            {t.feed.tabs.readUpToHere}
+                            <span className="h-px flex-1 bg-border" />
+                          </div>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </Fragment>
               ))
             )}

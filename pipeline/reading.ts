@@ -13,9 +13,9 @@ import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
   documentText, parseStoredReading, normalizeDocument, validateQuotes,
-  type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
+  formatPlanSchema, type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument, type EditorialFormat,
 } from "../src/lib/reading-document";
-import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
+import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES, FORMAT_PLAN_RULES } from "./reading-prompts";
 import { acquireAnalysis, finishAnalysis, getDocument, saveDocument, reserveCall, settleCall, recentBaselines, ReadingBudgetError, ReadingBusyError, type Baseline } from "./reading-store";
 
 export type ReadingOptions = { readerId: number; force?: boolean };
@@ -24,6 +24,101 @@ export const hash = (text: string) => createHash("sha256").update(text).digest("
 const emptyUsage = (): Usage => ({ input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 });
 const OUTPUT_TOKENS = 6000;
 export const MAX_SOURCE_CHARS = 160_000;
+type FormatPlan = z.infer<typeof formatPlanSchema>;
+
+/**
+ * Формы — не лотерея. Ограничиваем долю двух универсальных форм и списков,
+ * но не заставляем редкие формы появляться без подтверждённой структуры
+ * источника: фальшивая цитата или «решение» хуже однообразной прозы.
+ */
+function formatAllocator(total: number) {
+  const maximum = new Map<EditorialFormat, number>([
+    ["brief", Math.ceil(total * 0.35)],
+    ["story", Math.ceil(total * 0.25)],
+    ["bullets", Math.ceil(total * 0.25)],
+  ]);
+  const used = new Map<EditorialFormat, number>();
+  return (plan: FormatPlan): FormatPlan => {
+    const cap = maximum.get(plan.format);
+    if (cap === undefined || (used.get(plan.format) ?? 0) < cap) {
+      used.set(plan.format, (used.get(plan.format) ?? 0) + 1);
+      return plan;
+    }
+    const fallbackCap = maximum.get(plan.fallback);
+    if (plan.fallback !== plan.format && (fallbackCap === undefined || (used.get(plan.fallback) ?? 0) < fallbackCap)) {
+      used.set(plan.fallback, (used.get(plan.fallback) ?? 0) + 1);
+      return { ...plan, format: plan.fallback, reason: `${plan.reason} Основная форма уже достигла предела в этом выпуске.` };
+    }
+    // Если обе формы достигли предела, сохраняем смысловую форму вместо
+    // подмены её декоративным блоком.
+    used.set(plan.format, (used.get(plan.format) ?? 0) + 1);
+    return plan;
+  };
+}
+
+type DeferredFormatPlan = {
+  task: (() => Promise<FormatPlan>) | null;
+  resolve: (plan: FormatPlan | null) => void;
+  reject: (error: unknown) => void;
+};
+
+/**
+ * Анализ и запись карточек идут параллельно, но квота форм должна зависеть от
+ * позиции в выпуске, а не от сетевой гонки. Иначе два одинаковых прогона могли
+ * дать разные доли списков и прозы только из-за порядка ответов модели.
+ */
+export function orderedFormatPlanner(total: number) {
+  const assign = formatAllocator(total);
+  const pending = new Map<number, DeferredFormatPlan>();
+  let next = 0;
+  let draining = false;
+
+  const drain = async () => {
+    if (draining) return;
+    draining = true;
+    try {
+      while (pending.has(next)) {
+        const slot = pending.get(next);
+        if (!slot) break;
+        pending.delete(next);
+        try {
+          const plan = slot.task ? await slot.task() : null;
+          slot.resolve(plan ? assign(plan) : null);
+        } catch (error) {
+          slot.reject(error);
+        }
+        next++;
+      }
+    } finally {
+      draining = false;
+      if (pending.has(next)) void drain();
+    }
+  };
+
+  const schedule = (position: number, task: DeferredFormatPlan["task"]) =>
+    new Promise<FormatPlan | null>((resolve, reject) => {
+      if (position < next || pending.has(position)) {
+        reject(new Error(`Editorial format slot ${position} was scheduled twice.`));
+        return;
+      }
+      pending.set(position, { task, resolve, reject });
+      void drain();
+    });
+
+  return {
+    async plan(position: number, task: () => Promise<FormatPlan>): Promise<FormatPlan> {
+      const plan = await schedule(position, task);
+      if (!plan) throw new Error(`Editorial format slot ${position} was skipped.`);
+      return plan;
+    },
+    skip(position: number) {
+      // Cached, excluded and failed cards still consume their ordering slot so
+      // a later card never waits forever for a plan that will not be written.
+      if (position < next || pending.has(position)) return;
+      void schedule(position, null).catch(() => {});
+    },
+  };
+}
 
 export function splitSource(text: string, limit = 12_000): { id: string; start: number; end: number; text: string }[] {
   if (text.length > MAX_SOURCE_CHARS) throw new Error("Source exceeds processing limit; no partial summary is published");
@@ -49,7 +144,9 @@ function caller(sql: Sql, readerId: number, usage: Usage): Ask {
     // Extraction is mechanical; editing and checking use bounded reasoning.
     const reasoningEffort = process.env.READING_REASONING_EFFORT?.trim() || (phase.startsWith("extract") ? "none" : "low");
     if (!apiKey) throw new Error("No model key");
-    const outputTokens = reasoningEffort && reasoningEffort !== "none" ? 32000 : OUTPUT_TOKENS;
+    const outputTokens = phase === "format-plan"
+      ? 1200
+      : reasoningEffort && reasoningEffort !== "none" ? 32000 : OUTPUT_TOKENS;
     const messages = [
       { role: "system", content: `${rules}\nJSON SCHEMA:\n${JSON.stringify(z.toJSONSchema(schema))}` },
       { role: "user", content: JSON.stringify(data) },
@@ -132,7 +229,25 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
   return { sections, sourceVersion, availability };
 }
 
-export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[]): Promise<ReadingDocument> {
+export async function planFormat(ask: Ask, analysis: ArticleAnalysis, topic: string, baselines: Baseline[]): Promise<z.infer<typeof formatPlanSchema>> {
+  const result = await ask("format-plan", FORMAT_PLAN_RULES, {
+    topic,
+    candidateBaselines: baselines.map(({ id, title, originalTitle, summary, day }) => ({ id, title, originalTitle, summary, day })),
+    analysis: {
+      ...analysis,
+      sections: analysis.sections.map(({ claims, ...section }) => ({
+        ...section,
+        claims: claims.map(({ quote, ...claim }) => { void quote; return claim; }),
+      })),
+    },
+  }, formatPlanSchema);
+  const known = new Set(analysis.sections.flatMap((section) => section.claims.map((claim) => claim.id)));
+  if (!result.claimIds.every((id) => known.has(id))) throw new Error("Format plan cites an unknown source claim");
+  if (result.format === "continuation" && !baselines.length) return { ...result, format: "brief", fallback: "brief", reason: `${result.reason} Нет проверенного предыдущего материала, поэтому выбран краткий ответ.` };
+  return result;
+}
+
+export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[], formatPlan?: z.infer<typeof formatPlanSchema>): Promise<ReadingDocument> {
   const input = {
     language: voice.language, style: styleOf(voice.style).instruction,
     complexityPreference: voice.complexity,
@@ -147,9 +262,21 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
     analysis: { ...analysis, sections: analysis.sections.map(section => ({ ...section,
       claims: section.claims.map(({ quote, ...claim }) => { void quote; return claim; }) })) },
     candidateBaselines: baselines,
+    formatPlan: formatPlan ?? (() => {
+      const firstClaim = analysis.sections[0]?.claims[0];
+      if (!firstClaim) throw new Error("Source analysis has no claims for format fallback");
+      return { format: "brief" as EditorialFormat, reason: "Без отдельного плана формы: безопасный ответ.", claimIds: [firstClaim.id], fallback: "brief" as EditorialFormat };
+    })(),
   };
   const check = async (doc: ReadingDocument) => {
     const errors = [...validateCoverage(doc, analysis, readerContext, baselines.map((b) => b.id)), ...validateQuotes(doc, source)];
+    const answerWords = doc.answer?.text.trim().split(/\s+/u).filter(Boolean).length ?? 0;
+    if (!doc.answer) errors.push("Missing mandatory 35–60 word answer layer.");
+    else if (answerWords < 35 || answerWords > 60) errors.push(`Answer layer is ${answerWords} words; it must be 35–60 words.`);
+    if (formatPlan && !doc.formatPlan) errors.push("Missing mandatory editorial format plan.");
+    if (formatPlan && doc.formatPlan && ![formatPlan.format, formatPlan.fallback].includes(doc.formatPlan.format)) {
+      errors.push(`Document format ${doc.formatPlan.format} does not match the approved plan ${formatPlan.format} or fallback ${formatPlan.fallback}.`);
+    }
     if (errors.length) return errors;
     for (const section of splitSource(source)) {
       const result = await ask("verify", VERIFY_RULES, { ...input, sourceSection: section, document: doc }, auditSchema);
@@ -203,9 +330,10 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
   const exclude = compile(asNames(reader.exclude_rules));
   const excludedIds: number[] = [];
   const retainedIds: number[] = [];
+  const formats = orderedFormatPlanner(survivors.length);
   const { model } = resolve();
   const reasoningEffort = process.env.READING_REASONING_EFFORT?.trim() || "extract:none;edit+audit:low";
-  const writeOne = async (item: Survivor): Promise<Written | null> => {
+  const writeOne = async (item: Survivor, position: number): Promise<Written | null> => {
     let sourceVersion = "";
     let availability: SourceAvailability = "excerpt_only";
     let analysisKey: string | null = null;
@@ -231,7 +359,8 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       lease = shared.token;
       const analysis = shared.analysis ?? await analyzeSource(ask, source.text, item.title, sourceVersion, availability);
       if (lease) { await finishAnalysis(sql, analysisKey, lease, analysis); lease = null; }
-      const document = await composeDocument(ask, source.text, analysis, readerContext, voice, item.topic_label, baselines);
+      const formatPlan = await formats.plan(position, () => planFormat(ask, analysis, item.topic_label, baselines));
+      const document = await composeDocument(ask, source.text, analysis, readerContext, voice, item.topic_label, baselines, formatPlan);
       const notice = availabilityNotice(availability);
       const reading: StoredReading = { version: 2, sourceVersion, availability, status: "verified", document, notice,
         seconds: Math.ceil(minutesOf(cardChars(document.title.text, documentText(document) + (notice ?? "")), voice) * 60) };
@@ -258,11 +387,13 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       const notice = budget ? "Выжимка пока недоступна: дневной лимит обработки исчерпан. Оригинал — по ссылке в заголовке."
         : "Проверенную выжимку подготовить не удалось. Оригинал — по ссылке в заголовке.";
       return { id: item.id, title_ru: item.title, summary: notice, reading: { version: 2, sourceVersion, availability, status: "unavailable", document: null, notice, seconds: 0 } };
+    } finally {
+      formats.skip(position);
     }
   };
   // Keep source order and settle every in-flight request before propagating a retryable failure.
-  const outcomes = await pooled(survivors, 2, async item => {
-    try { return { item: await writeOne(item) }; }
+  const outcomes = await pooled(survivors.map((item, position) => ({ item, position })), 2, async ({ item, position }) => {
+    try { return { item: await writeOne(item, position) }; }
     catch (error) { return { error }; }
   });
   const failed = outcomes.find(outcome => "error" in outcome);

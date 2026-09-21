@@ -695,7 +695,12 @@ export function ItemCard({
             </a>
           </h3>
 
-          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : hasSummary ? (
+          {reading ? <ReadingSummary
+            reading={reading}
+            detailsOpen={expanded}
+            onDetailsOpenChange={setExpanded}
+            labels={t.feed.reading}
+          /> : hasSummary ? (
             <p
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст

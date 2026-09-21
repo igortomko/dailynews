@@ -46,15 +46,41 @@ function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
   }
 }
 
-export function ReadingSummary({ reading, labels = ru.feed.reading }: { reading: StoredReading; labels?: Labels }) {
+export function ReadingSummary({
+  reading,
+  detailsOpen,
+  onDetailsOpenChange,
+  labels = ru.feed.reading,
+}: {
+  reading: StoredReading;
+  detailsOpen: boolean;
+  onDetailsOpenChange: (next: boolean) => void;
+  labels?: Labels;
+}) {
   const doc = reading.document;
+  const answer = doc?.answer ?? doc?.lead ?? null;
+  const hasDetails = Boolean(doc && (doc.lead || doc.blocks.length || doc.application || doc.evidence));
   return <div className="mt-3 max-w-[68ch] space-y-4 break-words text-pretty text-base leading-[1.6] text-foreground [overflow-wrap:anywhere]">
     {reading.notice ? <p className="text-sm text-muted-foreground">{t(reading.notice)}</p> : null}
     {doc ? <>
-      {doc.lead ? <p>{t(doc.lead.text)}</p> : null}
-      {doc.blocks.map((b,i) => <Block key={i} block={b} labels={labels} />)}
-      {doc.application ? <p>{t(`${doc.application.condition} ${doc.application.text}`)}</p> : null}
-      {doc.evidence ? <p className="text-sm leading-relaxed text-muted-foreground">{t(doc.evidence.text)}</p> : null}
+      {answer ? <p>{t(answer.text)}</p> : null}
+      {hasDetails ? <button
+        type="button"
+        aria-expanded={detailsOpen}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDetailsOpenChange(!detailsOpen);
+        }}
+        className="cursor-pointer text-sm text-muted-foreground underline decoration-muted-foreground/50 underline-offset-4 hover:text-foreground"
+      >
+        {detailsOpen ? labels.hideDetails : labels.showDetails}
+      </button> : null}
+      {detailsOpen ? <>
+        {doc.lead && doc.lead.text !== answer?.text ? <p>{t(doc.lead.text)}</p> : null}
+        {doc.blocks.map((b,i) => <Block key={i} block={b} labels={labels} />)}
+        {doc.application ? <p>{t(`${doc.application.condition} ${doc.application.text}`)}</p> : null}
+        {doc.evidence ? <p className="text-sm leading-relaxed text-muted-foreground">{t(doc.evidence.text)}</p> : null}
+      </> : null}
     </> : null}
   </div>;
 }

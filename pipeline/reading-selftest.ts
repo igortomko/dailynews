@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
-import { splitSource, composeDocument, analyzeSource, type Ask } from "./reading";
+import { splitSource, composeDocument, analyzeSource, orderedFormatPlanner, type Ask } from "./reading";
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
 import { DEFAULT_VOICE } from "../src/lib/voice";
+import { evaluationCompleteness, evaluationFileSchema, evaluationReport, selectEvaluationSample } from "./reading-evaluation";
 
 const evidence = (text: string, ...claimIds: string[]) => ({ text, claimIds });
 const analysis: ArticleAnalysis = { sourceVersion: "v", availability: "article_text", sections: [{
@@ -16,18 +17,21 @@ const analysis: ArticleAnalysis = { sourceVersion: "v", availability: "article_t
 }] };
 const valid: ReadingDocument = {
   schemaVersion: 2, genre: "research", title: evidence("Speed improved in 24 participants", "s1-a", "s1-c"),
+  answer: evidence("The 24-person test found that speed improved, but accuracy did not change. It therefore shows a narrower performance gain, not a general cognitive benefit: the study measured only those two outcomes, so it cannot tell whether the effect persists outside this small group.", "s1-a", "s1-b", "s1-c"),
+  formatPlan: { format: "brief", fallback: "brief", reason: "One result and one essential limit are faster as a short answer.", claimIds: ["s1-a", "s1-b"] },
   lead: null, blocks: [{ kind: "paragraph", content: evidence("No effect on accuracy.", "s1-b") }], evidence: null, application: null,
   omitted: [], baselineId: null,
 };
 assert.deepEqual(validateCoverage(valid, analysis, "", []), []);
 const missing = structuredClone(valid); missing.blocks = [{ kind: "paragraph", content: evidence("Speed improved", "s1-a") }];
+missing.answer = null;
 assert.ok(validateCoverage(missing, analysis, "", []).some((e) => e.includes("s1-b")));
 assert.ok(!documentSchema.safeParse({ ...valid, blocks: [{ kind: "html", html: "<script>alert(1)</script>" }] }).success);
 const extra = structuredClone(valid); extra.blocks.push({ kind: "takeaway", attribution: "Author", content: evidence("Takeaway", "s1-a") }, { kind: "metric", value: "24", label: "participants", context: evidence("Population", "s1-c") });
 assert.ok(validateCoverage(extra, analysis, "", []).some((e) => e.includes("one visual")));
 const madeUp = structuredClone(valid); madeUp.title.claimIds = ["invented"];
 assert.ok(validateCoverage(madeUp, analysis, "", []).some((e) => e.includes("Unknown")));
-const application = { ...valid, application: { text: "Do a thing", condition: "If relevant", claimIds: ["s1-a"], contextQuote: "I am an expert in training" } };
+const application = { ...valid, application: { kind: "opportunity" as const, text: "Do a thing", condition: "If relevant", claimIds: ["s1-a"], contextQuote: "I am an expert in training" } };
 assert.ok(validateCoverage(application, analysis, "I follow AI products", []).some((e) => e.includes("context")));
 assert.ok(validateCoverage({ ...valid, baselineId: 88 }, analysis, "", [12]).some((e) => e.includes("previous")));
 assert.ok(validateSection({ ...analysis.sections[0], claims: [{ ...analysis.sections[0].claims[0], quote: "invented quote" }] }, "Speed improved").length > 0);
@@ -60,8 +64,61 @@ assert.ok(kindle.includes('&quot;'));
 assert.ok(blockText({ kind: 'steps', sequence: 'timeline', items: [{ label: 'Launch', content: evidence('Release', 's1-a'), state: 'planned' }, { label: 'Pilot', content: evidence('Trial', 's1-a'), state: 'current' }] }).includes('(предстоит)'));
 assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(221), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
 assert.deepEqual(normalizeDocument({ ...valid, omitted: [{ claimId: 's1-a', reason: 'Accidental duplicate' }] }).omitted, []);
+const tooShortAnswer = structuredClone(valid);
+tooShortAnswer.answer = evidence("Speed improved, but accuracy did not.", "s1-a", "s1-b");
+assert.ok(validateCoverage(tooShortAnswer, analysis, "", []).length === 0, "stored documents stay parseable even when a runtime-only answer constraint is not met");
+const candidateSample = selectEvaluationSample([
+  { itemId: 1, position: 1, format: "brief" as const },
+  { itemId: 2, position: 2, format: "brief" as const },
+  { itemId: 3, position: 3, format: "story" as const },
+  { itemId: 4, position: 4, format: "data" as const },
+  { itemId: 5, position: 5, format: "quote" as const },
+  { itemId: 6, position: 6, format: "mechanism" as const },
+  { itemId: 7, position: 7, format: "qa" as const },
+  { itemId: 8, position: 8, format: "comparison" as const },
+  { itemId: 9, position: 9, format: "steps" as const },
+  { itemId: 10, position: 10, format: "case" as const },
+  { itemId: 11, position: 11, format: "continuation" as const },
+  { itemId: 12, position: 12, format: "decision" as const },
+], 12);
+assert.deepEqual(candidateSample.map((item) => item.itemId), [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 2]);
+const evaluation = evaluationFileSchema.parse({
+  version: 1, createdAt: "2026-09-21T00:00:00.000Z", readerId: 1, day: "2026-09-21",
+  instructions: ["a", "b", "c", "d", "e"],
+  cases: Array.from({ length: 10 }, (_, index) => ({
+    itemId: index + 1, position: index + 1, title: `Item ${index + 1}`, format: "brief", answer: "Answer",
+    mainQuestion: "What happened?", expectedAnswer: "The result", essentialLimitation: "Small sample",
+    expectedSourceDecision: "optional", sourceDecisionReason: "The card contains the operational result.",
+  })),
+  responses: Array.from({ length: 10 }, (_, index) => ({
+    itemId: index + 1, readerAnswer: "The reader's answer", limitationNamed: true,
+    sourceDecision: "optional", sourceDecisionReason: "Enough to decide.", unsupportedOrMisleading: null,
+    personalizationChangedDecision: index === 0, reviewerNotes: null,
+  })),
+});
+assert.deepEqual(evaluationCompleteness(evaluation), []);
+assert.deepEqual(evaluationReport(evaluation), {
+  total: 10, complete: 10, limitationsNamed: 10, sourceDecisionsCorrect: 10,
+  personalizationChangedDecision: 1, misleadingFlags: 0,
+});
 
 async function main() {
+  const formatOrder: number[] = [];
+  const planner = orderedFormatPlanner(4);
+  const laterPlan = planner.plan(1, async () => {
+    formatOrder.push(1);
+    return { format: "brief", reason: "later", claimIds: ["s1-a"], fallback: "brief" };
+  });
+  const firstPlan = planner.plan(0, async () => {
+    formatOrder.push(0);
+    return { format: "brief", reason: "first", claimIds: ["s1-a"], fallback: "brief" };
+  });
+  await Promise.all([firstPlan, laterPlan]);
+  assert.deepEqual(formatOrder, [0, 1], "format quotas are allocated in release order, not response order");
+  const skipPlanner = orderedFormatPlanner(4);
+  skipPlanner.skip(0);
+  await skipPlanner.plan(1, async () => ({ format: "brief", reason: "after cache", claimIds: ["s1-a"], fallback: "brief" }));
+
   const visited: string[] = [];
   const extract: Ask = async (phase, _rules, data, schema) => {
     if (phase === 'source-audit') return schema.parse({ defects: [] });
