@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   ThumbsUpIcon,
   ThumbsDownIcon,
@@ -208,6 +208,54 @@ export function ItemCard({
   // и насколько надолго.
   const tags = [showTopic ? item.topic_label : null, kind, horizon].filter(Boolean);
 
+  /**
+   * Строка над заголовком: издание, метка кликбейта, время чтения и теги.
+   *
+   * Списком, а не четырьмя подряд стоящими условиями в разметке: между
+   * кусками стоит разделитель, а он нужен только между существующими.
+   * Пришитый к самому куску, он вылезал бы первым символом строки у любого
+   * материала без картинки-издания.
+   */
+  const meta = [
+    {
+      key: "source",
+      node: site ? (
+        <a
+          href={site}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
+        >
+          {item.source_label}
+        </a>
+      ) : (
+        <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
+          {item.source_label}
+        </span>
+      ),
+    },
+    // Метка стоит вплотную к источнику, а не за метаданными: место под время
+    // и тему держится всегда, чтобы строка не дёргалась при наведении, —
+    // и «кликбейт» за этим местом висел в пустоте, оторванный от того,
+    // к чему относится.
+    ...(clickbait
+      ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">кликбейт</span> }]
+      : []),
+    // Время чтения: «открывать ли сейчас» спрашивают раньше и чаще, чем
+    // «про что это». Пусто, когда текста статьи у нас нет: у 124 карточек
+    // из 200 его не бывает, и выдуманное число там было бы неотличимо
+    // от измеренного.
+    ...(minutes ? [{ key: "minutes", node: <span className="shrink-0">{minutes}</span> }] : []),
+    // min-w-0 обязателен: truncate обрезает только то, чему разрешили
+    // сузиться, а гибкий элемент по умолчанию не уже своего содержимого.
+    // Строка в одну линию держала ширину всей карточки, и на телефоне лента
+    // уезжала за край экрана — заголовок и текст обрезались справа,
+    // а докрутить до них было нельзя.
+    ...(tags.length > 0
+      ? [{ key: "tags", node: <span className="min-w-0 truncate">{tags.join(", ")}</span> }]
+      : []),
+  ];
+
   if (vote === "down") {
     return (
       <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
@@ -241,7 +289,7 @@ export function ItemCard({
           в покое их место занимало время чтения — и получалось два ряда,
           живущих по разным правилам.
 
-          Времени публикации здесь больше нет. «2д» и «≈41 мин» стоят рядом,
+          Времени публикации здесь больше нет. «2д» и «~41 мин» стоят рядом,
           оба про время и оба про разное: одно — давно ли вышло, второе —
           сколько читать. Глаз складывает их в одно число и спотыкается.
           Из двух оставлено то, что отвечает на «открывать ли сейчас».
@@ -253,37 +301,26 @@ export function ItemCard({
           с иллюстрацией и без неё стояли в разных местах. Теперь они
           всегда в правом верхнем углу, а картинка начинается под ними. */}
       <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        {/* Разделитель между кусками, а не пробел: «Hacker News ~7 мин
+            AI-инфра» читается одной строкой, в которой издание, время
+            и тема слипаются в чужое название. Запятая занята внутри
+            последнего куска — темой, типом и горизонтом, — и вторая
+            запятая между кусками сделала бы ряд однородным перечислением
+            того, что однородным не является.
+
+            aria-hidden: диктор и так делает паузу между элементами,
+            а «болт» в речи — мусор. */}
         <span className="flex min-w-0 items-baseline gap-1">
-          {site ? (
-            <a
-              href={site}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
-            >
-              {item.source_label}
-            </a>
-          ) : (
-            <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
-              {item.source_label}
-            </span>
-          )}
-          {/* Метка стоит вплотную к источнику, а не за метаданными:
-              место под время и тему держится всегда, чтобы строка
-              не дёргалась при наведении, — и «кликбейт» за этим местом
-              висел в пустоте, оторванный от того, к чему относится. */}
-          {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
-          {/* Время чтения: «открывать ли сейчас» спрашивают раньше и чаще,
-              чем «про что это». Пусто, когда текста статьи у нас нет:
-              у 124 карточек из 200 его не бывает, и выдуманное число там
-              было бы неотличимо от измеренного. */}
-          {minutes ? <span className="shrink-0">{minutes}</span> : null}
-          {/* min-w-0 обязателен: truncate обрезает только то, чему разрешили
-              сузиться, а гибкий элемент по умолчанию не уже своего
-              содержимого. Строка в одну линию держала ширину всей карточки,
-              и на телефоне лента уезжала за край экрана — заголовок и текст
-              обрезались справа, а докрутить до них было нельзя. */}
-          {tags.length > 0 ? <span className="min-w-0 truncate">{tags.join(", ")}</span> : null}
+          {meta.map(({ key, node }, index) => (
+            <Fragment key={key}>
+              {index > 0 ? (
+                <span aria-hidden className="shrink-0 text-muted-foreground/40">
+                  •
+                </span>
+              ) : null}
+              {node}
+            </Fragment>
+          ))}
         </span>
 
         {/* Оценка тоже по наведению: нужна раз на десяток материалов,
