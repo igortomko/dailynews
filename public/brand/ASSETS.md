@@ -34,7 +34,8 @@ not as the canonical logo. The continuous wordmark snake is a Bezier reconstruct
 with a smooth manually drawn Bezier head. No traced head fragments remain.
 The body is aligned to the middle of the new wordmark, passing through R, p
 and o counters behind left stems and in front of right strokes. It exits a
-at counter height without dipping below the baseline. Head and eyes are unchanged.
+at counter height without dipping below the baseline. The neck expands smoothly
+into an upward-facing head, with tilted cyan eyes, echoing the standalone mark.
 Flat vector color replaces the original raster texture.
 
 Rebuild: `node scripts/build-brand-identity.mjs`. Requires Potrace 1.16 and uv;
