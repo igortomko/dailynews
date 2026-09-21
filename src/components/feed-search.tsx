@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -48,12 +49,25 @@ export function SearchButton({
  * Поле на всю строку шапки. Сама форма общая со страницей результатов:
  * адрес и имя параметра у них обязаны совпадать, а две копии договора
  * расходятся с первой правкой любой из них.
+ *
+ * Раскрыто оно или нет — знает шапка, а поле только следит за фокусом:
+ * оно не появляется и не исчезает, а проявляется и гаснет, и убрать его
+ * из разметки на время ухода нельзя.
  */
-export function SearchField({ onClose }: { onClose: () => void }) {
+export function SearchField({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const field = useRef<HTMLInputElement>(null);
+
+  // Фокус ставится на раскрытие, а не на появление в разметке: поле теперь
+  // висит в шапке всегда, и `autoFocus` увёл бы курсор в него при каждой
+  // загрузке ленты — включая ту, где ничего не искали.
+  useEffect(() => {
+    if (open) field.current?.focus();
+  }, [open]);
+
   return (
     <>
       <SearchForm
-        autoFocus
+        inputRef={field}
         placeholder="Найти в прошлых выпусках: uranium дата-центры"
         className="flex-1"
         // Escape возвращает ленту на место. Без него поле закрывается только

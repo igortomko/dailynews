@@ -18,13 +18,18 @@ export function SearchForm({
   defaultValue,
   placeholder,
   autoFocus,
+  inputRef,
   onKeyDown,
   className,
   children,
 }: {
   defaultValue?: string;
   placeholder: string;
+  /** Фокус при появлении. Годится там, где поле и появляется вместе
+   *  со страницей; в шапке ленты оно есть всегда, и фокус ставится
+   *  по `inputRef`, когда его раскрыли. */
   autoFocus?: boolean;
+  inputRef?: React.Ref<HTMLInputElement>;
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
   className?: string;
   /** Что стоит в строке после поля: например, кнопка «закрыть». */
@@ -37,6 +42,7 @@ export function SearchForm({
         name="q"
         defaultValue={defaultValue}
         autoFocus={autoFocus}
+        ref={inputRef}
         enterKeyHint="search"
         placeholder={placeholder}
         aria-label="Поиск по выпускам"
