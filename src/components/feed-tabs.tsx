@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemCard } from "@/components/item-card";
 import { SearchButton, SearchField } from "@/components/feed-search";
+import { SearchHints } from "@/components/search-memory";
 import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
@@ -198,7 +199,13 @@ export function FeedTabs({
             // Вместо строки, а не поверх неё: между датой и шестерёнкой
             // на телефоне остаётся сантиметр, и поле там либо нечитаемо,
             // либо выдавливает дату за экран.
-            <SearchField onClose={() => setSearching(false)} />
+            //
+            // Ширина — по колонке текста, как на странице результатов:
+            // поле от края до края экрана и то же поле в колонке читаются
+            // как два разных поля, а это одно и то же, до и после отправки.
+            <div className="mx-auto flex w-full max-w-page items-center gap-2 px-4">
+              <SearchField onClose={() => setSearching(false)} />
+            </div>
           ) : (
             <>
               {left}
@@ -212,6 +219,12 @@ export function FeedTabs({
             </>
           )}
         </div>
+        {/* Пока ищут, вкладки уступают место подсказкам: они разбирают
+            сегодняшний выпуск по темам, а поиск идёт по всем сразу —
+            нажатие на вкладку посреди набора означало бы уйти из поиска
+            неизвестно куда. */}
+        {searching ? <SearchHints /> : (
+        <>
         {/* Родитель flex, полоса с margin: auto. Когда вкладки помещаются,
             поля разводят их по центру; когда шире — поля схлопываются в ноль,
             полоса прижимается к левому краю и прокручивается.
@@ -243,6 +256,8 @@ export function FeedTabs({
             ))}
           </TabsList>
         </div>
+        </>
+        )}
       </header>
 
       {/*
