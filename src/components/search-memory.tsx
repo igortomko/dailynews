@@ -77,9 +77,10 @@ export function RememberQuery({ query }: { query: string }) {
  * или «данные», и нажатие на него даёт сорок материалов, то есть ничего;
  * а к своему прошлому запросу возвращаются на самом деле.
  *
- * Пустая история закрывается не кнопками, а знанием: строка говорит, где
- * именно идёт поиск. Это единственное место, где такое можно сказать
- * вовремя — потом человек уже набирает.
+ * Пустая история не закрывается ничем: место остаётся пустым. Объяснение,
+ * где именно идёт поиск, стояло здесь и читалось инструкцией к полю, в
+ * которое уже целятся пальцем, — а прочитав его однажды, второй раз
+ * человек его не читает вовсе.
  */
 export function SearchHints() {
   // localStorage нет на сервере, и читать его в рендере — значит разойтись
@@ -88,16 +89,9 @@ export function SearchHints() {
   // лента подпрыгивает ровно в тот момент, когда в неё целятся пальцем.
   const recent = useSyncExternalStore<string[] | null>(subscribe, snapshot, () => null);
 
-  if (recent === null) return <div className="h-9" />;
-
-  if (recent.length === 0) {
-    return (
-      <p className="mx-auto flex h-9 max-w-page items-center px-4 text-xs text-muted-foreground">
-        Ищу по твоим прошлым выпускам: по описаниям и по заголовкам источников —
-        «уран» и «uranium» найдут одно и то же.
-      </p>
-    );
-  }
+  // Высота держится и пустой: вкладки ленты занимают столько же, и без неё
+  // страница подпрыгивает от одного нажатия на лупу.
+  if (recent === null || recent.length === 0) return <div className="h-9" />;
 
   return (
     <div className="mx-auto flex h-9 max-w-page items-center gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

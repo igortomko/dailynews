@@ -52,20 +52,6 @@ export function SearchButton({
 export function SearchField({ onClose }: { onClose: () => void }) {
   return (
     <>
-      {/* Уход из поиска — слева, как и на странице результатов: там это
-          стрелка назад, здесь крестик, но место у них одно. Справа кнопка
-          съедала бы у поля ровно те сорок пикселей, на которые оно
-          и разъезжалось с полем на выдаче. */}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Закрыть поиск"
-        onClick={onClose}
-        className="size-10 shrink-0 text-muted-foreground/50 transition-colors hover:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
-      >
-        <XIcon />
-      </Button>
       <SearchForm
         autoFocus
         placeholder="Найти в прошлых выпусках: uranium дата-центры"
@@ -76,6 +62,19 @@ export function SearchField({ onClose }: { onClose: () => void }) {
           if (event.key === "Escape") onClose();
         }}
       />
+      {/* Крестик справа: он закрывает поиск, а не уводит назад. Слева
+          на странице результатов стоит стрелка — это переход, и путать
+          их местами значит обещать переход там, где его нет. */}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Закрыть поиск"
+        onClick={onClose}
+        className="size-10 shrink-0 text-muted-foreground/50 transition-colors hover:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
+      >
+        <XIcon />
+      </Button>
     </>
   );
 }
