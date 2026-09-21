@@ -147,7 +147,10 @@ export async function dropSourceFor(drop: Drop): Promise<PostSource> {
     const id = videoIdOf(drop.url);
     const transcript = id ? await fetchTranscript(id) : null;
     if (!transcript?.text) throw new Error("субтитров у ролика нет — перескажи мысль словами");
-    title = drop.note || `Ролик ${id}`;
+    // Заголовок ролика — сам ролик, а не пометка: title_norm это ключ дедупа,
+    // и два разных ролика с одинаковой пометкой оказались бы «похожими».
+    // Пометка и так уходит в текст префиксом ниже.
+    title = `Ролик ${id}`;
     excerpt = transcript.text;
     url = drop.url;
   } else {
@@ -162,17 +165,35 @@ export async function dropSourceFor(drop: Drop): Promise<PostSource> {
   const note = "note" in drop && drop.note ? `Пометка автора: ${drop.note}\n\n` : "";
   const body = `${note}${excerpt}`.slice(0, 20_000);
 
-  const [item] = await sql<{ id: number }[]>`
+  // Обновляется только своя строка. `url_canon` уникален на всю таблицу,
+  // поэтому брошенная ссылка попадает в тот же материал, что приехал фидом,
+  // — чаще всего именно в тот, который владелец только что прочитал у себя
+  // в выпуске. Апдейт без этой оговорки переписал бы заголовок и текст
+  // материала, из которого собираются чужие выпуски, и записал бы туда
+  // личную пометку владельца. Прогон для этой же таблицы пишет `do nothing`
+  // ровно поэтому (`run.ts`).
+  const canon = canonUrl(url);
+  const [inserted] = await sql<{ id: number }[]>`
     insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt, published_at)
-    values (${source.id}, ${url}, ${canonUrl(url)}, ${title}, ${normalizeTitle(title)}, ${body}, now())
+    values (${source.id}, ${url}, ${canon}, ${title}, ${normalizeTitle(title)}, ${body}, now())
     -- title_norm обновляется вместе с title: по нему идёт дедуп через pg_trgm,
     -- и разъехавшаяся пара «заголовок и его нормальная форма» сравнивает
     -- новое со старым молча.
     on conflict (url_canon) do update set excerpt = excluded.excerpt,
                                           title = excluded.title,
                                           title_norm = excluded.title_norm
+      where dailynews.items.source_id = excluded.source_id
     returning id::int as id
   `;
+  // Ничего не вернулось — материал принадлежит другому источнику. Черновики
+  // вешаются на ту строку, а пометка живёт только в возвращаемом тексте:
+  // в базу к чужому материалу она не попадает.
+  const [item] = inserted
+    ? [inserted]
+    : await sql<{ id: number }[]>`
+        select id::int as id from dailynews.items where url_canon = ${canon}
+      `;
+  if (!item) throw new Error("материал не завёлся");
 
   return {
     id: item.id,

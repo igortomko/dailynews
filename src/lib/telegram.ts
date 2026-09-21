@@ -22,9 +22,13 @@ export const escapeHtml = (s: string) =>
  *
  * Без заданного секрета проверка отвечает «нет», а не «да»: незаполненная
  * переменная не должна открывать дверь.
+ *
+ * Ботов два, и секрет у каждого свой, поэтому имя переменной — аргумент.
+ * Вторая копия этой же проверки рядом разъехалась бы с первой незаметно,
+ * а расходится здесь ровно один сравниваемый байт.
  */
-export function checkSecret(header: string | null): boolean {
-  const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
+export function checkSecret(header: string | null, envName = "TELEGRAM_WEBHOOK_SECRET"): boolean {
+  const expected = process.env[envName];
   if (!expected || !header) return false;
   return equal(header, expected);
 }

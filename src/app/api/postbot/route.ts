@@ -1,6 +1,5 @@
 import { NextResponse, after, type NextRequest } from "next/server";
-import { equal } from "@/lib/auth";
-import { escapeHtml, SECRET_HEADER } from "@/lib/telegram";
+import { checkSecret, escapeHtml, SECRET_HEADER } from "@/lib/telegram";
 import { getChannels, getReader, recordCall, spentToday } from "@/lib/readers";
 import { classifyDrop } from "@/lib/drops";
 import { dropSourceFor, saveDrafts } from "@/lib/posts";
@@ -24,14 +23,6 @@ import { sql } from "@/lib/db";
  * превращается в поток повторов.
  */
 
-/** Свой секрет, а не читательский: два бота — два токена и два секрета,
- *  иначе утёкший секрет открывает оба. Незаданный означает «нет». */
-function checkSecret(header: string | null): boolean {
-  const expected = process.env.POSTBOT_WEBHOOK_SECRET;
-  if (!expected || !header) return false;
-  return equal(header, expected);
-}
-
 async function send(chatId: number, text: string): Promise<void> {
   const token = process.env.POSTBOT_TOKEN;
   if (!token) return;
@@ -45,7 +36,14 @@ async function send(chatId: number, text: string): Promise<void> {
       link_preview_options: { is_disabled: true },
     }),
     signal: AbortSignal.timeout(30_000),
-  }).catch(() => {});
+  }).then((res) => {
+    // Молчащая отправка неотличима от «бот сломался»: Telegram отвечает 400
+    // на разрубленную по 4000 знаков HTML-сущность, и владелец просто
+    // не получает черновики, не узнав почему.
+    if (!res.ok) console.error(`postbot send: Telegram HTTP ${res.status}`);
+  }).catch((error: unknown) => {
+    console.error(`postbot send: ${error instanceof Error ? error.message : error}`);
+  });
 }
 
 const HELP = [
@@ -84,11 +82,15 @@ export function parsePost(update: unknown): Incoming | null {
  * оказаться не у того. Бот пишет посты под именем хозяина и тратит его
  * деньги, поэтому здесь список из одного номера и никакой логики вокруг.
  *
+ * Номер тот же, что уже знает лента (`TELEGRAM_CHAT_ID`, им владелец
+ * забирает свою строку в `ensureReader`): вторая переменная с тем же
+ * значением однажды разъехалась бы с первой, и замок открылся бы не там.
+ *
  * Незаданная переменная означает «никому», а не «всем»: пустое окружение
  * не должно открывать дверь — то же правило, что у секрета вебхука.
  */
 function isOwner(telegramId: number): boolean {
-  const allowed = Number(process.env.POSTBOT_OWNER_ID);
+  const allowed = Number(process.env.TELEGRAM_CHAT_ID);
   return Number.isSafeInteger(allowed) && allowed > 0 && telegramId === allowed;
 }
 
@@ -182,7 +184,9 @@ async function reply(incoming: Incoming): Promise<void> {
 }
 
 export async function POST(request: NextRequest) {
-  if (!checkSecret(request.headers.get(SECRET_HEADER))) {
+  // Свой секрет, а не читательский: два бота — два токена и два секрета,
+  // иначе утёкший секрет открывает оба.
+  if (!checkSecret(request.headers.get(SECRET_HEADER), "POSTBOT_WEBHOOK_SECRET")) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
   const incoming = parsePost(await request.json().catch(() => null));

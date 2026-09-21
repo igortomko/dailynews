@@ -24,11 +24,11 @@ const postbot = process.argv[2] === "postbot";
 const names = postbot
   ? {
       token: "POSTBOT_TOKEN", secret: "POSTBOT_WEBHOOK_SECRET", path: "/api/postbot",
-      start: "Что можно бросить боту",
+      start: "Что можно бросить боту", help: "Что можно бросить боту",
     }
   : {
       token: "TELEGRAM_BOT_TOKEN", secret: "TELEGRAM_WEBHOOK_SECRET", path: "/api/telegram",
-      start: "Ссылка на ленту",
+      start: "Ссылка на ленту", help: "Как устроена лента",
     };
 
 const token = process.env[names.token]?.trim();
@@ -67,7 +67,14 @@ async function main() {
     allowed_updates: ["message"],
     drop_pending_updates: true,
   });
-  await api("setMyCommands", { commands: [{ command: "start", description: names.start }] });
+  // Оба маршрута отвечают и на /help: команда, которой нет в меню, для
+  // человека не существует, а ветка под неё в коде — мёртвая.
+  await api("setMyCommands", {
+    commands: [
+      { command: "start", description: names.start },
+      { command: "help", description: names.help },
+    ],
+  });
 
   // Спрашиваем, а не верим ответу на установку: сверять надо то, что стоит.
   const info = await api("getWebhookInfo") as {
