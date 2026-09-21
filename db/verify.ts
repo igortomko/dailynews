@@ -24,6 +24,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
+import { otherSources, storyLines } from "../src/lib/story";
 import { cleanupReason } from "../src/lib/source-health";
 
 
@@ -97,7 +98,7 @@ async function main() {
   await assertOwn(local, async (text) => (await sql.unsafe(text))[0] as { token?: string });
   const queries = await import("../src/lib/queries");
   const readers = await import("../src/lib/readers");
-  const { markDuplicates, shortlist } = await import("../pipeline/dedup");
+  const { flattenDupChains, markDuplicates, shortlist } = await import("../pipeline/dedup");
   const { candidates, selectSurvivors, targetsOf } = await import("../pipeline/select");
   const { normalizeTitle, canonUrl } = await import("../pipeline/normalize");
   const { DEFAULT_WEIGHTS } = await import("../src/lib/types");
@@ -1250,6 +1251,173 @@ async function main() {
     await sql`update dailynews.items set enriched_at = now() where id = ${bare.id}`;
     assert.equal((await needText()).includes(bare.id), false, "с отметкой за ним больше не ходят");
     console.log("  догрузка статьи: пустой и служебный текст ждут, полный и ролик — нет");
+
+    // --- сюжет: дедуп, сделанный видимым ---------------------------------------
+    // Здесь доказываются две вещи сразу, и обе ломаются молча: сюжет,
+    // чей оригинал пришёл из чужого источника, не должен исчезать
+    // из выпуска, а счётчик «ещё N твоих источников» не должен считать
+    // источник, повторивший сам себя.
+    const mkSource = async (label: string, url: string) =>
+      (await sql<{ id: number }[]>`
+        insert into dailynews.sources (kind, label, url)
+        values ('rss', ${label}, ${url}) returning id::int as id
+      `)[0].id;
+    const mineSource = await mkSource("Моё издание", "https://mine.example.com/feed");
+    const theirSource = await mkSource("Чужое издание", "https://theirs.example.com/feed");
+    await sql`
+      insert into dailynews.reader_sources (reader_id, source_id)
+      values (${owner.id}, ${mineSource}) on conflict do nothing
+    `;
+
+    const mkItem = async (sourceId: number, slug: string, title: string, minutesAgo: number) =>
+      Number((await sql<{ id: number }[]>`
+        insert into dailynews.items
+               (source_id, url, url_canon, title, title_norm, excerpt, published_at)
+        values (${sourceId}, ${`https://example.com/${slug}`}, ${`example.com/${slug}`},
+                ${title}, ${normalizeTitle(title)}, 'Текст про видеокарту',
+                now() - ${`${minutesAgo} minutes`}::interval)
+        returning id
+      `)[0].id);
+
+    // Чужое издание опрошено первым и стало оригиналом — ровно так дедуп
+    // и выбирает: по меньшему id, то есть по порядку сбора.
+    const theirItem = await mkItem(theirSource, "gpu-theirs", "Nvidia unveils new datacenter GPU", 120);
+    const myItem = await mkItem(mineSource, "gpu-mine", "Nvidia Unveils New Datacenter GPU!", 60);
+    assert.equal(await markDuplicates(sql, [theirItem, myItem]), 1, "перепечатка должна пометиться");
+    const [linked] = await sql<{ dup_of: number | null }[]>`
+      select dup_of from dailynews.items where id = ${myItem}
+    `;
+    assert.equal(Number(linked.dup_of), theirItem, "оригиналом стало чужое издание");
+    // Оценка есть только у оригинала: повторы в Jev не уезжают.
+    await sql`
+      insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+      values (
+        ${theirItem}, ${topicBy("ai-infra").id}, 130, 0.9,
+        ${sql.json(axes("ai-infra", "fact") as unknown as Parameters<typeof sql.json>[0])},
+        'jev-latest'
+      )
+    `;
+
+    // Главное: свой источник написал — значит новость обязана дойти,
+    // хотя оригинал лежит в источнике, которого у читателя нет.
+    const onlyMine = await candidates(sql, owner.id, [mineSource]);
+    const mineIds = new Set(onlyMine.map((row) => Number(row.id)));
+    assert.ok(mineIds.has(myItem), "сюжет с чужим оригиналом не должен исчезать из отбора");
+    assert.equal(
+      onlyMine.find((row) => Number(row.id) === myItem)!.source_label,
+      "Моё издание",
+      "читателю показывается публикация его источника, а не чужая",
+    );
+    assert.ok(
+      onlyMine.find((row) => Number(row.id) === myItem)!.axes.topic !== undefined,
+      "оценка сюжета берётся у оригинала и приезжает объектом, а не строкой",
+    );
+
+    // И ровно один материал на сюжет: обе публикации доступны — берём оригинал.
+    const bothMine = await candidates(sql, owner.id, [mineSource, theirSource]);
+    const both = bothMine.filter((row) => [myItem, theirItem].includes(Number(row.id)));
+    assert.equal(both.length, 1, `на сюжет отобрано ${both.length} материалов, должен быть один`);
+    assert.equal(Number(both[0].id), theirItem, "при своём оригинале предпочитается он");
+
+    // Публикация из своих источников, поехавшая в выпуск вместо чужого
+    // оригинала, обязана получить его оценку. На строке в scores держатся
+    // лента, событие чтения, отметка с читалки и догрузка выпуска — все
+    // внутренним join, и без неё материал исчезает из ленты молча: выпуск
+    // собран, письмо ушло, карточки нет.
+    const storyTargets = targetsOf(await readers.getReaderTopics(owner.id));
+    const storyPicked = await selectSurvivors(
+      sql, owner.id, owner.weights, storyTargets, 5, [mineSource],
+    );
+    assert.deepEqual(
+      storyPicked.map((row) => Number(row.id)), [myItem],
+      "отбор по своим источникам обязан отдать свою публикацию сюжета",
+    );
+    const [shared] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.scores where item_id = ${myItem}
+    `;
+    assert.equal(shared.n, 1, "повтор, поехавший в выпуск, получает оценку своего сюжета");
+
+    const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+    await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
+    const storyFeed = await queries.getFeed(owner.id, storyDay);
+    assert.deepEqual(
+      storyFeed.map((row) => Number(row.id)), [myItem],
+      "материал сюжета виден в ленте, а не теряется на join со scores",
+    );
+    assert.equal(storyFeed[0].source_id, mineSource, "источник карточки — свой, а не оригинала");
+
+    // Сюжет, уже ушедший в выпуск, не возвращается под другим изданием.
+    const otherDay = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    await makeDigest(owner.id, otherDay, [{ id: theirItem, total: 130, title: "Владелец: GPU" }]);
+    assert.ok(
+      !(await candidates(sql, owner.id, [mineSource])).some((row) => Number(row.id) === myItem),
+      "вчерашний сюжет не приходит второй раз от другого издания",
+    );
+    assert.ok(
+      !(await candidates(sql, owner.id, [mineSource, theirSource]))
+        .some((row) => [myItem, theirItem].includes(Number(row.id))),
+      "и не приходит второй раз оригиналом",
+    );
+
+    // Витрина: список публикаций считается по источникам читателя.
+    const storyBoth = await queries.getStories([mineSource, theirSource], [theirItem]);
+    assert.equal(storyBoth.get(theirItem)?.length, 2, "в сюжете обе публикации");
+    assert.equal(
+      otherSources(storyBoth.get(theirItem)!, theirSource), 1,
+      "чужое издание считается ещё одним источником",
+    );
+    assert.deepEqual(
+      storyLines(storyBoth.get(theirItem)!).map((row) => [row.source_label, row.note]),
+      [["Чужое издание", "первоисточник"], ["Моё издание", "1 час позже"]],
+      "порядок и пометки считаются по времени публикации",
+    );
+
+    const storyMine = await queries.getStories([mineSource], [theirItem]);
+    assert.equal(
+      storyMine.get(theirItem)?.length, 1,
+      "чужой источник в «твоих источниках» не показывается",
+    );
+
+    // Самоповтор: два материала одного источника — это не «ещё один источник».
+    // Своей парой, а не фикстурами из начала прогона: те собраны для дедупа
+    // и живут своей жизнью, и однажды «длина 2» сломалась бы по причине,
+    // к счётчику источников отношения не имеющей.
+    const selfFirst = await mkItem(mineSource, "same-a", "Same outlet reports the story", 90);
+    const selfSecond = await mkItem(mineSource, "same-b", "Same Outlet Reports The Story!", 45);
+    assert.equal(await markDuplicates(sql, [selfFirst, selfSecond]), 1, "самоповтор должен пометиться");
+    const selfStory = await queries.getStories([mineSource], [selfFirst]);
+    assert.equal(selfStory.get(selfFirst)?.length, 2, "повтор того же источника лежит в сюжете");
+    assert.equal(
+      otherSources(selfStory.get(selfFirst)!, mineSource), 0,
+      "источник, повторивший сам себя, строки не даёт",
+    );
+
+    // Цепочка dup_of. Рождается сама: шортлист серой зоны строится до пометок,
+    // и пока отвечает вопрос про дальнее звено, его кандидат успевает стать
+    // повтором. Ключом сюжета тогда становится середина — у неё может
+    // не быть оценки, и материал уходит из отбора молча.
+    const chainRoot = await mkItem(mineSource, "chain-root", "Chain root story", 200);
+    const chainMid = await mkItem(mineSource, "chain-mid", "Chain Root Story!", 150);
+    const chainTail = await mkItem(mineSource, "chain-tail", "Chain root story?", 100);
+    await sql`update dailynews.items set dup_of = ${chainMid} where id = ${chainTail}`;
+    await sql`update dailynews.items set dup_of = ${chainRoot} where id = ${chainMid}`;
+    const [beforeFlatten] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(beforeFlatten.n, 1, "цепочка должна быть заведена — иначе проверка ничего не ловит");
+    assert.equal(await flattenDupChains(sql), 1, "выпрямляется ровно одно звено");
+    const [afterFlatten] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(afterFlatten.n, 0, "после выпрямления повтор указывает только на корень");
+    const chainStory = await queries.getStories([mineSource], [chainRoot]);
+    assert.equal(
+      chainStory.get(chainRoot)?.length, 3,
+      "выпрямленный сюжет собирается целиком, а не делится надвое",
+    );
+    console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {

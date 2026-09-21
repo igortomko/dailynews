@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "./db";
 import type { SourceYield } from "./source-health";
 import type { Axes, Source } from "./types";
+import type { Publication } from "./story";
 
 /**
  * Запросы ленты. У каждого первым аргументом идёт читатель, и это не
@@ -19,6 +20,8 @@ export type FeedItem = {
   summary: string | null;
   image_url: string | null;
   source_label: string;
+  /** Нужен сюжету: источник, повторивший сам себя, — не «ещё один источник». */
+  source_id: number;
   topic_slug: string | null;
   topic_label: string | null;
   total: number;
@@ -48,6 +51,13 @@ export type FeedItem = {
    */
   seen: boolean;
 };
+
+/**
+ * Карточка ленты вместе со своим сюжетом: материал и его повторы
+ * в источниках этого читателя. Пустой сюжет — обычный случай: повтор
+ * есть у единиц.
+ */
+export type FeedCard = FeedItem & { story: Publication[] };
 
 export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`
@@ -151,7 +161,7 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
 export async function getFeed(readerId: number, day: string): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
     select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
-           s.label as source_label,
+           s.label as source_label, s.id as source_id,
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
            d.day::text as day,
@@ -191,10 +201,78 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
   // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт
   // ожидаемый OID колонки. Если axes придёт строкой, карточка молча
   // покажет прочерк вместо каждого бейджа — отказ, который не заметен.
+  //
+  // Number обязателен, хотя тип и обещает число: id и source_id — bigint,
+  // и драйвер отдаёт их строкой. Сюжет карточки, разложенный по числовым
+  // ключам, не находился ни разу — ни ошибки, ни пустого места, строка
+  // «о том же написали» просто не появлялась. Приводим здесь, а не ::int
+  // в запросе: каст сузил бы bigint до int4 и однажды уронил бы всю ленту
+  // целиком, а глобальная подмена типа в драйвере уже ломала запись
+  // («to: 20 шлёт int8 в колонки int»).
   return rows.map((row) => ({
     ...row,
+    id: Number(row.id),
+    source_id: Number(row.source_id),
     axes: typeof row.axes === "string" ? JSON.parse(row.axes) : row.axes,
   }));
+}
+
+/**
+ * Сюжеты для карточек ленты: что ещё выходило про то же самое.
+ *
+ * Ключ сюжета — coalesce(dup_of, id): у оригинала это он сам, у повтора —
+ * его оригинал. Одним выражением, а не «оригинал или его повторы»: обе
+ * половины сюжета обязаны находиться одним условием, под индексом 0040.
+ *
+ * Читатель здесь не отдельным аргументом, а списком его источников — тем же,
+ * которым отбирается выпуск (`sourcesForPlan`). Это не послабление правила
+ * про reader_id, а его же исполнение: изоляцию даёт именно этот список,
+ * и взять его шире значило бы показать в «твоих источниках» чужие. Тариф
+ * в нём уже учтён — ссылка на источник, выключенный понижением тарифа,
+ * была бы предложением, на которое нельзя нажать.
+ *
+ * Один запрос на ленту, а не на карточку: сорок карточек — это сорок
+ * обращений, и заметно это станет не на владельце.
+ */
+export async function getStories(
+  sourceIds: number[],
+  itemIds: number[],
+): Promise<Map<number, Publication[]>> {
+  const stories = new Map<number, Publication[]>();
+  if (sourceIds.length === 0 || itemIds.length === 0) return stories;
+
+  const rows = await sql<(Publication & { card_id: number })[]>`
+    with cards as (
+      -- Каст обязателен: items.id — bigint, а нетипизированный массив
+      -- уходит в int и не совпадает ни с одной строкой.
+      select id, coalesce(dup_of, id) as story_id
+        from dailynews.items
+       where id = any(${itemIds}::bigint[])
+    )
+    select c.id as card_id,
+           p.id as item_id, p.url,
+           p.source_id as source_id, s.label as source_label, s.kind,
+           p.published_at, p.points
+      from cards c
+      join dailynews.items p on coalesce(p.dup_of, p.id) = c.story_id
+      join dailynews.sources s on s.id = p.source_id
+     where p.source_id = any(${sourceIds}::bigint[])
+     order by c.id, p.id
+  `;
+
+  // Number на границе, как и в ленте: bigint приезжает строкой, а ключом
+  // Map и слагаемым счётчика источников обязано быть число.
+  for (const { card_id, ...publication } of rows) {
+    const key = Number(card_id);
+    const story = stories.get(key) ?? [];
+    story.push({
+      ...publication,
+      item_id: Number(publication.item_id),
+      source_id: Number(publication.source_id),
+    });
+    stories.set(key, story);
+  }
+  return stories;
 }
 
 export type SummaryQualityRow = {
