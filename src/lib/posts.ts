@@ -1,5 +1,9 @@
 import { sql } from "./db";
 import type { Draft, PostSource } from "../../pipeline/post";
+import { canonUrl, normalizeTitle } from "../../pipeline/normalize";
+import { fetchArticle } from "../../pipeline/article";
+import { fetchTranscript, videoIdOf } from "../../pipeline/youtube";
+import { syntheticUrl, titleOf, type Drop } from "./drops";
 
 /**
  * Черновики постов: что предложили и что он взял.
@@ -109,4 +113,62 @@ export async function takenToday(readerId: number): Promise<number> {
        and taken_at >= date_trunc('day', now())
   `;
   return row?.n ?? 0;
+}
+
+/**
+ * Достать текст и завести материал. Возвращает то же, что `postSourceFor`
+ * для новости из выпуска, — дальше путь общий.
+ */
+export async function dropSourceFor(drop: Drop): Promise<PostSource> {
+  // Источник заводится здесь, а не миграцией: строка нового вида, лежащая
+  // в базе, ломает повторное применение миграций — 0026 заново вешает свой
+  // список видов, где `manual` ещё нет.
+  const [source] = await sql<{ id: number }[]>`
+    insert into dailynews.sources (kind, label, url, active)
+    values ('manual', 'Свои входы', 'manual://drops', false)
+    on conflict (kind, url) do update set label = excluded.label
+    returning id::int as id
+  `;
+
+  let title: string;
+  let excerpt: string;
+  let url: string;
+
+  if (drop.kind === "link") {
+    const article = await fetchArticle(drop.url);
+    if (!article.markdown) throw new Error("по ссылке не нашлось текста — пришли мысль словами");
+    title = article.title || drop.url;
+    excerpt = article.markdown;
+    url = drop.url;
+  } else if (drop.kind === "video") {
+    const id = videoIdOf(drop.url);
+    const transcript = id ? await fetchTranscript(id) : null;
+    if (!transcript?.text) throw new Error("субтитров у ролика нет — перескажи мысль словами");
+    title = drop.note || `Ролик ${id}`;
+    excerpt = transcript.text;
+    url = drop.url;
+  } else {
+    title = titleOf(drop.text);
+    excerpt = drop.text;
+    url = syntheticUrl(drop.kind, drop.text);
+  }
+
+  const note = "note" in drop && drop.note ? `\n\nПометка автора: ${drop.note}` : "";
+  const body = `${excerpt}${note}`.slice(0, 20_000);
+
+  const [item] = await sql<{ id: number }[]>`
+    insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt, published_at)
+    values (${source.id}, ${url}, ${canonUrl(url)}, ${title}, ${normalizeTitle(title)}, ${body}, now())
+    on conflict (url_canon) do update set excerpt = excluded.excerpt, title = excluded.title
+    returning id::int as id
+  `;
+
+  return {
+    id: item.id,
+    title,
+    summary: "",
+    excerpt: body,
+    url: drop.kind === "thought" || drop.kind === "post" ? "" : url,
+    source_label: drop.kind === "post" ? "Пересланный пост" : "Свои входы",
+  };
 }

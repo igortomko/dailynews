@@ -16,15 +16,24 @@
  * здесь не переживает сборку — падает не проверка, а сам запуск.
  */
 
-const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+/**
+ * Ботов два, и вебхук им ставится одним скриптом: отличаются они только
+ * именами переменных и адресом. Второй — `npm run postbot:webhook`.
+ */
+const postbot = process.argv[2] === "postbot";
+const names = postbot
+  ? { token: "POSTBOT_TOKEN", secret: "POSTBOT_WEBHOOK_SECRET", path: "/api/postbot" }
+  : { token: "TELEGRAM_BOT_TOKEN", secret: "TELEGRAM_WEBHOOK_SECRET", path: "/api/telegram" };
+
+const token = process.env[names.token]?.trim();
+const secret = process.env[names.secret]?.trim();
 const appUrl = process.env.APP_URL?.trim();
 
 if (!token || !secret || !appUrl) {
   console.error(
-    "Нужны TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET и APP_URL.\n" +
+    `Нужны ${names.token}, ${names.secret} и APP_URL.\n` +
     "Секрет — случайная строка; им подписан каждый запрос от Telegram:\n" +
-    "  npm run env:set TELEGRAM_WEBHOOK_SECRET",
+    `  npm run env:set ${names.secret}`,
   );
   process.exit(1);
 }
@@ -41,7 +50,7 @@ const api = async (method: string, body?: object) => {
   return payload.result;
 };
 
-const url = `${appUrl.replace(/\/$/, "")}/api/telegram`;
+const url = `${appUrl.replace(/\/$/, "")}${names.path}`;
 
 async function main() {
   await api("setWebhook", {

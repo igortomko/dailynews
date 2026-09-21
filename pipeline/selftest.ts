@@ -6,6 +6,7 @@
  *   npx tsx pipeline/selftest.ts
  */
 import assertStrict from "node:assert/strict";
+import { classifyDrop, titleOf } from "../src/lib/drops";
 
 /**
  * Утверждения считает сам файл, а не человек в конце.
@@ -2234,6 +2235,42 @@ for (const file of UI_FILES) {
   }
 }
 assert.deepEqual(apologyHits, [], `извинения вместо выхода:\n${apologyHits.join("\n")}`);
+
+// --- что бросили боту ---------------------------------------------------
+{
+  // Ссылка узнаётся по началу сообщения, а не по вхождению: абзац мысли
+  // со ссылкой в середине — это мысль, и пост по нему пишется про мысль.
+  assert.equal(classifyDrop("https://example.com/a", false)?.kind, "link", "голая ссылка");
+  assert.equal(
+    classifyDrop("https://www.youtube.com/watch?v=dQw4w9WgXcQ", false)?.kind,
+    "video",
+    "ролик отличается от статьи",
+  );
+  assert.equal(
+    classifyDrop("https://example.com/a заходи со стороны денег", false)?.kind,
+    "link",
+    "пометка после адреса не превращает ссылку в мысль",
+  );
+  const noted = classifyDrop("https://example.com/a заходи со стороны денег", false);
+  assert.equal(noted?.kind === "link" && noted.note, "заходи со стороны денег", "пометка сохраняется");
+  assert.equal(
+    classifyDrop("Меня третий день не отпускает мысль про https://example.com/a и вот почему", false)?.kind,
+    "thought",
+    "адрес в середине абзаца — это мысль, а не ссылка",
+  );
+  assert.equal(classifyDrop("https://example.com/a", true)?.kind, "post", "пересланное — всегда чужой пост");
+  assert.equal(classifyDrop("   ", false), null, "пустое сообщение ничего не заводит");
+  assert.equal(
+    classifyDrop("https://example.com/a).", false)?.kind === "link"
+      && (classifyDrop("https://example.com/a).", false) as { url: string }).url,
+    "https://example.com/a",
+    "хвостовая пунктуация в адрес не входит",
+  );
+
+  assert.equal(titleOf("Первая фраза. Вторая фраза."), "Первая фраза.", "заголовок мысли — её первая фраза");
+  assert.equal(titleOf("а".repeat(200)).length, 120, "длинная фраза режется до 120 знаков");
+  assert.equal(titleOf("   "), "Без заголовка", "пустая мысль всё равно получает заголовок");
+}
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
 

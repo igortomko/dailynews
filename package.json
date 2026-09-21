@@ -15,6 +15,7 @@
     "dry-run": "tsx --env-file=.env pipeline/dry-run.ts",
     "ping": "tsx --env-file=.env db/ping.ts",
     "bot:webhook": "tsx --env-file=.env scripts/set-webhook.ts",
+    "postbot:webhook": "tsx --env-file=.env scripts/set-webhook.ts postbot",
     "env:set": "tsx scripts/env-set.ts",
     "replay": "tsx --env-file=.env pipeline/prompt-replay.ts"
   },
