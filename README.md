@@ -33,7 +33,7 @@ Brand system v4: настоящие векторные логотип и зна�
 [Все 40 PNG](https://news.tomko.io/brand/reporta-illustrations.zip) ·
 [Сравнение шрифтов логотипа](https://news.tomko.io/brand/type-study/index.html).
 
-- `public/brand/logo-reporta.svg` — векторный логотип, Bodoni Moda 700 в контурах
+- `public/brand/logo-reporta.svg` — векторный логотип, Literata 650 в контурах
 - `public/brand/logo-reporta-approved-transparent.png` — прозрачная PNG-версия для макетов
 - `public/brand/logo-reporta-dark.svg` — прозрачная версия для тёмных поверхностей
 - `public/brand/mark-reporta.svg` / `public/brand/mark-reporta.png` — самостоятельный знак-змейка
@@ -43,8 +43,8 @@ Brand system v4: настоящие векторные логотип и зна�
 - `public/brand/tokens.css` — готовые CSS-токены
 - `public/brand/reporta-brand-kit.zip` — полный набор с локальными шрифтами
 
-Логотип: **Bodoni Moda 700**, кернинг шрифта, буквы переведены в кривые.
-Замена шрифта пока не утверждена; кандидат после сравнения — **DM Serif Display**.
+Логотип: пробуем **Literata 650, opsz 18**, кернинг шрифта, буквы в кривых.
+Рядом сохранены варианты 600 и 700, исходник и предыдущий Bodoni.
 Типографика: **Fraunces / Literata** для заголовков (латиница / кириллица),
 **Inter** для текста и интерфейса, **DM Mono / IBM Plex Mono** для метаданных.
 Шрифты, изображения и скрипты локальные: `public/brand/index.html` работает
