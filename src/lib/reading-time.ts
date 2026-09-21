@@ -101,12 +101,20 @@ export const cardChars = (title: string, summary: string | null | undefined): nu
  */
 const points = (text: string): number => [...text].length;
 
+/**
+ * Время выпуска целиком.
+ *
+ * Заголовок берётся из самого выпуска (`title_ru`), а не из материала:
+ * читатель читает наш, написанный его языком и его сложностью, и он же
+ * другой длины. Правило живёт здесь одно на всех, кто это время
+ * показывает, — лента и настройки иначе считали бы разное об одном выпуске.
+ */
 export const digestMinutes = (
-  cards: { title: string; summary: string | null }[],
+  cards: { title: string; title_ru?: string | null; summary: string | null }[],
   voice: Voice,
 ): number =>
   minutesOf(
-    cards.reduce((chars, card) => chars + cardChars(card.title, card.summary), 0),
+    cards.reduce((chars, card) => chars + cardChars(card.title_ru || card.title, card.summary), 0),
     voice,
   );
 

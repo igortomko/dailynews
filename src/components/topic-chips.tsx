@@ -9,9 +9,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import { READING_MINUTES, topicsWord, type Plan } from "@/lib/plans";
-import { itemsForMinutes } from "@/lib/reading-time";
-import { count } from "@/lib/plural";
+import { MIN_READING_MINUTES, READING_MINUTES, topicsWord, type Plan } from "@/lib/plans";
+import { formatMinutes, itemsForMinutes } from "@/lib/reading-time";
+import { count, plural } from "@/lib/plural";
 import { usePaywall, PaywallCrown } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,11 @@ export function TopicChips({
   // заказа, и вторая правда о нём разъехалась бы с первой на первой же смене
   // языка (описания по-английски короче, и в те же минуты их влезает больше).
   const places = itemsForMinutes(minutes, perCard, plan.maxItems);
+  // Потолок штук упёрся раньше времени: у короткой карточки в заказанные
+  // минуты влезло бы больше, чем тариф отдаёт. Молчать об этом нельзя —
+  // выпуск выходил бы короче заказа каждый день, и виноватым выглядел бы
+  // поток, а не наш предел.
+  const capped = minutes / perCard > plan.maxItems;
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
   // и без приведения полоса показывала бы не тот выпуск, который придёт.
   const [chips, setChipsState] = useState<ChipInput[]>(() =>
@@ -63,7 +68,7 @@ export function TopicChips({
   const setCounts = (counts: number[]) => setChips(withCounts(chips, counts));
 
   const setMinutes = (next: number) => {
-    const asked = Math.min(plan.maxMinutes, Math.max(READING_MINUTES[0], next));
+    const asked = Math.min(plan.maxMinutes, Math.max(MIN_READING_MINUTES, next));
     setMinutesState(asked);
     setChips(withCounts(
       chips,
@@ -199,7 +204,7 @@ export function TopicChips({
               <ToggleGroupItem
                 key={size}
                 value={String(size)}
-                aria-label={`${size} минут`}
+                aria-label={`${size} ${plural(size, "минута", "минуты", "минут")}`}
                 aria-disabled={beyond || undefined}
                 className={beyond ? "text-muted-foreground/50" : undefined}
               >
@@ -214,8 +219,10 @@ export function TopicChips({
             подписью к времени, а не вместо него. */}
         <FieldDescription>
           Примерно {count(places, "новость", "новости", "новостей")} — столько
-          помещается в это время. Меньше будет только в день, когда важного
-          действительно меньше.
+          помещается в это время.{" "}
+          {capped
+            ? `На тарифе «${plan.label}» в выпуск попадает не больше ${plan.maxItems}: это ${formatMinutes(places * perCard)}.`
+            : "Меньше будет только в день, когда важного действительно меньше."}
         </FieldDescription>
         <input type="hidden" name="digest_minutes" value={minutes} />
       </Field>

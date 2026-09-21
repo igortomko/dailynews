@@ -1,6 +1,8 @@
 import { sql } from "./db";
 import type { Reader, ReaderChannel, ReaderTopic, Source, Topic, VoiceCardRow } from "./types";
 import { kindleSenderName } from "./kindle-setup";
+import { effectiveVoice } from "./lemon";
+import { cardMinutes } from "./reading-time";
 
 /**
  * Всё, что знает о читателях. Живёт отдельно от queries.ts, потому что нужно
@@ -148,6 +150,19 @@ export async function ensureReader(
     return (await getReader(reader.id)) ?? reader;
   }
   return reader;
+}
+
+/**
+ * Мерка этого читателя в минутах: сколько времени занимает его карточка.
+ *
+ * Ею и прогон, и догрузка, и форма интересов переводят заказанные минуты
+ * в число мест. Одной функцией, потому что зовётся она из трёх мест,
+ * а собрана из двух личных вещей — его описаний и его голоса: три копии
+ * этой сборки разъехались бы молча, и заказ считался бы по-разному
+ * в форме и в прогоне.
+ */
+export async function perCardOf(reader: Reader): Promise<number> {
+  return cardMinutes(await cardCharsOf(reader.id), effectiveVoice(reader));
 }
 
 /**

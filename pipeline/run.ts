@@ -1,8 +1,8 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
 import {
-  allReaders, cardCharsOf, digestProgress, getReaderTopics, lastActivityAt, pauseReader,
-  pendingKindleAsks, readerSources, recordCall, spentToday, topicsInUse, wakeReader,
+  allReaders, digestProgress, getReaderTopics, lastActivityAt, pauseReader,
+  pendingKindleAsks, perCardOf, readerSources, recordCall, spentToday, topicsInUse, wakeReader,
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -19,9 +19,9 @@ import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoI
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { issuesToday, minutesCap, sourcesForPlan } from "../src/lib/plans";
+import { issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
 import {
-  cardChars, cardMinutes, formatMinutes, isShort, itemsForMinutes, minutesOf,
+  cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf,
 } from "../src/lib/reading-time";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
@@ -245,8 +245,9 @@ async function runForReader(
   // Потолок тарифа поверх заказа: digest_minutes мог остаться от прежнего
   // тарифа, а платит за письмо описаний владелец ключа. Тот же потолок
   // стоит на догрузке из интерфейса — иначе он обходился бы кнопкой.
-  const targetMinutes = minutesCap(reader.digest_minutes, plan);
   const voice = effectiveVoice(reader);
+  const perCard = await perCardOf(reader);
+  const target = targetMinutes(reader.digest_minutes, plan, perCard);
 
   // Сколько уже лежит в сегодняшнем выпуске. Состав дописывается, а не
   // заменяется: прочитанное утром не должно исчезать из ленты. Но без этого
@@ -257,10 +258,9 @@ async function runForReader(
   // Набранное вычитается настоящим текстом, а не оценкой: описания уже
   // написаны, и мерить их приблизительно незачем.
   const today = await digestProgress(reader.id, day);
-  const leftMinutes = targetMinutes - minutesOf(today.chars, voice);
   const missing = itemsForMinutes(
-    leftMinutes,
-    cardMinutes(await cardCharsOf(reader.id), voice),
+    target - minutesOf(today.chars, voice),
+    perCard,
     // Технический потолок тарифа: оценка «сколько карточек в минуту»
     // промахивается, и без него промах оплачивался бы карточками.
     plan.maxItems - today.items,
@@ -268,7 +268,7 @@ async function runForReader(
   if (missing <= 0) {
     log(
       `  ${name}: выпуск за ${day} набран (${formatMinutes(minutesOf(today.chars, voice))} ` +
-      `из ${targetMinutes}, ${today.items} материалов) — пропуск`,
+      `из ${Math.round(target)}, ${today.items} материалов) — пропуск`,
     );
     return 0;
   }
@@ -373,7 +373,7 @@ async function runForReader(
         long_word_share: Number(longShare.toFixed(3)),
         // Заказ и то, что вышло, — рядом: обещание, которого никто не мерит,
         // расходится с выпуском молча, и узнаётся это от читателя.
-        reading_target: targetMinutes,
+        reading_target: Number(target.toFixed(1)),
         reading_minutes: Number(minutes.toFixed(1)),
         // Что на самом деле ушло в провайдера: модель выводит writeDigest,
         // своя копия резолюции разошлась бы с ней на пустой строке.
@@ -419,7 +419,7 @@ async function runForReader(
   }
 
   log(
-    `  ${name}: ${formatMinutes(minutes)} из ${targetMinutes} заказанных, ` +
+    `  ${name}: ${formatMinutes(minutes)} из ${Math.round(target)} заказанных, ` +
     `${survivors.length} материалов, ` +
     (meanQuality === null
       ? "качество не меряли (промпт один на всех), "
@@ -440,11 +440,11 @@ async function runForReader(
   // слабого материала, потолок штук тарифа, бедный поток), и угаданная
   // отправит чинить не то: строка, объясняющая недобор, не должна сама
   // быть догадкой.
-  if (isShort(minutes, targetMinutes)) {
+  if (isShort(minutes, target)) {
     log(`    недобор: подходящего меньше, чем заказано`);
   }
 
-  await deliver(reader, day, digest.intro, survivors, writtenById, name, { minutes, target: targetMinutes });
+  await deliver(reader, day, digest.intro, survivors, writtenById, name, { minutes, target });
   return digestCost + qualityCost;
 }
 

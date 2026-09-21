@@ -13,8 +13,8 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, cardCharsOf, deleteChannel, digestProgress, freezeKindleSender, getChannels,
-  getReader, getReaderTopics, readerSources, recordCall, saveChannel, saveVoiceCard,
+  addReaderSource, deleteChannel, digestProgress, freezeKindleSender, getChannels,
+  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveVoiceCard,
   saveVoiceSample, spentToday,
 } from "./readers";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
@@ -25,10 +25,10 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, kindDenial, minutesCap, READING_MINUTES, sourcesForPlan,
-  topicsWord, type Gated,
+  allows, cheapestWith, kindDenial, MIN_READING_MINUTES, minutesCap, READING_MINUTES,
+  sourcesForPlan, targetMinutes, topicsWord, type Gated,
 } from "./plans";
-import { cardChars, cardMinutes, itemsForMinutes, minutesOf } from "./reading-time";
+import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { toSlug } from "./slug";
 import { starterBySlug } from "./starter-topics";
@@ -141,7 +141,7 @@ export async function saveInterests(formData: FormData) {
   // форму рисует браузер, а платит за лишние описания владелец ключа.
   const minutes = minutesCap(
     Math.max(
-      READING_MINUTES[0],
+      MIN_READING_MINUTES,
       Math.round(Number(formData.get("digest_minutes"))) || READING_MINUTES[0],
     ),
     plan,
@@ -149,9 +149,7 @@ export async function saveInterests(formData: FormData) {
   // Цели тем считаются в материалах, а заказ — в минутах. Перевод один
   // и тот же, что в прогоне: мерка берётся из уже написанных описаний
   // этого читателя, и полоса делит ровно то число мест, которое придёт.
-  const places = itemsForMinutes(
-    minutes, cardMinutes(await cardCharsOf(readerId), effectiveVoice(reader)), plan.maxItems,
-  );
+  const places = itemsForMinutes(minutes, await perCardOf(reader), plan.maxItems);
   // Приводим ещё раз на сервере: из формы приходит то, что нарисовал
   // браузер, а сумма целей — это и есть деление выпуска между темами.
   const counts = normalize(
@@ -556,10 +554,11 @@ async function fillDigest(reader: Reader) {
   // описаний владелец ключа. Потолок один и тот же, что и в прогоне.
   const plan = effectivePlan(reader);
   const voice = effectiveVoice(reader);
-  const target = minutesCap(reader.digest_minutes, plan);
+  const perCard = await perCardOf(reader);
+  const target = targetMinutes(reader.digest_minutes, plan, perCard);
   const missing = itemsForMinutes(
     target - minutesOf(existing.chars, voice),
-    cardMinutes(await cardCharsOf(reader.id), voice),
+    perCard,
     plan.maxItems - existing.items,
   );
   if (missing <= 0) return { ok: true as const, added: 0 };
@@ -668,7 +667,8 @@ async function fillDigest(reader: Reader) {
     // «сегодня больше нечего» на каждом старом выпуске, который был полон.
     await tx`
       update dailynews.digests
-         set stats = coalesce(stats, '{}'::jsonb) || jsonb_build_object('reading_target', ${target})
+         set stats = coalesce(stats, '{}'::jsonb)
+                   || jsonb_build_object('reading_target', ${Number(target.toFixed(1))})
        where id = ${digestId}
     `;
 
@@ -964,9 +964,7 @@ export async function saveOnboardingInterests(slugs: string[], custom: string[])
   // Заказ по умолчанию — потолок тарифа: на первом экране это третье решение
   // подряд, а тариф и так знает своё время. Поменять можно в «Интересах».
   const minutes = plan.maxMinutes;
-  const places = itemsForMinutes(
-    minutes, cardMinutes(await cardCharsOf(reader.id), effectiveVoice(reader)), plan.maxItems,
-  );
+  const places = itemsForMinutes(minutes, await perCardOf(reader), plan.maxItems);
   await writeTopics(
     reader.id,
     chips,

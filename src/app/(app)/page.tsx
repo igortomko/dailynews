@@ -87,10 +87,7 @@ export default async function FeedPage({
 
   // Время считается по тому же тексту, который читатель и читает: заголовок
   // и описание из выпуска, а не статья за ссылкой.
-  const minutes = digestMinutes(
-    items.map((item) => ({ title: item.title_ru ?? item.title, summary: item.summary })),
-    effectiveVoice(reader),
-  );
+  const minutes = digestMinutes(items, effectiveVoice(reader));
 
   return (
     <FeedTabs

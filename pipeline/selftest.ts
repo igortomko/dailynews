@@ -977,7 +977,9 @@ assert.equal(
 // Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
 // им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
 // решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
-import { PLAN_IDS, PLANS, kindDenial, planOf, sourcesForPlan } from "../src/lib/plans";
+import {
+  PLAN_IDS, PLANS, kindDenial, planOf, sourcesForPlan, targetMinutes,
+} from "../src/lib/plans";
 import type { Source } from "../src/lib/types";
 
 assert.equal(planOf("pro").id, "pro", "известный тариф читается как он сам");
@@ -990,17 +992,34 @@ assert.ok(
   PLANS.free.maxMinutes < PLANS.plus.maxMinutes && PLANS.plus.maxMinutes < PLANS.pro.maxMinutes,
   "время выпуска должно расти с тарифом",
 );
-// Потолок штук — предохранитель под обещанием, а не вместо него. Окажись он
-// ниже заказанного времени больше чем на минуту — и строка «сегодня больше
-// действительно важного нет» загоралась бы каждый день у всех, то есть
-// перестала бы означать что-либо, кроме «тариф врёт».
+// Цель дня прижимается обоими потолками тарифа. Карточка бывает короче
+// медианы — свой язык, своя сложность, — и тогда потолок штук упирается
+// раньше времени. Сравнивай набранное с необрезанным заказом, и строка
+// «сегодня больше действительно важного нет» горела бы у такого читателя
+// каждый день, объясняя наш собственный предел тишиной в потоке.
 for (const id of PLAN_IDS) {
   const p = PLANS[id];
-  const fits = minutesOfChars(p.maxItems * CARD_CHARS);
+  for (const per of [perCard, perCard * 0.7, perCard * 1.4]) {
+    const target = targetMinutes(p.maxMinutes, p, per);
+    assert.ok(
+      target <= p.maxItems * per + 1e-9,
+      `на тарифе «${p.label}» цель ${target.toFixed(1)} мин выше того, ` +
+      `что отдают ${p.maxItems} карточек по ${(per * 60).toFixed(0)} с`,
+    );
+    assert.ok(target <= p.maxMinutes, `цель не должна превышать потолок тарифа «${p.label}»`);
+  }
+}
+
+// А сама калибровка тарифа: на медианной карточке потолок штук обязан
+// отдавать почти всё обещанное время. Иначе «до 20 минут» — это цена
+// за число карточек, названное минутами.
+for (const id of PLAN_IDS) {
+  const p = PLANS[id];
+  const share = minutesOfChars(p.maxItems * CARD_CHARS) / p.maxMinutes;
   assert.ok(
-    !isShort(fits, p.maxMinutes),
-    `на тарифе «${p.label}» потолок в ${p.maxItems} карточек даёт ${fits.toFixed(1)} мин ` +
-    `при обещанных ${p.maxMinutes}: недобор виден читателю каждый день`,
+    share >= 0.8,
+    `на тарифе «${p.label}» потолок в ${p.maxItems} карточек отдаёт лишь ` +
+    `${Math.round(share * 100)}% обещанных ${p.maxMinutes} минут`,
   );
 }
 
