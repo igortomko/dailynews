@@ -36,6 +36,10 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
+import {
+  applySpoken, byLetters, chunks, latinRuns, spelledOut, spokenMap, unknownRuns,
+  voiceFor, voiceForText,
+} from "../src/lib/speech";
 import { numberCollisions } from "../db/schema-gap";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
@@ -2681,6 +2685,103 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
   assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
   assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
+}
+
+// --- произношение латиницы в русском тексте -----------------------------------
+{
+  // Дефис клеит латиницу с латиницей и останавливается на кириллице.
+  assert.deepEqual(latinRuns("ZETA станет SPL-токеном"), ["ZETA", "SPL"]);
+  assert.deepEqual(latinRuns("Модель Qwen 3.5 в режиме x-High"), ["Qwen", "x-High"]);
+  assert.deepEqual(latinRuns("лотерея H-2B и виза"), ["H-2B"]);
+
+  // Один и тот же термин спрашивается один раз, сколько бы раз ни повторился.
+  assert.deepEqual(
+    latinRuns("Google купил Google, а Gemini остался у Google"),
+    ["Google", "Gemini"],
+    "повтор термина не удваивает вопрос к модели",
+  );
+
+  // По буквам читается то, что иначе не произнести, и то, что всё заглавными.
+  assert.equal(spelledOut("VHDL"), true, "нет гласных — только по буквам");
+  assert.equal(spelledOut("SPL"), true);
+  assert.equal(spelledOut("API"), true, "всё заглавными читается по буквам");
+  assert.equal(spelledOut("Gemini"), false);
+  assert.equal(spelledOut("Google"), false);
+
+  assert.equal(byLetters("VHDL"), "ви-эйч-ди-эль");
+  assert.equal(byLetters("GPU"), "джи-пи-ю");
+
+  // Подстановка идёт одним проходом по тем же кускам: `AI` лежит внутри
+  // `OpenAI`, и замена по подстроке испортила бы уже разобранное слово.
+  const map = new Map([["openai", "оупен-эй-ай"], ["ai", "эй-ай"]]);
+  assert.equal(
+    applySpoken("OpenAI и AI", map),
+    "оупен-эй-ай и эй-ай",
+    "внутренность длинного термина не переписывается",
+  );
+
+  // Чего не знаем — оставляем как есть. Выдуманное произношение звучит
+  // уверенно и неправильно, пропущенное — просто плохо.
+  assert.equal(applySpoken("Datasette вышел", new Map()), "Datasette вышел");
+
+  // Русский хвост остаётся русским: заменяется кусок, а не слово с падежом.
+  assert.equal(
+    applySpoken("станет SPL-токеном", new Map([["spl", "эс-пи-эль"]])),
+    "станет эс-пи-эль-токеном",
+  );
+
+  // Читаемое по буквам известно из кода — у модели про него не спрашивают.
+  const known = spokenMap("Процессор на VHDL и GPU, модель Datasette");
+  assert.equal(known.get("vhdl"), "ви-эйч-ди-эль");
+  assert.deepEqual(
+    unknownRuns("Процессор на VHDL и GPU, модель Datasette", known),
+    ["Datasette"],
+    "спрашиваем только то, чего не решает правило",
+  );
+
+  // Накопленное в базе перекрывает затравку: словарь правится данными.
+  const learned = spokenMap("Google", { Google: "гуугл" });
+  assert.equal(learned.get("google"), "гуугл");
+}
+
+// --- резка текста под движок озвучки -------------------------------------------
+{
+  // Режем по предложениям: разрыв посреди слова движок читает двумя
+  // обрубками, и это слышно.
+  const text = "Первое предложение. Второе предложение! Третье? Четвёртое.";
+  assert.deepEqual(chunks(text, 25), [
+    "Первое предложение.",
+    "Второе предложение!",
+    "Третье? Четвёртое.",
+  ]);
+
+  // Предложение длиннее куска уезжает целиком: длинный запрос лучше
+  // разорванной фразы.
+  const long = "а".repeat(60) + ".";
+  assert.deepEqual(chunks(long, 25), [long], "длинное предложение не рубится");
+
+  // Ничего не теряется и не дублируется.
+  const article = Array.from({ length: 40 }, (_, i) => `Фраза номер ${i}.`).join(" ");
+  const parts = chunks(article, 100);
+  assert.equal(parts.join(" "), article, "склейка кусков равна исходнику");
+  assert.ok(parts.length > 1, "длинный текст действительно поделился");
+  for (const part of parts) assert.ok(part.length <= 100 || !part.includes(" ") || part.split(/(?<=[.!?…])\s+/).length === 1);
+
+  // Голос без перевода выбирается по письменности, а не по языку читателя:
+  // языка оригинала в `items` нет вовсе.
+  assert.ok(voiceForText("Первая строка новости про рынок").startsWith("ru-"));
+  assert.ok(voiceForText("The diesel price hit a record high").startsWith("en-"));
+  assert.ok(
+    voiceForText("Google подтвердил, что Gemini забрался в системы").startsWith("ru-"),
+    "русская фраза с английскими названиями остаётся русской",
+  );
+
+  // Язык читателя — те же строки, что в селекте. Разъезд списков означал бы
+  // язык, который есть в настройках и молча не озвучивается.
+  for (const language of LANGUAGES) {
+    if (language === SOURCE_LANGUAGE) continue;
+    assert.ok(voiceFor(language), `нет голоса для языка «${language}»`);
+  }
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

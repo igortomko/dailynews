@@ -171,7 +171,7 @@ export type CallRecord = {
     | "dedup"
     // Карточка автора и пост — такие же оплаченные вызовы, и потолок
     // читателя считается по той же таблице.
-    | "voice" | "post" | "post-quality";
+    | "voice" | "post" | "post-quality" | "spoken-terms";
   model: string;
   tokensIn: number;
   tokensOut?: number;

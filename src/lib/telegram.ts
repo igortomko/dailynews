@@ -194,6 +194,83 @@ export async function sendMessage(chatId: number, text: string): Promise<void> {
 }
 
 /**
+ * Отправить озвучку.
+ *
+ * Telegram здесь и хранилище, и плеер: своего хранилища у продукта нет,
+ * а заводить его ради mp3 дороже, чем не заводить. Первая отправка льёт
+ * файл и возвращает `file_id`; по нему та же статья уходит второму
+ * читателю мгновенно и не весит ни байта трафика.
+ *
+ * Заливка идёт multipart, а пересылка по `file_id` — обычным JSON: это
+ * два разных запроса к одному методу, и различает их тип аргумента,
+ * а не флаг.
+ */
+export async function sendAudio(
+  chatId: number,
+  audio: Buffer | string,
+  meta: { title: string; duration?: number; caption?: string },
+): Promise<{ fileId: string; messageId: number }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
+
+  const fields: Record<string, string> = {
+    chat_id: String(chatId),
+    // Telegram режет заголовок сам, но молча: длинное имя приедет
+    // обрезанным без следа в ответе.
+    title: meta.title.slice(0, 120),
+    performer: "Retorta",
+  };
+  if (meta.duration) fields.duration = String(Math.round(meta.duration));
+  if (meta.caption) {
+    fields.caption = meta.caption.slice(0, 1000);
+    fields.parse_mode = "HTML";
+  }
+
+  let res: Response;
+  if (typeof audio === "string") {
+    res = await fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...fields, audio }),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } else {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    form.append(
+      "audio",
+      new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }),
+      `${slugOf(meta.title)}.mp3`,
+    );
+    res = await fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
+      method: "POST",
+      body: form,
+      // Заливка пяти мегабайт с общей машины бывает и минутой.
+      signal: AbortSignal.timeout(180_000),
+    });
+  }
+
+  if (!res.ok) {
+    throw new Error(`Telegram HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+  const body = (await res.json()) as {
+    ok: boolean;
+    description?: string;
+    result?: { message_id: number; audio?: { file_id: string } };
+  };
+  // `ok: false` приезжает с кодом 200, и без этой проверки отказ Telegram
+  // выглядел бы как успешная отправка с пустым file_id.
+  if (!body.ok || !body.result?.audio?.file_id) {
+    throw new Error(`Telegram отказал: ${body.description ?? "нет file_id в ответе"}`);
+  }
+  return { fileId: body.result.audio.file_id, messageId: body.result.message_id };
+}
+
+/** Имя файла для Telegram: кириллицу он принимает, а служебные знаки — нет. */
+const slugOf = (title: string) =>
+  title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 60) || "audio";
+
+/**
  * Спросить, дочитал ли он то, что уехало на читалку.
  *
  * Это единственная петля измерения вокруг отправки: Amazon обратно

@@ -1138,12 +1138,66 @@ async function main() {
 
     // Оплаченные этапы обязаны проходить ограничение: этап, которого нет
     // в check, уронил бы запись расхода — а с ней и ответ, уже оплаченный.
-    for (const stage of ["voice", "post", "post-quality"] as const) {
+    for (const stage of ["voice", "post", "post-quality", "spoken-terms"] as const) {
       await readers.recordCall({
         readerId: owner.id, stage, model: "deepseek-flash", tokensIn: 10, tokensOut: 5, costUsd: 0,
       });
     }
-    console.log("  расход: этапы voice, post и post-quality принимаются");
+    console.log("  расход: этапы voice, post, post-quality и spoken-terms принимаются");
+
+    // Озвучка: аудио общее по языку, квота — личная.
+    //
+    // Ключ `item_audio` — материал и язык, а не материал и читатель:
+    // озвучивается перевод, а он уже общий по той же паре. Добавь сюда
+    // читателя — и второй платил бы синтезом за то, что уже синтезировано.
+    // А `audio_sends` наоборот: без `reader_id` в счёте квота считалась бы
+    // по всей ленте, и сосед закрывал бы день тому, кто не слушал ничего.
+    const [firstItem] = await sql<{ id: number }[]>`
+      select id from dailynews.items order by id limit 1
+    `;
+    await sql`
+      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+      values (${firstItem.id}, 'русском', 'AgADfake', 600, 'ru-RU-SvetlanaNeural')
+    `;
+    const [oneVoice] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.item_audio
+       where item_id = ${firstItem.id} and language = 'русском'
+    `;
+    assert.equal(oneVoice.n, 1, "одна озвучка на язык, а не на читателя");
+
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 600, 'sent')
+    `;
+    const listened = async (readerId: number) => {
+      const [row] = await sql<{ total: number }[]>`
+        select coalesce(sum(seconds), 0)::int as total
+          from dailynews.audio_sends
+         where reader_id = ${readerId}
+           and status in ('queued', 'translating', 'speaking', 'sending', 'sent')
+           and at > now() - interval '1 day'
+      `;
+      return row.total;
+    };
+    assert.equal(await listened(owner.id), 600, "наслушанное считается по читателю");
+    assert.equal(await listened(second.id), 0, "сосед не тратит чужую квоту");
+
+    // Отказ снимает секунды: неудавшаяся озвучка не имеет права съесть
+    // день читателю, который так ничего и не услышал.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status, error)
+      values (${owner.id}, ${firstItem.id}, 0, 'failed', 'движок молчит')
+    `;
+    assert.equal(await listened(owner.id), 600, "провалившаяся озвучка квоту не тратит");
+
+    // Шаг — состояние той же строки, и выдуманного шага не бывает.
+    await rejects(
+      `insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+       values (${owner.id}, ${firstItem.id}, 1, 'напеваю')`,
+      /audio_sends_status_check/,
+      "выдуманный шаг озвучки отвергается",
+    );
+    console.log("  озвучка: аудио общее по языку, квота и шаги — по читателю");
 
     // --- список колонок читателя не должен отставать от таблицы ------------
     //

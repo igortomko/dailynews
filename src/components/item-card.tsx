@@ -11,6 +11,7 @@ import {
   PenLineIcon,
   CrownIcon,
   ChevronDownIcon,
+  HeadphonesIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
@@ -127,6 +128,7 @@ export function ItemCard({
   // индекса и честно об этом говорит.
   // Начальное состояние приходит из базы, а не всегда «ещё не отправляли»:
   // отправка идёт минуту, и перезагрузка посреди неё стирала весь след.
+  const [audio, setAudio] = useState<"idle" | "working" | "sent">("idle");
   const [kindle, setKindle] = useState<"idle" | "sending" | "sent">(
     item.kindled ? "sent" : "idle",
   );
@@ -204,6 +206,70 @@ export function ItemCard({
 
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
+  const canListen = FEATURES.audio.has(plan);
+  const audioPaywall = usePaywall("audio", plan);
+
+  /**
+   * Озвучка идёт минутами, поэтому шаг спрашивается, а не угадывается.
+   * Проценты рисовать нечем: перевод занимает минуту, синтез — десятки
+   * секунд, и «43%» о них не говорит ничего, а «перевожу» говорит всё.
+   */
+  const speak = async () => {
+    if (!canListen) {
+      audioPaywall.open();
+      return;
+    }
+    setAudio("working");
+    const toastId = toast.loading("Готовлю озвучку…");
+    try {
+      const res = await fetch("/api/audio", {
+        method: "POST",
+        body: JSON.stringify({ item_id: item.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? "Не получилось озвучить — попробуй ещё раз");
+
+      const WORDS: Record<string, string> = {
+        queued: "Встала в очередь…",
+        translating: "Перевожу статью…",
+        speaking: "Читаю вслух…",
+        sending: "Отправляю в Telegram…",
+      };
+      // Опрос, а не сокет: одна кнопка на карточку и минуты работы —
+      // держать соединение ради четырёх слов дороже, чем спросить раз
+      // в две секунды.
+      for (let i = 0; i < 150; i++) {
+        await new Promise((done) => setTimeout(done, 2000));
+        const tick = await fetch(`/api/audio?send_id=${body.send_id}`);
+        const state = await tick.json().catch(() => ({}));
+        if (state.status === "sent") {
+          setAudio("sent");
+          toast.success("Озвучка в Telegram", {
+            id: toastId,
+            description: `${Math.max(1, Math.round((state.seconds ?? 0) / 60))} мин — открой чат с ботом`,
+          });
+          return;
+        }
+        if (state.status === "failed") {
+          throw new Error(state.error ?? "Не получилось озвучить — попробуй ещё раз");
+        }
+        if (WORDS[state.status]) toast.loading(WORDS[state.status], { id: toastId });
+      }
+      // Пять минут без ответа — это не «ещё чуть-чуть». Молчащий спиннер
+      // читается как поломка, и лучше сказать правду: работа идёт, а мы
+      // перестали ждать.
+      toast.info("Озвучка ещё готовится", {
+        id: toastId,
+        description: "Придёт в Telegram, когда будет готова",
+      });
+      setAudio("idle");
+    } catch (error) {
+      setAudio("idle");
+      toast.error(error instanceof Error ? error.message : "Не получилось озвучить", {
+        id: toastId,
+      });
+    }
+  };
 
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
@@ -367,6 +433,24 @@ export function ItemCard({
                 {canPost ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem
+                disabled={audio === "working"}
+                onClick={audio === "working" ? undefined : speak}
+              >
+                {audio === "working" ? (
+                  <Spinner />
+                ) : audio === "sent" ? (
+                  <CheckIcon />
+                ) : (
+                  <HeadphonesIcon />
+                )}
+                {audio === "working"
+                  ? "Озвучиваю…"
+                  : audio === "sent"
+                    ? "Уже в Telegram"
+                    : "Озвучить"}
+                {canListen ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 disabled={kindle !== "idle"}
                 onClick={kindle === "idle" ? sendToKindle : undefined}
               >
@@ -448,6 +532,34 @@ export function ItemCard({
             </TooltipTrigger>
             <TooltipContent>
               {canPost ? "Пост твоим голосом для твоих сетей" : "Своё мнение — на тарифе «Pro»"}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Озвучить статью"
+                  aria-disabled={audio === "working"}
+                  onClick={audio === "working" ? undefined : speak}
+                  className={cn(
+                    "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
+                    audio === "idle"
+                      ? "cursor-pointer text-muted-foreground/50"
+                      : "text-foreground",
+                  )}
+                />
+              }
+            >
+              <span className="relative flex size-3.5 items-center justify-center">
+                <Spinner className={cn("absolute", swap(audio === "working"))} />
+                <CheckIcon className={cn("absolute", swap(audio === "sent"))} />
+                <HeadphonesIcon className={swap(audio === "idle")} />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {canListen ? "Слушать статью в Telegram" : "Озвучка — на тарифе «Pro»"}
             </TooltipContent>
           </Tooltip>
 
@@ -659,6 +771,7 @@ export function ItemCard({
       </div>
 
       {paywall.dialog}
+      {audioPaywall.dialog}
       {/* Мотатка монтируется только после нажатия: она пишет пост при открытии,
           и держать её на каждой карточке значило бы сорок запросов на ленту. */}
       {opinion ? (
