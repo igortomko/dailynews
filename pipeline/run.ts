@@ -307,7 +307,9 @@ async function runForReader(
   });
 
   const digest = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
+  const published = survivors.filter(item => !digest.excludedIds?.includes(item.id));
   const digestCost = llmCost(digest.usage);
+  if (!published.length) { log(`  ${name}: полный текст исключён личными правилами; пустой выпуск не создаётся`); return digestCost; }
   if (!digest.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
     tokensIn: digest.usage.input, tokensOut: digest.usage.output, costUsd: digestCost,
@@ -353,7 +355,7 @@ async function runForReader(
    */
   const minutes = minutesOf(
     today.chars +
-      survivors.reduce((chars, survivor) => {
+      published.reduce((chars, survivor) => {
         const text = writtenById.get(String(survivor.id));
         return chars + cardChars(text?.title_ru ?? survivor.title, text?.summary ?? "");
       }, 0),
@@ -411,7 +413,7 @@ async function runForReader(
 
   const qualityById = new Map((quality?.scored ?? []).map((q) => [String(q.item_id), q]));
 
-  for (const [index, survivor] of survivors.entries()) {
+  for (const [index, survivor] of published.entries()) {
     const written = writtenById.get(String(survivor.id));
     const scored = qualityById.get(String(survivor.id));
     // Текст пишется сюда, а не в items: язык, сложность и манера персональны,
@@ -436,7 +438,7 @@ async function runForReader(
 
   log(
     `  ${name}: ${formatMinutes(minutes)} из ${Math.round(target)} заказанных, ` +
-    `${survivors.length} материалов, ` +
+    `${published.length} материалов, ` +
     (meanQuality === null
       ? (reader.reading_v2_enabled ? "выжимки сверены с доступным источником, " : "качество не меряли (промпт один на всех), ")
       : `качество ${meanQuality.toFixed(0)} из 85 по ${quality?.scored.length} описаниям, `) +
@@ -460,7 +462,7 @@ async function runForReader(
     log(`    недобор: подходящего меньше, чем заказано`);
   }
 
-  await deliver(reader, day, digest.intro, survivors, writtenById, name, { minutes, target });
+  await deliver(reader, day, digest.intro, published, writtenById, name, { minutes, target });
   return digestCost + qualityCost;
 }
 

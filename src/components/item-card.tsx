@@ -211,7 +211,7 @@ export function ItemCard({
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
   const reading = parseStoredReading(item.summary_document);
   const seconds = reading ? reading.seconds : cardChars(item.title_ru || item.title, item.summary) / DEFAULT_CHARS_PER_MINUTE * 60;
-  const minutes = seconds > 0 ? summaryTime(seconds) : null;
+  const minutes = seconds > 0 ? summaryTime(seconds, t.feed.time) : null;
   const others = otherSources(item.story, item.source_id);
   const lines = others > 0 ? storyLines(item.story, t.feed.story) : [];
 
@@ -641,7 +641,7 @@ export function ItemCard({
             </a>
           </h3>
 
-          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} /></div> : item.summary ? (
+          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : item.summary ? (
             <p
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст

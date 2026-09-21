@@ -47,13 +47,17 @@
     "Structured reading pipeline, safe renderer, additive schema, reader-scoped caching and shared budget protocol implemented.",
     "Independent code review findings fixed and rechecked statically.",
     "1174 legacy checks and reading-specific checks pass; local PostgreSQL verification and webpack production build passed before final editorial changes.",
-    "Live replays exposed overlong summaries and false validator rejection in reasoning-disabled provider mode; source-span anchors, bounded lengths and mixed reasoning introduced."
+    "Live replays exposed overlong summaries and false validator rejection in reasoning-disabled provider mode; source-span anchors, bounded lengths and mixed reasoning introduced.",
+    "Merged current main UI/i18n/performance and deployed reader-rules branch without dropping either.",
+    "Repeated live v2.9 replay: 8/8 source-consistency checks, 28 calls, $0.0894. Editorial limits documented.",
+    "Independent review findings closed, including bounded concurrency, full-source exclusions, retained rewrite reporting and empty-edition guard."
   ],
   "evidence": [
-    "Desktop and 390px layout inspected in the real ItemCard renderer; metadata overlap corrected.",
-    "Final repeated live replay of four articles is in progress; production not modified."
+    "1243 legacy assertions plus reading tests pass; PostgreSQL budget/cache/exclusion checks pass.",
+    "Browser inspected at 1280 and 390px, no overflow; temporary QA route removed and viewport reset.",
+    "Live replay prose-only distribution and remaining technical wording are documented, not represented as measured comprehension gains."
   ],
-  "nextStep": "Validate final live outputs and latest checks, then commit, migrate, deploy and rewrite the owner edition within the saved daily cap.",
+  "nextStep": "Confirm final build, commit, push/merge, migrate, deploy and rewrite current owner edition within the saved daily cap.",
   "completionClaimed": false,
   "contextComplete": true,
   "artifacts": [

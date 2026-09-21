@@ -43,6 +43,8 @@ assert.equal(typography('на 5 км'), 'на\u00a05\u00a0км');
 assert.equal(typography('и в статье'), 'и\u00a0в\u00a0статье');
 assert.equal(typography('6 сентября'), '6\u00a0сентября');
 assert.equal(typography('Шаг 1'), 'Шаг\u00a01');
+assert.equal(typography('Qwen2.5-32B и 2026-09-21'), 'Qwen2.5-32B и\u00a02026-09-21');
+assert.equal(typography('2023–2024 годы'), '2023\u2060–\u20602024 годы');
 assert.ok(documentText(valid).includes('No effect on accuracy'));
 const kindle = digestHtml('2026-09-21','',[{ title:'<unsafe>',summary:'First\n\nSecond',url:'https://example.com/?a="x"',source_label:'Source',topic_label:'Topic' }]);
 assert.ok(kindle.includes('&lt;unsafe&gt;'));

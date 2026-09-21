@@ -75,6 +75,8 @@ export type DigestResult = {
   accounted?: boolean;
   intro: string;
   items: Written[];
+  excludedIds?: number[];
+  retainedIds?: number[];
   flagged?: number;
   usage: Usage;
   /**

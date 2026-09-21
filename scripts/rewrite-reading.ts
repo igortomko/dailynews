@@ -28,12 +28,14 @@ async function main() {
       and coalesce(di.summary_document->>'status','') <> 'verified'
     order by di.position`;
   const limit = process.argv.includes('--limit') ? Number(arg('--limit')) : rows.length;
+  if (!rows.length) { console.log(JSON.stringify({ readerId, day: digest.day, rewritten: 0, failed: 0, backup: dir })); return; }
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Invalid limit or nothing to rewrite');
   let rewritten = 0, failed = 0;
   await pooled(rows.slice(0,limit), 3, async item => {
     const started = Date.now();
     try {
       const result = await writeDigest([item], reader.reader_context, effectiveVoice(reader), { readerId });
+      if (result.excludedIds?.includes(item.id)) { console.log(JSON.stringify({ item: item.id, status: 'excluded-by-reader' })); return; }
       const written = result.items[0];
       if (!written?.reading) throw new Error('Expected reading document');
       writeFileSync(`${dir}/${item.id}.json`, JSON.stringify(result, null, 2), { mode: 0o600 });

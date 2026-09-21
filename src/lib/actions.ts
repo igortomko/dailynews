@@ -574,21 +574,24 @@ async function rewriteFor(reader: Reader) {
 
   const byId = new Map(written.items.map((item) => [String(item.id), item]));
   let rewritten = 0;
+  let retained = 0;
   for (const survivor of survivors) {
+    if (written.excludedIds?.includes(survivor.id)) continue;
+    if (written.retainedIds?.includes(survivor.id)) { retained++; continue; }
     const item = byId.get(String(survivor.id));
     // Материал, которого модель не вернула, остаётся как был: пустое
     // описание вместо прежнего — это потеря, а не обновление.
-    if (!item?.title_ru) continue;
-    await sql`
+    if (!item?.title_ru || item.reading?.status === 'unavailable') { retained++; continue; }
+    const updated = await sql`
       update dailynews.digest_items
          set title = ${item.title_ru}, summary = ${item.summary ?? ""},
              summary_document = ${item.reading ? sql.json(item.reading) : null}
        where digest_id = ${digest.id} and item_id = ${survivor.id}
-         and (${item.reading?.status !== 'unavailable'} or coalesce(summary, '') = '')
+       returning item_id
     `;
-    rewritten += 1;
+    rewritten += updated.length;
   }
-  return { ok: true as const, rewritten, day: digest.day };
+  return { ok: true as const, rewritten, retained, day: digest.day };
 }
 
 /**
@@ -667,6 +670,7 @@ async function fillDigest(reader: Reader) {
   });
 
   const written = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
+  if (survivors.every(item => written.excludedIds?.includes(item.id))) return { ok: true as const, added: 0 };
   if (!written.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,
@@ -758,6 +762,7 @@ async function fillDigest(reader: Reader) {
     let filled = minutesOf(chars, voice);
     for (const survivor of survivors) {
       if (filled >= target || taken + fitting.length >= plan.maxItems) break;
+      if (written.excludedIds?.includes(survivor.id)) continue;
       const text = writtenById.get(String(survivor.id));
       fitting.push(survivor);
       filled += minutesOf(cardChars(text?.title_ru ?? survivor.title, text?.summary ?? ""), voice);

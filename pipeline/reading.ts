@@ -6,9 +6,10 @@ import { resolve, type Survivor, type Usage, type Written, type DigestResult } f
 import { llmCost } from "./cost";
 import { fetchArticle } from "./article";
 import { articleHtml, videoIdOf } from "./youtube";
-import { stripHtml } from "./fetch";
+import { pooled, stripHtml } from "./fetch";
 import { minutesOf, cardChars } from "../src/lib/reading-time";
 import { styleOf, type Voice } from "../src/lib/voice";
+import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
   documentText, parseStoredReading, normalizeDocument,
@@ -191,16 +192,24 @@ const availabilityNotice = (availability: SourceAvailability): string | null =>
 export async function writeReadingDigest(sql: Sql, survivors: Survivor[], readerContext: string, voice: Voice, options: ReadingOptions): Promise<DigestResult> {
   const usage = emptyUsage();
   const ask = caller(sql, options.readerId, usage);
-  const items: Written[] = [];
+  const [reader] = await sql<{ exclude_rules: unknown }[]>`select exclude_rules from dailynews.readers where id=${options.readerId}`;
+  if (!reader) throw new Error("Reader unavailable");
+  const exclude = compile(asNames(reader.exclude_rules));
+  const excludedIds: number[] = [];
+  const retainedIds: number[] = [];
   const { model } = resolve();
   const reasoningEffort = process.env.READING_REASONING_EFFORT?.trim() || "extract:none;edit+audit:low";
-  for (const item of survivors) {
+  const writeOne = async (item: Survivor): Promise<Written | null> => {
     let sourceVersion = "";
     let availability: SourceAvailability = "excerpt_only";
     let analysisKey: string | null = null;
     let lease: string | null = null;
     try {
       const source = await sourceFor(sql, item);
+      if (exclude.test(mentionText(item.title, item.excerpt, source.text))) {
+        excludedIds.push(item.id);
+        return null;
+      }
       availability = source.availability;
       sourceVersion = hash(`${source.text}\n${item.title}\n${item.url}\n${availability}`);
       if (!source.text.trim()) throw new Error("Source unavailable");
@@ -209,8 +218,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       const key = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion, readerContext, voice, baselines]));
       const cached = options.force ? null : parseStoredReading(await getDocument(sql, options.readerId, key));
       if (cached?.document && cached.status === "verified") {
-        items.push({ id: item.id, title_ru: cached.document.title.text, summary: [cached.notice, documentText(cached.document)].filter(Boolean).join("\n\n"), reading: cached });
-        continue;
+        return { id: item.id, title_ru: cached.document.title.text, summary: [cached.notice, documentText(cached.document)].filter(Boolean).join("\n\n"), reading: cached };
       }
       analysisKey = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion]));
       const shared = await acquireAnalysis(sql, item.id, analysisKey, sourceVersion);
@@ -222,7 +230,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       const reading: StoredReading = { version: 2, sourceVersion, availability, status: "verified", document, notice,
         seconds: Math.ceil(minutesOf(cardChars(document.title.text, documentText(document) + (notice ?? "")), voice) * 60) };
       await saveDocument(sql, options.readerId, item.id, key, reading);
-      items.push({ id: item.id, title_ru: document.title.text, summary: [notice, documentText(document)].filter(Boolean).join("\n\n"), reading });
+      return { id: item.id, title_ru: document.title.text, summary: [notice, documentText(document)].filter(Boolean).join("\n\n"), reading };
     } catch (error) {
       if (error instanceof ReadingBusyError) throw error;
       if (lease && analysisKey) await finishAnalysis(sql, analysisKey, lease, null);
@@ -234,18 +242,26 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
         order by d.day desc limit 1`;
       const retained = parseStoredReading(previous?.result);
       if (retained?.status === "verified" && retained.document) {
-        items.push({ id: item.id, title_ru: retained.document.title.text,
-          summary: [retained.notice, documentText(retained.document)].filter(Boolean).join("\n\n"), reading: retained });
+        retainedIds.push(item.id);
         console.warn(`reading ${item.id}: retained verified summary of unchanged source`);
-        continue;
+        return { id: item.id, title_ru: retained.document.title.text,
+          summary: [retained.notice, documentText(retained.document)].filter(Boolean).join("\n\n"), reading: retained };
       }
       const budget = error instanceof ReadingBudgetError;
       console.warn(`reading ${item.id}: ${error instanceof Error ? error.message.slice(0,180) : 'failed'}`);
       const notice = budget ? "Выжимка пока недоступна: дневной лимит обработки исчерпан. Оригинал — по ссылке в заголовке."
         : "Проверенную выжимку подготовить не удалось. Оригинал — по ссылке в заголовке.";
-      items.push({ id: item.id, title_ru: item.title, summary: notice, reading: { version: 2, sourceVersion, availability, status: "unavailable", document: null, notice, seconds: 0 } });
+      return { id: item.id, title_ru: item.title, summary: notice, reading: { version: 2, sourceVersion, availability, status: "unavailable", document: null, notice, seconds: 0 } };
     }
-  }
+  };
+  // Keep source order and settle every in-flight request before propagating a retryable failure.
+  const outcomes = await pooled(survivors, 2, async item => {
+    try { return { item: await writeOne(item) }; }
+    catch (error) { return { error }; }
+  });
+  const failed = outcomes.find(outcome => "error" in outcome);
+  if (failed) throw failed.error;
+  const items = outcomes.flatMap(outcome => outcome.item ? [outcome.item] : []);
   // The introduction is written only after all final, verified cards exist.
   let intro = "";
   const complete = items.filter((i) => i.reading?.status === "verified");
@@ -257,5 +273,5 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       if (!checked.defects.length) intro = result.intro;
     } catch (error) { console.warn(`reading intro unavailable: ${error instanceof Error ? error.message.slice(0,100) : 'failed'}`); }
   }
-  return { intro, items, usage, model, reasoningEffort: reasoningEffort ?? null, accounted: true };
+  return { intro, items, excludedIds, retainedIds, usage, model, reasoningEffort: reasoningEffort ?? null, accounted: true };
 }
