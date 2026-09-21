@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { HISTORY_KEY, recentFrom, remember } from "@/lib/search-history";
 
 /**
  * Недавние запросы — в браузере, а не в базе.
@@ -14,48 +15,14 @@ import Link from "next/link";
  * ведёт туда же, поэтому второй писатель разошёлся бы с первым ровно тогда,
  * когда запрос пришёл ссылкой, а не из поля.
  */
-const KEY = "reporta:searches";
-const MAX = 5;
-
 function read(): string[] {
   try {
-    return recentFrom(localStorage.getItem(KEY));
+    return recentFrom(localStorage.getItem(HISTORY_KEY));
   } catch {
     // Приватное окно, запрещённые данные сайта, чужая строка в ключе —
     // истории просто нет. Искать можно и без неё, ронять страницу не за что.
     return [];
   }
-}
-
-/**
- * Что лежит в хранилище, знает не наш код: ключ переживает наши правки,
- * его пишет соседняя вкладка другой версии и правит кто угодно из консоли.
- * Поэтому разбор ничего не обещает и на любую неожиданность отвечает
- * пустой историей, а не исключением посреди отрисовки шапки.
- */
-export function recentFrom(raw: string | null): string[] {
-  try {
-    const list: unknown = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(list)) return [];
-    return list.filter((item): item is string => typeof item === "string").slice(0, MAX);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Список после нового запроса: свежий первым, повтор не удваивается,
- * длина не растёт.
- *
- * Регистр не считается различием: «Uranium» следом за «uranium» — это один
- * и тот же поиск, и две подсказки вместо одной съедают место, ничего
- * не добавляя.
- */
-export function remember(list: string[], query: string): string[] {
-  const text = query.trim();
-  if (!text) return list;
-  const rest = list.filter((old) => old.toLowerCase() !== text.toLowerCase());
-  return [text, ...rest].slice(0, MAX);
 }
 
 /**
@@ -71,7 +38,7 @@ let cachedList: string[] = [];
 function snapshot(): string[] {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(KEY);
+    raw = localStorage.getItem(HISTORY_KEY);
   } catch {
     raw = null;
   }
@@ -93,7 +60,7 @@ export function RememberQuery({ query }: { query: string }) {
   useEffect(() => {
     if (!query.trim()) return;
     try {
-      localStorage.setItem(KEY, JSON.stringify(remember(read(), query)));
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(remember(read(), query)));
     } catch {
       // см. read(): негде — значит негде.
     }

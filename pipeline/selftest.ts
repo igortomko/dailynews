@@ -60,7 +60,7 @@ import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
 import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
-import { recentFrom, remember } from "../src/components/search-memory";
+import { recentFrom, remember } from "../src/lib/search-history";
 import {
   ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
 } from "../src/lib/source-health";
@@ -2700,6 +2700,10 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     5,
     "длинный список подрезается: подсказок ровно столько, сколько помещается",
   );
+  // Строка рисуется списком, и два одинаковых запроса — это два одинаковых
+  // ключа React и одна и та же подсказка дважды. Наша запись повторов
+  // не делает, но ключ правят и снаружи.
+  assert.deepEqual(recentFrom('["Уран","уран","гпу"]'), ["Уран", "гпу"], "повторы не доезжают до строки");
 
   assert.deepEqual(remember(["гпу"], "уран"), ["уран", "гпу"], "свежий запрос идёт первым");
   assert.deepEqual(remember(["уран", "гпу"], "гпу"), ["гпу", "уран"], "повтор поднимается, а не удваивается");

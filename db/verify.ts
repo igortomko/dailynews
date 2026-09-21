@@ -541,6 +541,9 @@ async function main() {
       // пустая колонка оставляет в склейке висячий пробел, отрывок приходит
       // без него — и «дочитано до конца» становится ложным на каждом
       // отрывке, отчего многоточие перестаёт что-либо означать.
+      const [beforeFirst] = await sql<{ summary: string | null }[]>`
+        select summary from dailynews.digest_items where item_id = ${ids[0]}
+      `;
       await sql`
         update dailynews.digest_items set summary = 'Модель умеет больше контекста'
          where item_id = ${ids[0]}
@@ -551,7 +554,8 @@ async function main() {
         `у неурезанного отрывка многоточия быть не должно: ${whole}`,
       );
       await sql`
-        update dailynews.digest_items set summary = 'S' where item_id = ${ids[0]}
+        update dailynews.digest_items set summary = ${beforeFirst?.summary ?? null}
+         where item_id = ${ids[0]}
       `;
       assert.equal(byRussian.hits[0].title, "Владелец: уран", "заголовок берётся из выпуска");
       assert.equal(byRussian.hits[0].day, today, "у находки есть день выпуска, чтобы вернуться");
