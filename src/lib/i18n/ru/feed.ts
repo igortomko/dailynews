@@ -1,5 +1,4 @@
 import type { feed as En } from "../en/feed";
-import { count as ruCount } from "@/lib/plural";
 import { count, plural } from "@/lib/plural";
 
 const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
@@ -44,11 +43,11 @@ export const feed: typeof En = {
 
   rules: {
     hiddenBefore: (n: number) =>
-      `${ruCount(n, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим `,
+      `${count(n, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим`,
     hiddenLink: "исключениям",
     allHiddenTitle: "Всё скрыто исключениями",
     allHiddenDescription: (n: number) =>
-      `В выпуске ${ruCount(n, "карточка", "карточки", "карточек")}, и в каждой есть что-то из твоего списка. Выпуск не пересобирается — освободившиеся места не добираются.`,
+      `В выпуске ${count(n, "карточка", "карточки", "карточек")}, и в каждой есть что-то из твоего списка. Выпуск не пересобирается — освободившиеся места не добираются.`,
     fixExclusions: "Поправить исключения",
     followedTitle: "Из твоего списка «За чем следить»",
   },

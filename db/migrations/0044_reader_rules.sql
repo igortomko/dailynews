@@ -36,5 +36,15 @@ alter table dailynews.readers drop constraint if exists readers_exclude_rules_ar
 alter table dailynews.readers
   add constraint readers_exclude_rules_array check (jsonb_typeof(exclude_rules) = 'array');
 
-insert into dailynews.migrations (name) values ('0042_reader_rules')
+-- Номер 0044, а не 0042: под 0042 файл ушёл в живую базу 21 сентября 2026
+-- из своей ветки, а соседняя в тот же день принесла 0042_ui_language.
+-- Два файла под одним номером — ровно та ловушка, о которой AGENTS.md
+-- говорит на примере 0036, поэтому файл переименован, а прежняя запись
+-- журнала снимается здесь же: иначе «запись без файла» сообщалась бы
+-- при каждом накатывании. Выполняется целиком через
+-- `npm run migrate -- --force 0044_reader_rules` — обещанное схеме уже
+-- в базе, и без принуждения файл записался бы в журнал, не выполнив этого.
+delete from dailynews.migrations where name = '0042_reader_rules';
+
+insert into dailynews.migrations (name) values ('0044_reader_rules')
   on conflict (name) do nothing;

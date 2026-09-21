@@ -807,6 +807,12 @@ assert.equal(withVariants(sameRules, 3, "x").next, sameRules, "нет таког
 // а не пустой список: иначе старая вкладка стирала бы сохранённое.
 assert.ok("error" in cleanRules("follow", {}), "не-массив от формы — отказ, а не «правил нет»");
 
+// Пересекающиеся написания: пометка называет самое длинное совпавшее,
+// а не то, что стояло в списке раньше.
+const nested = compile([["Figma"], ["Figma Design"]]);
+assert.equal(nested.find("Figma Design ships"), "Figma Design", "длинное написание называет себя, а не свой префикс");
+assert.equal(nested.find("Figma ships"), "Figma", "короткое находится, когда длинного нет");
+
 const foldedNames = compile([["Фёдор"], ["Figma"]]);
 assert.equal(foldedNames.test("ФЕДОР пришёл"), true, "регистр и ё/е сходятся");
 assert.equal(foldedNames.test("Ｆｉｇｍａ"), true, "полноширинные буквы сходятся по NFKC");

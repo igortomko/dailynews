@@ -369,7 +369,7 @@ export function FeedTabs({
             называть — строка на каждом выпуске перестала бы что-либо значить. */}
         {hidden > 0 && items.length > 0 ? (
           <p className="mb-3 text-sm text-muted-foreground">
-            {t.feed.rules.hiddenBefore(hidden)}
+            {t.feed.rules.hiddenBefore(hidden)}{" "}
             <Link href="/settings/interests" className="underline underline-offset-4">
               {t.feed.rules.hiddenLink}
             </Link>

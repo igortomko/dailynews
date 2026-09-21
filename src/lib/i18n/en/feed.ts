@@ -44,7 +44,7 @@ export const feed = {
 
   /** Личные правила поверх готового выпуска: feed-tabs.tsx и item-card.tsx */
   rules: {
-    hiddenBefore: (n: number) => `${n} ${n === 1 ? "card" : "cards"} hidden by your `,
+    hiddenBefore: (n: number) => `${n} ${n === 1 ? "card" : "cards"} hidden by your`,
     hiddenLink: "exclusions",
     allHiddenTitle: "Everything is hidden by exclusions",
     allHiddenDescription: (n: number) =>
