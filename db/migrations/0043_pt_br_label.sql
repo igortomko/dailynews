@@ -13,3 +13,6 @@
 update dailynews.readers
    set language = 'португальском (бразильский)'
  where language = 'португальском (бразильский вариант)';
+
+insert into dailynews.migrations (name) values ('0043_pt_br_label')
+  on conflict (name) do nothing;

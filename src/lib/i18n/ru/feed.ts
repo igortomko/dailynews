@@ -1,7 +1,7 @@
-const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
-
 import type { feed as En } from "../en/feed";
 import { count } from "@/lib/plural";
+
+const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
 
 const story = (n: number) => count(n, "материал", "материала", "материалов");
 const storySearched = (n: number) => count(n, "материалу", "материалам", "материалам");

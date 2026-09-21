@@ -24,3 +24,6 @@ alter table dailynews.readers alter column ui_language set not null;
 alter table dailynews.readers drop constraint if exists readers_ui_language_check;
 alter table dailynews.readers
   add constraint readers_ui_language_check check (ui_language in ('en', 'ru'));
+
+insert into dailynews.migrations (name) values ('0042_ui_language')
+  on conflict (name) do nothing;
