@@ -236,9 +236,16 @@ export async function selectSurvivors(
   // из одного ночного прогона мало: досюда доходит и догрузка выпуска
   // (`fillDigest`), а цепочка может лежать в базе с прошлого раза. Тогда
   // ключом стала бы середина без оценки, и сюжет снова выпал бы молча.
-  // Условие обеспечивается там, где оно потребляется; запрос идемпотентен
-  // и на чистой базе стоит один пустой update.
-  await flattenDupChains(sql as unknown as Parameters<typeof flattenDupChains>[0]);
+  //
+  // Сначала вопрос, потом запись: отбор зовётся на каждого читателя, а после
+  // первого раза выпрямлять уже нечего. Читающий путь не должен писать
+  // в таблицу по разу на читателя ради нуля изменённых строк.
+  const [chained] = await sql<{ id: number }[]>`
+    select c.id from dailynews.items c
+      join dailynews.items p on p.id = c.dup_of
+     where p.dup_of is not null limit 1
+  `;
+  if (chained) await flattenDupChains(sql);
   const survivors = pickSurvivors(
     await candidates(sql, readerId, sourceIds), weights, targets, digestSize,
   );

@@ -175,8 +175,14 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
            -- coalesce обязателен: у письма и части фидов своей даты нет,
            -- а без неё карточка осталась бы вовсе без времени.
            coalesce(i.published_at, i.collected_at) as published_at,
+           -- Без разметки: body хранится HTML-ом (enrich кладёт статью
+           -- тегами, фид — content:encoded), и длина с тегами завышает
+           -- время чтения тем сильнее, чем больше в статье ссылок.
+           -- На живых данных текста в среднем 78% от длины, а у худших
+           -- материалов 6%: 5145 знаков разметки на 290 знаков текста —
+           -- «≈4 мин» там, где читать нечего.
            case when i.transcribed_at is null and i.body is not null
-                then length(i.body) end as body_chars,
+                then length(regexp_replace(i.body, '<[^>]*>', '', 'g')) end as body_chars,
            (select count(*)::int from dailynews.reads r
              where r.item_id = i.id and r.reader_id = ${readerId}
                and r.event in ('opened', 'outbound')) as read_count,

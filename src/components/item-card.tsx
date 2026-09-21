@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { readingTime, relativeTime } from "@/lib/relative-time";
+import { readingTime } from "@/lib/relative-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { OpinionDialog } from "@/components/opinion-dialog";
@@ -64,19 +64,6 @@ function report(
     .catch(() => new Promise((resolve) => setTimeout(resolve, 1500)).then(send))
     .catch((error) => console.warn(`событие «${body.event}» не доехало:`, error));
 }
-
-/**
- * Полная дата для подсказки. «4д» отвечает на «давно ли», но не на «какого
- * числа» — а это разные вопросы, и второй возникает ровно тогда, когда
- * материал обсуждают с кем-то ещё.
- */
-const EXACT = new Intl.DateTimeFormat("ru", {
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
 /**
  * Классы для иконки, которая появляется или уходит по состоянию. Обе (все
@@ -216,6 +203,10 @@ export function ItemCard({
   const kind = item.axes?.kind?.choice ? KIND[item.axes.kind.choice] : undefined;
   const horizon = item.axes?.horizon?.choice ? HORIZON[item.axes.horizon.choice] : undefined;
   const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
+  // Тема, тип и горизонт — одной строкой вместе с источником и временем
+  // чтения. Порядок от общего к частному: про что это, что это за материал
+  // и насколько надолго.
+  const tags = [showTopic ? item.topic_label : null, kind, horizon].filter(Boolean);
 
   if (vote === "down") {
     return (
@@ -246,10 +237,14 @@ export function ItemCard({
       ref={article}
       className="group border-b py-5 transition-opacity duration-150 last:border-0"
     >
-      {/* В покое остаётся только источник. Время, тема и метки нужны,
-          когда уже присматриваешься к материалу, а в списке они тянут
-          строку и спорят с заголовком. Место под них держится всегда,
-          поэтому строка не дёргается при наведении.
+      {/* Одна строка, а не две. Пока метаданные проявлялись по наведению,
+          в покое их место занимало время чтения — и получалось два ряда,
+          живущих по разным правилам.
+
+          Времени публикации здесь больше нет. «2д» и «≈41 мин» стоят рядом,
+          оба про время и оба про разное: одно — давно ли вышло, второе —
+          сколько читать. Глаз складывает их в одно число и спотыкается.
+          Из двух оставлено то, что отвечает на «открывать ли сейчас».
           Разделитель — запятая: точки с пробелами по бокам растягивали
           ряд сильнее, чем несли смысла.
 
@@ -278,41 +273,17 @@ export function ItemCard({
               не дёргалась при наведении, — и «кликбейт» за этим местом
               висел в пустоте, оторванный от того, к чему относится. */}
           {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
-          {/* Время чтения остаётся на виду вместе с источником, а не уезжает
-              к скрытым меткам. Тема и горизонт отвечают на «про что это»
-              и нужны, когда уже присматриваешься; «≈6 мин» отвечает
-              на «открывать ли сейчас» — то есть на вопрос, который задают
-              раньше и чаще. Пусто, когда текста статьи у нас нет: у 124
-              карточек из 200 его не бывает, и выдуманное число там было бы
-              неотличимо от измеренного. */}
+          {/* Время чтения: «открывать ли сейчас» спрашивают раньше и чаще,
+              чем «про что это». Пусто, когда текста статьи у нас нет:
+              у 124 карточек из 200 его не бывает, и выдуманное число там
+              было бы неотличимо от измеренного. */}
           {minutes ? <span className="shrink-0">{minutes}</span> : null}
           {/* min-w-0 обязателен: truncate обрезает только то, чему разрешили
               сузиться, а гибкий элемент по умолчанию не уже своего
               содержимого. Строка в одну линию держала ширину всей карточки,
               и на телефоне лента уезжала за край экрана — заголовок и текст
               обрезались справа, а докрутить до них было нельзя. */}
-          <span className="min-w-0 truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <time
-                    dateTime={new Date(item.published_at).toISOString()}
-                    // Часовой пояс сервера и читателя разные, и точная дата
-                    // на них расходится. Значение читателя верное,
-                    // предупреждение о несовпадении — шум.
-                    suppressHydrationWarning
-                    className="cursor-default"
-                  />
-                }
-              >
-                {relativeTime(item.published_at)}
-              </TooltipTrigger>
-              <TooltipContent>{EXACT.format(new Date(item.published_at))}</TooltipContent>
-            </Tooltip>
-            {[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).length > 0
-              ? `, ${[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).join(", ")}`
-              : ""}
-          </span>
+          {tags.length > 0 ? <span className="min-w-0 truncate">{tags.join(", ")}</span> : null}
         </span>
 
         {/* Оценка тоже по наведению: нужна раз на десяток материалов,

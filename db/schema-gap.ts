@@ -35,14 +35,11 @@ type Db = typeof import("../src/lib/db")["sql"];
 
 export type Gap = { kind: "таблица" | "колонка" | "ограничение"; name: string; from: string };
 
-/** Что миграции обещают: таблицы, колонки по таблицам и именованные ограничения. */
-/**
- * Разбор каталога не меняется в пределах прогона, а спрашивают его трижды:
- * сверка до накатывания, отбор пропускаемых файлов и сверка после. Парсить
- * одни и те же сорок файлов три раза незачем.
- */
+/** Разбор одного каталога спрашивают трижды за прогон: сверка до накатывания,
+ *  отбор файлов и сверка после. Парсить сорок файлов три раза незачем. */
 const parsed = new Map<string, ReturnType<typeof parseDir>>();
 
+/** Что миграции обещают: таблицы, колонки по таблицам и именованные ограничения. */
 export function promised(dir = "db/migrations") {
   const hit = parsed.get(dir);
   if (hit) return hit;
@@ -172,9 +169,6 @@ export function fileCoverage(dir = "db/migrations"): {
   }
   return { skippable, silent };
 }
-
-/** Короткий вход для тех, кому нужен только первый набор. */
-export const skippableFiles = (dir = "db/migrations") => fileCoverage(dir).skippable;
 
 export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]> {
   const { tables, columns, constraints } = promised(dir);
