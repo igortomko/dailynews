@@ -76,7 +76,7 @@ export function InterestsForm({
    * Догрузить сегодняшний выпуск, если он стал короче заказанного. Доли тем
    * ему уже не помогут — он отобран, — и тост об этом честно молчит.
    */
-  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh(), t.feed.rebuild), [router, t]);
 
   const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 

@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { rewriteDigest, topUpDigest } from "@/lib/actions";
 import { useT } from "@/components/i18n-provider";
 import type { Dict } from "@/lib/i18n";
-import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 
 type RebuildText = Dict["feed"]["rebuild"];
 
@@ -66,11 +65,12 @@ export function queueRebuild(kind: Kind) {
  * Промис возвращается, чтобы кнопка держала спиннер ровно столько, сколько
  * идёт пересборка, а не гасила его до срока.
  *
- * `t` по умолчанию — русские подписи: формы настроек, которые сегодня зовут
- * `flushRebuild`, ещё не подключены к словарю, и без умолчания их типизация
- * сломалась бы правкой чужого файла.
+ * `t` обязателен. Русские подписи по умолчанию стояли здесь, пока формы
+ * настроек не читали язык читателя; теперь читают, и умолчание осталось бы
+ * ровно тем, чем такие умолчания и бывают, — тихим русским тостом
+ * в английском интерфейсе у той формы, которую однажды забудут.
  */
-export async function flushRebuild(refresh: () => void, t: RebuildText = ruFeed.rebuild): Promise<Outcome> {
+export async function flushRebuild(refresh: () => void, t: RebuildText): Promise<Outcome> {
   if (running) {
     toast.info(t.stillUpdatingTitle, {
       description: t.stillUpdatingDescription,
@@ -91,7 +91,7 @@ export async function flushRebuild(refresh: () => void, t: RebuildText = ruFeed.
   return run(kinds, refresh, t);
 }
 
-async function run(kinds: Kind[], refresh: () => void, t: RebuildText = ruFeed.rebuild): Promise<Outcome> {
+async function run(kinds: Kind[], refresh: () => void, t: RebuildText): Promise<Outcome> {
   // Окно отмены стоит здесь, а не в `flushRebuild`, и достаётся обоим входам
   // намеренно. Уход из настроек запускает платную работу, которую читатель
   // не просил вслух: кнопку он нажал, а тут просто закрыл раздел. Окно даёт
