@@ -33,7 +33,9 @@ export function recentFrom(raw: string | null): string[] {
     if (!Array.isArray(list)) return [];
     const seen = new Set<string>();
     return list
-      .filter((item): item is string => typeof item === "string")
+      // Пустая строка пережила бы фильтр по типу и нарисовалась бы пустой
+      // подсказкой, ведущей на поиск без запроса.
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
       .filter((item) => {
         const key = item.toLowerCase();
         if (seen.has(key)) return false;

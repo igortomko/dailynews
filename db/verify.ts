@@ -548,7 +548,11 @@ async function main() {
         update dailynews.digest_items set summary = 'Модель умеет больше контекста'
          where item_id = ${ids[0]}
       `;
-      const whole = (await queries.searchArchive(ru, "контекста")).hits[0]?.snippet ?? "";
+      const [shortHit] = (await queries.searchArchive(ru, "контекста")).hits;
+      // Именно изменённое описание, а не первая попавшаяся находка: иначе
+      // следующая строка фикстуры однажды превратит проверку в пустую.
+      assert.equal(String(shortHit?.item_id), String(ids[0]), "мерим отрывок своего материала");
+      const whole = shortHit?.snippet ?? "";
       assert.ok(
         whole.length > 0 && !whole.startsWith("…") && !whole.endsWith("…"),
         `у неурезанного отрывка многоточия быть не должно: ${whole}`,
