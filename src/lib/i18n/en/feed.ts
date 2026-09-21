@@ -65,6 +65,7 @@ export const feed = {
     upvoteTooltip: "More like this in future digests",
     downvoteLabel: "Hide and show less like this",
     thisCard: "this card",
+    summaryUnavailable: "The summary is not available yet. Open the original using the headline link.",
   },
 
   /** Поле и кнопка поиска: src/components/feed-search.tsx, search-form.tsx, search-memory.tsx */

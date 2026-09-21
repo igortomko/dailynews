@@ -63,6 +63,7 @@ export const feed: typeof En = {
     upvoteTooltip: "Больше такого в следующих выпусках",
     downvoteLabel: "Скрыть и меньше такого",
     thisCard: "эта карточка",
+    summaryUnavailable: "Выжимка пока недоступна. Оригинал — по ссылке в заголовке.",
   },
 
   search: {

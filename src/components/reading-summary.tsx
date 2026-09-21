@@ -31,7 +31,7 @@ function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
       </div>)}</div>
     </div>;
     case "metric": return <div className="rounded-xl bg-muted/60 p-4">
-      <p className="text-3xl font-semibold tracking-tight">{t(b.value)}</p>
+      <p className="text-2xl font-semibold tracking-tight">{t(b.value)}</p>
       <p className="mt-1 font-medium">{t(b.label)}</p><p className="mt-2 text-sm text-muted-foreground">{t(b.context.text)}</p>
     </div>;
     case "steps": return <ol className="space-y-3">{b.items.map((item,i) => <li key={i}>
