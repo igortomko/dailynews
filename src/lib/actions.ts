@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
-import { dictOf, localeOf } from "./i18n";
+import { dictOf, localeOf, type Dict } from "./i18n";
 import { getDict } from "./i18n/server";
 import { discover, planFor, type Found } from "../../pipeline/discover";
 import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
@@ -188,7 +188,7 @@ export async function saveInterests(formData: FormData) {
   // За чем следить и что исключать живут в той же форме: это одно решение
   // об отборе, и сохраняется оно одной кнопкой. Пределы проверяет сервер —
   // форму рисует браузер.
-  const rules = readRules(formData);
+  const rules = readRules(formData, (await getDict()).rules);
   if ("error" in rules) return { error: rules.error };
 
   await writeTopics(readerId, chips, slugs, counts, minutes, true, rules);
@@ -202,17 +202,26 @@ export async function saveInterests(formData: FormData) {
  * форма, что и темы, и пустой список означает «правил нет», а не «поле
  * забыли» — иначе форма, где поля нет, молча стирала бы список.
  */
-function readRules(formData: FormData): Rules | { error: string } {
+function readRules(formData: FormData, words: Dict["rules"]): Rules | { error: string } {
   const parse = (field: string): unknown => {
+    const raw = formData.get(field);
+    // Поля нет — это не «правил нет»: вкладка со старой сборкой после
+    // развёртывания не рисует скрытых полей, и пустой список стёр бы
+    // сохранённое молча. Не разобралось — тоже отказ, а не пустота:
+    // не-массив доходит до cleanRules, и тот называет причину.
+    if (raw === null) return {};
     try {
-      return JSON.parse(String(formData.get(field) ?? "[]"));
+      // Разобранный null — тот же отказ, а не «правил нет»: cleanRules
+      // читает null как пустой список, и он стёр бы сохранённое молча.
+      const parsed: unknown = JSON.parse(String(raw));
+      return parsed === null ? {} : parsed;
     } catch {
-      return null;
+      return {};
     }
   };
-  const follow = cleanRules("follow", parse("follow"));
+  const follow = cleanRules("follow", parse("follow"), words);
   if ("error" in follow) return follow;
-  const exclude = cleanRules("exclude", parse("exclude"));
+  const exclude = cleanRules("exclude", parse("exclude"), words);
   if ("error" in exclude) return exclude;
   return { follow: follow.rules, exclude: exclude.rules };
 }
@@ -1029,15 +1038,19 @@ export async function saveOnboardingInterests(
   custom: string[],
   // Необязательные блоки первого экрана. Сохраняются здесь же, до сборки
   // первого выпуска: он собирается на последнем шаге и обязан их учесть.
+  // Пустое по умолчанию, а не отказ, как у формы настроек: на первом
+  // экране правил у читателя ещё нет, и стирать здесь нечего, — а вкладка
+  // со старой сборкой должна пройти онбординг, а не упереться в ошибку.
   follow: unknown = [],
   exclude: unknown = [],
 ) {
   const reader = await currentReader();
   const plan = effectivePlan(reader);
 
-  const followRules = cleanRules("follow", follow);
+  const words = (await getDict()).rules;
+  const followRules = cleanRules("follow", follow, words);
   if ("error" in followRules) return { error: followRules.error };
-  const excludeRules = cleanRules("exclude", exclude);
+  const excludeRules = cleanRules("exclude", exclude, words);
   if ("error" in excludeRules) return { error: excludeRules.error };
 
   const picked = slugs

@@ -52,13 +52,6 @@ export function InterestsForm({
       new Promise<boolean>((resolve) => {
         const node = form.current;
         if (!node) return resolve(false);
-        // Набранное в поле списка добавляется при уходе из поля. Уход
-        // делается здесь, а не нажатием на кнопку: с ней чипы появлялись бы
-        // между mousedown и mouseup, кнопка уезжала бы вниз, и первый клик
-        // пропадал. Блюр — отдельное событие, React дописывает скрытые поля
-        // до того, как форма прочитана.
-        const active = document.activeElement;
-        if (active instanceof HTMLElement && node.contains(active)) active.blur();
         startTransition(async () => {
           // Отказ приходит двумя путями: разобранным `{ error }` и исключением
           // из серверного действия. Молчать нельзя ни о том, ни о другом.
@@ -87,6 +80,21 @@ export function InterestsForm({
 
   const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 
+  /**
+   * Закрыть поле списка до снимка правок, а не внутри записи. Уход из поля
+   * добавляет чип и зовёт `touch`; сделанный внутри `write`, он попадал бы
+   * после снимка `apply`, и форма после удачной записи оставалась бы
+   * «несохранённой» на вид. Кнопка не забирает фокус на mousedown (ниже):
+   * иначе чип появлялся бы между mousedown и mouseup, кнопка уезжала
+   * бы вниз, и первый клик пропадал.
+   */
+  const save = () => {
+    const node = form.current;
+    const active = document.activeElement;
+    if (node && active instanceof HTMLElement && node.contains(active)) active.blur();
+    void apply();
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -108,24 +116,8 @@ export function InterestsForm({
                 Пересборку выпуска ни то ни другое не заводит — исключение
                 прячет карточки из готового само, слежение решается
                 при следующем отборе. */}
-            <NameRules
-              kind="follow"
-              name="follow"
-              initial={follow}
-              label="За чем следить"
-              description="Компании, продукты, люди. Упомянутое встанет в своей теме первым — в пределах выпуска, не сверх него. Ищется по написанию: «Figma» не найдёт «Фигму», добавь оба."
-              placeholder="Figma, Framer, Webflow"
-              onChange={touch}
-            />
-            <NameRules
-              kind="exclude"
-              name="exclude"
-              initial={exclude}
-              label="Что исключать"
-              description="Имена, продукты, фразы. Упомянутое в выпуск не попадёт, а из готового спрячется. Тоже по написанию, без перевода."
-              placeholder="Название компании, имя, фраза"
-              onChange={touch}
-            />
+            <NameRules kind="follow" name="follow" initial={follow} onChange={touch} />
+            <NameRules kind="exclude" name="exclude" initial={exclude} onChange={touch} />
             {error ? <FieldError>{error}</FieldError> : null}
 
             <Button
@@ -135,9 +127,9 @@ export function InterestsForm({
               // действие, ради которого сюда пришли, а в ряду одинаковых
               // оно читалось как ещё одна настройка.
               className="h-11 self-start px-6 text-base"
-              // Фокус остаётся в поле до самого клика: см. `write`.
+              // Фокус остаётся в поле до самого клика: см. `save`.
               onMouseDown={(event) => event.preventDefault()}
-              onClick={apply}
+              onClick={save}
             >
               {applying ? <Spinner data-icon="inline-start" /> : null}
               {t.settings.common.save}

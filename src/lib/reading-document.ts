@@ -5,12 +5,13 @@ const ids = z.array(z.string().min(1).max(64)).min(1).max(80);
 export const supported = z.object({ text, claimIds: ids }).strict();
 const block = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paragraph"), content: supported }).strict(),
-  z.object({ kind: z.literal("list"), numbering: z.enum(["facts", "bullets"]), items: z.array(supported).min(2).max(5) }).strict(),
+  z.object({ kind: z.literal("list"), numbering: z.enum(["facts", "bullets"]), items: z.array(supported).min(2).max(6) }).strict(),
+  z.object({ kind: z.literal("quote"), attribution: text.max(160), content: supported.extend({ text: text.max(500) }) }).strict(),
   z.object({ kind: z.literal("qa"), items: z.array(z.object({ question: supported, answer: supported }).strict()).min(1).max(3) }).strict(),
   z.object({ kind: z.literal("flow"), nodes: z.array(z.object({ value: text, label: text, claimIds: ids }).strict()).min(2).max(4), relations: z.array(z.enum(["earns", "equivalent", "leads_to", "follows"])).min(1).max(3) }).strict(),
   z.object({ kind: z.literal("comparison"), commonBasis: supported, emphasis: z.enum(["label", "content"]), items: z.array(z.object({ label: text, content: supported }).strict()).length(2) }).strict(),
   z.object({ kind: z.literal("metric"), value: text, label: text, context: supported }).strict(),
-  z.object({ kind: z.literal("steps"), sequence: z.enum(["procedure", "timeline"]), items: z.array(z.object({ label: text, content: supported, state: z.enum(["done", "current", "planned", "unspecified"]) }).strict()).min(2).max(4) }).strict(),
+  z.object({ kind: z.literal("steps"), sequence: z.enum(["procedure", "timeline"]), items: z.array(z.object({ label: text, content: supported, state: z.enum(["done", "current", "planned", "unspecified"]) }).strict()).min(2).max(6) }).strict(),
   z.object({ kind: z.literal("takeaway"), attribution: text, content: supported }).strict(),
 ]);
 export const documentSchema = z.object({
@@ -63,7 +64,7 @@ export function supportedFields(doc: ReadingDocument): z.infer<typeof supported>
   const values = [doc.title, ...(doc.lead ? [doc.lead] : [])];
   for (const b of doc.blocks) {
     switch (b.kind) {
-      case "paragraph": case "takeaway": values.push(b.content); break;
+      case "paragraph": case "takeaway": case "quote": values.push(b.content); break;
       case "list": values.push(...b.items); break;
       case "qa": values.push(...b.items.flatMap((q) => [q.question, q.answer])); break;
       case "flow": values.push(...b.nodes.map((n) => ({ text: `${n.value} ${n.label}`, claimIds: n.claimIds }))); break;
@@ -104,6 +105,14 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   return issues;
 }
 export const normalize = (s: string) => s.replace(/\s+/gu, " ").trim();
+export function validateQuotes(doc: ReadingDocument, source: string): string[] {
+  const issues: string[] = [];
+  for (const b of doc.blocks) if (b.kind === "quote") {
+    if (b.content.text.split(/\s+/u).length > 25) issues.push("A quotation must be at most 25 words.");
+    if (!normalize(source).includes(normalize(b.content.text))) issues.push("A quotation must be an exact original-language excerpt from the source, not a translation or paraphrase.");
+  }
+  return issues;
+}
 export function validateSection(section: z.infer<typeof sectionSchema>, source: string): string[] {
   const errors: string[] = [];
   if (new Set(section.claims.map((c) => c.id)).size !== section.claims.length) errors.push("Duplicate claim IDs");
@@ -123,6 +132,7 @@ export function blockText(b: ReadingBlock): string {
     case "metric": return `${b.value} ${b.label}\n${b.context.text}`;
     case "steps": return b.items.map((i, at) => `${at + 1}. ${i.label}${stepStateText[i.state] ? ` (${stepStateText[i.state]})` : ""}: ${i.content.text}`).join("\n");
     case "takeaway": return `${b.content.text}\n${b.attribution}`;
+    case "quote": return `“${b.content.text}”\n— ${b.attribution}`;
   }
 }
 export function documentText(doc: ReadingDocument): string {

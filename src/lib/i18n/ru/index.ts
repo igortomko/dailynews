@@ -6,6 +6,7 @@ import { settings } from "./settings";
 import { sources } from "./sources";
 import { plans } from "./plans";
 import { onboarding } from "./onboarding";
+import { rules } from "./rules";
 
 /**
  * Русский словарь. Раскладка файл в файл с английским: расходятся они
@@ -21,4 +22,5 @@ export const ru: Dict = {
   sources,
   plans,
   onboarding,
+  rules,
 };

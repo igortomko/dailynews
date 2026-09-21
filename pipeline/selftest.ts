@@ -59,7 +59,8 @@ import {
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import {
-  applyRules, asNames, cleanRules, compile, mentionText, NO_RULES, RULE_LIMITS, rulesOf, splitNames,
+  applyRules, asNames, cleanRules, compile, mentionText, mergeDraft, NO_RULES, RULE_LIMITS, rulesOf,
+  splitNames, withVariants,
 } from "../src/lib/rules";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
@@ -757,6 +758,11 @@ assert.deepEqual(
   ["Figma", "Framer", "Webflow"],
   "запятая и перевод строки делят; повтор без регистра и пустое выбрасываются",
 );
+assert.deepEqual(
+  splitNames("Figma，Фигма; Ｆramer、x"),
+  ["Figma", "Фигма", "Framer", "x"],
+  "полноширинная запятая, точка с запятой и идеографическая запятая — тоже разделители",
+);
 
 assert.deepEqual(
   cleanRules("follow", ["Figma", ["Framer", " framer ", "Фреймер"]]),
@@ -800,6 +806,54 @@ assert.equal(ruleNames.test("axxxb"), false, "текст читателя не �
 assert.equal(ruleNames.test("literal a.*b here"), true, "и находится буквально");
 assert.equal(ruleNames.find("Hacker News on Go"), "Hacker News", "называется первое найденное по тексту");
 assert.equal(ruleNames.find("nothing here"), null, "нет упоминания — нет имени");
+
+// Граница ставится только с той стороны, где написание кончается словесным
+// знаком: «.NET» и «C++» читатель ждёт «как написано», а не только между
+// пробелами. Подчёркивание — словесный знак: «go_router» не про Go.
+const edgeNames = compile([[".NET"], ["C++"], ["Go"]]);
+assert.equal(edgeNames.test("ASP.NET Core"), true, ".NET находится в ASP.NET: слева у него точка");
+assert.equal(edgeNames.test("C++17 modules"), true, "C++ находится в C++17: справа у него плюс");
+assert.equal(edgeNames.test("go_router update"), false, "подчёркивание — часть слова, Go не находится");
+assert.equal(edgeNames.test("abc++"), false, "C++ внутри слова по-прежнему не считается");
+assert.equal(edgeNames.test("Go go go"), true, "обычная граница на месте");
+
+// Слияние набранного и написания раскрытого правила — те же функции,
+// что зовут кнопки, скрытое поле формы и onChange: непринятое остаётся
+// в поле, а не пропадает.
+const mergedDraft = mergeDraft([["Figma"]], `Framer, figma, ${"x".repeat(81)}`, 20);
+assert.deepEqual(mergedDraft.next, [["Figma"], ["Framer"]], "принятое становится правилами");
+assert.equal(mergedDraft.stopped, "«figma» уже есть", "первая причина отказа словами");
+assert.deepEqual(mergedDraft.rejected, ["figma", "x".repeat(81)], "непринятое возвращается целиком");
+const untouched = [["Figma"]];
+assert.equal(mergeDraft(untouched, "figma", 20).next, untouched, "нечего добавить — тот же массив");
+assert.equal(mergeDraft(manyRules(20), "ещё одно", 20).stopped?.startsWith("Не больше 20"), true, "предел называется");
+assert.deepEqual(mergeDraft(manyRules(20), "ещё одно", 20).rejected, ["ещё одно"], "и лишнее остаётся в поле");
+assert.deepEqual(
+  withVariants([["Figma"], ["Framer"]], 0, "Фигма, figma.com, Figma").next,
+  [["Figma", "Фигма", "figma.com"], ["Framer"]],
+  "написания добавляются к имени, само имя не задваивается",
+);
+assert.equal(
+  withVariants([["Figma"], ["Framer"]], 0, "framer").stopped,
+  "«framer» уже есть в другом правиле",
+  "написание из другого правила — отказ с причиной",
+);
+assert.equal(
+  withVariants([["Figma"]], 0, "a, b, c, d, e").stopped?.startsWith("Не больше 5"), true,
+  "шестое написание — отказ",
+);
+const sameRules = [["Figma", "Фигма"]];
+assert.equal(withVariants(sameRules, 0, "Фигма").next, sameRules, "без изменений — тот же массив");
+assert.equal(withVariants(sameRules, 3, "x").next, sameRules, "нет такого правила — ничего не меняется");
+// Форма без поля или с битым JSON отдаёт не-массив, и это отказ,
+// а не пустой список: иначе старая вкладка стирала бы сохранённое.
+assert.ok("error" in cleanRules("follow", {}), "не-массив от формы — отказ, а не «правил нет»");
+
+// Пересекающиеся написания: пометка называет самое длинное совпавшее,
+// а не то, что стояло в списке раньше.
+const nested = compile([["Figma"], ["Figma Design"]]);
+assert.equal(nested.find("Figma Design ships"), "Figma Design", "длинное написание называет себя, а не свой префикс");
+assert.equal(nested.find("Figma ships"), "Figma", "короткое находится, когда длинного нет");
 
 const foldedNames = compile([["Фёдор"], ["Figma"]]);
 assert.equal(foldedNames.test("ФЕДОР пришёл"), true, "регистр и ё/е сходятся");

@@ -3,7 +3,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowUpIcon } from "lucide-react";
-import { count } from "@/lib/plural";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -352,24 +351,35 @@ export function FeedTabs({
             Убрать уходящую строку из разметки нельзя, пока она уходит,
             поэтому обе висят всегда — а скрытая получает `inert`: без него
             обратный Tab уходит на стрелки дат, которых не видно. */}
-        <div className="grid h-14 sm:h-12">
+        <div className="grid h-26 lg:h-12">
           <div
             inert={searching}
-            className={layerClass(!searching, "above", "flex items-center justify-between gap-3 px-4")}
+            className={layerClass(!searching, "above", "grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[48px_56px] items-center gap-x-1 px-2 sm:gap-x-3 sm:px-4 lg:grid-cols-[minmax(0,1fr)_160px_minmax(0,1fr)] lg:grid-rows-1")}
           >
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="col-start-1 row-start-2 flex min-w-0 items-center gap-2 [&>div]:gap-0 sm:[&>div]:gap-2 lg:row-start-1">
                 {left}
                 {/* Время выпуска — рядом с его датой: это две вещи об одном
                     и том же выпуске. Число карточек осталось на вкладках,
                     где оно и отвечает на свой вопрос — «сколько в этой теме». */}
-                <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+                <span className="hidden shrink-0 text-sm text-muted-foreground tabular-nums sm:inline">
                   {formatMinutes(reading.minutes, t.feed.time)}
                 </span>
               </div>
+              <Link
+                href="/"
+                aria-label="Reporta"
+                className="col-span-2 col-start-1 row-start-1 w-35 translate-y-1 justify-self-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:col-span-1 lg:col-start-2"
+              >
+                {/* Both themes use the approved vector, retaining the red snake. */}
+                {/* eslint-disable @next/next/no-img-element */}
+                <img src="/brand/logo-reporta.svg" alt="" width="760" height="216" className="block h-auto w-full dark:hidden" />
+                <img src="/brand/logo-reporta-dark.svg" alt="" width="760" height="216" className="hidden h-auto w-full dark:block" />
+                {/* eslint-enable @next/next/no-img-element */}
+              </Link>
               {/* Поиск рядом с датами: и то и другое — способ добраться
                   до прошлого выпуска. Стрелками к соседнему, календарём
                   к дальнему, поиском — когда помнишь слово, а не дату. */}
-              <div className="flex items-center gap-2">
+              <div className="col-start-2 row-start-2 flex items-center justify-self-end gap-2 lg:col-start-3 lg:row-start-1">
                 <SearchButton ref={trigger} onOpen={() => setSearching(true)} />
                 {right}
               </div>
@@ -474,15 +484,29 @@ export function FeedTabs({
             называть — строка на каждом выпуске перестала бы что-либо значить. */}
         {hidden > 0 && items.length > 0 ? (
           <p className="mb-3 text-sm text-muted-foreground">
-            {count(hidden, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим{" "}
+            {t.feed.rules.hiddenBefore(hidden)}{" "}
             <Link href="/settings/interests" className="underline underline-offset-4">
-              исключениям
+              {t.feed.rules.hiddenLink}
             </Link>
             .
           </p>
         ) : null}
         <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
-      {tabs.map((tab) => {
+      {items.length === 0 && hidden > 0 ? (
+        // Выпуск есть, но исключения закрыли его целиком. Спокойно и с выходом:
+        // пустая лента без причины и без ссылки — тупик, и чинить её пошли бы
+        // в источники. Один раз на всю ленту, а не в каждой вкладке: условие
+        // про весь выпуск, а панели вкладок остаются смонтированными все.
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>{t.feed.rules.allHiddenTitle}</EmptyTitle>
+            <EmptyDescription>{t.feed.rules.allHiddenDescription(hidden)}</EmptyDescription>
+          </EmptyHeader>
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/settings/interests" />}>
+            {t.feed.rules.fixExclusions}
+          </Button>
+        </Empty>
+      ) : tabs.map((tab) => {
         const list = forTab(tab.slug);
         return (
           <TabsContent
@@ -500,24 +524,7 @@ export function FeedTabs({
                 "[@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-25",
             )}
           >
-            {items.length === 0 && hidden > 0 ? (
-              // Выпуск есть, но исключения закрыли его целиком. Спокойно
-              // и с выходом: пустая лента без причины и без ссылки — тупик,
-              // и чинить её пошли бы в источники.
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>Всё скрыто исключениями</EmptyTitle>
-                  <EmptyDescription>
-                    В выпуске {count(hidden, "карточка", "карточки", "карточек")}, и в каждой есть
-                    что-то из твоего списка. Выпуск не пересобирается — освободившиеся места
-                    не добираются.
-                  </EmptyDescription>
-                </EmptyHeader>
-                <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/settings/interests" />}>
-                  Поправить исключения
-                </Button>
-              </Empty>
-            ) : list.length === 0 ? (
+            {list.length === 0 ? (
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>{t.feed.tabs.emptyTitle}</EmptyTitle>

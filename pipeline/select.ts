@@ -212,11 +212,15 @@ export function pickSurvivors(
   // материал тоже, то есть весь выпуск.
   const best = Math.max(bestToday, scored[0]?.total ?? 0);
   const floor = best > 0 ? best * SCORE_FLOOR : -Infinity;
-  const byScore = scored
-    .filter(({ total }) => total >= floor)
-    // Место в очереди темы: сначала упомянутое, внутри него — по скору.
-    // Сортировка устойчива, поэтому без правил порядок остаётся по скору.
-    .sort((a, b) => Number(b.priority) - Number(a.priority) || b.total - a.total);
+  // Место в очереди темы: сначала упомянутое, внутри него — по скору.
+  // Сортировка устойчива, поэтому без правил порядок остаётся по скору.
+  // Тот же порядок решает и равный ход двух тем ниже: одно сравнение
+  // на оба места, чтобы они не разошлись.
+  const byMentionThenScore = (
+    a: { priority: boolean; total: number },
+    b: { priority: boolean; total: number },
+  ) => Number(b.priority) - Number(a.priority) || b.total - a.total;
+  const byScore = scored.filter(({ total }) => total >= floor).sort(byMentionThenScore);
 
   const seen = new Map<number, number>();
   const queued = byScore.map(({ row, total, priority }) => {
@@ -233,7 +237,7 @@ export function pickSurvivors(
     // Между темами круг решает `turn`; при равном ходе упомянутое идёт
     // первым — иначе на границе предела его отрезало бы соседней темой,
     // при том что в своей очереди оно стояло первым.
-    .sort((a, b) => a.turn - b.turn || Number(b.priority) - Number(a.priority) || b.total - a.total)
+    .sort((a, b) => a.turn - b.turn || byMentionThenScore(a, b))
     .slice(0, limit)
     .map(({ row, total }) => ({
       id: row.id,

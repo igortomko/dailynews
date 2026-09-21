@@ -320,12 +320,15 @@ export function ItemCard({
       ? [{
           key: "followed",
           node: (
+            // min-w-0 и truncate, как у темы рядом: написание — текст читателя
+            // длиной до 80 знаков, и без обрезки оно наезжало бы на кнопки
+            // на узком экране.
             <span
-              className="inline-flex shrink-0 items-center gap-1"
-              title="Из твоего списка «За чем следить»"
+              className="inline-flex min-w-0 items-center gap-1"
+              title={t.feed.rules.followedTitle}
             >
-              <EyeIcon className="size-3" aria-hidden />
-              {item.followed}
+              <EyeIcon className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{item.followed}</span>
             </span>
           ),
           quiet: true as const,
