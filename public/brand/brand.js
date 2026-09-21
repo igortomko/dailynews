@@ -17,6 +17,13 @@
     });
   });
   const semanticPreview = document.querySelector('#semantic-preview');
+  document.querySelectorAll('.semantic-row').forEach(row => {
+    const token = document.createElement('button');
+    token.className = 'semantic-token';
+    token.dataset.role = 'solid';
+    token.append(document.createElement('i'), document.createElement('code'));
+    row.querySelector('.semantic-example').after(token);
+  });
   function updateSemanticTokens() {
     const styles = getComputedStyle(semanticPreview);
     document.querySelectorAll('.semantic-token').forEach(button => {
@@ -49,6 +56,40 @@
         notify(`Цвет: ${value}. Выделите код под образцом, чтобы скопировать вручную.`);
       }
     });
+  });
+  const artLibrary = document.querySelector('#art-library');
+  const artDialog = document.querySelector('#art-dialog');
+  function setArtTheme(theme) {
+    artLibrary.dataset.galleryTheme = theme;
+    document.querySelectorAll('[data-art-image]').forEach(image => {
+      image.src = `./illustrations/preview/${image.dataset.artImage}-${theme}.webp`;
+    });
+    document.querySelectorAll('[data-art-theme]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.artTheme === theme)));
+  }
+  document.querySelectorAll('[data-art-theme]').forEach(button => button.addEventListener('click', () => setArtTheme(button.dataset.artTheme)));
+  document.querySelector('#art-checker').addEventListener('change', event => {
+    artLibrary.classList.toggle('show-checker', event.target.checked);
+    document.querySelector('.art-dialog-stage').classList.toggle('show-checker', event.target.checked);
+  });
+  function setArtDialogTheme(theme) {
+    document.querySelector('.art-dialog-stage').dataset.galleryTheme = theme;
+    document.querySelector('#art-dialog-image').src = `./illustrations/${theme}/${artDialog.dataset.artId}.png`;
+    document.querySelector('#art-dialog-theme').setAttribute('aria-pressed', String(theme === 'dark'));
+  }
+  document.querySelectorAll('[data-art-open]').forEach(button => button.addEventListener('click', () => {
+    const figure = button.closest('figure');
+    const id = button.dataset.artOpen;
+    artDialog.dataset.artId = id;
+    document.querySelector('#art-dialog-title').textContent = figure.querySelector('b').textContent;
+    document.querySelector('#art-dialog-meaning').textContent = figure.querySelector('small').textContent;
+    document.querySelector('#art-dialog-image').alt = figure.querySelector('[data-art-image]').alt;
+    document.querySelector('#art-dialog-light').href = `./illustrations/light/${id}.png`;
+    document.querySelector('#art-dialog-dark').href = `./illustrations/dark/${id}.png`;
+    setArtDialogTheme(artLibrary.dataset.galleryTheme);
+    artDialog.showModal();
+  }));
+  document.querySelector('#art-dialog-theme').addEventListener('click', () => {
+    setArtDialogTheme(document.querySelector('.art-dialog-stage').dataset.galleryTheme === 'dark' ? 'light' : 'dark');
   });
   document.querySelectorAll('.bookmark').forEach(button => {
     button.addEventListener('click', () => {

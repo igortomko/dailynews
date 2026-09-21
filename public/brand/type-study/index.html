@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Reporta / Выбор шрифта</title>
+  <link rel="stylesheet" href="../fonts/fonts.css">
+  <style>
+    *{box-sizing:border-box;letter-spacing:0}body{margin:0;background:#fff;color:#171716;font:400 15px/1.6 Inter,Arial,sans-serif;font-synthesis:none}main{max-width:1100px;margin:0 auto;padding:32px 28px}header{border-bottom:1px solid #d6d7d0;padding-bottom:24px}h1{font-size:28px;line-height:1.2;margin:16px 0}h2{font-size:17px;margin:0}p{margin:8px 0;max-width:70ch;color:#555}a{color:inherit}section{padding:24px 0;border-bottom:1px solid #d6d7d0}img{display:block;width:100%;height:auto;aspect-ratio:1529/434;object-fit:contain}.meta{font-size:12px;color:#62625c}strong{color:#bd2a10}label{display:flex;align-items:center;gap:8px;margin-top:16px}input{width:18px;height:18px;accent-color:#171716}.sample{position:relative}.snake{position:absolute;inset:0;pointer-events:none}.snake[hidden]{display:none}@media(max-width:600px){main{padding:20px 16px}h1{font-size:24px}section{padding:20px 0}}
+  </style>
+</head>
+<body><main>
+  <header><a href="../index.html#identity">К брендбуку</a><h1>Reporta / Шрифт логотипа</h1><p>Исходник и три кандидата. Буквы каждого шрифта переведены в SVG с родным кернингом, без растяжения. Это сравнение, основной логотип не заменён.</p><label><input id="snake-toggle" type="checkbox">Показать змейку поверх вариантов</label></header>
+  <section><h2>Исходный логотип</h2><p class="meta">Утверждённая картинка. Точный шрифт по ней не установлен.</p><img src="../logo-reporta-approved.png" alt="Исходный утверждённый логотип Reporta"></section>
+  <section><h2>DM Serif Display <strong>/ рекомендую</strong></h2><p>Ближе всего из этих трёх: плотная e, округлая p и восходящая форма t. У R другая ножка, поэтому совпадение не один в один. Основной мастер пока не меняем.</p><div class="sample"><img src="./dm-serif-display.svg" alt="Reporta набрано DM Serif Display"><img class="snake" src="../snake-reporta.svg" alt="" hidden></div><a class="meta" href="https://github.com/google/fonts/tree/main/ofl/dmserifdisplay">Шрифт и лицензия</a></section>
+  <section><h2>Prata</h2><p>Более острые окончания и выразительная форма t. Кандидат на близкую пластику оригинала.</p><div class="sample"><img src="./prata.svg" alt="Reporta набрано Prata"><img class="snake" src="../snake-reporta.svg" alt="" hidden></div><a class="meta" href="https://github.com/google/fonts/tree/main/ofl/prata">Шрифт и лицензия</a></section>
+  <section><h2>Libre Caslon Display</h2><p>Тоньше и спокойнее. Для сравнения с более книжным направлением.</p><div class="sample"><img src="./libre-caslon-display.svg" alt="Reporta набрано Libre Caslon Display"><img class="snake" src="../snake-reporta.svg" alt="" hidden></div><a class="meta" href="https://github.com/google/fonts/tree/main/ofl/librecaslondisplay">Шрифт и лицензия</a></section>
+  <section><h2>Bodoni Moda / текущий вариант</h2><p>Контрольное сравнение с вариантом, который не подошёл.</p><img src="../logo-reporta.svg" alt="Текущий логотип Bodoni Moda"></section>
+</main><script>document.querySelector('#snake-toggle').addEventListener('change',event=>{document.querySelectorAll('.snake').forEach(image=>image.hidden=!event.target.checked)});</script></body>
+</html>

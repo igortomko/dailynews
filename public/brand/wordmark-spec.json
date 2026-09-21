@@ -51,5 +51,5 @@
   ],
   "tracking": 0,
   "outlines": true,
-  "note": "Native font kerning retained. Wordmark is newly typeset; snake body reconstructed as a continuous Bezier, head traced from approved reference."
+  "note": "Native font kerning retained; replacement typeface pending comparison. Snake body and head are smooth manually reconstructed Bezier curves, with exact circular cyan eyes and no raster or traced noise."
 }
