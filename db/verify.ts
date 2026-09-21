@@ -132,12 +132,25 @@ async function main() {
      */
     const rejects = async (
       statement: string,
-      pattern: RegExp,
+      /**
+       * Регулярное выражение по тексту — или код SQLSTATE строкой.
+       *
+       * Код переживает и локаль кластера, и переписанное между версиями
+       * сообщение; в самом тексте ошибки его нет, он лежит отдельным полем,
+       * поэтому сверяется он не выражением, а проверкой.
+       */
+      pattern: RegExp | string,
       why: string,
       /** Значения для $1…$n: часть отказов бывает только у параметра. */
-      params: unknown[] = [],
+      params: Parameters<typeof sql.unsafe>[1] = [],
     ) => {
-      await assert.rejects(sql.unsafe(statement, params as never[]), pattern, why);
+      await assert.rejects(
+        sql.unsafe(statement, params),
+        typeof pattern === "string"
+          ? (error: unknown) => (error as { code?: string }).code === pattern
+          : pattern,
+        why,
+      );
       const [alive] = await sql<{ v: string }[]>`select 'ok'::text as v`;
       assert.equal(
         alive?.v,
@@ -395,7 +408,9 @@ async function main() {
     const shapes = async (digestId: number, itemId: number) => {
       await rejects(
         "select jsonb_build_object('reading_target', $1) as j",
-        /determine data type/,
+        // Код, а не английский текст: сообщение переписывают между версиями,
+        // а на локализованном кластере его не будет вовсе.
+        "42P18", // тип параметра не определён
         "без каста параметр в jsonb_build_object не типизируется — это и было причиной",
         [1.5],
       );
@@ -423,7 +438,7 @@ async function main() {
          values ($1, $2, 1, 98, 'проба', 'S')
          on conflict (digest_id, item_id) do nothing
          returning id::int as id`,
-        /column "id" does not exist/,
+        "42703", // столбца нет
         "у digest_items нет собственного ключа — returning id падал на каждой вставке",
         [digestId, itemId],
       );

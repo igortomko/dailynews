@@ -537,6 +537,19 @@ const privateStart = (text: string, extra: Record<string, unknown> = {}) => ({
   },
 });
 
+/**
+ * Язык интерфейса из разбора апдейта.
+ *
+ * Сужение, а не каст: `as { locale: string }` обходит union, и ветка,
+ * переставшая нести язык, продолжила бы компилироваться — проверка
+ * превратилась бы в обращение к полю несуществующего объекта.
+ */
+const localeOfUpdate = (update: unknown) => {
+  const parsed = parseUpdate(update);
+  assert.ok(parsed.kind === "start" || parsed.kind === "link", "апдейт разобран в ветку с языком");
+  return parsed.locale;
+};
+
 assert.deepEqual(
   parseUpdate(privateStart("/start")),
   { kind: "start", telegramId: 4242, chatId: 4242, username: "igor", locale: "en" },
@@ -548,24 +561,24 @@ assert.deepEqual(
 // от того, на каком языке он написал боту: ошибки нет, экран открывается,
 // просто не на его языке.
 assert.equal(
-  (parseUpdate(privateStart("/start", { language_code: "ru" })) as { locale: string }).locale,
+  localeOfUpdate(privateStart("/start", { language_code: "ru" })),
   "ru",
   "язык из апдейта становится языком интерфейса",
 );
 // Telegram шлёт и «ru-RU», и «en-US»: страна нам ни о чём не говорит.
 assert.equal(
-  (parseUpdate(privateStart("/start", { language_code: "ru-RU" })) as { locale: string }).locale,
+  localeOfUpdate(privateStart("/start", { language_code: "ru-RU" })),
   "ru",
   "страна в коде языка отбрасывается",
 );
 // Словарей два, и незнакомый язык — это язык по умолчанию, а не пустой экран.
 assert.equal(
-  (parseUpdate(privateStart("/start", { language_code: "pt-BR" })) as { locale: string }).locale,
+  localeOfUpdate(privateStart("/start", { language_code: "pt-BR" })),
   "en",
   "язык без словаря читается как язык по умолчанию",
 );
 assert.equal(
-  (parseUpdate(privateStart("/start", { language_code: 42 })) as { locale: string }).locale,
+  localeOfUpdate(privateStart("/start", { language_code: 42 })),
   "en",
   "не строка — тоже язык по умолчанию",
 );
@@ -1999,7 +2012,7 @@ assert.equal(parseUpdate(privateStart("https://t.me/durov")).kind, "link", "сс
 // Язык нужен и этой ветке: у читателя, чьё первое сообщение — ссылка,
 // строка заводится здесь, а следующий /start язык уже не переписывает.
 assert.equal(
-  (parseUpdate(privateStart("https://t.me/durov", { language_code: "ru" })) as { locale: string }).locale,
+  localeOfUpdate(privateStart("https://t.me/durov", { language_code: "ru" })),
   "ru",
   "ссылка тоже приносит язык интерфейса",
 );

@@ -40,7 +40,7 @@ export const onboarding: typeof En = {
       openFeed: "Открыть ленту",
       dontClose: "Не закрывай вкладку.",
       elapsed: (seconds: number) =>
-        `${plural(seconds, "прошла", "прошло", "прошло")} ${count(seconds, "секунда", "секунды", "секунд")}, обычно около минуты`,
+        `${plural(seconds, "Прошла", "Прошло", "Прошло")} ${count(seconds, "секунда", "секунды", "секунд")}, обычно около минуты`,
       noFreshItems: "Свежих материалов по твоим темам пока нет — соберу ночью.",
       buildFailed: "Не получилось собрать первый выпуск — соберу ночью.",
       digestSummary: (added, topics) =>
