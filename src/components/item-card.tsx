@@ -30,7 +30,6 @@ import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedCard } from "@/lib/queries";
 import { alsoLine, otherSources, storyLines, storyTitle } from "@/lib/story";
-import { HORIZON, KIND } from "@/lib/axis-labels";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
 const SEEN_MS = 1500;
@@ -200,13 +199,16 @@ export function ItemCard({
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
-  const kind = item.axes?.kind?.choice ? KIND[item.axes.kind.choice] : undefined;
-  const horizon = item.axes?.horizon?.choice ? HORIZON[item.axes.horizon.choice] : undefined;
   const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
-  // Тема, тип и горизонт — одной строкой вместе с источником и временем
-  // чтения. Порядок от общего к частному: про что это, что это за материал
-  // и насколько надолго.
-  const tags = [showTopic ? item.topic_label : null, kind, horizon].filter(Boolean);
+  // Тема — одной строкой вместе с источником и временем чтения.
+  //
+  // Тип материала и горизонт отсюда убраны. «Факт» стоял у 58% карточек
+  // выпуска, «месяцы» — у 44%: метка, которая есть почти у всех, не отличает
+  // карточку от соседней, а слова взяты из нашей шкалы, а не из языка
+  // читателя. В отборе и в «Калибровке» обе оси работают по-прежнему —
+  // там значения стоят рядом друг с другом и сравниваются. В строке
+  // остаётся метка, которая сообщает об отклонении, — «кликбейт» выше.
+  const topic = showTopic ? item.topic_label : null;
 
   if (vote === "down") {
     return (
@@ -283,7 +285,7 @@ export function ItemCard({
               содержимого. Строка в одну линию держала ширину всей карточки,
               и на телефоне лента уезжала за край экрана — заголовок и текст
               обрезались справа, а докрутить до них было нельзя. */}
-          {tags.length > 0 ? <span className="min-w-0 truncate">{tags.join(", ")}</span> : null}
+          {topic ? <span className="min-w-0 truncate">{topic}</span> : null}
         </span>
 
         {/* Оценка тоже по наведению: нужна раз на десяток материалов,
