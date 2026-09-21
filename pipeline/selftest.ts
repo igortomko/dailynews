@@ -38,6 +38,7 @@ import {
 import { appOrigin } from "../src/lib/auth";
 import { numberCollisions } from "../db/schema-gap";
 import { dropStrayReady } from "../db/free-port";
+import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -48,7 +49,7 @@ import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
-import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
 import {
   channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
@@ -468,6 +469,13 @@ assert.ok(
   [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
   "у каждого варианта должны быть и подпись для читателя, и требование для модели",
 );
+// Манеру выбирают по первой фразе, а не по названию: «Разбор» и «Ровно»
+// различаются только примером. Манера без примера выглядит в ряду пустой
+// карточкой — и выбирают соседнюю, потому что про неё понятно.
+assert.ok(
+  STYLES.every((entry) => (entry.example ?? "").trim().length > 0),
+  "у каждой манеры должен быть пример того, как начнётся описание",
+);
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
 assert.equal(styleOf("выдуманная").key, "нейтральный", "незнакомая манера читается как нейтральная");
@@ -555,6 +563,9 @@ const candidate = (id: number, topicId: number | null, clickbait: number): Candi
   body: null,
   url: `https://example.com/${id}`,
   source_label: "тест",
+  // Каталожный скор: порядок кандидатов из базы. Отбор пересчитывает
+  // свой из axes весами читателя, поэтому здесь он ни на что не влияет.
+  total: 0,
   topic_id: topicId,
   topic_label: `тема ${topicId ?? "нет"}`,
   axes: axes({ clickbait: { noul: clickbait } }),
@@ -899,31 +910,22 @@ assert.ok(
   "но страница остаётся: ряд чисел нужен для правок отбора",
 );
 
-// Ручка границы стоит в зазоре между кусками, а не в доле от всей ширины:
-// куски выложены флексом с зазором, и доля от полной ширины промахивается
-// тем сильнее, чем правее граница — на последних ручка уезжала на соседний
-// сегмент и выглядела его ручкой.
+// Ручка границы стоит там, где кончается её левый кусок: полоса сплошная,
+// доля считается от всей ширины. Пока между кусками был зазор, к доле
+// прибавлялись пройденные зазоры — без поправки ручка промахивалась тем
+// сильнее, чем правее граница, и у правого края уезжала на соседний сегмент.
+// Вернётся зазор — вернётся и поправка, иначе промах вернётся молча.
 {
   const counts = [15, 12, 7, 3, 3];   // 40 новостей, пять тем
-  const gaps = BAR_GAP * (counts.length - 1);
 
-  assert.equal(
-    handleLeft(counts, 0),
-    `calc((100% - ${gaps}px) * 0.375 + ${BAR_GAP / 2}px)`,
-    "первая граница: доля от цветной части плюс половина зазора",
-  );
-  assert.equal(
-    handleLeft(counts, 1),
-    `calc((100% - ${gaps}px) * 0.675 + ${BAR_GAP * 1.5}px)`,
-    "вторая граница уже прошла один зазор целиком",
-  );
-  // Последняя граница обязана попасть в последний зазор, а не за полосу.
+  assert.equal(handleLeft(counts, 0), "37.5%", "первая граница — там, где кончился первый кусок");
+  assert.equal(handleLeft(counts, 1), "67.5%", "вторая граница считает оба куска слева");
   assert.equal(
     handleLeft(counts, counts.length - 2),
-    `calc((100% - ${gaps}px) * 0.925 + ${BAR_GAP * 3.5}px)`,
-    "у правого края ручка остаётся в своём зазоре",
+    "92.5%",
+    "у правого края ручка остаётся внутри полосы, а не за ней",
   );
-  assert.ok(handleLeft([1], 0).includes("100% - 0px"), "на одной теме зазоров нет");
+  assert.equal(handleLeft([1], 0), "100%", "единственная тема занимает полосу целиком");
 }
 
 // Окно с предложением показывает все тарифы, где возможность есть и которые
@@ -2450,7 +2452,6 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   );
 }
 
-console.log(`Самопроверка пройдена: ${checks} утверждений`);
 
 // --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
 // Подмена колонки при сохранении была необратимой: тариф открывается обратно,
@@ -2581,6 +2582,105 @@ console.log(`Самопроверка пройдена: ${checks} утвержд
     false,
     "и не отменяется тем, что запасной уровень дошёл до разбора",
   );
+}
+
+// Сюжет: дедуп сделан видимым.
+//
+// Проверяется то, что на живых данных уже разъехалось: «первоисточник»
+// по dup_of неверен в трёх случаях из четырёх, потому что оригиналом
+// дедуп назначает меньший id — порядок опроса источников, а не публикации.
+{
+  const pub = (
+    item_id: number,
+    source_id: number,
+    source_label: string,
+    kind: "rss" | "hackernews",
+    minutes: number,
+    points: number | null = null,
+  ) => ({
+    item_id,
+    source_id,
+    source_label,
+    kind,
+    url: `https://example.com/${item_id}`,
+    published_at: new Date(Date.UTC(2026, 8, 20, 10, 0) + minutes * 60_000),
+    points,
+  });
+
+  // Живой случай: Hacker News собран первым и стал оригиналом, а написан
+  // пост был на 103 минуты раньше.
+  const willison = pub(68, 2, "Simon Willison", "rss", 0);
+  const hn = pub(12, 1, "Hacker News", "hackernews", 103, 418);
+  assert.deepEqual(
+    storyLines([hn, willison]).map((row) => [row.source_label, row.note]),
+    [["Simon Willison", "первоисточник"], ["Hacker News", "обсуждение: 418 points"]],
+    "первоисточник — самое раннее издание, а не меньший id",
+  );
+
+  // Обсуждение раньше статьи первоисточником не становится, и отсчёт
+  // «позже» идёт от издания: иначе вторая статья получила бы «раньше».
+  const early = pub(5, 1, "Hacker News", "hackernews", 0, 91);
+  const verge = pub(9, 3, "The Verge", "rss", 60);
+  const ars = pub(11, 4, "Ars Technica", "rss", 78);
+  assert.deepEqual(
+    storyLines([ars, early, verge]).map((row) => row.note),
+    ["обсуждение: 91 points", "первоисточник", "18 минут позже"],
+    "отсчёт идёт от первого издания, обсуждение в нём не участвует",
+  );
+
+  // Кластер без единого издания: отсчитывать не от чего, и выдумывать
+  // первоисточник нельзя.
+  assert.deepEqual(
+    storyLines([pub(1, 1, "Hacker News", "hackernews", 0, null)]).map((row) => row.note),
+    ["обсуждение"],
+    "обсуждение без очков остаётся обсуждением, а не первоисточником",
+  );
+
+  // Даты нет ни у кого: у RSS она бывает неразобранной, у письма её нет
+  // вовсе. «Первоисточник» здесь — заявление о времени, которого мы
+  // не знаем, и достаться оно не должно никому.
+  const undated = (id: number, label: string) => ({
+    item_id: id, source_id: id, source_label: label, kind: "rss" as const,
+    url: `https://example.com/${id}`, published_at: null, points: null,
+  });
+  assert.deepEqual(
+    storyLines([undated(2, "Второе"), undated(1, "Первое")]).map((row) => row.note),
+    ["", ""],
+    "без даты первоисточника нет ни у кого",
+  );
+  // Одна известная дата — и он находится, а безымянный остаётся без пометки.
+  assert.deepEqual(
+    storyLines([undated(9, "Без даты"), pub(3, 3, "С датой", "rss", 0)])
+      .map((row) => [row.source_label, row.note]),
+    [["С датой", "первоисточник"], ["Без даты", ""]],
+    "известная дата делает первоисточником её, а не первого по id",
+  );
+
+  // Двенадцать кластеров из шестнадцати на живом потоке — это источник,
+  // повторивший сам себя. Строка о них соврала бы.
+  assert.equal(
+    otherSources([pub(1, 7, "Cointelegraph", "rss", 0), pub(2, 7, "Cointelegraph", "rss", 30)], 7),
+    0,
+    "источник, повторивший сам себя, не «ещё один источник»",
+  );
+  assert.equal(otherSources([willison, hn], 2), 1, "чужой источник в сюжете считается");
+
+  assert.equal(laterBy(0), "тогда же");
+  assert.equal(laterBy(1), "1 минуту позже");
+  assert.equal(laterBy(18), "18 минут позже");
+  assert.equal(laterBy(103), "2 часа позже", "минуты перестают быть минутами после часа");
+  assert.equal(laterBy(341), "6 часов позже");
+  assert.equal(laterBy(1500), "1 день позже");
+  assert.equal(laterBy(4000), "3 дня позже");
+
+  // «1 материалов» — та же ловушка, только в новой строке.
+  assert.equal(alsoLine(1), "О том же написали ещё 1 твой источник");
+  assert.equal(alsoLine(3), "О том же написали ещё 3 твоих источника");
+  assert.equal(alsoLine(5), "О том же написали ещё 5 твоих источников");
+  assert.equal(alsoLine(11), "О том же написали ещё 11 твоих источников");
+  assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
+  assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
+  assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
