@@ -69,18 +69,33 @@ function ToTop() {
 }
 
 /**
- * Два слоя в одной клетке сетки: видимый и ушедший. Прозрачность и четыре
- * пикселя сдвига — вся анимация; `visibility` уезжает в переход вместе
- * с ними, иначе ушедший слой ловил бы мышь поверх пришедшего.
+ * Слой шапки: видимый или ушедший. Оба лежат в одной клетке сетки, потому
+ * что уходящий нельзя убрать из разметки, пока он уходит.
  *
- * `motion-reduce` выключает переход целиком: попросившему систему ничего
- * не двигать поле открывается мгновенно, как и было.
+ * Вся анимация — прозрачность и четыре пикселя: уходящий слой отступает
+ * туда, откуда пришёл бы (`from`), встречный приходит с другой стороны.
+ * Собирается это одной функцией на все четыре слоя: правка кроссфейда,
+ * разложенная по четырём местам, доедет до трёх из них.
+ *
+ * В списке переходов `translate`, а не `transform`: у Tailwind
+ * `translate-y-*` — это свойство `translate`, и в произвольном списке
+ * его никто не подставит. С `transform` сдвиг не анимировался бы вовсе,
+ * а прыгал в конце перехода — ровно та поломка, которую не видно,
+ * потому что прозрачность-то менялась.
+ *
+ * `visibility` едет в переходе вместе с ними: без неё ушедший слой ловил бы
+ * мышь поверх пришедшего. `motion-reduce` выключает переход целиком —
+ * попросившему систему ничего не двигать поле открывается мгновенно.
  */
-const LAYER =
-  "col-start-1 row-start-1 invisible -translate-y-1 opacity-0 " +
-  "transition-[opacity,transform,visibility] duration-150 ease-out motion-reduce:transition-none";
-
-const SHOWN = "visible translate-y-0 opacity-100";
+const layerClass = (shown: boolean, from: "above" | "below", extra?: string) =>
+  cn(
+    "col-start-1 row-start-1 transition-[opacity,translate,visibility] duration-150 ease-out",
+    "motion-reduce:transition-none",
+    shown
+      ? "visible translate-y-0 opacity-100"
+      : cn("invisible opacity-0", from === "above" ? "-translate-y-1" : "translate-y-1"),
+    extra,
+  );
 
 export function FeedTabs({
   topics,
@@ -231,7 +246,7 @@ export function FeedTabs({
         <div className="grid h-14 sm:h-12">
           <div
             inert={searching}
-            className={cn(LAYER, "flex items-center justify-between gap-3 px-4", !searching && SHOWN)}
+            className={layerClass(!searching, "above", "flex items-center justify-between gap-3 px-4")}
           >
               <div className="flex min-w-0 items-center gap-2">
                 {left}
@@ -259,16 +274,14 @@ export function FeedTabs({
               владельца и не оплошность выравнивания — крестик закрывает
               поиск, стрелка уводит, и одинаковое место обещало бы
               одинаковое действие. */}
+          {/* Приходит снизу, а строка уходит вверх: четыре пикселя навстречу
+              друг другу читаются как смена, а не как общий сдвиг шапки. */}
           <div
             inert={!searching}
-            className={cn(
-              LAYER,
-              // Приходит снизу, а строка уходит вверх: четыре пикселя
-              // навстречу друг другу читаются как смена, а не как общий
-              // сдвиг всей шапки.
-              "translate-y-1",
+            className={layerClass(
+              searching,
+              "below",
               "mx-auto flex w-full max-w-page items-center gap-2 px-4",
-              searching && SHOWN,
             )}
           >
             <SearchField open={searching} onClose={() => setSearching(false)} />
@@ -281,7 +294,7 @@ export function FeedTabs({
             над ними: два перехода разной длины в одной шапке читаются
             как две разные поломки. */}
         <div className="grid">
-        <div inert={searching} className={cn(LAYER, !searching && SHOWN)}>
+        <div inert={searching} className={layerClass(!searching, "above")}>
         {/* Родитель flex, полоса с margin: auto. Когда вкладки помещаются,
             поля разводят их по центру; когда шире — поля схлопываются в ноль,
             полоса прижимается к левому краю и прокручивается.
@@ -314,7 +327,7 @@ export function FeedTabs({
           </TabsList>
         </div>
         </div>
-          <div inert={!searching} className={cn(LAYER, "translate-y-1", searching && SHOWN)}>
+          <div inert={!searching} className={layerClass(searching, "below")}>
             <SearchHints />
           </div>
         </div>
