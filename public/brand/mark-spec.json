@@ -1,0 +1,10 @@
+{
+  "name": "mark-reporta.svg",
+  "width": 300,
+  "height": 152,
+  "source": "sources/mark-reporta-clean.svg",
+  "paths": 1,
+  "eyeCircles": 4,
+  "opaqueHead": true,
+  "note": "Approved silhouette with enclosed eye cutouts filled before smoothing and tracing. No eye holes, masks or raster. Original eye centers and radii retained. Historical tracing IoU does not apply to this master."
+}

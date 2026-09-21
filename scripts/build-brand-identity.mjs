@@ -95,15 +95,8 @@ try {
     const file = width === 760 ? 'logo-reporta.png' : `logo-reporta-${width}.png`;
     await sharp(Buffer.from(logo), { density: 144 }).resize({ width }).png().toFile(join(brand, file));
   }
-  const mark = await makeVector('mark-reporta', join(brand, 'sources/mark-reporta-approved.png'), true);
-  await sharp(Buffer.from(mark)).png().toFile(join(brand, 'mark-reporta.png'));
-  for (const size of [16, 32, 180, 512]) {
-    await sharp(Buffer.from(mark), { density: 288 }).resize(size, size, { fit: 'contain', background: '#00000000' }).png().toFile(join(brand, `favicon-${size}.png`));
-  }
-  const { document } = parseHTML(mark);
-  const inner = document.querySelector('svg').innerHTML;
-  const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><svg x="2" y="16" width="60" height="30" viewBox="0 0 300 152">${inner}</svg></svg>\n`;
-  await writeFile(join(brand, 'favicon.svg'), favicon);
+  const { markReport } = await import('./build-brand-mark.mjs');
+  reports.push(markReport);
   reports[0].name = 'sources/logo-reporta-traced.svg';
   const fontBuild = spawnSync('uv', ['run', '--with-requirements', resolve(brand, '../../scripts/brand-font-requirements.txt'), 'python', resolve(brand, '../../scripts/build-brand-wordmark.py')], { encoding: 'utf8' });
   if (fontBuild.error) throw fontBuild.error;
