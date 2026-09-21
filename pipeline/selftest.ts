@@ -2102,8 +2102,12 @@ for (const prop of ["left", "right"]) {
 // который-нибудь из них единственным ребёнком — проверка выше станет
 // суеверием, и упасть она должна здесь.
 const tabsSource = readFileSync("src/components/feed-tabs.tsx", "utf8");
-const headerRow = tabsSource.slice(tabsSource.indexOf("{left}"), tabsSource.indexOf("</header>"));
-assert.ok(headerRow.length > 0, "шапку ленты рисует feed-tabs");
+const rowFrom = tabsSource.indexOf("{left}");
+const rowTo = tabsSource.indexOf("</header>");
+// Оба конца названы явно: indexOf отдаёт -1, а slice с -1 молча вернёт
+// хвост файла — проверка осталась бы зелёной, не посмотрев на шапку вовсе.
+assert.ok(rowFrom >= 0 && rowTo > rowFrom, "шапку ленты рисует feed-tabs");
+const headerRow = tabsSource.slice(rowFrom, rowTo);
 assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left стоит рядом с кнопками");
 assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 
