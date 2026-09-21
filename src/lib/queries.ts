@@ -20,6 +20,7 @@ export type FeedItem = {
   title: string;
   title_ru: string | null;
   summary: string | null;
+  summary_document?: unknown;
   image_url: string | null;
   source_label: string;
   /** Нужен сюжету: источник, повторивший сам себя, — не «ещё один источник». */
@@ -169,7 +170,7 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
  */
 export async function getFeed(readerId: number, day: string): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
-    select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
+    select i.id, i.url, i.title, di.title as title_ru, di.summary, di.summary_document, i.image_url,
            s.label as source_label, s.id as source_id,
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,

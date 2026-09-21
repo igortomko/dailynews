@@ -26,7 +26,7 @@ import { cardMinutes } from "./reading-time";
  */
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
-  reader_context, digest_minutes, weights, language, complexity, style,
+  reader_context, reading_v2_enabled, digest_minutes, weights, language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
@@ -207,6 +207,7 @@ export async function digestProgress(
            coalesce(max(di.total), 0)::float as best
       from dailynews.digests d
  left join dailynews.digest_items di on di.digest_id = d.id
+       and coalesce(di.summary_document->>'status','verified') <> 'unavailable'
      -- Каст обязателен: у нетипизированного параметра Postgres выбирает
      -- тип по колонке и падает на null там, где null означает «любой день».
      where d.reader_id = ${readerId}
@@ -248,10 +249,10 @@ export async function cardCharsOf(readerId: number): Promise<number> {
  *  бесплатный и мгновенный, и сто аккаунтов заводятся за вечер. */
 export async function spentToday(readerId: number): Promise<number> {
   const [row] = await sql<{ spent: number }[]>`
-    select coalesce(sum(cost_usd), 0)::float as spent
-      from dailynews.model_calls
-     where reader_id = ${readerId}
-       and at >= date_trunc('day', now())
+    select (coalesce((select sum(cost_usd) from dailynews.model_calls
+      where reader_id=${readerId} and at>=date_trunc('day',now())),0)
+      + coalesce((select sum(reserved_usd) from dailynews.reading_calls
+      where reader_id=${readerId} and status='reserved' and at>=date_trunc('day',now())),0))::float as spent
   `;
   return row?.spent ?? 0;
 }

@@ -1,3 +1,4 @@
+import { budgetedFetch } from "./model-budget";
 /**
  * Пост его голосом по одному материалу выпуска.
  *
@@ -219,6 +220,7 @@ export async function writePost(
   item: PostSource,
   card: VoiceCard,
   networkIds: NetworkId[],
+  readerId?: number,
 ): Promise<PostResult> {
   const { baseUrl, model, apiKey } = resolve();
   if (!apiKey) throw new Error("не задан LLM_API_KEY");
@@ -226,7 +228,7 @@ export async function writePost(
   const networks = networkIds.map((id) => NETWORKS[id]).filter(Boolean);
   if (networks.length === 0) throw new Error("не выбрана ни одна сеть");
 
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const res = await budgetedFetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -242,7 +244,7 @@ export async function writePost(
       messages: [{ role: "user", content: promptFor(item, card, networks) }],
     }),
     signal: AbortSignal.timeout(300_000),
-  });
+  }, readerId, "post");
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
 
   const payload = await res.json();

@@ -1,3 +1,4 @@
+import { budgetedJev } from "./model-budget";
 import { TypeSafeClient, choice } from "@typesafe-ai/sdk";
 import { STARTER_TOPICS } from "../src/lib/starter-topics";
 
@@ -20,7 +21,7 @@ export type Ranked = { slugs: string[]; inputTokens: number; model: string };
 
 const EMPTY: Ranked = { slugs: [], inputTokens: 0, model: "" };
 
-export async function rankTopics(bio: string): Promise<Ranked> {
+export async function rankTopics(bio: string, readerId?: number): Promise<Ranked> {
   const text = bio.trim();
   if (text.length < 8) return EMPTY;
 
@@ -29,7 +30,7 @@ export async function rankTopics(bio: string): Promise<Ranked> {
 
   try {
     const client = new TypeSafeClient();
-    const result = await client.systemOne({
+    const result = await budgetedJev(readerId, "interests", { text, criteria }, () => client.systemOne({
       state: { "Человек о себе": text },
       questions: {
         topic: choice(
@@ -37,7 +38,7 @@ export async function rankTopics(bio: string): Promise<Ranked> {
           criteria,
         ),
       },
-    });
+    }));
 
     const probabilities = result.answers.topic.probabilities as Record<string, number>;
     const slugs = Object.entries(probabilities)

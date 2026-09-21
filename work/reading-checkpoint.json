@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "goal": "Implement and deploy the approved generative news reading specification.",
+  "constraints": [
+    "Only dailynews schema and /opt/dailynews deployment; preserve parallel work.",
+    "User now explicitly authorized production implementation, overriding the prior examples-only scope.",
+    "No external messages or claims of measured reader-comprehension gains."
+  ],
+  "requirements": [
+    {
+      "id": "source",
+      "text": "Analyze every available source section; audit coverage and narrative development",
+      "status": "met"
+    },
+    {
+      "id": "personal",
+      "text": "Topic-specific explanations based on explicit context, optional formats/actions, source verification and repair",
+      "status": "met"
+    },
+    {
+      "id": "storage",
+      "text": "Reader-scoped documents, shared analysis leases, additive migration and budget reservation",
+      "status": "met"
+    },
+    {
+      "id": "ui",
+      "text": "Safe components, no mandatory accent or evidence divider, summary time and typography, text parity",
+      "status": "met"
+    },
+    {
+      "id": "verify",
+      "text": "Tests, database checks, live replay, independent review and browser QA",
+      "status": "pending"
+    },
+    {
+      "id": "deploy",
+      "text": "Migrate, build, deploy and verify production version and owner summaries",
+      "status": "pending"
+    }
+  ],
+  "plan": [
+    "Implement pipeline and compatible persistence",
+    "Validate tests, replay and review",
+    "Deploy and verify production"
+  ],
+  "completed": [
+    "Structured reading pipeline, safe renderer, additive schema, reader-scoped caching and shared budget protocol implemented.",
+    "Independent code review findings fixed and rechecked statically.",
+    "1174 legacy checks and reading-specific checks pass; local PostgreSQL verification and webpack production build passed before final editorial changes.",
+    "Live replays exposed overlong summaries and false validator rejection in reasoning-disabled provider mode; source-span anchors, bounded lengths and mixed reasoning introduced."
+  ],
+  "evidence": [
+    "Desktop and 390px layout inspected in the real ItemCard renderer; metadata overlap corrected.",
+    "Final repeated live replay of four articles is in progress; production not modified."
+  ],
+  "nextStep": "Validate final live outputs and latest checks, then commit, migrate, deploy and rewrite the owner edition within the saved daily cap.",
+  "completionClaimed": false,
+  "contextComplete": true,
+  "artifacts": [
+    "work/reading-plan.md",
+    "pipeline/reading.ts",
+    "src/lib/reading-document.ts",
+    "db/migrations/0044_generative_reading.sql"
+  ]
+}

@@ -116,6 +116,7 @@ export type Reader = {
   username: string | null;
   owner: boolean;
   reader_context: string;
+  reading_v2_enabled: boolean;
   /**
    * Сколько минут чтения заказано. Карточек столько, сколько уложится
    * в это время: перевод делает `itemsForMinutes` по длине уже написанных

@@ -1,3 +1,6 @@
+import { budgetedFetch } from "./model-budget";
+import type { StoredReading } from "../src/lib/reading-document";
+import type { ReadingOptions } from "./reading";
 import type { Axes } from "../src/lib/types";
 import { checkLexicon, repeatsHeadline } from "./lexicon";
 import { complexityAt, styleOf, DEFAULT_VOICE, type Voice } from "../src/lib/voice";
@@ -61,6 +64,7 @@ export type Written = {
   id: number;
   title_ru: string;
   summary: string;
+  reading?: StoredReading;
 };
 
 export type Usage = {
@@ -68,6 +72,7 @@ export type Usage = {
 };
 
 export type DigestResult = {
+  accounted?: boolean;
   intro: string;
   items: Written[];
   flagged?: number;
@@ -188,7 +193,17 @@ export async function writeDigest(
   survivors: Survivor[],
   readerContext: string,
   voice: Voice = DEFAULT_VOICE,
+  options?: ReadingOptions,
 ): Promise<DigestResult> {
+  if (options) {
+    const { sql } = await import("../src/lib/db");
+    const [reader] = await sql<{ reading_v2_enabled: boolean }[]>`select reading_v2_enabled from dailynews.readers where id=${options.readerId}`;
+    if (!reader) throw new Error("Reader unavailable");
+    if (reader.reading_v2_enabled) {
+      const { writeReadingDigest } = await import("./reading");
+      return writeReadingDigest(sql, survivors, readerContext, voice, options);
+    }
+  }
   const language = voice.language || "русском";
   const { baseUrl, model, apiKey, reasoningEffort } = resolve();
   if (!apiKey) {
@@ -198,7 +213,7 @@ export async function writeDigest(
       flagged: 0,
       usage: { input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 },
       model,
-      reasoningEffort: reasoningEffort ?? null,
+      reasoningEffort: reasoningEffort ?? null, accounted: !!options,
       items: survivors.map((s) => ({
         id: s.id,
         title_ru: s.title,
@@ -332,7 +347,7 @@ ${blockOf(list)}
 {${askIntro ? '"intro": "...", ' : ""}"items": [[<число>, "...", "..."]]}`;
 
   const ask = async (list: Survivor[], askIntro: boolean) => {
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const res = await budgetedFetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -350,7 +365,7 @@ ${blockOf(list)}
     // Рассуждающие модели тратят на дайджест по несколько минут; потолок
     // должен быть выше их худшего случая, иначе прогон падает молча.
     signal: AbortSignal.timeout(600_000),
-  });
+  }, options?.readerId);
     if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
 
     const payload = await res.json();
@@ -437,7 +452,7 @@ ${blockOf(list)}
   }
   if (flagged > 0) console.error(`  ~ помечено ${flagged} из ${written.length}`);
 
-  return { intro, items: written, flagged, usage, model, reasoningEffort: reasoningEffort ?? null };
+  return { intro, items: written, flagged, usage, model, reasoningEffort: reasoningEffort ?? null, accounted: !!options };
 }
 
 /**
