@@ -1,8 +1,7 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import { equal } from "@/lib/auth";
 import { escapeHtml, SECRET_HEADER } from "@/lib/telegram";
-import { getReader, recordCall, spentToday } from "@/lib/readers";
-import { getChannels } from "@/lib/readers";
+import { getChannels, getReader, recordCall, spentToday } from "@/lib/readers";
 import { classifyDrop } from "@/lib/drops";
 import { dropSourceFor, saveDrafts } from "@/lib/posts";
 import { asCard, cardFromVoice } from "../../../../pipeline/voice-card";
@@ -67,9 +66,12 @@ type Incoming = { chatId: number; telegramId: number; text: string; forwarded: b
 export function parsePost(update: unknown): Incoming | null {
   const message = (update as { message?: Record<string, unknown> })?.message;
   if (!message) return null;
-  const chat = message.chat as { id?: unknown } | undefined;
+  const chat = message.chat as { id?: unknown; type?: unknown } | undefined;
   const from = message.from as { id?: unknown; is_bot?: unknown } | undefined;
   const text = typeof message.text === "string" ? message.text : "";
+  // Только личные чаты. Владелец, написавший боту в группе, остаётся владельцем
+  // по from.id — и черновики его голосом ушли бы всем участникам разом.
+  if (chat?.type !== "private") return null;
   if (typeof chat?.id !== "number" || typeof from?.id !== "number") return null;
   if (from.is_bot === true || !text.trim()) return null;
   const forwarded = Boolean(message.forward_origin ?? message.forward_from ?? message.forward_from_chat);
@@ -121,7 +123,7 @@ async function reply(incoming: Incoming): Promise<void> {
   }[drop.kind];
   await send(incoming.chatId, waiting);
 
-  let source;
+  let source: Awaited<ReturnType<typeof dropSourceFor>>;
   try {
     source = await dropSourceFor(drop);
   } catch (error) {
@@ -172,6 +174,12 @@ export async function POST(request: NextRequest) {
   const incoming = parsePost(await request.json().catch(() => null));
   // Ответ Telegram уходит сразу: чтение статьи и письмо поста занимают
   // десятки секунд, а он повторяет апдейт, не дождавшись ответа.
-  if (incoming) after(() => reply(incoming));
+  // Ответ Telegram уже ушёл, поэтому отказ до внутреннего try (база, читатель,
+  // потолок) больше некому поймать: без этого он станет unhandled rejection.
+  if (incoming) {
+    after(() => reply(incoming).catch((error: unknown) => {
+      console.error(`postbot: ${error instanceof Error ? error.message : error}`);
+    }));
+  }
   return NextResponse.json({ ok: true });
 }

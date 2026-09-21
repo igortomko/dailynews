@@ -20,7 +20,8 @@ export type Drop =
   | { kind: "post"; text: string }
   | { kind: "thought"; text: string };
 
-const URL_RE = /https?:\/\/\S+/;
+// Регистр схемы произвольный: Telegram отдаёт текст как есть, «HTTPS://» тоже адрес.
+const URL_RE = /https?:\/\/\S+/i;
 
 /**
  * Что прислали. Чистая функция: решение принимается по тексту и признаку
@@ -39,11 +40,12 @@ export function classifyDrop(text: string, forwarded: boolean): Drop | null {
   if (forwarded) return { kind: "post", text: body };
 
   const match = body.match(URL_RE);
-  const url = match?.[0]?.replace(/[)\].,;]+$/, "");
+  const url = match?.[0]?.replace(/[)\].,;:!?"'»]+$/, "");
   const leading = url !== undefined && body.indexOf(url) === 0;
-  // Резать по исходному совпадению, а не по очищенному адресу: снятая
-  // хвостовая пунктуация осталась в тексте и стала бы пометкой «).».
-  const note = match ? body.slice((match.index ?? 0) + match[0].length).trim() : "";
+  // Хвост из одной пунктуации — это точка в конце адреса, а не пометка:
+  // иначе в промпт уходит «Пометка автора: ).».
+  const tail = match ? body.slice((match.index ?? 0) + match[0].length).trim() : "";
+  const note = /[\p{L}\p{N}]/u.test(tail) ? tail : "";
   if (url && leading && note.length <= 300) {
     return videoIdOf(url) ? { kind: "video", url, note } : { kind: "link", url, note };
   }

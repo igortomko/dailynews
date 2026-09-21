@@ -6,7 +6,7 @@
  *   npx tsx pipeline/selftest.ts
  */
 import assertStrict from "node:assert/strict";
-import { classifyDrop, titleOf } from "../src/lib/drops";
+import { classifyDrop, syntheticUrl, titleOf } from "../src/lib/drops";
 
 /**
  * Утверждения считает сам файл, а не человек в конце.
@@ -2272,6 +2272,19 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     punctuated?.kind === "link" && punctuated.note,
     "а дальше мысль",
     "снятая с адреса пунктуация в пометку не попадает",
+  );
+
+  // Синтетический адрес держит обещание «дважды брошенная мысль — один
+  // материал»: он единственный сводит повтор на тот же url_canon.
+  assert.equal(
+    syntheticUrl("thought", "одна и та же мысль"),
+    syntheticUrl("thought", "одна и та же мысль"),
+    "одинаковый текст — один и тот же адрес",
+  );
+  assert.notEqual(
+    syntheticUrl("thought", "одна и та же мысль"),
+    syntheticUrl("post", "одна и та же мысль"),
+    "тот же текст другим видом — другой материал",
   );
 
   assert.equal(titleOf("Первая фраза. Вторая фраза."), "Первая фраза.", "заголовок мысли — её первая фраза");
