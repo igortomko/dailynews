@@ -25,6 +25,7 @@ import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
 import { otherSources, storyLines } from "../src/lib/story";
+import { readingTime } from "../src/lib/relative-time";
 import { cleanupOf } from "../src/lib/source-health";
 
 
@@ -1462,7 +1463,31 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
+    // Время чтения считается из длины текста статьи. Колонка, заведённая
+    // миграцией, но не выбранная лентой, ничем себя не выдаёт: подписи
+    // просто не будет, и выглядит это как «у материала нет текста».
+    await sql`update dailynews.items set body = ${"т".repeat(7760)} where id = ${myItem}`;
     const storyFeed = await queries.getFeed(owner.id, storyDay);
+    // strictEqual, а не equal: колонка живёт среди bigint-ов, и «"7760"»
+    // прошло бы нестрогое сравнение молча — ровно тот класс ошибки,
+    // который уже ломал сюжеты по числовым ключам.
+    assert.strictEqual(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
+    assert.strictEqual(
+      readingTime(storyFeed[0].body_chars), "≈6 мин", "и она превращается в минуты",
+    );
+
+    // У ролика текст — пересказ субтитров, а не то, что откроется
+    // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
+    await sql`update dailynews.items set transcribed_at = now() where id = ${myItem}`;
+    assert.equal(
+      (await queries.getFeed(owner.id, storyDay))[0].body_chars, null,
+      "у ролика времени чтения не бывает",
+    );
+    // Фикстура возвращается на место целиком: ниже этот же материал
+    // участвует в проверках сюжета, и оставленный текст менял бы их условия.
+    await sql`
+      update dailynews.items set transcribed_at = null, body = null where id = ${myItem}
+    `;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",
@@ -1529,7 +1554,10 @@ async function main() {
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
     `;
     assert.equal(beforeFlatten.n, 1, "цепочка должна быть заведена — иначе проверка ничего не ловит");
-    assert.equal(await flattenDupChains(sql), 1, "выпрямляется ровно одно звено");
+    assert.equal(
+      await flattenDupChains(sql), 1,
+      "считаются исправленные материалы, а не переписывания",
+    );
     const [afterFlatten] = await sql<{ n: number }[]>`
       select count(*)::int as n from dailynews.items c
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
@@ -1540,6 +1568,34 @@ async function main() {
       chainStory.get(chainRoot)?.length, 3,
       "выпрямленный сюжет собирается целиком, а не делится надвое",
     );
+
+    // Цепочка из четырёх материалов правится за два шага, но исправить надо
+    // два из них: третий и четвёртый (второй и так указывает на корень).
+    // Сложенные длины ответов насчитали бы три — число в логе прогона
+    // означало бы не то, что в нём написано.
+    const deep = [
+      await mkItem(mineSource, "deep-0", "Deep chain story zero", 400),
+      await mkItem(mineSource, "deep-1", "Deep chain story one", 350),
+      await mkItem(mineSource, "deep-2", "Deep chain story two", 300),
+      await mkItem(mineSource, "deep-3", "Deep chain story three", 250),
+    ];
+    for (let i = 1; i < deep.length; i++) {
+      await sql`update dailynews.items set dup_of = ${deep[i - 1]} where id = ${deep[i]}`;
+    }
+    assert.equal(await flattenDupChains(sql), 2, "два материала, сколько бы шагов ни ушло");
+    const deepStory = await queries.getStories([mineSource], [deep[0]]);
+    assert.equal(deepStory.get(deep[0])?.length, 4, "длинная цепочка сходится в один сюжет");
+
+    // Инвариант обеспечивается там, где потребляется: догрузка выпуска
+    // зовёт selectSurvivors мимо ночного прогона, и цепочка, оставшаяся
+    // с прошлого раза, увела бы ключ сюжета в середину без оценки.
+    await sql`update dailynews.items set dup_of = ${deep[1]} where id = ${deep[3]}`;
+    await selectSurvivors(sql, owner.id, owner.weights, storyTargets, 5, [mineSource]);
+    const [chainsLeft] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(chainsLeft.n, 0, "отбор выпрямляет цепочки сам, а не надеется на прогон");
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

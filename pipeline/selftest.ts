@@ -36,11 +36,12 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
-import { numberCollisions } from "../db/schema-gap";
+import { fileCoverage, numberCollisions } from "../db/schema-gap";
+import { readingTime } from "../src/lib/relative-time";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { dupVerdict, sameStoryQuestion } from "./dedup";
 import { composite } from "./score";
@@ -2785,6 +2786,71 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
   assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
   assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
+}
+
+// --- какие миграции сверка формы схемы вообще может проверить ------------------
+// Молчание сверки о файле, который ей ничего не обещал, — не ответ. Пока
+// эти две причины были одной, миграция из одних индексов уходила в журнал
+// мимо базы (0041), а миграция данных — вместе с тринадцатью источниками,
+// которые должна была убрать (0031).
+{
+  const { skippable, silent } = fileCoverage();
+  assert.ok(skippable.has("0039_item_enriched.sql"), "файл из одной колонки сверка доказывает целиком");
+  assert.ok(silent.has("0041_story_index.sql"), "файл из одних индексов схеме не обещает ничего");
+  assert.ok(!skippable.has("0041_story_index.sql"), "и пропускать его по молчанию сверки нельзя");
+  assert.ok(silent.has("0003_seed.sql"), "сид — это данные, и сверка формы схемы про них не знает");
+  assert.ok(silent.has("0031_sources_only_added_or_removed.sql"), "update — тоже данные");
+
+  // Файл, который делает и то и другое: колонка есть, индекса может не быть,
+  // и «обещанное уже есть» пропустило бы половину файла. Но и в отчёт
+  // о невыполненных он не идёт — выполнялся он из-за колонки.
+  for (const both of ["0012_summary_quality.sql", "0030_source_soft_delete.sql"]) {
+    assert.ok(!skippable.has(both), `${both}: колонка вместе с индексом не доказывается целиком`);
+    assert.ok(!silent.has(both), `${both}: но обещания форме схемы у него есть`);
+  }
+
+  // Самое важное: файл, чьё ограничение позже переопределили, обязан
+  // остаться пропускаемым. Выполнить 0035 заново значит вернуть
+  // model_calls_stage_check к старому списку этапов и стереть чужие —
+  // это уже случалось.
+  assert.ok(
+    skippable.has("0035_video_stage.sql"),
+    "переопределённое позже ограничение не делает файл невыполненным",
+  );
+
+  // Наборы не пересекаются, и это не тавтология: пересекись они — файл
+  // и выполнялся бы, и записывался без выполнения, смотря кто спросит.
+  assert.ok(
+    [...skippable].every((file) => !silent.has(file)),
+    "файл либо доказуем сверкой целиком, либо не обещал ей ничего",
+  );
+  // Каждый файл каталога попадает ровно в один из трёх случаев: доказуем,
+  // невидим сверке или смешанный. Считаем их поимённо — так новый файл
+  // сразу виден в том случае, куда попал.
+  const files = readdirSync("db/migrations").filter((name) => name.endsWith(".sql"));
+  const mixed = files.filter((file) => !skippable.has(file) && !silent.has(file));
+  assert.equal(
+    skippable.size + silent.size + mixed.length, files.length,
+    "каждый файл каталога попадает ровно в один случай",
+  );
+  assert.ok(mixed.includes("0012_summary_quality.sql"), "0012 — смешанный: колонка и индекс");
+}
+
+// --- время чтения --------------------------------------------------------------
+// Число, похожее на измеренное, но придуманное, — худший вид подписи:
+// проверить его читателю нечем до самого перехода по ссылке.
+{
+  assert.equal(readingTime(null), null, "текста нет — времени нет");
+  assert.equal(readingTime(0), null, "пустой текст времени не даёт");
+  assert.equal(readingTime(599), null, "анонс короче порога остаётся без подписи");
+  assert.equal(readingTime(600), "≈1 мин", "минута — нижняя граница, а не ноль");
+  // Числа — с живого потока и уже без разметки: медиана и девяностый
+  // перцентиль длины текста статьи.
+  assert.equal(readingTime(5894), "≈5 мин", "медианная статья живого потока");
+  assert.equal(readingTime(23003), "≈19 мин", "девяностый перцентиль");
+  // Выше часа — в часах: «≈104 мин» читатель пересчитывает в уме.
+  assert.equal(readingTime(72000), "≈1 ч");
+  assert.equal(readingTime(124771), "≈2 ч", "самая длинная статья потока");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
