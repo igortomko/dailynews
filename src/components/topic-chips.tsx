@@ -207,6 +207,8 @@ export function TopicChips({
           // Список считается из PLANS: написанный руками, он разъедется
           // с настоящими размерами молча.
           <FieldDescription>
+            {/* Формы родительные: считает их «до», а не само число —
+                «до 21 новости», «до 22 новостей», «до 100 новостей». */}
             На тарифе «{plan.label}» — до{" "}
             {count(maxDigestOf(plan), "новости", "новостей", "новостей")}. Больше —{" "}
             <Link href="/settings/subscription" className="underline underline-offset-4">

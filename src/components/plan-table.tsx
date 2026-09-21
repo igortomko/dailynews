@@ -69,6 +69,14 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
           // для них нет и не будет — это был бы второй набор состояний,
           // расходящийся с настоящим.
           const portal = reader.portal_url;
+          // Состояние кнопки считается до разметки и именем: три вложенных
+          // тернарника в JSX читаются только целиком, а состояний тут пять
+          // и следующий тариф добавит шестое.
+          const action: "manage" | "here" | "buy" | "unpaid" | "down" | "below" = mine
+            ? portal ? "manage" : "here"
+            : plan.price > current.price
+              ? buy ? "buy" : "unpaid"
+              : portal ? "down" : "below";
 
           return (
             <div
@@ -90,7 +98,7 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                   />
                   {plan.label}
                 </span>
-                {mine ? <Badge variant="secondary">Твой тариф</Badge> : null}
+                {action === "manage" ? <Badge variant="secondary">Твой тариф</Badge> : null}
               </div>
 
               <div className="flex items-baseline gap-1">
@@ -131,48 +139,44 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
 
               {/* Кнопка появляется только там, где ей есть куда вести:
                   «перейти» без настроенной оплаты — обещание без продукта. */}
-              {mine ? (
-                portal ? (
-                  <Button size="sm" variant="outline" className="mt-auto" render={<a href={portal} />}>
-                    Управлять тарифом
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="outline" className="mt-auto" disabled>
-                    Твой тариф
-                  </Button>
-                )
-              ) : plan.price > current.price ? (
-                buy ? (
-                  <Button size="sm" className="mt-auto" render={<a href={buy} />}>
+              {action === "manage" ? (
+                <Button size="sm" variant="outline" className="mt-auto" render={<a href={portal!} />}>
+                  Управлять тарифом
+                </Button>
+              ) : action === "here" ? (
+                <Button size="sm" variant="outline" className="mt-auto" disabled>
+                  Твой тариф
+                </Button>
+              ) : action === "buy" ? (
+                <Button size="sm" className="mt-auto" render={<a href={buy!} />}>
+                  Перейти на «{plan.label}»
+                </Button>
+              ) : action === "unpaid" ? (
+                // aria-disabled, а не disabled: выключенная кнопка
+                // не показывает подсказку, и «не нажимается» остаётся
+                // без причины — выглядит как поломка оплаты.
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        className="mt-auto cursor-default aria-disabled:opacity-50"
+                        aria-disabled
+                      />
+                    }
+                  >
                     Перейти на «{plan.label}»
-                  </Button>
-                ) : (
-                  // aria-disabled, а не disabled: выключенная кнопка
-                  // не показывает подсказку, и «не нажимается» остаётся
-                  // без причины — выглядит как поломка оплаты.
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="sm"
-                          className="mt-auto cursor-default aria-disabled:opacity-50"
-                          aria-disabled
-                        />
-                      }
-                    >
-                      Перейти на «{plan.label}»
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      Ссылка на оплату этого тарифа ещё не настроена — напиши боту
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              ) : portal ? (
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Ссылка на оплату этого тарифа ещё не настроена — напиши боту
+                  </TooltipContent>
+                </Tooltip>
+              ) : action === "down" ? (
                 // Понижение — тоже переход, и вести ему есть куда: смену
                 // тарифа принимает тот же портал. «Ниже твоего» сообщало
                 // только, что кнопка не работает, и уйти с Pro было нечем.
                 <div className="mt-auto flex flex-col gap-1.5">
-                  <Button size="sm" variant="outline" render={<a href={portal} />}>
+                  <Button size="sm" variant="outline" render={<a href={portal!} />}>
                     Перейти на «{plan.label}»
                   </Button>
                   <span className="text-center text-[11px] leading-tight text-muted-foreground">

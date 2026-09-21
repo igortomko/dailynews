@@ -270,10 +270,15 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     // Выбранная карточка остаётся светлой и берёт границу:
                     // залить её фоном нельзя — тем же фоном набран пример
                     // внутри, и он бы исчез ровно у выбранной манеры.
+                    //
+                    // Выбор ловится по `aria-pressed`: `data-state=on` базовый
+                    // компонент не пишет вовсе, и правило по нему не сработало
+                    // бы никогда — карточка выглядела бы невыбранной, а форма
+                    // при этом сохраняла бы выбранное.
                     className={cn(
                       "h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal",
-                      "data-[state=on]:border-foreground/40 data-[state=on]:shadow-sm",
-                      "aria-pressed:bg-card data-[state=on]:bg-card data-[state=on]:hover:bg-card",
+                      "aria-pressed:border-foreground/50 aria-pressed:shadow-sm",
+                      "aria-pressed:bg-card hover:aria-pressed:bg-card",
                     )}
                   >
                     <span className="font-medium">{entry.label}</span>

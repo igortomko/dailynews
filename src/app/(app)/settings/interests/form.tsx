@@ -37,11 +37,19 @@ export function InterestsForm({
     const node = form.current;
     if (!node) return;
     startTransition(async () => {
-      const result = await saveInterests(new FormData(node));
-      if (result?.error) {
-        setError(result.error);
-        // Спиннер гасим здесь: `after` при отказе не зовётся, и снять его
-        // больше некому — кнопка осталась бы крутиться навсегда.
+      // Отказ приходит двумя путями: разобранным `{ error }` и исключением
+      // из серверного действия. Оба гасят спиннер здесь — `after` при отказе
+      // не зовётся, и снять его больше некому: кнопка крутилась бы всегда,
+      // а причина не называлась бы вовсе.
+      try {
+        const result = await saveInterests(new FormData(node));
+        if (result?.error) {
+          setError(result.error);
+          setApplying(false);
+          return;
+        }
+      } catch {
+        setError("Сохранить не вышло — попробуй ещё раз");
         setApplying(false);
         return;
       }

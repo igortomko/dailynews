@@ -91,6 +91,10 @@ async function run(kinds: Kind[], refresh: () => void) {
   } catch (error) {
     toast.dismiss(running);
     toast.error(error instanceof Error ? error.message : "Пересобрать не вышло");
+    // Возвращаем в очередь: списанная работа, которая не сделалась, —
+    // это отказ, похожий на успех. Второе «Сохранить» отвечало бы
+    // «настройки сохранены», а выпуск так и остался бы прежним.
+    for (const kind of kinds) queued.add(kind);
   }
 }
 
