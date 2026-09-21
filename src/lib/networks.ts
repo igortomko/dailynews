@@ -18,7 +18,8 @@ export type NetworkId = (typeof NETWORK_IDS)[number];
 
 export type Network = {
   id: NetworkId;
-  label: string;
+  // Подпись сети — не здесь: она видна глазу, и живёт в словаре интерфейса
+  // (`onboarding.networks`), а не в этой таблице бизнес-логики и промптов.
   /**
    * Есть ли таб в мотатке. У блога его нет: блог — источник голоса,
    * а не сеть, куда жмут «поделиться».
@@ -43,7 +44,6 @@ export type Network = {
 export const NETWORKS: Record<NetworkId, Network> = {
   telegram: {
     id: "telegram",
-    label: "Telegram",
     tab: true,
     limit: 900,
     handle: "@канал или t.me/канал",
@@ -56,7 +56,6 @@ export const NETWORKS: Record<NetworkId, Network> = {
   },
   x: {
     id: "x",
-    label: "X",
     tab: true,
     limit: 280,
     handle: "@ник",
@@ -68,7 +67,6 @@ export const NETWORKS: Record<NetworkId, Network> = {
   },
   linkedin: {
     id: "linkedin",
-    label: "LinkedIn",
     tab: true,
     limit: 1300,
     // Ленту LinkedIn наружу не отдаёт вовсе: ни фида, ни публичной страницы
@@ -83,7 +81,6 @@ export const NETWORKS: Record<NetworkId, Network> = {
   },
   threads: {
     id: "threads",
-    label: "Threads",
     tab: true,
     limit: 500,
     handle: null,
@@ -94,7 +91,6 @@ export const NETWORKS: Record<NetworkId, Network> = {
   },
   blog: {
     id: "blog",
-    label: "Блог",
     tab: false,
     limit: 0,
     handle: "адрес RSS или сайта",

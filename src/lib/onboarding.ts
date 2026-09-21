@@ -1,3 +1,5 @@
+import type { Dict } from "@/lib/i18n";
+import { ru } from "@/lib/i18n/ru/index";
 import "server-only";
 import { sql } from "./db";
 import { catalogFor } from "./queries";
@@ -71,6 +73,8 @@ export async function suggestSources(
   readerId: number,
   topicSlugs: string[],
   plan: Plan,
+  /** Язык подписи «за что предложено». По умолчанию русский, как у соседей. */
+  t: Dict["onboarding"] = ru.onboarding,
 ): Promise<Suggestion[]> {
   const taken = await sql<{ kind: string; url: string }[]>`
     select s.kind, s.url from dailynews.reader_sources rs
@@ -108,7 +112,7 @@ export async function suggestSources(
   for (const row of await catalogFor(readerId, topicSlugs, plan.kinds)) {
     push(
       { kind: row.kind as Source["kind"], url: row.url, label: row.label },
-      `${count(row.items, "материал", "материала", "материалов")} за месяц`,
+      t.wizard.sourceWhyItems(row.items),
     );
   }
 

@@ -1,26 +1,33 @@
-const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
+import type { Dict } from "@/lib/i18n";
+import { feed as ruFeed } from "@/lib/i18n/ru/feed";
+
+export type TimeLabels = Dict["feed"]["time"];
 
 /**
  * «10ч» вместо «10 часов назад». В строке метаданных время стоит рядом
  * с источником и темой, и развёрнутая форма занимает там больше места,
  * чем несёт смысла: «назад» не добавляет ничего, а читается в каждой
  * карточке заново.
+ *
+ * `t` по умолчанию — русские подписи. Весь живой код язык передаёт; умолчание
+ * осталось для утверждений, которые зовут эту функцию без читателя и сверяют
+ * русский текст напрямую.
  */
-export function relativeTime(value: string | Date): string {
+export function relativeTime(value: string | Date, t: TimeLabels = ruFeed.time): string {
   const then = typeof value === "string" ? new Date(`${value}${value.length === 10 ? "T12:00:00" : ""}`) : value;
   if (Number.isNaN(then.getTime())) return "";
 
   const minutes = Math.round((Date.now() - then.getTime()) / 60_000);
-  if (minutes < 1) return "сейчас";
-  if (minutes < 60) return `${minutes}м`;
+  if (minutes < 1) return t.now;
+  if (minutes < 60) return t.minutesAgo(minutes);
 
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}ч`;
+  if (hours < 24) return t.hoursAgo(hours);
 
   const days = Math.round(hours / 24);
-  if (days < 7) return `${days}д`;
+  if (days < 7) return t.daysAgo(days);
 
-  return MONTH.format(then);
+  return t.monthDay(then);
 }
 
 /**
@@ -55,8 +62,8 @@ const MIN_CHARS = 600;
  * Выше часа — в часах: «~104 мин» читатель всё равно пересчитывает в уме,
  * а таких материалов в потоке единицы.
  */
-export function readingTime(chars: number | null): string | null {
+export function readingTime(chars: number | null, t: TimeLabels = ruFeed.time): string | null {
   if (chars === null || chars < MIN_CHARS) return null;
   const minutes = Math.max(1, Math.round(chars / CHARS_PER_MINUTE));
-  return minutes < 60 ? `~${minutes} мин` : `~${Math.round(minutes / 60)} ч`;
+  return minutes < 60 ? t.readingMinutes(minutes) : t.readingHours(Math.round(minutes / 60));
 }

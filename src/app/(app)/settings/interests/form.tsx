@@ -11,6 +11,7 @@ import { FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { flushRebuild } from "@/components/rebuild-queue";
 import { useSettingsSave } from "@/components/settings-save";
+import { useT } from "@/components/i18n-provider";
 
 export function InterestsForm({
   chips,
@@ -28,6 +29,7 @@ export function InterestsForm({
   inToday: number;
   plan: Plan;
 }) {
+  const t = useT();
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -53,14 +55,14 @@ export function InterestsForm({
               return resolve(false);
             }
           } catch {
-            setError("Не удалось сохранить. Попробуй ещё раз");
+            setError(t.settings.common.saveError);
             return resolve(false);
           }
           setError(null);
           resolve(true);
         });
       }),
-    [],
+    [t],
   );
 
   /**
@@ -74,10 +76,8 @@ export function InterestsForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Интересы</CardTitle>
-        <CardDescription>
-          О чём собирать новости. Двигай границы: чем больше доля темы, тем больше новостей по ней.
-        </CardDescription>
+        <CardTitle>{t.nav.interests}</CardTitle>
+        <CardDescription>{t.settings.interests.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <form ref={form} onChange={touch} onSubmit={(event) => event.preventDefault()}>
@@ -102,7 +102,7 @@ export function InterestsForm({
               onClick={apply}
             >
               {applying ? <Spinner data-icon="inline-start" /> : null}
-              Сохранить
+              {t.settings.common.save}
             </Button>
           </FieldGroup>
         </form>
