@@ -137,22 +137,22 @@ export function itemsForMinutes(minutes: number, perCard: number, maxItems: numb
 }
 
 /**
- * «≈19 мин».
+ * «~19 мин».
  *
  * Волна — часть обещания, а не украшение: время считается по нашей мерке
  * скорости, а читают все по-разному. Ровное «19 минут» обещало бы точность,
  * которой здесь нет ни у кого.
  *
- * Меньше минуты не показывается нулём: выпуск, о котором написано «≈0 мин»,
+ * Меньше минуты не показывается нулём: выпуск, о котором написано «~0 мин»,
  * выглядит пустым, хотя в нём есть что читать.
  */
 export const formatMinutes = (minutes: number): string =>
-  `≈${Math.max(1, Math.round(minutes))} мин`;
+  `~${Math.max(1, Math.round(minutes))} мин`;
 
 /** Та же волна, но словом: в Telegram и в подписях «мин» читается обрубком. */
 export const formatMinutesLong = (minutes: number): string => {
   const n = Math.max(1, Math.round(minutes));
-  return `≈${n} ${plural(n, "минута", "минуты", "минут")}`;
+  return `~${n} ${plural(n, "минута", "минуты", "минут")}`;
 };
 
 /**
