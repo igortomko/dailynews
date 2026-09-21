@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { cn } from "@/lib/utils";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { savePersonalization } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import { CheckIcon } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -27,6 +25,7 @@ import type { Reader } from "@/lib/types";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { PaywallCrown, usePaywall } from "@/components/paywall";
 import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
+import { useSettingsSave } from "@/components/settings-save";
 
 /** Флажок и название одной строкой: в поле и в списке это одно и то же. */
 const languageOption = (entry: string) => (
@@ -46,19 +45,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   const translates = FEATURES.language.has(plan);
   const languagePaywall = usePaywall("language", plan);
   const [pending, startTransition] = useTransition();
-  const [saved, setSaved] = useState(false);
-  const [applying, setApplying] = useState(false);
-  // Тронул ли читатель хоть что-то с прошлого нажатия. Кнопка над нетронутой
-  // формой отвечала бы «настройки сохранены» на форму, которую не меняли:
-  // ответ на действие, которого не было.
-  const [dirty, setDirty] = useState(false);
-  // Номер последней правки. Пересборка идёт минуту-две, и тост зовёт читать
-  // дальше: за это время форму успевают тронуть ещё раз. Гасить кнопку
-  // по итогу прошлого захода нельзя — новая правка осталась бы без способа
-  // доехать до выпуска, а кнопка сказала бы, что всё сделано.
-  const edits = useRef(0);
   const form = useRef<HTMLFormElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
   const first = !profile?.onboarded_at;
 
@@ -77,120 +64,62 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   });
 
   /**
-   * `after` получает исход и не ждётся: иначе «сохраняю…» висело бы всю
-   * пересборку. Провал записи обязан сказать о себе — молча погашенная
-   * галочка читается как «сохранено», а в базе прежнее.
+   * Запись. Промисом, а не колбэком: её ждут двое — кнопка и окно
+   * «сохранить перед уходом», и второму нужен исход, чтобы решить,
+   * уходить ли.
    */
-  const save = (after?: (ok: boolean) => void) => {
-    const node = form.current;
-    // Исход сообщаем и здесь: `apply` уже зажёг спиннер, и молчаливый выход
-    // оставил бы кнопку крутиться до перезагрузки страницы.
-    if (!node) {
-      after?.(false);
-      return;
-    }
-    const data = new FormData(node);
-    startTransition(async () => {
-      try {
-        await savePersonalization(data);
-      } catch {
-        toast.error("Не удалось сохранить. Попробуй ещё раз");
-        after?.(false);
-        return;
-      }
-      setSaved(true);
+  const write = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const node = form.current;
+        if (!node) return resolve(false);
+        const data = new FormData(node);
+        startTransition(async () => {
+          try {
+            await savePersonalization(data);
+          } catch {
+            // Провал записи обязан сказать о себе: молча погашенная кнопка
+            // читается как «сохранено», а в базе прежнее.
+            toast.error("Не удалось сохранить. Попробуй ещё раз");
+            return resolve(false);
+          }
 
-      // Язык, сложность, манера и «кто читает» уезжают в промпт дайджеста:
-      // выпуск, написанный прежними, новой настройке не соответствует.
-      // Пересборка отсюда не запускается — она откладывается до «Сохранить»
-      // или до выхода из настроек, чтобы не занимать интерфейс на минуту
-      // посреди правки.
-      const now = {
-        language: String(data.get("language") ?? ""),
-        complexity: Number(data.get("complexity")),
-        style: String(data.get("style") ?? ""),
-        reader_context: String(data.get("reader_context") ?? ""),
-      };
-      if (
-        now.language !== written.current.language ||
-        now.complexity !== written.current.complexity ||
-        now.style !== written.current.style ||
-        now.reader_context !== written.current.reader_context
-      ) {
-        // Запоминаем сразу: второе нажатие «Сохранить» без правок не должно
-        // оплачивать переписывание того же текста тем же голосом.
-        written.current = now;
-        queueRebuild("voice");
-      } else {
-        // Покрутил и вернул как было — это не правка. Кнопка над формой,
-        // равной сохранённому, обещала бы работу, которой нет.
-        setDirty(false);
-      }
-      after?.(true);
-    });
-  };
+          // Язык, сложность, манера и «кто читает» уезжают в промпт дайджеста:
+          // выпуск, написанный прежними, новой настройке не соответствует.
+          // Сама пересборка отсюда не запускается — её решает тот, кто
+          // позвал запись.
+          const now = {
+            language: String(data.get("language") ?? ""),
+            complexity: Number(data.get("complexity")),
+            style: String(data.get("style") ?? ""),
+            reader_context: String(data.get("reader_context") ?? ""),
+          };
+          if (
+            now.language !== written.current.language ||
+            now.complexity !== written.current.complexity ||
+            now.style !== written.current.style ||
+            now.reader_context !== written.current.reader_context
+          ) {
+            // Запоминаем сразу: второе сохранение без правок не должно
+            // оплачивать переписывание того же текста тем же голосом.
+            written.current = now;
+            queueRebuild("voice");
+          }
+          resolve(true);
+        });
+      }),
+    [],
+  );
 
-  // Сохраняем сами, с паузой после последней правки: иначе запрос уходил бы
-  // на каждую букву в текстовом поле. Пауза короткая, но не нулевая — правку,
-  // сделанную и тут же брошенную уходом со страницы, она не спасёт. Кнопка
-  // рядом отвечает не за запись, а за то, чтобы сегодняшний выпуск
-  // переписался прямо сейчас, не дожидаясь полуночи.
-  const schedule = () => {
-    edits.current += 1;
-    setDirty(true);
-    setSaved(false);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(save, 900);
-  };
+  /** Переписать сегодняшний выпуск новым голосом, не дожидаясь полуночи. */
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
 
-  /** «Сохранить»: дописать недописанное и переписать выпуск, не дожидаясь полуночи. */
-  const apply = () => {
-    clearTimeout(timer.current);
-    setApplying(true);
-    const mark = edits.current;
-    save((ok) => {
-      if (!ok) {
-        setApplying(false);
-        return;
-      }
-      void flushRebuild(() => router.refresh())
-        .then((outcome) => {
-          // Отменил или не дождался прошлого захода — кнопка остаётся живой:
-          // нажать ещё раз тут единственный способ довести дело до конца.
-          // Правка, сделанная пока шла работа, тоже держит её живой.
-          const applied = outcome === "done" || outcome === "idle";
-          if (applied && edits.current === mark) setDirty(false);
-        })
-        .catch(() => {})
-        .finally(() => setApplying(false));
-    });
-  };
-
-  useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => {
-    if (!saved) return;
-    const hide = setTimeout(() => setSaved(false), 2000);
-    return () => clearTimeout(hide);
-  }, [saved]);
+  const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {first ? "Настрой ленту" : "Язык и подача"}
-          {/* Зелёный только у «сохранено»: это единственное состояние,
-              которое сообщает, что всё в порядке. «Сохраняю…» ничего
-              не обещает и красится как обычная подпись. */}
-          <span
-            aria-live="polite"
-            className={cn(
-              "flex items-center gap-1 text-xs font-normal",
-              saved && !pending ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-            )}
-          >
-            {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
-          </span>
-        </CardTitle>
+        <CardTitle>{first ? "Настрой ленту" : "Язык и подача"}</CardTitle>
         <CardDescription>
           {first
             ? "Скажи, на каком языке и как писать новости. Интересы выберешь следующим шагом."
@@ -201,7 +130,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
+        <form ref={form} onChange={touch} onSubmit={(event) => event.preventDefault()}>
           {/* Сколько новостей в день — в «Интересах», рядом с полосой, где
               это число делится между темами: там оно одно решение, а не два.
               Здесь остаётся только то, как текст написан и для кого. */}
@@ -224,7 +153,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     return;
                   }
                   setLanguage(value);
-                  schedule();
+                  touch();
                 }}
               >
                 {/* Не disabled: выключенный селект не ловит нажатие, и окно
@@ -279,7 +208,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 onValueChange={(value: string[]) => {
                   if (!value[0]) return;
                   setComplexity(Number(value[0]));
-                  schedule();
+                  touch();
                 }}
                 variant="outline"
                 className="grid w-full grid-cols-2 items-stretch sm:grid-cols-5"
@@ -310,7 +239,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 onValueChange={(value: string[]) => {
                   if (!value[0]) return;
                   setStyle(value[0]);
-                  schedule();
+                  touch();
                 }}
                 variant="outline"
                 className="grid w-full grid-cols-1 items-stretch sm:grid-cols-2 lg:grid-cols-4"
@@ -353,17 +282,23 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
             {first ? (
               <Button
                 type="button"
+                // Своя занятость, а не `applying`: его зажигает «Сохранить»,
+                // а эта кнопка зовёт запись напрямую — и без признака работы
+                // двойное нажатие уходило дважды.
                 disabled={pending}
                 className="self-start"
-                onClick={() => {
-                  clearTimeout(timer.current);
-                  save();
+                onClick={async () => {
+                  // Уходим только после записи: раньше переход шёл вместе
+                  // с ней, и отказ записи уносил настройку молча. Пересборки
+                  // здесь нет и не нужно — выпуска ещё не существует.
+                  if (!(await write())) return;
                   // У блогера настройка на шаг длиннее: голос собирается
                   // с его каналов, и просить их потом — значит получить
                   // первый пост, написанный ничьим голосом.
                   router.push(FEATURES.posts.has(plan) ? "/settings/channels?first=1" : "/");
                 }}
               >
+                {pending ? <Spinner data-icon="inline-start" /> : null}
                 {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
               </Button>
             ) : (

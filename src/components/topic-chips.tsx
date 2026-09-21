@@ -226,8 +226,10 @@ export function TopicChips({
               этой строки «3 из 12» было бы числом из ниоткуда. Но стоят они
               подписью к времени, а не вместо него. */}
           <span className="text-sm text-muted-foreground">
-            примерно{" "}
-            <span className="font-medium text-foreground tabular-nums">{places}</span>{" "}
+            {/* Знаком, а не словом, и тем же, что у времени чтения
+                в карточке: два написания одной и той же оговорки в одном
+                продукте читаются как две разные. */}
+            <span className="font-medium text-foreground tabular-nums">~{places}</span>{" "}
             {plural(places, "новость", "новости", "новостей")}
           </span>
         </div>
@@ -257,7 +259,10 @@ export function TopicChips({
 
       {chips.length > 1 ? (
         <Field>
-          <FieldLabel>Распределение по темам</FieldLabel>
+          {/* Единица названа в подписи: под полосой стоят новости, а выпуск
+              заказан минутами, и без слова числа читаются той единицей,
+              которой набран весь экран выше. */}
+          <FieldLabel>Распределение по темам, новостей</FieldLabel>
           <TopicBudgetBar
             labels={chips.map((chip) => chip.label)}
             counts={chips.map((chip) => chip.count)}
