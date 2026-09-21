@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { FEATURES, type FeatureId, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
@@ -22,6 +23,18 @@ const SECTIONS: { href: string; label: (t: Dict) => string; feature?: FeatureId 
   { href: "/settings/subscription", label: (t) => t.nav.subscription },
   { href: "/settings/about", label: (t) => t.nav.about },
 ];
+
+/**
+ * Раздел, который сейчас грузится. Разделы — серверные страницы, и между
+ * нажатием и новым содержимым проходит заметное время: без признака работы
+ * нажатие читается как «не сработало», и его повторяют. Тот же приём, что
+ * у стрелок дат в ленте: про переход знает сам Next, своё состояние рядом
+ * разошлось бы с настоящим при первой отмене.
+ */
+function Busy() {
+  const { pending } = useLinkStatus();
+  return pending ? <Spinner className="ml-1.5 inline-block size-3 align-[-1px]" /> : null;
+}
 
 /**
  * «Калибровки» в списке нет намеренно, а страница осталась и открывается
@@ -63,6 +76,7 @@ export function SettingsNav({ plan }: { plan: Plan }) {
             {locked && section.feature ? (
               <PaywallCrown feature={section.feature} plan={plan} className="ml-1.5" />
             ) : null}
+            <Busy />
           </Link>
         );
       })}

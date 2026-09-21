@@ -19,19 +19,23 @@ Reporta собирает поток, оценивает каждый матер�
 ### Brand assets
 
 <p align="center">
-  <img src="./public/brand/illustrations/observer.webp" alt="Гравюра: читательница" width="30%">
-  <img src="./public/brand/illustrations/attention.webp" alt="Гравюра: внимание к источнику" width="30%">
-  <img src="./public/brand/illustrations/city.webp" alt="Гравюра: город" width="30%">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="./public/brand/illustrations/preview/observer-dark.webp"><img src="./public/brand/illustrations/preview/observer-light.webp" alt="Меньше шума: из потока газет остаётся одна" width="30%"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="./public/brand/illustrations/preview/attention-dark.webp"><img src="./public/brand/illustrations/preview/attention-light.webp" alt="Найти ценное: красный камень среди газетных строк" width="30%"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="./public/brand/illustrations/preview/city-dark.webp"><img src="./public/brand/illustrations/preview/city-light.webp" alt="Мир к утреннему кофе: город внутри чашки" width="30%"></picture>
 </p>
 
-Brand system v2: редакционный характер, оригинальная серия гравюр, правила
-композиции, палитра, типографика, пример выпуска, движение, цветовые версии,
+Brand system v4: настоящие векторные логотип и знак, 20 упрощённых гравюр с простыми
+сюрреалистическими метафорами, семантические цвета интерфейса в двух темах,
+правила композиции, типографика, пример выпуска, движение, цветовые версии,
 четыре интерактивных состояния продукта и фотография в трёх форматах.
 Примеры в брендбуке не изменяют аккаунт и не являются реальными новостями.
+У каждой гравюры две прозрачные версии: чёрная и белая, красный неизменен.
+[Все 40 PNG](https://news.tomko.io/brand/reporta-illustrations.zip) ·
+[Сравнение шрифтов логотипа](https://news.tomko.io/brand/type-study/index.html).
 
-- `public/brand/logo-reporta.png` — утверждённый primary logo для светлых поверхностей
+- `public/brand/logo-reporta.svg` — векторный логотип, Bodoni Moda 700 в контурах
 - `public/brand/logo-reporta-approved-transparent.png` — прозрачная PNG-версия для макетов
-- `public/brand/logo-reporta-on-dark.png` — утверждённый знак на тёмном поле
+- `public/brand/logo-reporta-dark.svg` — прозрачная версия для тёмных поверхностей
 - `public/brand/mark-reporta.svg` / `public/brand/mark-reporta.png` — самостоятельный знак-змейка
 - `public/brand/favicon.svg` — favicon и аватар
 - `public/brand/index.html` — все 10 направлений и интерактивные примеры
@@ -39,11 +43,13 @@ Brand system v2: редакционный характер, оригинальн
 - `public/brand/tokens.css` — готовые CSS-токены
 - `public/brand/reporta-brand-kit.zip` — полный набор с локальными шрифтами
 
+Логотип: **Bodoni Moda 700**, кернинг шрифта, буквы переведены в кривые.
+Замена шрифта пока не утверждена; кандидат после сравнения — **DM Serif Display**.
 Типографика: **Fraunces / Literata** для заголовков (латиница / кириллица),
 **Inter** для текста и интерфейса, **DM Mono / IBM Plex Mono** для метаданных.
 Шрифты, изображения и скрипты локальные: `public/brand/index.html` работает
 с диска без сервера. [Происхождение ассетов](./public/brand/ASSETS.md).
-SVG логотипа содержит утверждённый растр 1:1, а не векторные контуры.
+SVG логотипа и знака содержат только векторную геометрию, без встроенного растра.
 
 Новостная лента на многих читателей: собирает весь поток, оценивает каждый
 материал по осям, отбирает кодом под каждого читателя, пишет ему дайджест

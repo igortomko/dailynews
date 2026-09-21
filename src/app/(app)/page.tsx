@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { getDigestDays, getFeed, getStories } from "@/lib/queries";
+import { isDay } from "@/lib/day";
+import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
@@ -16,29 +18,53 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { getDict } from "@/lib/i18n/server";
+import { dictOf } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
 export default async function FeedPage({
   searchParams,
 }: {
-  searchParams: Promise<{ day?: string }>;
+  // Повторённый параметр приезжает массивом (урок поиска): объявить его
+  // строкой значит отдать массив в запрос и получить 500 вместо ленты.
+  searchParams: Promise<{ day?: string | string[] }>;
 }) {
   // Чья это лента, решает подписанная кука и ничто другое.
   const reader = await currentReader();
   // Первый заход идёт своим путём: интересы, источники, первый выпуск.
   if (!reader.onboarded_at) redirect("/welcome");
 
-  const [{ day: requested }, days, topics, channels, sources, t] = await Promise.all([
-    searchParams,
+  // Словарь — из уже загруженной строки, а не отдельным запросом: соединений
+  // в пуле пять, и ещё один круг ради того, что уже в руках, поставил бы
+  // ленту в очередь за самой собой.
+  const t = dictOf(reader.ui_language);
+
+  const { day: param } = await searchParams;
+  // Похожее на день, но не день («2026-02-31», пустая строка, массив) —
+  // это null, то есть последний выпуск: в запрос день уходит кастом к date,
+  // и непроверенная строка из чужой ссылки роняла бы страницу.
+  const requested = isDay(param) ? param : null;
+  // Всё одним кругом до базы, включая сам выпуск: раньше лента ждала список
+  // дней, чтобы проверить запрошенный, и только потом шла за выпуском —
+  // лишний круг на каждом показе ради ссылки на день, которого нет. Теперь
+  // выпуск спрашивается сразу за запрошенный день (null — за последний),
+  // а день сверяется со списком уже по пришедшему: не сошёлся — второй
+  // запрос, и платит за него только чужая ссылка на день без выпуска.
+  //
+  // Выпуск и заказ стоят первыми: соединений в пуле пять, запросов шесть,
+  // и в очереди оказывается написанный последним — пусть это будет список
+  // площадок, а не сама лента.
+  const [asked, askedDigest, days, topics, sources, channels] = await Promise.all([
+    getFeed(reader.id, requested),
+    // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
+    // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
+    // три карточки, объявлял бы себя недобранным. Заказ берётся того дня,
+    // а не сегодняшний: лента листается на девяносто дней назад.
+    digestProgress(reader.id, requested),
     getDigestDays(reader.id),
     getReaderTopics(reader.id),
-    getChannels(reader.id),
-    // Ни от чего здесь не зависит: ждать его после ленты значит добавить
-    // лишний круг к каждому показу.
     readerSources(reader.id),
-    getDict(),
+    getChannels(reader.id),
   ]);
   // Действующий, а не купленный: у отменённой подписки оплаченный месяц
   // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
@@ -83,15 +109,11 @@ export default async function FeedPage({
 
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
-  const day = requested && days.includes(requested) ? requested : days[0];
-  const [feed, digest] = await Promise.all([
-    getFeed(reader.id, day),
-    // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
-    // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
-    // три карточки, объявлял бы себя недобранным. Заказ берётся того дня,
-    // а не сегодняшний: лента листается на девяносто дней назад.
-    digestProgress(reader.id, day),
-  ]);
+  const known = requested === null || days.includes(requested);
+  const day = known && requested ? requested : days[0];
+  const [feed, digest] = known
+    ? [asked, askedDigest]
+    : await Promise.all([getFeed(reader.id, day), digestProgress(reader.id, day)]);
   const minutes = minutesOf(digest.chars, effectiveVoice(reader));
 
   // Сюжет карточки считается по тем же источникам, по которым собран выпуск:
@@ -111,7 +133,12 @@ export default async function FeedPage({
   const mine = sourcesForPlan(sources, plan).map((source) => Number(source.id));
   const shown = feed.map((item) => item.source_id);
   const stories = await getStories([...new Set([...mine, ...shown])], feed.map((item) => item.id));
-  const items = feed.map((item) => ({ ...item, story: stories.get(item.id) ?? [] }));
+  // Оси остаются на сервере: карточке нужен один ответ — кликбейт ли это.
+  const items = feed.map(({ axes, ...item }) => ({
+    ...item,
+    clickbait: (axes?.clickbait?.noul ?? 0) > CLICKBAIT_LABEL_NOUL,
+    story: stories.get(item.id) ?? [],
+  }));
 
   return (
     <FeedTabs
@@ -146,7 +173,11 @@ export default async function FeedPage({
                 size="icon-sm"
                 aria-label={t.nav.settings}
                 className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
-                render={<Link href="/settings/personalization" />}
+                // Настройки подгружаются заранее, пока читают ленту: страница
+                // динамическая, и без этого каждое нажатие на шестерёнку ждало
+                // бы сервер. Раскладка и первый раздел — это один запрос
+                // о читателе, дёшево.
+                render={<Link href="/settings/personalization" prefetch={true} />}
               />
             }
           >

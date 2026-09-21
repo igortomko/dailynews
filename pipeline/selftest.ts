@@ -40,6 +40,7 @@ import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { readingTime } from "../src/lib/relative-time";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
 import { en as EN_DICT } from "../src/lib/i18n/en/index";
+import { isDay } from "../src/lib/day";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
@@ -3184,5 +3185,18 @@ for (const [name, table] of [
     `rsync --delete сносит ${made![1]}: нужно --exclude '/${made![1]}' с косой`,
   );
 }
+
+// День из адреса проверяется до запроса: в SQL он уходит кастом к date,
+// и непроверенная строка роняла бы ленту вместо того, чтобы открыть последний
+// выпуск. Строго по форме и по календарю.
+assert.ok(isDay("2026-09-21"), "обычный день проходит");
+assert.ok(isDay("2024-02-29"), "29 февраля високосного года — день");
+assert.equal(isDay("2026-02-31"), false, "31 февраля — не день, хотя Date дотянул бы его до марта");
+assert.equal(isDay("2026-9-1"), false, "без нулей — не та форма, что в базе и в адресе");
+assert.equal(isDay(""), false, "пустой параметр — не день, а «последний выпуск»");
+assert.equal(isDay(["2026-09-21", "2026-09-20"]), false, "повторённый параметр приезжает массивом");
+assert.equal(isDay(undefined), false, "нет параметра — нет дня");
+assert.ok(isDay("0026-01-01"), "год ниже сотни — тоже день: Date.UTC читал бы его как 1926");
+assert.equal(isDay("0000-02-30"), false, "календарь проверяется и у таких лет");
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

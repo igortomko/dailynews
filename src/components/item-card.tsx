@@ -211,7 +211,7 @@ export function ItemCard({
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
-  const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
+  const clickbait = item.clickbait;
   // Тема — одной строкой вместе с источником и временем чтения.
   //
   // Тип материала и горизонт отсюда убраны. «Факт» стоял у 58% карточек

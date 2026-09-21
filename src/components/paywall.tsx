@@ -183,8 +183,19 @@ export function PaywallCrown({
  */
 export function usePaywall(feature: FeatureId, plan: Plan) {
   const [open, setOpen] = useState(false);
+  // Окно монтируется после первого нажатия, а не вместе с кнопкой: в ленте
+  // пятьдесят карточек, и пятьдесят закрытых диалогов — это пятьдесят
+  // корней Dialog, которые браузер собирает при каждом показе выпуска ради
+  // окна, которое откроют раз в месяц. После первого открытия остаётся
+  // смонтированным: анимация закрытия идёт на живом окне.
+  const [mounted, setMounted] = useState(false);
   return {
-    open: () => setOpen(true),
-    dialog: <PaywallDialog feature={feature} plan={plan} open={open} onOpenChange={setOpen} />,
+    open: () => {
+      setMounted(true);
+      setOpen(true);
+    },
+    dialog: mounted ? (
+      <PaywallDialog feature={feature} plan={plan} open={open} onOpenChange={setOpen} />
+    ) : null,
   };
 }
