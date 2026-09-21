@@ -272,7 +272,7 @@ export function OverviewDialog({
       // обещала бы то, чего могло не случиться.
       setCopied(format);
       setFallback(null);
-      toast.success(t.copied);
+      toast.success(t.copied, { description: t.copiedHint });
     } catch {
       setCopied(null);
       setFallback(text);
