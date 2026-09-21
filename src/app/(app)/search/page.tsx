@@ -7,6 +7,7 @@ import { count } from "@/lib/plural";
 import { dayInWords, digestsWord } from "@/lib/telegram";
 import { PageHeader } from "@/components/page-header";
 import { SearchForm } from "@/components/search-form";
+import { RememberQuery } from "@/components/search-memory";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
 export const dynamic = "force-dynamic";
@@ -189,6 +190,10 @@ export default async function SearchPage({
 
   return (
     <>
+      {/* Запрос запоминается здесь, а не в форме: сюда приходят и из поля
+          в шапке ленты, и по ссылке, и по своей же подсказке — а писатель
+          у истории должен быть один. */}
+      <RememberQuery query={query} />
       <PageHeader
         left={
           <div className="flex w-full items-center gap-2">

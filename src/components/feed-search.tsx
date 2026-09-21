@@ -51,16 +51,11 @@ export function SearchButton({
  */
 export function SearchField({ onClose }: { onClose: () => void }) {
   return (
-    <SearchForm
-      autoFocus
-      placeholder="Найти в прошлых выпусках: uranium дата-центры"
-      className="flex w-full items-center gap-2"
-      // Escape возвращает ленту на место. Без него поле закрывается только
-      // мышью, а открывают его с клавиатуры.
-      onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
-      }}
-    >
+    <>
+      {/* Уход из поиска — слева, как и на странице результатов: там это
+          стрелка назад, здесь крестик, но место у них одно. Справа кнопка
+          съедала бы у поля ровно те сорок пикселей, на которые оно
+          и разъезжалось с полем на выдаче. */}
       <Button
         type="button"
         variant="ghost"
@@ -71,6 +66,16 @@ export function SearchField({ onClose }: { onClose: () => void }) {
       >
         <XIcon />
       </Button>
-    </SearchForm>
+      <SearchForm
+        autoFocus
+        placeholder="Найти в прошлых выпусках: uranium дата-центры"
+        className="flex-1"
+        // Escape возвращает ленту на место. Без него поле закрывается только
+        // мышью, а открывают его с клавиатуры.
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onClose();
+        }}
+      />
+    </>
   );
 }
