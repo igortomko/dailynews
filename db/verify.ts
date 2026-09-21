@@ -24,8 +24,12 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
+import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
+import { readingTime } from "../src/lib/relative-time";
 import { cleanupOf } from "../src/lib/source-health";
+import { applyRules, rulesOf } from "../src/lib/rules";
+import { toSlug } from "../src/lib/slug";
 
 
 
@@ -126,8 +130,27 @@ async function main() {
      * тоже остаётся: `ReadyForQuery` там полагается по спецификации,
      * то есть отказ идёт путём, который не зависит от правки вовсе.
      */
-    const rejects = async (statement: string, pattern: RegExp, why: string) => {
-      await assert.rejects(sql.unsafe(statement), pattern, why);
+    const rejects = async (
+      statement: string,
+      /**
+       * Регулярное выражение по тексту — или код SQLSTATE строкой.
+       *
+       * Код переживает и локаль кластера, и переписанное между версиями
+       * сообщение; в самом тексте ошибки его нет, он лежит отдельным полем,
+       * поэтому сверяется он не выражением, а проверкой.
+       */
+      pattern: RegExp | string,
+      why: string,
+      /** Значения для $1…$n: часть отказов бывает только у параметра. */
+      params: Parameters<typeof sql.unsafe>[1] = [],
+    ) => {
+      await assert.rejects(
+        sql.unsafe(statement, params),
+        typeof pattern === "string"
+          ? (error: unknown) => (error as { code?: string }).code === pattern
+          : pattern,
+        why,
+      );
       const [alive] = await sql<{ v: string }[]>`select 'ok'::text as v`;
       assert.equal(
         alive?.v,
@@ -164,7 +187,10 @@ async function main() {
     assert.equal(all.length, 1, "после миграции должен быть ровно один читатель — владелец");
     const owner = all[0];
     assert.ok(owner.owner, "перенесённый читатель должен быть владельцем");
-    assert.equal(owner.digest_size, 12);
+    // 0040 перевела заказ в минуты: двенадцать карточек по полминуты —
+    // это шесть минут чтения. Перенос обязан довезти прежний выбор, а не
+    // выдать умолчание: читатель настраивал размер выпуска один раз.
+    assert.equal(owner.digest_minutes, 6, "прежние 12 карточек — это шесть минут чтения");
     assert.equal(owner.complexity, 3, "сложность по умолчанию — середина шкалы");
     assert.equal(owner.style, "нейтральный", "манера по умолчанию");
     assert.ok(owner.reader_context.length > 0, "контекст читателя должен переехать, а не обнулиться");
@@ -368,13 +394,68 @@ async function main() {
       return digest.id;
     };
 
+    /**
+     * Две формы запроса из сборки выпуска, которые не работали ни разу.
+     *
+     * `jsonb_build_object` принимает "any", и тип нетипизированного параметра
+     * Postgres вывести не может — запрос падает на разборе, до единой строки.
+     * У `digest_items` нет столбца `id`: ключ составной, и `returning id`
+     * падал на каждой вставке. Обе видны были только как вежливое
+     * «не получилось собрать первый выпуск»: у нового читателя первый выпуск
+     * не собирался вовсе, а ночной прогон пишет выпуск своим кодом и потому
+     * работал.
+     */
+    const shapes = async (digestId: number, itemId: number) => {
+      await rejects(
+        "select jsonb_build_object('reading_target', $1) as j",
+        // Код, а не английский текст: сообщение переписывают между версиями,
+        // а на локализованном кластере его не будет вовсе.
+        "42P18", // тип параметра не определён
+        "без каста параметр в jsonb_build_object не типизируется — это и было причиной",
+        [1.5],
+      );
+      await sql`
+        update dailynews.digests
+           set stats = coalesce(stats, '{}'::jsonb)
+                     || jsonb_build_object('reading_target', ${1.5}::real)
+         where id = ${digestId}
+      `;
+      const [{ target }] = await sql<{ target: number }[]>`
+        select (stats->>'reading_target')::float as target
+          from dailynews.digests where id = ${digestId}`;
+      assert.equal(target, 1.5, "заказ дня ложится в stats, а не теряется");
+
+      const back = await sql<{ item_id: number }[]>`
+        insert into dailynews.digest_items (digest_id, item_id, total, position, title, summary)
+        values (${digestId}, ${itemId}, 1, 99, 'проба', 'S')
+        on conflict (digest_id, item_id) do nothing
+        returning item_id::int as item_id
+      `;
+      assert.equal(back.length, 0, "уже лежащий материал не вставляется второй раз");
+      await rejects(
+        `insert into dailynews.digest_items
+           (digest_id, item_id, total, position, title, summary)
+         values ($1, $2, 1, 98, 'проба', 'S')
+         on conflict (digest_id, item_id) do nothing
+         returning id::int as id`,
+        "42703", // столбца нет
+        "у digest_items нет собственного ключа — returning id падал на каждой вставке",
+        [digestId, itemId],
+      );
+      // Убираем за собой: заказ дня — предмет отдельной проверки ниже,
+      // и оставленное здесь значение сделало бы её бессмысленной.
+      await sql`update dailynews.digests set stats = stats - 'reading_target' where id = ${digestId}`;
+      console.log("  формы запросов сборки: каст и составной ключ на месте");
+    };
+
     const today = new Date().toISOString().slice(0, 10);
     // Владельцу — два материала, второму читателю — один, и подписи разные:
     // текст персонален, потому что язык и манера персональны.
-    await makeDigest(owner.id, today, [
+    const ownerDigest = await makeDigest(owner.id, today, [
       { id: ids[0], total: 120, title: "Владелец: GPT-6" },
       { id: ids[2], total: 95, title: "Владелец: уран" },
     ]);
+    await shapes(ownerDigest, ids[0]);
     await makeDigest(second.id, today, [{ id: ids[3], total: 60, title: "Vera: CBT" }]);
 
     // Материал старше своего выпуска: без этого проверка ниже проходила бы
@@ -410,6 +491,67 @@ async function main() {
     assert.ok(stored.kind, "axes->'kind'->>'choice' не должен быть null");
     assert.equal(ownerFeed[0].axes.kind.choice, "fact", "axes должны разобраться из jsonb");
     assert.equal(ownerFeed[0].read_count, 0);
+
+    // --- время выпуска: своё у каждого ------------------------------------------
+    // Набранное вычитается из заказа этими двумя запросами. Сложи они чужие
+    // карточки со своими — и выпуск обрывался бы на середине заказа: не ошибка
+    // в логе, а просто «сегодня мало новостей» каждый день.
+    const ownerProgress = await readers.digestProgress(owner.id, today);
+    const secondProgress = await readers.digestProgress(second.id, today);
+    assert.equal(ownerProgress.items, 2, "в набранном владельца только его карточки");
+    assert.equal(secondProgress.items, 1, "второй читатель набрал своё");
+    // Одна и та же сумма считается в SQL и в коде (cardChars). Две формулы
+    // одного числа расходятся молча: заказ считался бы одним, а показанное
+    // читателю время — другим.
+    assert.equal(
+      ownerProgress.chars,
+      cardChars("Владелец: GPT-6", "S") + cardChars("Владелец: уран", "S"),
+      "знаки карточки считаются в базе и в коде одинаково",
+    );
+    // Порог слабого материала на догрузке держится за это число: возьми оно
+    // чужой выпуск — и у читателя с тихой лентой порог задрал бы сосед.
+    assert.equal(ownerProgress.best, 120, "лучший скор — из своего выпуска");
+    assert.equal(secondProgress.best, 60, "у второго читателя лучший свой");
+    assert.equal(
+      (await readers.digestProgress(owner.id, "2000-01-01")).items, 0,
+      "день без выпуска — это ноль набранного, а не чужой выпуск",
+    );
+    // Мерка карточки — тоже личная: у англоязычного выпуска длина другая,
+    // и общая мерка промахивалась бы у всех, кроме среднего читателя.
+    assert.equal(
+      await readers.cardCharsOf(second.id), cardChars("Vera: CBT", "S"),
+      "мерка карточки считается по своим описаниям",
+    );
+    assert.equal(
+      await readers.cardCharsOf(-1), 0,
+      "у читателя без выпусков мерки нет — её заменяет общая, а не ноль в делителе",
+    );
+    assert.equal(
+      (await readers.digestProgress(-1, null)).day, null,
+      "у читателя без выпусков день пуст: это и значит «первого выпуска ещё не было»",
+    );
+
+    // Заказ дня лежит при самом выпуске. Лента листается на девяносто дней
+    // назад, и старый выпуск, померенный сегодняшней настройкой, обвинялся
+    // бы в недоборе, которого не было: «~5 из 45 — сегодня больше нечего»
+    // на выпуске, который был полон.
+    assert.equal(
+      (await readers.digestProgress(owner.id, today)).target, null,
+      "выпуск без сохранённого заказа не даёт повода считать недобор",
+    );
+    await sql`
+      update dailynews.digests
+         set stats = coalesce(stats, '{}'::jsonb) || '{"reading_target": 20}'::jsonb
+       where reader_id = ${second.id} and day = ${today}::date
+    `;
+    assert.equal(
+      (await readers.digestProgress(second.id, today)).target, 20,
+      "заказ дня читается из своего выпуска",
+    );
+    assert.equal(
+      (await readers.digestProgress(owner.id, today)).target, null,
+      "заказ соседа в свой выпуск не приезжает",
+    );
     // Время материала, а не день выпуска. Карточка показывала d.day, и все
     // материалы выпуска получали один возраст, отсчитанный от полудня того
     // дня: в ленте за сегодня везде стояло «1ч» независимо от материала.
@@ -479,6 +621,155 @@ async function main() {
       `  калибровка: ${ownerCalibration.totals.opened}/${ownerCalibration.totals.shown} у владельца, ` +
       `${secondCalibration.totals.opened}/${secondCalibration.totals.shown} у второго`,
     );
+
+    // --- поиск по прошлым выпускам ----------------------------------------------
+    // «Где я видел про uranium и дата-центры» — вопрос к своему архиву,
+    // а не к интернету. Ошибка здесь той же породы, что и чужая лента:
+    // выдача приходит быстро, выглядит осмысленной и собрана не из твоего.
+    {
+      const { HL_START } = await import("../src/lib/search");
+      // Описание пишется читателю его языком — по нему и ищут первым делом.
+      const [before] = await sql<{ summary: string | null }[]>`
+        select summary from dailynews.digest_items where item_id = ${ids[2]}
+      `;
+      // Описание длиннее отрывка намеренно: у короткого обрезать нечего,
+      // и обе проверки многоточия ниже прошли бы, ничего не измерив.
+      await sql`
+        update dailynews.digest_items
+           set summary = 'Спотовая цена на уран обновила максимум, дата-центры разгоняют спрос '
+                      || 'на энергию, а запуск новых блоков отстаёт от графика на годы; трейдеры '
+                      || 'закладывают дефицит топлива до конца десятилетия, добытчики обещают '
+                      || 'нарастить объёмы, но разрешения выдаются медленнее, чем строятся шахты'
+         where item_id = ${ids[2]}
+      `;
+
+      // Словарь поиска выбирается по языку выпуска, а его решает тариф:
+      // у платного перевод есть, у бесплатного текст остаётся языком
+      // источника. Читатели ниже заявлены явно — иначе проверка меряла бы
+      // тариф из фикстуры, а не поиск.
+      const ru = { ...owner, plan: "pro", language: "русском" };
+
+      const archive = await queries.archiveSize(owner.id);
+      assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
+      assert.deepEqual(
+        await queries.archiveSize(second.id),
+        { items: 1, days: 1 },
+        "в чужой архив соседние выпуски не попадают",
+      );
+
+      const byRussian = await queries.searchArchive(ru, "уран");
+      assert.equal(byRussian.hits.length, 1, "слово из описания выпуска обязано находиться");
+      assert.equal(String(byRussian.hits[0].item_id), String(ids[2]));
+      assert.equal(byRussian.loose, false, "по одному слову ослаблять нечего");
+      assert.ok(
+        byRussian.hits[0].snippet.includes(HL_START),
+        "найденное в отрывке обязано быть отмечено: иначе выдачу нечем читать",
+      );
+      // Многоточие означает «здесь отрезано», и проверяются обе стороны
+      // сразу: отрывок начинается с первых слов описания — слева резать
+      // нечего, — а конец в него не поместился, и справа резать пришлось.
+      // Поставленное с обеих сторон всегда обещало бы текст, которого нет.
+      assert.ok(
+        !byRussian.hits[0].snippet.startsWith("…"),
+        `отрывок с начала описания не помечается обрезанным: ${byRussian.hits[0].snippet}`,
+      );
+      assert.ok(
+        byRussian.hits[0].snippet.endsWith("…"),
+        `у обрезанного конца многоточие обязано быть: ${byRussian.hits[0].snippet}`,
+      );
+
+      // А короткий текст помещается в отрывок целиком, и тогда многоточия
+      // нет ни с одной стороны. Проверка держит не красоту, а `btrim`:
+      // пустая колонка оставляет в склейке висячий пробел, отрывок приходит
+      // без него — и «дочитано до конца» становится ложным на каждом
+      // отрывке, отчего многоточие перестаёт что-либо означать.
+      const [beforeFirst] = await sql<{ summary: string | null }[]>`
+        select summary from dailynews.digest_items where item_id = ${ids[0]}
+      `;
+      await sql`
+        update dailynews.digest_items set summary = 'Модель умеет больше контекста'
+         where item_id = ${ids[0]}
+      `;
+      const [shortHit] = (await queries.searchArchive(ru, "контекста")).hits;
+      // Именно изменённое описание, а не первая попавшаяся находка: иначе
+      // следующая строка фикстуры однажды превратит проверку в пустую.
+      assert.equal(String(shortHit?.item_id), String(ids[0]), "мерим отрывок своего материала");
+      const whole = shortHit?.snippet ?? "";
+      assert.ok(
+        whole.length > 0 && !whole.startsWith("…") && !whole.endsWith("…"),
+        `у неурезанного отрывка многоточия быть не должно: ${whole}`,
+      );
+      await sql`
+        update dailynews.digest_items set summary = ${beforeFirst?.summary ?? null}
+         where item_id = ${ids[0]}
+      `;
+      assert.equal(byRussian.hits[0].title, "Владелец: уран", "заголовок берётся из выпуска");
+      assert.equal(byRussian.hits[0].day, today, "у находки есть день выпуска, чтобы вернуться");
+
+      // Ищут тем словом, которое запомнили: «уран» стоит в описании выпуска,
+      // «uranium» — в заголовке источника. Одно без другого — половина поиска.
+      const byEnglish = await queries.searchArchive(ru, "uranium");
+      assert.equal(byEnglish.hits.length, 1, "исходный заголовок обязан искаться наравне");
+      assert.equal(String(byEnglish.hits[0].item_id), String(ids[2]));
+
+      // Словоформа, а не подстрока: «цены» и «цена» — одно слово.
+      assert.equal(
+        (await queries.searchArchive(ru, "цены")).hits.length,
+        1,
+        "поиск обязан сводить словоформы, иначе он работает только точным попаданием",
+      );
+      // Словарь один на оба текста, и это не компромисс: у русской
+      // конфигурации Postgres латиница уходит в английский стеммер.
+      // «цены» находит «цена» в описании выпуска, «prices» — «price»
+      // в заголовке источника, и это один и тот же поиск.
+      assert.equal(
+        (await queries.searchArchive(ru, "prices")).hits.length,
+        1,
+        "словоформа английского заголовка обязана сводиться тем же словарём",
+      );
+
+      // Самое дорогое здесь — чужой архив: он приходит вовремя и не твой.
+      const stranger = await queries.searchArchive(second, "уран");
+      assert.equal(stranger.hits.length, 0, "выпуск соседа в своём поиске не находится");
+      assert.equal(
+        (await queries.searchArchive(ru, "CBT")).hits.length,
+        0,
+        "и в обратную сторону тоже: владелец не ищет по выпуску второго",
+      );
+
+      // Ищут вопросом: все слова разом дают ноль, хотя ответ лежит в архиве.
+      const asked = await queries.searchArchive(ru, "где я видел про uranium");
+      assert.equal(asked.loose, true, "ослабление обязано называться вслух");
+      assert.equal(String(asked.hits[0].item_id), String(ids[2]));
+      assert.equal(
+        (await queries.searchArchive(ru, "кварки бозоны")).loose,
+        false,
+        "ослабление, не нашедшее ничего, ослаблением не объявляется",
+      );
+
+      // Палец вниз убирает материал из ленты — и из поиска тоже: иначе
+      // «убрать» означало бы «убрать с одной страницы из двух».
+      await sql`
+        insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+        values (${owner.id}, ${ids[2]}, 'down', 95, 0.8)
+      `;
+      assert.equal(
+        (await queries.searchArchive(ru, "уран")).hits.length,
+        0,
+        "скрытое пальцем вниз в поиске не всплывает",
+      );
+      // Убирается ровно вставленное, и описание возвращается на место:
+      // проверка, оставляющая след, однажды объяснит чужой провал.
+      await sql`
+        delete from dailynews.reads
+         where reader_id = ${owner.id} and item_id = ${ids[2]} and event = 'down'
+      `;
+      await sql`
+        update dailynews.digest_items set summary = ${before?.summary ?? null}
+         where item_id = ${ids[2]}
+      `;
+      console.log("  поиск: свой архив находится, чужой — нет");
+    }
 
     // --- отбор: своё не повторяется, чужое не исчезает ---------------------------
     // Самая дорогая ошибка многопользовательского отбора: первый прогнавшийся
@@ -945,7 +1236,7 @@ async function main() {
     const survivors = await selectSurvivors(
       sql, owner.id, owner.weights, budgetTargets, 20, everySource,
     );
-    assert.equal(survivors.length, 20, "отбор должен отдать ровно digest_size");
+    assert.equal(survivors.length, 20, "отбор должен отдать ровно столько мест, сколько заказано");
     for (const { topic, target } of budget) {
       const got = survivors.filter((s) => s.topic_label === topic.label).length;
       assert.equal(got, target, `${topic.label}: просили ${target}, отбор дал ${got}`);
@@ -995,6 +1286,115 @@ async function main() {
     );
     console.log(`  цели персональны: ${budget[1].topic.label} — ${secondShare} мест у второго`);
 
+    // --- личные правила: за чем следить и что исключать ------------------------
+    // Правило личное: у владельца оно есть, у второго читателя нет, и один
+    // и тот же поток должен разойтись по-разному. Ломается это молча —
+    // выпуск приходит вовремя, просто с тем, что просили не показывать,
+    // — поэтому проверяется настоящий отбор и настоящая лента.
+    const [ruleSource] = await sql<{ id: number }[]>`
+      insert into dailynews.sources (kind, label, url, config)
+      values ('rss', 'Правила: издание', 'https://rules.example.com/feed', '{}'::jsonb)
+      returning id::int as id
+    `;
+    const ruleItem = async (topic: typeof topics[number], title: string, total: number, extra = {}) => {
+      const url = `https://rules.example.com/${toSlug(title)}`;
+      const [row] = await sql<{ id: number }[]>`
+        insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+        values (${ruleSource.id}, ${url}, ${url}, ${title}, ${normalizeTitle(title)}, '')
+        returning id::int as id
+      `;
+      await sql`
+        insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+        values (
+          ${row.id}, ${topic.id}, ${total}, 0.8,
+          ${sql.json(axes(topic.slug, "fact", extra) as unknown as Parameters<typeof sql.json>[0])},
+          'jev-latest'
+        )
+      `;
+      return row.id;
+    };
+    // Figma — середина очереди дизайна по скору: без правила в шесть мест
+    // не попадает, с правилом обязана встать первой. Musk — лучший
+    // материал потока: без правила берётся у любого читателя.
+    const figmaItem = await ruleItem(budget[1].topic, "Figma raises a round", 60, { clickbait: { noul: 0.35 } });
+    const muskItem = await ruleItem(budget[2].topic, "Musk buys the chain", 130, { depth: { score: 2, max: 2, confidence: 0.9 } });
+    const ruleSources = [...everySource, ruleSource.id];
+
+    const ownerRules = { follow: [["Figma", "Фигма"]], exclude: [["Musk"]] };
+    await readers.saveRules(sql, owner.id, ownerRules);
+    const ownerRuled = (await readers.getReader(owner.id))!;
+    assert.deepEqual(ownerRuled.follow_rules, ownerRules.follow, "слежение приезжает массивом, а не строкой jsonb");
+    assert.deepEqual(ownerRuled.exclude_rules, ownerRules.exclude, "исключения приезжают массивом");
+    const secondRuled = (await readers.getReader(second.id))!;
+    assert.deepEqual(secondRuled.exclude_rules, [], "у второго читателя правил нет: старые читатели получают пустую настройку");
+    await rejects(
+      `update dailynews.readers set follow_rules = '"Figma"'::jsonb where id = ${owner.id}`,
+      /readers_follow_rules_array/,
+      "строка вместо массива (урок 0005) отвергается самой базой",
+    );
+
+    const ownerTargets = targetsOf(await readers.getReaderTopics(owner.id));
+    const unruledPick = await selectSurvivors(sql, owner.id, owner.weights, ownerTargets, 12, ruleSources);
+    assert.ok(unruledPick.some((s) => Number(s.id) === muskItem), "без правил лучший материал берётся");
+    assert.ok(!unruledPick.some((s) => Number(s.id) === figmaItem), "без правил середина очереди в шесть мест не попадает");
+
+    const ruledPick = await selectSurvivors(
+      sql, owner.id, owner.weights, ownerTargets, 12, ruleSources, 0, rulesOf(ownerRuled),
+    );
+    assert.ok(!ruledPick.some((s) => Number(s.id) === muskItem), "исключённое не попадает в выпуск владельца");
+    const designPicked = ruledPick.filter((s) => s.topic_label === budget[1].topic.label);
+    assert.equal(Number(designPicked[0]?.id), figmaItem, "упомянутое встаёт первым в своей теме");
+    assert.equal(
+      designPicked.length,
+      unruledPick.filter((s) => s.topic_label === budget[1].topic.label).length,
+      "доля темы от слежения не растёт: приоритет — порядок внутри очереди, а не лишние места",
+    );
+
+    // Сорок мест, а не двенадцать: у второго цель «Дизайн» — двадцать, и круг
+    // отдаёт дизайну двадцать мест раньше, чем блокчейн получит первое.
+    // Проверяется изоляция правил, а не бюджет тем.
+    const secondPick = await selectSurvivors(
+      sql, second.id, second.weights, targetsOf(await readers.getReaderTopics(second.id)), 40, ruleSources, 0,
+      rulesOf(secondRuled),
+    );
+    assert.ok(secondPick.some((s) => Number(s.id) === muskItem), "исключение владельца не трогает выпуск соседа");
+    console.log("  правила отбора: исключённое ушло, упомянутое первое, сосед не задет");
+
+    // Готовый выпуск: исключение прячет карточку без пересборки, у соседа
+    // та же карточка остаётся. Пометка слежения находится по написанию
+    // из выпуска — «Фигма» ловится вторым написанием, называется первым.
+    const rulesDay = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
+    const ruleCards = [
+      { id: muskItem, total: 130, title: "Владелец: Маск покупает" },
+      { id: figmaItem, total: 60, title: "Владелец: Фигма подняла раунд" },
+    ];
+    await makeDigest(owner.id, rulesDay, ruleCards);
+    await makeDigest(second.id, rulesDay, ruleCards);
+    const ownerShown = applyRules(await queries.getFeed(owner.id, rulesDay), rulesOf(ownerRuled));
+    assert.deepEqual(ownerShown.visible.map((c) => Number(c.id)), [figmaItem], "исключённая карточка спрятана из готового выпуска");
+    assert.equal(ownerShown.hidden, 1, "скрытое посчитано");
+    assert.equal(ownerShown.visible[0].followed, "Figma", "пометка называет первое написание правила");
+    const secondShown = applyRules(await queries.getFeed(second.id, rulesDay), rulesOf(secondRuled));
+    assert.equal(secondShown.hidden, 0, "у соседа ничего не спрятано");
+    assert.equal(secondShown.visible.length, 2, "у соседа обе карточки на месте");
+    // Снятое правило возвращает карточку как была — без пересборки.
+    await readers.saveRules(sql, owner.id, { follow: [], exclude: [] });
+    const ownerFreed = applyRules(
+      await queries.getFeed(owner.id, rulesDay), rulesOf((await readers.getReader(owner.id))!),
+    );
+    assert.equal(ownerFreed.visible.length, 2, "снятое исключение возвращает карточку");
+    assert.equal(ownerFreed.visible[0].followed, null, "без слежения пометки нет");
+    console.log("  правила в ленте: спрятано без пересборки, возвращается снятием правила");
+    // Выпуск и источник этой проверки убираются: дальше мерка карточки
+    // и архив считаются по выпускам владельца, а список источников —
+    // по каталогу, и лишний день или лишняя активная строка сдвинули бы их.
+    // Материалы и оценки уходят каскадом за источником.
+    await sql`
+      delete from dailynews.digests
+       where day = ${rulesDay}::date and reader_id in (${owner.id}, ${second.id})
+    `;
+    await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
+
     // --- потолок расходов -------------------------------------------------------
     assert.equal(await readers.spentToday(second.id), 0, "новый читатель ничего не потратил");
     await readers.recordCall({
@@ -1011,17 +1411,19 @@ async function main() {
     );
     console.log(`  потолок: свой счёт у каждого, общий этап не на читателе`);
 
-    // Список в форме предлагает до ста. Разъедется с ограничением колонки —
-    // и выбор «100» вернёт ошибку там, где читатель ничего не нарушал.
-    const { MAX_DIGEST } = await import("../src/lib/topic-budget");
-    await sql`update dailynews.readers set digest_size = ${MAX_DIGEST} where id = ${owner.id}`;
+    // Список в форме предлагает до сорока пяти минут. Разъедется
+    // с ограничением колонки — и выбор «45» вернёт ошибку там, где читатель
+    // ничего не нарушал.
+    const { READING_MINUTES } = await import("../src/lib/plans");
+    const maxMinutes = READING_MINUTES[READING_MINUTES.length - 1];
+    await sql`update dailynews.readers set digest_minutes = ${maxMinutes} where id = ${owner.id}`;
     await rejects(
-      `update dailynews.readers set digest_size = ${MAX_DIGEST + 1} where id = ${owner.id}`,
-      /digest_size/,
+      `update dailynews.readers set digest_minutes = ${maxMinutes + 1} where id = ${owner.id}`,
+      /digest_minutes/,
       "за потолком список предлагать не должен, а база — принимать",
     );
-    await sql`update dailynews.readers set digest_size = 12 where id = ${owner.id}`;
-    console.log(`  размер дайджеста: ${MAX_DIGEST} проходит, ${MAX_DIGEST + 1} отвергается`);
+    await sql`update dailynews.readers set digest_minutes = 6 where id = ${owner.id}`;
+    console.log(`  время выпуска: ${maxMinutes} проходит, ${maxMinutes + 1} отвергается`);
 
     // Ноль в цели уронил бы отбор делением на ноль, а не спрятал тему.
     await rejects(
@@ -1212,7 +1614,13 @@ async function main() {
     // Читаются кодом не все: llm остался неиспользованным, служебные времена
     // никому не нужны. Список исключений короткий и назван вслух — молчаливое
     // исключение здесь ничем не отличалось бы от забытой колонки.
-    const SKIP = new Set(["llm", "created_at", "updated_at", "reader_context_hash"]);
+    // digest_size осталась от заказа в штуках: 0040 перевела его в минуты,
+    // а колонку не тронула — переименованная, она стала бы ловушкой
+    // («размер», а внутри минуты), снесённая отдельной миграцией стоила бы
+    // дороже, чем не читается.
+    const SKIP = new Set([
+      "llm", "created_at", "updated_at", "reader_context_hash", "digest_size",
+    ]);
     const loaded = new Set(Object.keys((await readers.getReader(owner.id)) ?? {}));
     const missed = live.filter((column) => !SKIP.has(column) && !loaded.has(column));
     assert.deepEqual(
@@ -1393,7 +1801,31 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
+    // Время чтения считается из длины текста статьи. Колонка, заведённая
+    // миграцией, но не выбранная лентой, ничем себя не выдаёт: подписи
+    // просто не будет, и выглядит это как «у материала нет текста».
+    await sql`update dailynews.items set body = ${"т".repeat(7760)} where id = ${myItem}`;
     const storyFeed = await queries.getFeed(owner.id, storyDay);
+    // strictEqual, а не equal: колонка живёт среди bigint-ов, и «"7760"»
+    // прошло бы нестрогое сравнение молча — ровно тот класс ошибки,
+    // который уже ломал сюжеты по числовым ключам.
+    assert.strictEqual(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
+    assert.strictEqual(
+      readingTime(storyFeed[0].body_chars), "~6 мин", "и она превращается в минуты",
+    );
+
+    // У ролика текст — пересказ субтитров, а не то, что откроется
+    // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
+    await sql`update dailynews.items set transcribed_at = now() where id = ${myItem}`;
+    assert.equal(
+      (await queries.getFeed(owner.id, storyDay))[0].body_chars, null,
+      "у ролика времени чтения не бывает",
+    );
+    // Фикстура возвращается на место целиком: ниже этот же материал
+    // участвует в проверках сюжета, и оставленный текст менял бы их условия.
+    await sql`
+      update dailynews.items set transcribed_at = null, body = null where id = ${myItem}
+    `;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",
@@ -1460,7 +1892,10 @@ async function main() {
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
     `;
     assert.equal(beforeFlatten.n, 1, "цепочка должна быть заведена — иначе проверка ничего не ловит");
-    assert.equal(await flattenDupChains(sql), 1, "выпрямляется ровно одно звено");
+    assert.equal(
+      await flattenDupChains(sql), 1,
+      "считаются исправленные материалы, а не переписывания",
+    );
     const [afterFlatten] = await sql<{ n: number }[]>`
       select count(*)::int as n from dailynews.items c
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
@@ -1471,7 +1906,102 @@ async function main() {
       chainStory.get(chainRoot)?.length, 3,
       "выпрямленный сюжет собирается целиком, а не делится надвое",
     );
+
+    // Цепочка из четырёх материалов правится за два шага, но исправить надо
+    // два из них: третий и четвёртый (второй и так указывает на корень).
+    // Сложенные длины ответов насчитали бы три — число в логе прогона
+    // означало бы не то, что в нём написано.
+    const deep = [
+      await mkItem(mineSource, "deep-0", "Deep chain story zero", 400),
+      await mkItem(mineSource, "deep-1", "Deep chain story one", 350),
+      await mkItem(mineSource, "deep-2", "Deep chain story two", 300),
+      await mkItem(mineSource, "deep-3", "Deep chain story three", 250),
+    ];
+    for (let i = 1; i < deep.length; i++) {
+      await sql`update dailynews.items set dup_of = ${deep[i - 1]} where id = ${deep[i]}`;
+    }
+    assert.equal(await flattenDupChains(sql), 2, "два материала, сколько бы шагов ни ушло");
+    const deepStory = await queries.getStories([mineSource], [deep[0]]);
+    assert.equal(deepStory.get(deep[0])?.length, 4, "длинная цепочка сходится в один сюжет");
+
+    // Инвариант обеспечивается там, где потребляется: догрузка выпуска
+    // зовёт selectSurvivors мимо ночного прогона, и цепочка, оставшаяся
+    // с прошлого раза, увела бы ключ сюжета в середину без оценки.
+    await sql`update dailynews.items set dup_of = ${deep[1]} where id = ${deep[3]}`;
+    await selectSurvivors(sql, owner.id, owner.weights, storyTargets, 5, [mineSource]);
+    const [chainsLeft] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(chainsLeft.n, 0, "отбор выпрямляет цепочки сам, а не надеется на прогон");
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
+
+    // Reading cache isolation, idempotent settlement and concurrent budget reservations.
+    const readingStore = await import("../pipeline/reading-store");
+    const budgetReader = await readers.ensureReader(BIG_TELEGRAM_ID + 99, "reading-test");
+    await sql`update dailynews.readers set daily_cap_usd=0.10 where id=${budgetReader.id}`;
+    const reservations = await Promise.allSettled([
+      readingStore.reserveCall(sql, budgetReader.id, 0.07, "verify", "test-model"),
+      readingStore.reserveCall(sql, budgetReader.id, 0.07, "verify", "test-model"),
+    ]);
+    assert.equal(reservations.filter((r) => r.status === "fulfilled").length, 1, "parallel reservations cannot both spend the remaining budget");
+    const accepted = reservations.find((r) => r.status === "fulfilled");
+    assert.ok(accepted?.status === "fulfilled");
+    const callId = accepted.value;
+    await readingStore.settleCall(sql, budgetReader.id, callId, { input: 10, output: 5, cached: 3, reasoning: 0, requests: 1 }, 0.01, 100);
+    await readingStore.settleCall(sql, budgetReader.id, callId, null, null, 100);
+    assert.ok(Math.abs((await readers.spentToday(budgetReader.id)) - 0.01) < 0.000001, "settlement is idempotent and releases the unused reservation");
+    const uncertain = await readingStore.reserveCall(sql, budgetReader.id, 0.08, "compose", "test-model");
+    await readingStore.settleCall(sql, budgetReader.id, uncertain, null, null, 100);
+    assert.ok(Math.abs((await readers.spentToday(budgetReader.id)) - 0.09) < 0.000001, "uncertain paid calls retain a conservative charge");
+    const record = { version: 2 as const, sourceVersion: "test-v", availability: "excerpt_only" as const, status: "unavailable" as const, document: null, notice: "Test", seconds: 0 };
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", record);
+    assert.deepEqual(await readingStore.getDocument(sql, owner.id, "reading-private-key"), record);
+    assert.equal(await readingStore.getDocument(sql, second.id, "reading-private-key"), null, "another reader cannot fetch a private summary by its key");
+    const lease = await readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v");
+    assert.ok(lease.token);
+    await assert.rejects(() => readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v"), readingStore.ReadingBusyError);
+    await readingStore.finishAnalysis(sql, "reading-shared-key", lease.token, null);
+    const renewed = await readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v");
+    assert.ok(renewed.token, "failed analysis can be retried");
+    await readingStore.finishAnalysis(sql, "reading-shared-key", renewed.token, null);
+    assert.equal((await readingStore.recentBaselines(sql, second.id, deep[0], "new story")).length, 0);
+    const beforeUnavailable = await readers.digestProgress(owner.id, null);
+    const [latestDigest] = await sql<{ id: number }[]>`select id::int from dailynews.digests where reader_id=${owner.id} order by day desc limit 1`;
+    const [placeholder] = await sql<{ item_id: number }[]>`select item_id::int from dailynews.digest_items where digest_id=${latestDigest.id} limit 1`;
+    if (placeholder) {
+      await sql`update dailynews.digest_items set summary_document=${sql.json(record)} where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
+      const afterUnavailable = await readers.digestProgress(owner.id, null);
+      assert.equal(afterUnavailable.items, beforeUnavailable.items - 1, "unavailable summaries do not fill usable card capacity");
+      await sql`update dailynews.digest_items set summary_document=null where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
+    }
+    const good = { ...record, status: "verified" as const };
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", good);
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", record);
+    assert.equal((await readingStore.getDocument(sql, owner.id, "reading-private-key"))?.status, "verified", "a concurrent failure cannot downgrade a verified private cache entry");
+    console.log("  reading: scoped caches, analysis lease, reservations, settlement and new queries verified");
+
+    // Full source access can reveal an exclusion missing from the RSS teaser.
+    const { writeReadingDigest } = await import("../pipeline/reading");
+    const { compile: compileReadingRules, applyRules: applyReadingRules, NO_MATCH: noReadingMatch } = await import("../src/lib/rules");
+    const excludedNames = [["FictionalBlockedVendor"]];
+    await sql`update dailynews.readers set exclude_rules=${sql.json(excludedNames)} where id=${owner.id}`;
+    await sql`update dailynews.items set body='<p>FictionalBlockedVendor is named only in the full article.</p>', source_content_kind='article_text' where id=${deep[0]}`;
+    const filtered = await writeReadingDigest(sql, [{ id: deep[0], title: 'Neutral title', excerpt: 'Neutral teaser', body: null,
+      url: 'https://example.com/full-source', source_label: 'Source', topic_label: 'Topic', total: 0, axes: {} as import("../src/lib/types").Axes }],
+      '', { language: 'русском', complexity: 3, style: 'нейтральный' }, { readerId: owner.id });
+    assert.deepEqual(filtered.excludedIds, [deep[0]]);
+    assert.equal(filtered.items.length, 0, "excluded full sources never become unavailable placeholders");
+    assert.equal(filtered.usage.requests, 0, "excluded sources do not spend the generation budget");
+    if (placeholder) {
+      await sql`update dailynews.items set body='<p>FictionalBlockedVendor appears only here.</p>' where id=${placeholder.item_id}`;
+      const feed = await queries.getFeed(owner.id, null);
+      const visibility = applyReadingRules(feed, { follow: noReadingMatch, exclude: compileReadingRules(excludedNames) });
+      assert.ok(feed.some(item => item.id === placeholder.item_id), "the existing card remains stored");
+      assert.ok(!visibility.visible.some(item => item.id === placeholder.item_id), "full-source exclusions also hide existing cards");
+    }
+    await sql`update dailynews.readers set exclude_rules='[]'::jsonb where id=${owner.id}`;
+    console.log("  reading: full-source exclusions prevent generation and hide existing cards");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {

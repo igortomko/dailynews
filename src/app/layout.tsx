@@ -17,9 +17,34 @@ const inter = Inter({
   display: "swap",
 });
 
+/**
+ * Описание одно на всех и по-английски: карточку ссылки собирает чужой робот
+ * без сессии, и языка читателя в этот момент не знает никто. Переводить его
+ * по `Accept-Language` робота значит описывать продукт тем языком, на котором
+ * говорит краулер, а не тот, кто перейдёт по ссылке.
+ */
 export const metadata: Metadata = {
-  title: "Retorta",
-  description: "Персональная новостная лента со скорингом по собственным осям",
+  metadataBase: new URL("https://news.tomko.io"),
+  title: "Reporta",
+  description: "A personal news feed that pulls the signal out of the stream",
+  icons: {
+    icon: [
+      { url: "/brand/favicon.svg", type: "image/svg+xml" },
+      { url: "/brand/favicon-32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: "/brand/favicon-180.png",
+  },
+  openGraph: {
+    title: "Reporta",
+    description: "A personal news feed that pulls the signal out of the stream",
+    images: [{ url: "/brand/social-preview.png", width: 1200, height: 630, alt: "Reporta brand mark" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Reporta",
+    description: "A personal news feed that pulls the signal out of the stream",
+    images: ["/brand/social-preview.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -11,6 +11,10 @@
  * ponytail: HTML вместо EPUB — если понадобится обложка и точное
  * разбиение на главы, здесь появится сборка zip.
  */
+import { documentText, type StoredReading } from "../src/lib/reading-document";
+import { typography } from "../src/lib/typography";
+import type { Dict } from "../src/lib/i18n";
+import { ru } from "../src/lib/i18n/ru/index";
 import { FEATURES } from "../src/lib/plans";
 import { effectivePlan } from "../src/lib/lemon";
 /** Домен отправителя. Переменная старше константы: она уже есть
@@ -21,22 +25,22 @@ const DOMAIN = process.env.KINDLE_FROM_DOMAIN?.trim() || "kindle.tomko.io";
 export type Article = {
   title: string;
   summary: string;
+  reading?: StoredReading;
   url: string;
   source_label: string;
   topic_label: string;
 };
 
 const escapeHtml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function digestHtml(day: string, intro: string, articles: Article[]): string {
   const body = articles
     .map((a) =>
       [
-        `<h2>${escapeHtml(a.title)}</h2>`,
-        `<p class="meta">${escapeHtml(a.topic_label)} · ${escapeHtml(a.source_label)}</p>`,
-        `<p>${escapeHtml(a.summary)}</p>`,
-        `<p class="meta"><a href="${escapeHtml(a.url)}">Источник</a></p>`,
+        `<p class="meta"><a href="${escapeHtml(/^https?:\/\//i.test(a.url) ? a.url : "#")}">${escapeHtml(a.source_label)}</a> · ${escapeHtml(a.topic_label)}</p>`,
+        `<h2>${escapeHtml(typography(a.title))}</h2>`,
+        ...(a.reading?.document ? [a.reading.notice, documentText(a.reading.document)] : [a.summary]).filter(Boolean).join("\n\n").split(/\n\n+/).map((p) => `<p>${escapeHtml(typography(p)).replace(/\n/g, "<br>")}</p>`),
       ].join("\n"),
     )
     .join("\n\n");
@@ -46,10 +50,10 @@ export function digestHtml(day: string, intro: string, articles: Article[]): str
   return [
     "<!doctype html>",
     '<html lang="ru"><head><meta charset="utf-8">',
-    `<title>Retorta за ${escapeHtml(day)}</title>`,
+    `<title>Reporta за ${escapeHtml(day)}</title>`,
     "<style>body{font-family:serif}h2{page-break-before:always}.meta{color:#555;font-size:.85em}</style>",
     "</head><body>",
-    `<h1>Retorta за ${escapeHtml(day)}</h1>`,
+    `<h1>Reporta за ${escapeHtml(day)}</h1>`,
     intro ? `<p>${escapeHtml(intro)}</p>` : "",
     body,
     "</body></html>",
@@ -77,13 +81,13 @@ export async function sendToKindle(options: {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      from: `Retorta <${senderAddress(options.sender)}>`,
+      from: `Reporta <${senderAddress(options.sender)}>`,
       to: [options.to],
-      subject: `Retorta за ${options.day}`,
+      subject: `Reporta за ${options.day}`,
       text: `Выпуск за ${options.day} — во вложении.`,
       attachments: [
         {
-          filename: `retorta-${options.day}.html`,
+          filename: `reporta-${options.day}.html`,
           content: Buffer.from(html, "utf8").toString("base64"),
         },
       ],
@@ -183,7 +187,7 @@ export async function sendArticleToKindle(options: {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      from: `Retorta <${senderAddress(options.sender)}>`,
+      from: `Reporta <${senderAddress(options.sender)}>`,
       to: [options.to],
       subject: options.title,
       text: options.title,
@@ -210,20 +214,24 @@ export function articleBlocker(
     daily_cap_usd: number;
   },
   spent: number,
+  // Словарь необязателен и по умолчанию русский: эту же проверку зовёт
+  // ночной прогон, где спрашивать язык не у кого, — а веб передаёт язык
+  // своего читателя и получает отказ на нём.
+  t: Dict["errors"] = ru.errors,
 ): string {
-  if (!reader.kindle_address) return "Сначала настрой Kindle в «Доставке» — там нужен адрес читалки";
-  if (!reader.kindle_sender) return "Это наша поломка — напиши боту в Telegram";
+  if (!reader.kindle_address) return t.kindleNoAddress;
+  if (!reader.kindle_sender) return t.kindleNoSender;
   // Пока отправитель не одобрен у Amazon, письмо уходит и исчезает: код
   // E014, уведомление владельцу читалки, тишина в нашу сторону. Отказать
   // здесь дешевле, чем потратить минуту и цент на книгу, которую Amazon
   // выбросит, — и честнее, чем показать «отправлено».
-  if (!reader.kindle_approved) return "Amazon ещё не разрешил наш адрес — доделай настройку в «Доставке»";
+  if (!reader.kindle_approved) return t.kindleNotApproved;
   // Потолок проверяется до вызовов, а не после: узнать о перерасходе
   // постфактум можно и из счёта.
   if (spent >= reader.daily_cap_usd) {
     // Сумма наружу не уходит: это наш потолок расходов, а не квота,
     // о которой читатель что-то знает. Ему важно одно — когда снимется.
-    return "Сегодня больше отправить нельзя — завтра лимит обнулится";
+    return t.kindleCapReached;
   }
   return "";
 }

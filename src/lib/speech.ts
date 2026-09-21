@@ -158,7 +158,7 @@ export function unknownRuns(text: string, known: Map<string, string>): string[] 
 const VOICES: Record<string, string> = {
   "русском": "ru-RU-SvetlanaNeural",
   "английском": "en-US-AriaNeural",
-  "португальском (бразильский вариант)": "pt-BR-FranciscaNeural",
+  "португальском (бразильский)": "pt-BR-FranciscaNeural",
   "испанском": "es-ES-ElviraNeural",
   "немецком": "de-DE-KatjaNeural",
   "французском": "fr-FR-DeniseNeural",

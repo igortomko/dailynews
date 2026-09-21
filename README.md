@@ -1,10 +1,62 @@
-# Retorta
+# Reporta
+
+<p align="center">
+  <a href="https://news.tomko.io/brand/"><img src="./public/brand/brand-preview.png" alt="Reporta: смотреть внимательнее. Гравюрный город и утверждённый логотип." width="1080"></a>
+</p>
+
+<p align="center">
+  Персональная новостная лента, которая пробирается через шум и оставляет сигнал.
+  <br>
+  <a href="https://news.tomko.io/brand/">Открыть интерактивный брендбук</a> ·
+  <a href="https://news.tomko.io/brand/reporta-brand-kit.zip">Скачать бренд-кит</a>
+</p>
+
+Reporta собирает поток, оценивает каждый материал по общим осям, отбирает
+лучшее под конкретного читателя и пишет дайджест его языком. Красная линия —
+это не декоративный элемент: это маленький редактор, который пробирается через
+текст и находит то, что стоит открыть.
+
+### Brand assets
+
+<p align="center">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="./public/brand/illustrations/preview/observer-dark.webp"><img src="./public/brand/illustrations/preview/observer-light.webp" alt="Меньше шума: из потока газет остаётся одна" width="30%"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="./public/brand/illustrations/preview/attention-dark.webp"><img src="./public/brand/illustrations/preview/attention-light.webp" alt="Найти ценное: красный камень среди газетных строк" width="30%"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="./public/brand/illustrations/preview/city-dark.webp"><img src="./public/brand/illustrations/preview/city-light.webp" alt="Мир к утреннему кофе: город внутри чашки" width="30%"></picture>
+</p>
+
+Brand system v4: настоящие векторные логотип и знак, 20 упрощённых гравюр с простыми
+сюрреалистическими метафорами, семантические цвета интерфейса в двух темах,
+правила композиции, типографика, пример выпуска, движение, цветовые версии,
+четыре интерактивных состояния продукта и фотография в трёх форматах.
+Примеры в брендбуке не изменяют аккаунт и не являются реальными новостями.
+У каждой гравюры две прозрачные версии: чёрная и белая, красный неизменен.
+[Все 40 PNG](https://news.tomko.io/brand/reporta-illustrations.zip) ·
+[Сравнение шрифтов логотипа](https://news.tomko.io/brand/type-study/index.html).
+
+- `public/brand/logo-reporta.svg` — DM Serif Display в контурах с ручным кернингом
+- `public/brand/logo-reporta-approved-transparent.png` — прозрачная PNG-версия для макетов
+- `public/brand/logo-reporta-dark.svg` — прозрачная версия для тёмных поверхностей
+- `public/brand/mark-reporta.svg` / `public/brand/mark-reporta.png` — самостоятельный знак-змейка
+- `public/brand/favicon.svg` — favicon и аватар
+- `public/brand/index.html` — все 10 направлений и интерактивные примеры
+- `public/brand/GUIDELINES.md` — правила использования
+- `public/brand/tokens.css` — готовые CSS-токены
+- `public/brand/reporta-brand-kit.zip` — полный набор с локальными шрифтами
+
+Логотип: **DM Serif Display Regular 400**, оптическая корректировка шести пар,
+буквы в кривых. В сравнении сохранены исходный кернинг, Literata и Bodoni.
+Типографика: **Fraunces / Literata** для заголовков (латиница / кириллица),
+**Inter** для текста и интерфейса, **DM Mono / IBM Plex Mono** для метаданных.
+Шрифты, изображения и скрипты локальные: `public/brand/index.html` работает
+с диска без сервера. [Происхождение ассетов](./public/brand/ASSETS.md).
+SVG логотипа и знака содержат только векторную геометрию, без встроенного растра.
 
 Новостная лента на многих читателей: собирает весь поток, оценивает каждый
 материал по осям, отбирает кодом под каждого читателя, пишет ему дайджест
 его языком и присылает ссылку в его чат. Подключена читалка — выпуск уходит
 книгой на Kindle. Читается в вебе — там же собирается статистика, по которой
-отбор калибруется.
+отбор калибруется, и там же ищется то, что уже приходило: «где я видел
+про uranium и дата-центры» отвечает архив, а не память.
 
 Читатель заводится сам: пишет боту `/start`, подписывается на канал и
 получает одноразовую ссылку на сайт. Дальше три шага — интересы, источники,
@@ -166,8 +218,10 @@ src/lib/
   starter-topics.ts готовые интересы и первые источники под каждый
   onboarding.ts     шаг первого захода и подборка источников под интересы
   telegram.ts       разбор апдейта, секрет вебхука, отправка
+  search.ts         разбор поискового запроса, словарь языка, подсветка
   session.ts        кто сейчас читает — только из подписанной куки
 src/app/            интерфейс: лента, интересы, источники, доставка, калибровка
+src/app/(app)/search  поиск по прошлым выпускам этого читателя
 src/app/(app)/welcome первый заход: интересы → источники → первый выпуск
 src/app/api/telegram  вебхук бота: /start заводит читателя и шлёт ссылку
 db/migrations/      схема, роль, таблицы, стартовый каталог

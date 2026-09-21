@@ -1,8 +1,8 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
 import {
-  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks,
-  readerSources, recordCall, spentToday, topicsInUse, wakeReader,
+  allReaders, digestProgress, getReaderTopics, lastActivityAt, pauseReader,
+  pendingKindleAsks, perCardOf, readerSources, recordCall, spentToday, topicsInUse, wakeReader,
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -19,9 +19,13 @@ import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoI
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { digestCap, issuesToday, sourcesForPlan } from "../src/lib/plans";
+import { issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
+import {
+  cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf,
+} from "../src/lib/reading-time";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
+import { rulesOf } from "../src/lib/rules";
 
 const log = (msg: string) => console.log(msg);
 
@@ -239,34 +243,57 @@ async function runForReader(
     return 0;
   }
 
-  // Потолок тарифа поверх ползунка: digest_size мог остаться от прежнего
+  // Потолок тарифа поверх заказа: digest_minutes мог остаться от прежнего
   // тарифа, а платит за письмо описаний владелец ключа. Тот же потолок
   // стоит на догрузке из интерфейса — иначе он обходился бы кнопкой.
-  const digestSize = digestCap(reader.digest_size, plan);
+  const voice = effectiveVoice(reader);
+  const perCard = await perCardOf(reader);
+  const target = targetMinutes(reader.digest_minutes, plan, perCard);
 
   // Сколько уже лежит в сегодняшнем выпуске. Состав дописывается, а не
   // заменяется: прочитанное утром не должно исчезать из ленты. Но без этого
-  // вычитания повторный прогон дописывал бы ещё digestSize материалов поверх,
-  // и выпуск рос бы с каждым запуском — сорок, восемьдесят, сто двадцать.
-  // Выглядело бы это как «сегодня много новостей».
-  const [today] = await sql<{ taken: number }[]>`
-    select count(*)::int as taken
-      from dailynews.digests d
-      join dailynews.digest_items di on di.digest_id = d.id
-     where d.reader_id = ${reader.id} and d.day = ${day}
-  `;
-  const missing = digestSize - today.taken;
+  // вычитания повторный прогон дописывал бы ещё целый заказ поверх, и выпуск
+  // рос бы с каждым запуском — сорок, восемьдесят, сто двадцать. Выглядело бы
+  // это как «сегодня много новостей».
+  //
+  // Набранное вычитается настоящим текстом, а не оценкой: описания уже
+  // написаны, и мерить их приблизительно незачем.
+  const today = await digestProgress(reader.id, day);
+  const missing = itemsForMinutes(
+    target - minutesOf(today.chars, voice),
+    perCard,
+    // Технический потолок тарифа: оценка «сколько карточек в минуту»
+    // промахивается, и без него промах оплачивался бы карточками.
+    plan.maxItems - today.items,
+  );
   if (missing <= 0) {
-    log(`  ${name}: выпуск за ${day} уже полон (${today.taken} из ${digestSize}) — пропуск`);
+    // «Набран» не значит «полон»: мест могло не остаться по потолку штук,
+    // и тогда выпуск короче заказа. Читатель видит это строкой в ленте,
+    // а лог говорил бы, что всё в порядке.
+    const filled = minutesOf(today.chars, voice);
+    log(
+      `  ${name}: выпуск за ${day} ${isShort(filled, target) ? "добирать нечем" : "набран"} ` +
+      `(${formatMinutes(filled)} из ${Math.round(target)}, ${today.items} материалов) — пропуск`,
+    );
     return 0;
   }
 
   const mySources = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
+  // За чем следить и что исключать — тем же правилом, что у первого
+  // выпуска и догрузки: правило, которое работает ночью и не работает
+  // по кнопке, читается как настройка, которая иногда не сохраняется.
+  const rules = rulesOf(reader);
   const survivors = await selectSurvivors(
-    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
+    // Порог слабого материала отсчитывается от лучшего за сегодня, а не от
+    // лучшего среди оставшихся: второй прогон за сутки иначе пустил бы в
+    // выпуск ровно тех, кого отверг первый.
+    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, today.best, rules,
   );
   if (survivors.length === 0) {
-    log(`  ${name}: свежих материалов нет — пропуск`);
+    // Исключения названы: пустой отбор при заданном списке — это, скорее
+    // всего, список, а не поток, и лог не должен посылать искать поломку
+    // в источниках.
+    log(`  ${name}: свежих материалов нет${rules.exclude.empty ? "" : " (с учётом исключений)"} — пропуск`);
     return 0;
   }
 
@@ -282,9 +309,11 @@ async function runForReader(
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const digest = await writeDigest(survivors, reader.reader_context, effectiveVoice(reader));
+  const digest = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
+  const published = survivors.filter(item => !digest.excludedIds?.includes(item.id));
   const digestCost = llmCost(digest.usage);
-  await recordCall({
+  if (!published.length) { log(`  ${name}: полный текст исключён личными правилами; пустой выпуск не создаётся`); return digestCost; }
+  if (!digest.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
     tokensIn: digest.usage.input, tokensOut: digest.usage.output, costUsd: digestCost,
   });
@@ -297,7 +326,7 @@ async function runForReader(
   // описаний у каждого — это один и тот же ответ, оплаченный столько раз,
   // сколько у нас читателей. Ряд по дням от этого не страдает, а вход
   // петли дороже входа самого дайджеста: 3170 токенов на описание против 527.
-  const measuresQuality = reader.owner;
+  const measuresQuality = reader.owner && !digest.accounted;
   const quality = measuresQuality
     ? await scoreSummaries(
         qualitySample(digest.items).map((item: (typeof digest.items)[number]) => ({
@@ -320,6 +349,22 @@ async function runForReader(
     ? quality.scored.reduce((sum, row) => sum + row.total, 0) / quality.scored.length
     : null;
 
+  const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
+
+  /**
+   * Сколько времени займёт выпуск. Считается по написанному тексту, а не
+   * по заказу: карточек столько, сколько уложилось, и разница между
+   * заказанным и вышедшим — это и есть то, о чём читателю говорят вслух.
+   */
+  const minutes = minutesOf(
+    today.chars +
+      published.reduce((chars, survivor) => {
+        const text = writtenById.get(String(survivor.id));
+        return chars + cardChars(text?.title_ru ?? survivor.title, text?.summary ?? "");
+      }, 0),
+    voice,
+  );
+
   // Ползунок сложности меняет промпт — а меняется ли текст, видно только
   // по ряду этих двух чисел рядом с положением ползунка.
   const measured = digest.items.map((item) => readability(item.summary));
@@ -340,9 +385,16 @@ async function runForReader(
         plan: plan.id,
         words_per_sentence: Number(perSentence.toFixed(1)),
         long_word_share: Number(longShare.toFixed(3)),
+        // Заказ и то, что вышло, — рядом: обещание, которого никто не мерит,
+        // расходится с выпуском молча, и узнаётся это от читателя.
+        reading_target: Number(target.toFixed(1)),
+        reading_minutes: Number(minutes.toFixed(1)),
         // Что на самом деле ушло в провайдера: модель выводит writeDigest,
         // своя копия резолюции разошлась бы с ней на пустой строке.
         digest_model: digest.model,
+        reading_version: reader.reading_v2_enabled ? 2 : null,
+        reading_verified: digest.items.filter(item => item.reading?.status === "verified").length,
+        reading_unavailable: digest.items.filter(item => item.reading?.status === "unavailable").length,
         digest_input_tokens: digest.usage.input,
         digest_cached_tokens: digest.usage.cached,
         digest_output_tokens: digest.usage.output,
@@ -362,10 +414,9 @@ async function runForReader(
     select count(*)::int as taken from dailynews.digest_items where digest_id = ${row.id}
   `;
 
-  const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
   const qualityById = new Map((quality?.scored ?? []).map((q) => [String(q.item_id), q]));
 
-  for (const [index, survivor] of survivors.entries()) {
+  for (const [index, survivor] of published.entries()) {
     const written = writtenById.get(String(survivor.id));
     const scored = qualityById.get(String(survivor.id));
     // Текст пишется сюда, а не в items: язык, сложность и манера персональны,
@@ -373,21 +424,26 @@ async function runForReader(
     // первого своим языком.
     await sql`
       insert into dailynews.digest_items
-        (digest_id, item_id, total, position, title, summary, summary_axes, summary_score)
+        (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score)
       values (
         ${row.id}, ${survivor.id}, ${survivor.total}, ${taken + index + 1},
         ${written?.title_ru ?? survivor.title}, ${written?.summary ?? ""},
+        ${written?.reading ? sql.json(written.reading) : null},
         ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
         ${scored?.total ?? null}
       )
-      on conflict (digest_id, item_id) do nothing
+      on conflict (digest_id, item_id) do update
+        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document
+        where dailynews.digest_items.summary_document->>'status'='unavailable'
+          and excluded.summary_document->>'status'='verified'
     `;
   }
 
   log(
-    `  ${name}: ${survivors.length} материалов, ` +
+    `  ${name}: ${formatMinutes(minutes)} из ${Math.round(target)} заказанных, ` +
+    `${published.length} материалов, ` +
     (meanQuality === null
-      ? "качество не меряли (промпт один на всех), "
+      ? (reader.reading_v2_enabled ? "выжимки сверены с доступным источником, " : "качество не меряли (промпт один на всех), ")
       : `качество ${meanQuality.toFixed(0)} из 85 по ${quality?.scored.length} описаниям, `) +
     `${perSentence.toFixed(1)} слов в предложении (ползунок ${reader.complexity} из 5), ` +
     `$${(digestCost + qualityCost).toFixed(4)}`,
@@ -400,7 +456,16 @@ async function runForReader(
     `(${digest.usage.reasoning} рассуждение)`,
   );
 
-  await deliver(reader, day, digest.intro, survivors, writtenById, name);
+  // Недобор называется вслух и здесь: молча пришедший короткий выпуск
+  // неотличим от поломки отбора. Причина не называется — их три (порог
+  // слабого материала, потолок штук тарифа, бедный поток), и угаданная
+  // отправит чинить не то: строка, объясняющая недобор, не должна сама
+  // быть догадкой.
+  if (isShort(minutes, target)) {
+    log(`    недобор: подходящего меньше, чем заказано`);
+  }
+
+  await deliver(reader, day, digest.intro, published, writtenById, name, { minutes, target });
   return digestCost + qualityCost;
 }
 
@@ -410,8 +475,9 @@ async function deliver(
   day: string,
   intro: string,
   survivors: Survivor[],
-  writtenById: Map<string, { title_ru: string; summary: string }>,
+  writtenById: Map<string, { title_ru: string; summary: string; reading?: import("../src/lib/reading-document").StoredReading }>,
   name: string,
+  reading: { minutes: number; target: number },
 ): Promise<void> {
   const titleOf = (s: Survivor) => writtenById.get(String(s.id))?.title_ru ?? s.title;
 
@@ -431,6 +497,7 @@ async function deliver(
         Number(reader.telegram_id), day, intro,
         survivors.map((s) => ({ title: titleOf(s), topic: s.topic_label })),
         appUrl,
+        reading,
       );
       await sql`
         update dailynews.digests set sent_at = now()
@@ -462,6 +529,7 @@ async function deliver(
       articles: survivors.map((s) => ({
         title: titleOf(s),
         summary: writtenById.get(String(s.id))?.summary ?? s.excerpt,
+        reading: writtenById.get(String(s.id))?.reading,
         url: s.url,
         source_label: s.source_label,
         topic_label: s.topic_label,

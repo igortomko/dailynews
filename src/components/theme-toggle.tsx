@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Переключатель светлой и тёмной темы.
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
+  const t = useT();
 
   return (
     <Tooltip>
@@ -31,7 +33,7 @@ export function ThemeToggle({ className }: { className?: string }) {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Переключить тему"
+            aria-label={t.theme.toggle}
             onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
             className={cn(
               "text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground",
@@ -41,19 +43,24 @@ export function ThemeToggle({ className }: { className?: string }) {
         }
       >
         {/* Иконки не подменяются, а перетекают одна в другую: обе лежат
-            в разметке, верхняя поверх нижней. Появляющаяся растёт с 0.25
-            и теряет размытие, уходящая — наоборот. Простое hidden/block
-            даёт скачок, который на переключателе темы особенно заметен:
-            цвет страницы меняется плавно, а иконка щёлкает. */}
+            в разметке, верхняя поверх нижней. Появляющаяся растёт с 0.25,
+            уходящая съёживается. Простое hidden/block даёт скачок, который
+            на переключателе темы особенно заметен: цвет страницы меняется
+            плавно, а иконка щёлкает.
+
+            Размытия в переходе нет. Оно тут стояло и читалось грязью:
+            на значке в шестнадцать пикселей четыре пиксела blur размазывают
+            весь рисунок, и середина перехода выглядит не мягкой, а мыльной.
+            На крупной картинке тот же приём работает, на иконке — нет. */}
         <span className="relative flex size-4 items-center justify-center">
-          <SunIcon className="absolute scale-[0.25] opacity-0 blur-[4px] transition-[opacity,filter,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-100 dark:opacity-100 dark:blur-0" />
-          <MoonIcon className="scale-100 opacity-100 blur-0 transition-[opacity,filter,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-[0.25] dark:opacity-0 dark:blur-[4px]" />
+          <SunIcon className="absolute scale-[0.25] opacity-0 transition-[opacity,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-100 dark:opacity-100" />
+          <MoonIcon className="scale-100 opacity-100 transition-[opacity,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-[0.25] dark:opacity-0" />
         </span>
       </TooltipTrigger>
       {/* Подпись называет то, что будет после нажатия, — как и иконка. */}
       <TooltipContent>
-        <span className="dark:hidden">Тёмная тема</span>
-        <span className="hidden dark:block">Светлая тема</span>
+        <span className="dark:hidden">{t.theme.dark}</span>
+        <span className="hidden dark:block">{t.theme.light}</span>
       </TooltipContent>
     </Tooltip>
   );

@@ -1,3 +1,4 @@
+import { budgetedJev } from "./model-budget";
 import { TypeSafeClient, noul, score } from "@typesafe-ai/sdk";
 
 /**
@@ -89,6 +90,7 @@ const mean = (values: number[]) =>
 export async function scoreTranslation(
   source: string[],
   translated: string[],
+  readerId?: number,
 ): Promise<TranslationQuality | null> {
   const pairs = samplePairs(source, translated);
   if (pairs.length === 0) return null;
@@ -101,10 +103,10 @@ export async function scoreTranslation(
   await Promise.all(
     pairs.map(async (pair) => {
       try {
-        const result = await client.systemOne({
+        const result = await budgetedJev(readerId, "translation-quality", { pair, questions: QUESTIONS }, () => client.systemOne({
           state: { Оригинал: pair.from, Перевод: pair.to },
           questions: QUESTIONS,
-        });
+        }));
         const a = result.answers;
         collected.push({
           natural: { score: a.natural.score, max: 2, confidence: a.natural.confidence },

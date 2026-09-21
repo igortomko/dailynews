@@ -1,0 +1,182 @@
+[
+  {
+    "id": "observer",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 470618,
+    "redPixels": 23520,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "attention",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 309703,
+    "redPixels": 32029,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "city",
+    "width": 1536,
+    "height": 1024,
+    "visiblePixels": 380075,
+    "redPixels": 88375,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "lighthouse",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 411540,
+    "redPixels": 91604,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "magnet",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 291504,
+    "redPixels": 51506,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "context",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 171999,
+    "redPixels": 12354,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "bookmark",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 240257,
+    "redPixels": 45266,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "delivery",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 201279,
+    "redPixels": 74783,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "balance",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 289851,
+    "redPixels": 24063,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "voice",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 284041,
+    "redPixels": 29289,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "roots",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 242286,
+    "redPixels": 43868,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "horizon",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 350770,
+    "redPixels": 26163,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "duplicates",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 295580,
+    "redPixels": 53686,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "time",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 328594,
+    "redPixels": 30583,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "morning",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 291358,
+    "redPixels": 71717,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "archive",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 578168,
+    "redPixels": 49955,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "perspective",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 444107,
+    "redPixels": 103379,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "tuning",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 410980,
+    "redPixels": 42329,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "course",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 371468,
+    "redPixels": 84080,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  },
+  {
+    "id": "pause",
+    "width": 1254,
+    "height": 1254,
+    "visiblePixels": 379489,
+    "redPixels": 32716,
+    "sharedAlpha": true,
+    "unchangedRed": true
+  }
+]

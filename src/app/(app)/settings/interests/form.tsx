@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
-import { CheckIcon } from "lucide-react";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
 import { Button } from "@/components/ui/button";
@@ -12,124 +10,130 @@ import type { Plan } from "@/lib/plans";
 import { FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { flushRebuild } from "@/components/rebuild-queue";
+import { useSettingsSave } from "@/components/settings-save";
+import { useT } from "@/components/i18n-provider";
+import { NameRules } from "@/components/name-rules";
+import type { Names } from "@/lib/rules";
 
 export function InterestsForm({
   chips,
-  total,
+  minutes,
+  perCard,
   inToday,
   plan,
+  follow,
+  exclude,
 }: {
   chips: ChipInput[];
-  total: number;
+  /** Заказ: сколько минут чтения просит читатель. */
+  minutes: number;
+  /** Сколько минут занимает одна его карточка — мерка для деления на места. */
+  perCard: number;
+  /** Сколько минут в последнем выпуске. */
   inToday: number;
   plan: Plan;
+  /** Личные правила отбора: в той же форме, потому что это то же решение. */
+  follow: Names[];
+  exclude: Names[];
 }) {
-  const [pending, startTransition] = useTransition();
+  const t = useT();
+  const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [applying, setApplying] = useState(false);
   const form = useRef<HTMLFormElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
 
-  /** `after` зовётся после записи и только при успехе: пересобирать отвергнутое не за чем. */
-  const save = (after?: () => void) => {
-    const node = form.current;
-    if (!node) return;
-    startTransition(async () => {
-      // Отказ приходит двумя путями: разобранным `{ error }` и исключением
-      // из серверного действия. Оба гасят спиннер здесь — `after` при отказе
-      // не зовётся, и снять его больше некому: кнопка крутилась бы всегда,
-      // а причина не называлась бы вовсе.
-      try {
-        const result = await saveInterests(new FormData(node));
-        if (result?.error) {
-          setError(result.error);
-          setApplying(false);
-          return;
-        }
-      } catch {
-        setError("Сохранить не вышло — попробуй ещё раз");
-        setApplying(false);
-        return;
-      }
-      setError(null);
-      setSaved(true);
-      after?.();
-    });
-  };
-
-  // Сохраняем сами, с паузой после последней правки: иначе запрос уходил бы
-  // на каждое движение границы. Пауза короткая, но не нулевая — правку,
-  // сделанную и тут же брошенную уходом со страницы, она не спасёт.
-  const schedule = () => {
-    setSaved(false);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(save, 900);
-  };
+  /**
+   * Запись. Промисом, а не колбэком: её ждут двое — кнопка и окно
+   * «сохранить перед уходом», и второму нужен исход, чтобы решить,
+   * уходить ли.
+   */
+  const write = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const node = form.current;
+        if (!node) return resolve(false);
+        startTransition(async () => {
+          // Отказ приходит двумя путями: разобранным `{ error }` и исключением
+          // из серверного действия. Молчать нельзя ни о том, ни о другом.
+          try {
+            const result = await saveInterests(new FormData(node));
+            if (result?.error) {
+              setError(result.error);
+              return resolve(false);
+            }
+          } catch {
+            setError(t.settings.common.saveError);
+            return resolve(false);
+          }
+          setError(null);
+          resolve(true);
+        });
+      }),
+    [t],
+  );
 
   /**
-   * «Сохранить»: дописать недописанное и догрузить сегодняшний выпуск,
-   * если он стал меньше заказанного. Доли тем сегодняшнему выпуску уже
-   * не помогут — он отобран, — и тост об этом честно молчит.
+   * Догрузить сегодняшний выпуск, если он стал короче заказанного. Доли тем
+   * ему уже не помогут — он отобран, — и тост об этом честно молчит.
    */
-  const apply = () => {
-    clearTimeout(timer.current);
-    setApplying(true);
-    save(() => {
-      void flushRebuild(() => router.refresh())
-        .catch(() => {})
-        .finally(() => setApplying(false));
-    });
-  };
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => {
-    if (!saved) return;
-    const hide = setTimeout(() => setSaved(false), 2000);
-    return () => clearTimeout(hide);
-  }, [saved]);
+  const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
+
+  /**
+   * Закрыть поле списка до снимка правок, а не внутри записи. Уход из поля
+   * добавляет чип и зовёт `touch`; сделанный внутри `write`, он попадал бы
+   * после снимка `apply`, и форма после удачной записи оставалась бы
+   * «несохранённой» на вид. Кнопка не забирает фокус на mousedown (ниже):
+   * иначе чип появлялся бы между mousedown и mouseup, кнопка уезжала
+   * бы вниз, и первый клик пропадал.
+   */
+  const save = () => {
+    const node = form.current;
+    const active = document.activeElement;
+    if (node && active instanceof HTMLElement && node.contains(active)) active.blur();
+    void apply();
+  };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Интересы
-          <span
-            aria-live="polite"
-            className={cn(
-              "flex items-center gap-1 text-xs font-normal",
-              saved && !pending ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-            )}
-          >
-            {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
-          </span>
-        </CardTitle>
-        <CardDescription>
-          О чём собирать новости. Чем больше доля темы — тем больше новостей по ней в выпуске.
-        </CardDescription>
+        <CardTitle>{t.nav.interests}</CardTitle>
+        <CardDescription>{t.settings.interests.description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
+        <form ref={form} onChange={touch} onSubmit={(event) => event.preventDefault()}>
           <FieldGroup>
             <TopicChips
               initial={chips}
-              initialTotal={total}
+              initialMinutes={minutes}
+              perCard={perCard}
               inToday={inToday}
               plan={plan}
-              onChange={schedule}
+              onChange={touch}
             />
+            {/* После тем и их долей: сначала о чём, потом что именно.
+                Пересборку выпуска ни то ни другое не заводит — исключение
+                прячет карточки из готового само, слежение решается
+                при следующем отборе. */}
+            <NameRules kind="follow" name="follow" initial={follow} onChange={touch} />
+            <NameRules kind="exclude" name="exclude" initial={exclude} onChange={touch} />
             {error ? <FieldError>{error}</FieldError> : null}
 
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" disabled={applying} className="self-start" onClick={apply}>
-                {applying ? <Spinner data-icon="inline-start" /> : null}
-                Сохранить
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Новые доли работают со следующего выпуска, увеличенный размер догрузим сегодня
-              </span>
-            </div>
+            <Button
+              type="button"
+              disabled={applying || !dirty}
+              // Заметно крупнее остальных кнопок экрана: это единственное
+              // действие, ради которого сюда пришли, а в ряду одинаковых
+              // оно читалось как ещё одна настройка.
+              className="h-11 self-start px-6 text-base"
+              // Фокус остаётся в поле до самого клика: см. `save`.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={save}
+            >
+              {applying ? <Spinner data-icon="inline-start" /> : null}
+              {t.settings.common.save}
+            </Button>
           </FieldGroup>
         </form>
       </CardContent>

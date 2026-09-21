@@ -40,11 +40,15 @@ import {
   applySpoken, byLetters, chunks, latinRuns, spelledOut, spokenMap, unknownRuns,
   voiceFor, voiceForText,
 } from "../src/lib/speech";
-import { numberCollisions } from "../db/schema-gap";
+import { fileCoverage, numberCollisions } from "../db/schema-gap";
+import { readingTime } from "../src/lib/relative-time";
+import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
+import { en as EN_DICT } from "../src/lib/i18n/en/index";
+import { isDay } from "../src/lib/day";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { dupVerdict, sameStoryQuestion } from "./dedup";
 import { composite } from "./score";
@@ -58,18 +62,26 @@ import {
   channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
+import {
+  applyRules, asNames, cleanRules, compile, mentionText, mergeDraft, NO_RULES, RULE_LIMITS, rulesOf,
+  splitNames, withVariants,
+} from "../src/lib/rules";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
+import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
+import { recentFrom, remember } from "../src/lib/search-history";
+import { blockOf, move, overviewMarkdown, overviewText, reconcile } from "../src/lib/overview";
+import { formatDay } from "../src/lib/relative-time";
 import {
   ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
 } from "../src/lib/source-health";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -381,17 +393,26 @@ assert.ok(
   "ограничения увезённой таблицы требоваться не должны",
 );
 
-// --- список размеров против ограничения базы -----------------------------------
+// --- список времени против ограничения базы ------------------------------------
 // Форма предлагает список, база держит check. Разъедутся — читатель выберет
 // число, которое база отвергнет, и виноватым будет выглядеть он.
-import { DIGEST_SIZES, MAX_DIGEST } from "../src/lib/topic-budget";
+import { MIN_READING_MINUTES, READING_MINUTES as MINUTES_LIST } from "../src/lib/plans";
+const MAX_MINUTES = MINUTES_LIST[MINUTES_LIST.length - 1];
 assert.ok(
-  readFileSync("db/migrations/0018_digest_size_100.sql", "utf8").includes(`between 3 and ${MAX_DIGEST}`),
-  "потолок списка должен совпадать с ограничением колонки",
+  readFileSync("db/migrations/0040_reading_minutes.sql", "utf8")
+    .includes(`between ${MIN_READING_MINUTES} and ${MAX_MINUTES}`),
+  "границы списка должны совпадать с ограничением колонки",
 );
 assert.ok(
-  DIGEST_SIZES.every((size, index) => index === 0 || size > DIGEST_SIZES[index - 1]),
-  "список размеров должен идти по возрастанию",
+  MINUTES_LIST.every((size, index) => index === 0 || size > MINUTES_LIST[index - 1]),
+  "список времени должен идти по возрастанию",
+);
+// Корона над вариантом, которого нет ни на одном тарифе, ведёт в никуда:
+// читатель нажимает, ему предлагают Pro, он покупает Pro — и вариант
+// по-прежнему недоступен.
+assert.equal(
+  MAX_MINUTES, PLANS.pro.maxMinutes,
+  "верх списка должен совпадать с потолком самого дорогого тарифа",
 );
 
 // --- разгон перед выводом ------------------------------------------------------
@@ -470,15 +491,27 @@ assert.ok(
   "ключи сложности должны совпадать со значением колонки",
 );
 assert.ok(
-  [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
-  "у каждого варианта должны быть и подпись для читателя, и требование для модели",
+  [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0),
+  "у каждого варианта должно быть требование для модели",
 );
-// Манеру выбирают по первой фразе, а не по названию: «Разбор» и «Ровно»
-// различаются только примером. Манера без примера выглядит в ряду пустой
-// карточкой — и выбирают соседнюю, потому что про неё понятно.
+// Ключи и требования не повторяются: два одинаковых значения в ряду означают,
+// что выбирать не из чего, — а деления при этом разные. Подпись для читателя
+// сюда не входит: она переехала в словарь интерфейса (i18n/*/settings.ts)
+// и от языка промпта больше не зависит.
+for (const field of ["key", "instruction"] as const) {
+  assert.equal(
+    new Set([...COMPLEXITY, ...STYLES].map((entry) => entry[field])).size,
+    COMPLEXITY.length + STYLES.length,
+    `${field}: повтор означает два неразличимых варианта в одном ряду`,
+  );
+}
+
+// У каждого языка есть флажок. Словарь повторяет список строками, и язык,
+// добавленный только в список, остался бы в строю без значка — молча
+// и ровно у одного пункта.
 assert.ok(
-  STYLES.every((entry) => (entry.example ?? "").trim().length > 0),
-  "у каждой манеры должен быть пример того, как начнётся описание",
+  LANGUAGES.every((entry) => flagOf(entry).length > 0),
+  "язык без флажка: словарь разъехался со списком",
 );
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
@@ -509,10 +542,50 @@ const privateStart = (text: string, extra: Record<string, unknown> = {}) => ({
   },
 });
 
+/**
+ * Язык интерфейса из разбора апдейта.
+ *
+ * Сужение, а не каст: `as { locale: string }` обходит union, и ветка,
+ * переставшая нести язык, продолжила бы компилироваться — проверка
+ * превратилась бы в обращение к полю несуществующего объекта.
+ */
+const localeOfUpdate = (update: unknown) => {
+  const parsed = parseUpdate(update);
+  assert.ok(parsed.kind === "start" || parsed.kind === "link", "апдейт разобран в ветку с языком");
+  return parsed.locale;
+};
+
 assert.deepEqual(
   parseUpdate(privateStart("/start")),
-  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor" },
+  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor", locale: "en" },
   "обычный /start заводит читателя",
+);
+
+// --- язык интерфейса приходит из Telegram -------------------------------------
+// Без этого каждый новый читатель получал интерфейс по умолчанию независимо
+// от того, на каком языке он написал боту: ошибки нет, экран открывается,
+// просто не на его языке.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "ru" })),
+  "ru",
+  "язык из апдейта становится языком интерфейса",
+);
+// Telegram шлёт и «ru-RU», и «en-US»: страна нам ни о чём не говорит.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "ru-RU" })),
+  "ru",
+  "страна в коде языка отбрасывается",
+);
+// Словарей два, и незнакомый язык — это язык по умолчанию, а не пустой экран.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "pt-BR" })),
+  "en",
+  "язык без словаря читается как язык по умолчанию",
+);
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: 42 })),
+  "en",
+  "не строка — тоже язык по умолчанию",
 );
 assert.equal(parseUpdate(privateStart("/start@lenta_bot")).kind, "start", "/start@ИмяБота — тот же /start");
 assert.equal(parseUpdate(privateStart("/start login")).kind, "start", "полезная нагрузка не мешает");
@@ -541,7 +614,7 @@ assert.deepEqual(
   parseUpdate({
     message: { text: "/start", chat: { id: bigId, type: "private" }, from: { id: bigId } },
   }),
-  { kind: "start", telegramId: bigId, chatId: bigId, username: null },
+  { kind: "start", telegramId: bigId, chatId: bigId, username: null, locale: "en" },
   "большой telegram_id должен пережить разбор",
 );
 
@@ -560,7 +633,12 @@ assert.equal(checkSecret(null), false, "запрос без заголовка �
 // Отбор переехал из SQL в код, потому что веса стали персональными:
 // второй экземпляр формулы на SQL разъехался бы с composite() молча.
 // Здесь он проверяется без базы — на числах, а не на пересказе.
-const candidate = (id: number, topicId: number | null, clickbait: number): Candidate => ({
+const candidate = (
+  id: number,
+  topicId: number | null,
+  clickbait: number,
+  extra: Partial<Axes> = {},
+): Candidate => ({
   id,
   title: `материал ${id}`,
   excerpt: "",
@@ -572,7 +650,7 @@ const candidate = (id: number, topicId: number | null, clickbait: number): Candi
   total: 0,
   topic_id: topicId,
   topic_label: `тема ${topicId ?? "нет"}`,
-  axes: axes({ clickbait: { noul: clickbait } }),
+  axes: axes({ clickbait: { noul: clickbait }, ...extra }),
 });
 
 const pool: Candidate[] = [];
@@ -607,6 +685,298 @@ assert.ok(strangerCount > 0, "лучший материал вне целей д
 assert.equal(
   pickSurvivors([candidate(999, null, 0)], DEFAULT_WEIGHTS, new Map(), 5).length, 1,
   "материал вне тем не должен уронить отбор делением на ноль",
+);
+
+// --- порог слабого материала ---------------------------------------------------
+// Выпуск заказывается минутами, и без порога норма добиралась бы чем угодно:
+// до двадцати минут всегда можно дотянуть, если брать всё подряд. Проверяется
+// на числах, а не на пересказе: отказ здесь выглядит как полный выпуск.
+const weak = (id: number, clickbait: number): Candidate =>
+  candidate(id, 1, clickbait, {
+    kind: { choice: "reprint", confidence: 0.9, probabilities: {} },
+    horizon: { choice: "noise", confidence: 0.8, probabilities: {} },
+    novelty: { score: 0, max: 2, confidence: 0.8 },
+    specifics: { score: 0, max: 2, confidence: 0.8 },
+    depth: { score: 0, max: 2, confidence: 0.8 },
+    actionable: { noul: 0 },
+  });
+
+const strong = [candidate(1, 1, 0), candidate(2, 2, 0), candidate(3, 3, 0)];
+const mixed = pickSurvivors(
+  [...strong, ...Array.from({ length: 10 }, (_, n) => weak(500 + n, 0.2))],
+  DEFAULT_WEIGHTS,
+  new Map([[1, 1], [2, 1], [3, 1]]),
+  20,
+);
+assert.equal(
+  mixed.length, strong.length,
+  "норма не добивается слабым материалом: место остаётся незанятым",
+);
+
+// Порог отсчитывается от лучшего за сегодня, а не от лучшего среди
+// оставшихся. Иначе кнопка «добрать» приносила бы ровно тех, кого ночной
+// отбор отверг, — и тем увереннее, чем беднее стал пул.
+const leftovers = Array.from({ length: 10 }, (_, n) => weak(600 + n, 0.2));
+assert.ok(
+  pickSurvivors(leftovers, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length > 0,
+  "сам по себе бедный пул отбирается: порог относителен",
+);
+assert.equal(
+  pickSurvivors(
+    leftovers, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20,
+    composite(strong[0].axes, DEFAULT_WEIGHTS),
+  ).length,
+  0,
+  "на догрузке порог держится за лучший материал сегодняшнего выпуска",
+);
+
+// Отрицательный лучший скор: доля от него больше него самого, и порог
+// выбросил бы весь выпуск — включая тот самый лучший материал.
+const gloomy = [0.9, 1].map((clickbait, index) =>
+  candidate(700 + index, 1, clickbait, {
+    topic: { choice: "other", confidence: 0.9, probabilities: {} },
+    kind: { choice: "reprint", confidence: 0.9, probabilities: {} },
+    horizon: { choice: "noise", confidence: 0.8, probabilities: {} },
+    novelty: { score: 0, max: 2, confidence: 0.8 },
+    specifics: { score: 0, max: 2, confidence: 0.8 },
+    depth: { score: 0, max: 2, confidence: 0.8 },
+    actionable: { noul: 0 },
+  }),
+);
+assert.ok(
+  composite(gloomy[0].axes, DEFAULT_WEIGHTS) < 0,
+  "проверка держится на отрицательном скоре — иначе она ни о чём",
+);
+assert.equal(
+  pickSurvivors(gloomy, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length, gloomy.length,
+  "день целиком в минусе не должен оставлять читателя без выпуска",
+);
+
+// --- личные правила: за чем следить и что исключать ----------------------------
+// Правило — список написаний одного и того же. Ищется буквально, с границей
+// слова для любого алфавита; текст читателя не исполняется как regex.
+// Проверяется на числах и строках, а не на пересказе: отказ здесь выглядит
+// как выпуск, пришедший вовремя и с тем, что просили не показывать.
+assert.deepEqual(
+  splitNames("Figma, Framer\nWebflow, figma , "),
+  ["Figma", "Framer", "Webflow"],
+  "запятая и перевод строки делят; повтор без регистра и пустое выбрасываются",
+);
+assert.deepEqual(
+  splitNames("Figma，Фигма; Ｆramer、x"),
+  ["Figma", "Фигма", "Framer", "x"],
+  "полноширинная запятая, точка с запятой и идеографическая запятая — тоже разделители",
+);
+
+assert.deepEqual(
+  cleanRules("follow", ["Figma", ["Framer", " framer ", "Фреймер"]]),
+  { rules: [["Figma"], ["Framer", "Фреймер"]] },
+  "строка — правило из одного написания; повтор внутри правила схлопывается",
+);
+assert.deepEqual(
+  cleanRules("follow", [["Figma"], ["figma", "Фигма"]]),
+  { rules: [["Figma"], ["Фигма"]] },
+  "написание из другого правила теряется, а не задваивается",
+);
+assert.deepEqual(cleanRules("follow", undefined), { rules: [] }, "нет поля — нет правил");
+assert.deepEqual(cleanRules("follow", [[""], [], ["  "]]), { rules: [] }, "пустые правила выбрасываются");
+assert.ok("error" in cleanRules("follow", "Figma"), "не массив — отказ, а не пустой список");
+assert.ok("error" in cleanRules("follow", [[42]]), "не строка — отказ");
+const manyRules = (n: number) => Array.from({ length: n }, (_, i) => [`имя ${i}`]);
+assert.ok(!("error" in cleanRules("follow", manyRules(RULE_LIMITS.rules.follow))), "предел слежения проходит");
+assert.ok("error" in cleanRules("follow", manyRules(RULE_LIMITS.rules.follow + 1)), "предел слежения плюс один — отказ");
+assert.ok(!("error" in cleanRules("exclude", manyRules(RULE_LIMITS.rules.exclude))), "предел исключений проходит");
+assert.ok("error" in cleanRules("exclude", manyRules(RULE_LIMITS.rules.exclude + 1)), "предел исключений плюс один — отказ");
+assert.ok("error" in cleanRules("follow", [["a", "b", "c", "d", "e", "f"]]), "шестое написание — отказ");
+assert.ok(!("error" in cleanRules("follow", [["x".repeat(RULE_LIMITS.chars)]])), "80 знаков проходят");
+assert.ok("error" in cleanRules("follow", [["x".repeat(RULE_LIMITS.chars + 1)]]), "81 знак — отказ");
+
+assert.deepEqual(asNames('[["Figma","Фигма"]]'), [["Figma", "Фигма"]], "строка в jsonb (урок 0005) читается, а не роняет ленту");
+assert.deepEqual(asNames("не json"), [], "битая строка — пустой список");
+assert.deepEqual(asNames([["", 5, "Ok"], "Solo"]), [["Ok"], ["Solo"]], "мусор внутри правила отбрасывается");
+
+const ruleNames = compile([["Apple"], ["Go"], ["Hacker News"], ["Яндекс"], ["C++"], [".NET"], ["a.*b"]]);
+assert.equal(ruleNames.test("I bought a pineapple"), false, "Apple не находится в Pineapple");
+assert.equal(ruleNames.test("Apple ships a new Mac"), true, "Apple находится словом");
+assert.equal(ruleNames.test("Google I/O keynote"), false, "Go не находится в Google");
+assert.equal(ruleNames.test("Written in Go."), true, "Go перед точкой — слово");
+assert.equal(ruleNames.test("Hacker\n   News thread"), true, "пробельный разрыв внутри написания — тот же текст");
+assert.equal(ruleNames.test("Яндекса больше нет"), false, "кириллица: другая форма — другое слово; \\b здесь ловил бы середину");
+assert.equal(ruleNames.test("«Яндекс» купил"), true, "кавычки — граница слова и для кириллицы");
+assert.equal(ruleNames.test("modern c++ features"), true, "C++ ищется как написано");
+assert.equal(ruleNames.test("abc++"), false, "C++ внутри слова не считается");
+assert.equal(ruleNames.test("using .net core"), true, ".NET ищется как написано");
+assert.equal(ruleNames.test("axxxb"), false, "текст читателя не исполняется как regex");
+assert.equal(ruleNames.test("literal a.*b here"), true, "и находится буквально");
+assert.equal(ruleNames.find("Hacker News on Go"), "Hacker News", "называется первое найденное по тексту");
+assert.equal(ruleNames.find("nothing here"), null, "нет упоминания — нет имени");
+
+// Граница ставится только с той стороны, где написание кончается словесным
+// знаком: «.NET» и «C++» читатель ждёт «как написано», а не только между
+// пробелами. Подчёркивание — словесный знак: «go_router» не про Go.
+const edgeNames = compile([[".NET"], ["C++"], ["Go"]]);
+assert.equal(edgeNames.test("ASP.NET Core"), true, ".NET находится в ASP.NET: слева у него точка");
+assert.equal(edgeNames.test("C++17 modules"), true, "C++ находится в C++17: справа у него плюс");
+assert.equal(edgeNames.test("go_router update"), false, "подчёркивание — часть слова, Go не находится");
+assert.equal(edgeNames.test("abc++"), false, "C++ внутри слова по-прежнему не считается");
+assert.equal(edgeNames.test("Go go go"), true, "обычная граница на месте");
+
+// Слияние набранного и написания раскрытого правила — те же функции,
+// что зовут кнопки, скрытое поле формы и onChange: непринятое остаётся
+// в поле, а не пропадает.
+const mergedDraft = mergeDraft([["Figma"]], `Framer, figma, ${"x".repeat(81)}`, 20);
+assert.deepEqual(mergedDraft.next, [["Figma"], ["Framer"]], "принятое становится правилами");
+assert.equal(mergedDraft.stopped, "«figma» уже есть", "первая причина отказа словами");
+assert.deepEqual(mergedDraft.rejected, ["figma", "x".repeat(81)], "непринятое возвращается целиком");
+const untouched = [["Figma"]];
+assert.equal(mergeDraft(untouched, "figma", 20).next, untouched, "нечего добавить — тот же массив");
+assert.equal(mergeDraft(manyRules(20), "ещё одно", 20).stopped?.startsWith("Не больше 20"), true, "предел называется");
+assert.deepEqual(mergeDraft(manyRules(20), "ещё одно", 20).rejected, ["ещё одно"], "и лишнее остаётся в поле");
+assert.deepEqual(
+  withVariants([["Figma"], ["Framer"]], 0, "Фигма, figma.com, Figma").next,
+  [["Figma", "Фигма", "figma.com"], ["Framer"]],
+  "написания добавляются к имени, само имя не задваивается",
+);
+assert.equal(
+  withVariants([["Figma"], ["Framer"]], 0, "framer").stopped,
+  "«framer» уже есть в другом правиле",
+  "написание из другого правила — отказ с причиной",
+);
+assert.equal(
+  withVariants([["Figma"]], 0, "a, b, c, d, e").stopped?.startsWith("Не больше 5"), true,
+  "шестое написание — отказ",
+);
+const sameRules = [["Figma", "Фигма"]];
+assert.equal(withVariants(sameRules, 0, "Фигма").next, sameRules, "без изменений — тот же массив");
+assert.equal(withVariants(sameRules, 3, "x").next, sameRules, "нет такого правила — ничего не меняется");
+// Форма без поля или с битым JSON отдаёт не-массив, и это отказ,
+// а не пустой список: иначе старая вкладка стирала бы сохранённое.
+assert.ok("error" in cleanRules("follow", {}), "не-массив от формы — отказ, а не «правил нет»");
+
+// Пересекающиеся написания: пометка называет самое длинное совпавшее,
+// а не то, что стояло в списке раньше.
+const nested = compile([["Figma"], ["Figma Design"]]);
+assert.equal(nested.find("Figma Design ships"), "Figma Design", "длинное написание называет себя, а не свой префикс");
+assert.equal(nested.find("Figma ships"), "Figma", "короткое находится, когда длинного нет");
+
+const foldedNames = compile([["Фёдор"], ["Figma"]]);
+assert.equal(foldedNames.test("ФЕДОР пришёл"), true, "регистр и ё/е сходятся");
+assert.equal(foldedNames.test("Ｆｉｇｍａ"), true, "полноширинные буквы сходятся по NFKC");
+assert.equal(foldedNames.find("FIGMA rocks"), "Figma", "называется написание из правила, а не из текста");
+
+assert.equal(compile([]).empty, true, "без правил — пустой сопоставитель");
+assert.equal(compile([[" "]]).empty, true, "пустое написание — тоже пустой");
+assert.equal(NO_RULES.follow.test("что угодно"), false, "пустой сопоставитель не ловит ничего");
+assert.equal(mentionText("a", null, "", undefined, "b"), "a\nb", "пустые куски не дают лишних строк");
+const readerRules = rulesOf({ follow_rules: [["Figma"]], exclude_rules: '[["Musk"]]' });
+assert.equal(readerRules.follow.test("Figma"), true, "слежение читается из колонки");
+assert.equal(readerRules.exclude.test("Elon Musk said"), true, "исключения из строки jsonb тоже читаются");
+
+// Правила поверх готового выпуска: тот же текст, что и при отборе, плюс
+// написанное языком читателя.
+const readyCards = [
+  { id: 1, title: "Figma ships", excerpt: "", title_ru: "Figma выпустила", summary: null },
+  { id: 2, title: "Design roundup", excerpt: "Musk quoted", title_ru: "Дизайн", summary: "обзор" },
+  { id: 3, title: "Plain", excerpt: "", title_ru: "Про Маска", summary: "текст" },
+];
+const ruledCards = applyRules(
+  readyCards,
+  rulesOf({ follow_rules: [["Figma"]], exclude_rules: [["Musk"], ["Маска"]] }),
+);
+assert.deepEqual(ruledCards.visible.map((c) => c.id), [1], "исключение ловит и описание из фида, и текст выпуска");
+assert.equal(ruledCards.hidden, 2, "скрытое считается, а не пропадает молча");
+assert.equal(ruledCards.visible[0].followed, "Figma", "упомянутое из списка называется на карточке");
+assert.deepEqual(applyRules(readyCards, NO_RULES).visible.map((c) => c.id), [1, 2, 3], "без правил выпуск прежний");
+assert.equal(applyRules(readyCards, NO_RULES).visible[0].followed, null, "без правил пометок нет");
+
+// --- правила в отборе ----------------------------------------------------------
+// Исключение снимает материал до порога и очередей, слежение — порядок
+// внутри очереди темы. Круг по темам, порог и предел остаются прежними.
+const titled = (
+  id: number, topicId: number, clickbait: number, title: string, extra: Partial<Candidate> = {},
+): Candidate => ({ ...candidate(id, topicId, clickbait), title, ...extra });
+const rulePool = [
+  titled(11, 1, 0.5, "Ordinary infra note"),
+  titled(12, 1, 0.0, "Best infra note"),
+  titled(13, 1, 0.3, "Figma ships infra"),
+  titled(21, 2, 0.1, "Design roundup"),
+  titled(22, 2, 0.2, "Musk on design"),
+];
+const ruleTargets = new Map([[1, 1], [2, 1]]);
+const idsOf = (list: { id: number }[]) => list.map((s) => s.id);
+const rulesFor = (follow: string[][], exclude: string[][]) =>
+  rulesOf({ follow_rules: follow, exclude_rules: exclude });
+const unruled = pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5);
+assert.deepEqual(idsOf(unruled), [12, 21, 22, 13, 11], "без правил: круг по темам, внутри темы по скору");
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([["Nothing"]], [["Nobody"]]))),
+  idsOf(unruled),
+  "правила, которые ничего не ловят, ничего не меняют",
+);
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([["Figma"]], []))),
+  [13, 21, 12, 22, 11],
+  "упомянутое встаёт первым в своей теме, круг по темам прежний",
+);
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 2, 0, rulesFor([["Figma"]], []))),
+  [13, 21],
+  "на границе предела при равном ходе упомянутое идёт первым",
+);
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([], [["Musk"]]))),
+  [12, 21, 13, 11],
+  "исключённое не занимает места и не сдвигает остальных",
+);
+assert.ok(
+  !idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([["design"]], [["Musk"]]))).includes(22),
+  "исключение побеждает слежение",
+);
+
+// Слабый материал с упоминанием не спасается: порог остаётся порогом.
+const threeTopics = new Map([[1, 1], [2, 1], [3, 1]]);
+const weakFigma = { ...weak(601, 0.2), title: "Figma weak note" };
+assert.deepEqual(
+  idsOf(pickSurvivors([...strong, weakFigma], DEFAULT_WEIGHTS, threeTopics, 20, 0, rulesFor([["Figma"]], []))),
+  idsOf(pickSurvivors(strong, DEFAULT_WEIGHTS, threeTopics, 20)),
+  "слежение не добирает слабый материал",
+);
+
+// Исключённый лучший материал не задаёт порог остальным: порог считается
+// по тому, что осталось после исключений.
+const leftoverPool = [titled(700, 1, 0, "Musk best"), ...leftovers];
+assert.equal(
+  pickSurvivors(leftoverPool, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length, 1,
+  "без правил слабые отрезаны порогом от лучшего",
+);
+assert.equal(
+  pickSurvivors(leftoverPool, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20, 0, rulesFor([], [["Musk"]])).length,
+  leftovers.length,
+  "исключённый лучший не задаёт порог тем, кто остался",
+);
+
+// Одно упоминание в нескольких написаниях — одно место.
+const withBoth = titled(800, 1, 0.1, "Figma and Framer together");
+assert.deepEqual(
+  idsOf(pickSurvivors(
+    [withBoth, titled(801, 1, 0.0, "Other")], DEFAULT_WEIGHTS, new Map([[1, 1]]), 5, 0,
+    rulesFor([["Figma"], ["Framer"]], []),
+  )),
+  [800, 801],
+  "материал с двумя упоминаниями занимает одно место и идёт первым",
+);
+
+// Ищется в описании из фида и в тексте статьи, снятой с разметки.
+const inBody = titled(900, 1, 0.1, "Plain title", {
+  excerpt: "mentions Figma", body: "<p>Built with <b>Framer</b></p>",
+});
+assert.equal(
+  pickSurvivors([inBody], DEFAULT_WEIGHTS, new Map([[1, 1]]), 5, 0, rulesFor([], [["Framer"]])).length, 0,
+  "исключение видит текст статьи под разметкой",
+);
+assert.equal(
+  pickSurvivors([inBody], DEFAULT_WEIGHTS, new Map([[1, 1]]), 5, 0, rulesFor([], [["<b>"]])).length, 1,
+  "разметка — не текст: тег не упоминание",
 );
 
 // --- выпуск для Kindle ----------------------------------------------------------
@@ -821,11 +1191,105 @@ for (const hook of ["/api/telegram", "/api/lemon"]) {
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
 
+// --- время чтения -------------------------------------------------------------
+// Обещание продукта — минуты, и считаются они по нашему же тексту. Ошибка
+// здесь не падает и не видна: выпуск приходит, просто не на то время,
+// которое заказано, — а узнаётся это от читателя через месяц.
+import {
+  CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
+  formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+} from "../src/lib/reading-time";
+import { DEFAULT_VOICE } from "../src/lib/voice";
+
+const minutesOfChars = (chars: number) => minutesOf(chars, DEFAULT_VOICE);
+
+// Карточка — это заголовок и описание вместе: читают их подряд, и считать
+// одно без другого значит занижать время на всех ста карточках сразу.
+assert.equal(
+  cardChars("аб", "вгд"), 5,
+  "в карточке считается заголовок вместе с описанием",
+);
+assert.equal(cardChars("аб", null), 2, "карточка без описания не роняет счёт");
+
+// Медиана живых выпусков: карточка около полуминуты. Уедет мерка — уедут
+// и тарифы, которые на ней построены.
+const perCard = minutesOfChars(CARD_CHARS);
+assert.ok(
+  perCard > 0.4 && perCard < 0.6,
+  `карточка должна занимать около полуминуты, вышло ${perCard.toFixed(2)}`,
+);
+
+// Язык и сложность меняют скорость. Без этого «двадцать минут» означало бы
+// разное время у русского и японского выпуска при одинаковом обещании.
+assert.ok(
+  charsPerMinute({ ...DEFAULT_VOICE, language: "японском" }) <
+    charsPerMinute({ ...DEFAULT_VOICE, language: "русском" }),
+  "иероглифический знак читается дольше буквенного",
+);
+assert.ok(
+  charsPerMinute({ ...DEFAULT_VOICE, language: SOURCE_LANGUAGE }) >
+    charsPerMinute({ ...DEFAULT_VOICE, language: "русском" }),
+  "без перевода выпуск остаётся английским, а он короче на знак",
+);
+assert.ok(
+  charsPerMinute({ ...DEFAULT_VOICE, complexity: 5 }) <
+    charsPerMinute({ ...DEFAULT_VOICE, complexity: 1 }),
+  "текст для специалиста читается медленнее, чем объяснение с нуля",
+);
+// Ноль — значение вне шкалы, и `level || 3` подменил бы его серединой:
+// тот же промах, что с ползунком сложности в промпте.
+assert.equal(
+  charsPerMinute({ ...DEFAULT_VOICE, complexity: 0 }),
+  charsPerMinute({ ...DEFAULT_VOICE, complexity: 1 }),
+  "сложность вне шкалы прижимается к краю, а не подменяется серединой",
+);
+assert.ok(
+  Number.isFinite(charsPerMinute({ ...DEFAULT_VOICE, language: "клингонском" })),
+  "незнакомый язык берёт общую мерку, а не роняет счёт",
+);
+
+// Время выпуска — сумма его карточек, и складывает их сама база
+// (`digestProgress`): лента прячет скрытое пальцем вниз, и выпуск,
+// померенный по видимому, объявлял бы себя недобранным.
+assert.equal(
+  minutesOfChars(cardChars("а", "б") + cardChars("в", "г")),
+  minutesOfChars(4),
+  "время выпуска — сумма его карточек",
+);
+
+// Округление показывается только читателю. «~0 мин» на непустом выпуске
+// выглядит как пустой выпуск — отказ, похожий на успех.
+assert.equal(formatMinutes(0.2), "~1 мин", "меньше минуты не показывается нулём");
+assert.equal(formatMinutesLong(1), "~1 минута", "единица склоняется");
+assert.equal(formatMinutesLong(3), "~3 минуты", "тройка склоняется");
+assert.equal(formatMinutesLong(11), "~11 минут", "одиннадцать берёт форму множественного");
+
+// Недобор меньше минуты — это разброс мерки, а не пустой день. Строка,
+// горящая каждый день, ничем не отличается от выключенной.
+assert.ok(!isShort(19.4, 20), "полминуты недобора называть вслух не о чем");
+assert.ok(isShort(7, 10), "три минуты недобора читатель должен увидеть");
+
+// Перевод заказа в места: та же арифметика в прогоне и в браузере.
+assert.equal(
+  itemsForMinutes(20, perCard, 100), Math.round(20 / perCard),
+  "места считаются делением заказа на карточку",
+);
+assert.equal(
+  itemsForMinutes(45, perCard, 10), 10,
+  "технический потолок тарифа режет оценку, а не наоборот",
+);
+assert.equal(
+  cardMinutes(0, DEFAULT_VOICE), perCard,
+  "у нового читателя мерки нет, и берётся общая",
+);
+
 // --- тарифы -----------------------------------------------------------------
 // Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
 // им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
 // решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
-import { PLAN_IDS, PLANS, kindDenial, maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
+import {
+  PLAN_IDS, PLANS, kindDenial, planOf, sourcesForPlan, targetMinutes,
+} from "../src/lib/plans";
 import type { Source } from "../src/lib/types";
 
 assert.equal(planOf("pro").id, "pro", "известный тариф читается как он сам");
@@ -835,10 +1299,39 @@ assert.ok(!PLANS.free.kinds.includes("x"), "X не должен быть дос�
 assert.ok(!PLANS.plus.kinds.includes("x"), "X не должен быть доступен на Plus");
 assert.ok(PLANS.pro.kinds.includes("x"), "X — признак Pro");
 assert.ok(
-  maxDigestOf(PLANS.free) < maxDigestOf(PLANS.plus) &&
-    maxDigestOf(PLANS.plus) < maxDigestOf(PLANS.pro),
-  "размер выпуска должен расти с тарифом",
+  PLANS.free.maxMinutes < PLANS.plus.maxMinutes && PLANS.plus.maxMinutes < PLANS.pro.maxMinutes,
+  "время выпуска должно расти с тарифом",
 );
+// Цель дня прижимается обоими потолками тарифа. Карточка бывает короче
+// медианы — свой язык, своя сложность, — и тогда потолок штук упирается
+// раньше времени. Сравнивай набранное с необрезанным заказом, и строка
+// «сегодня больше действительно важного нет» горела бы у такого читателя
+// каждый день, объясняя наш собственный предел тишиной в потоке.
+for (const id of PLAN_IDS) {
+  const p = PLANS[id];
+  for (const per of [perCard, perCard * 0.7, perCard * 1.4]) {
+    const target = targetMinutes(p.maxMinutes, p, per);
+    assert.ok(
+      target <= p.maxItems * per + 1e-9,
+      `на тарифе «${p.label}» цель ${target.toFixed(1)} мин выше того, ` +
+      `что отдают ${p.maxItems} карточек по ${(per * 60).toFixed(0)} с`,
+    );
+    assert.ok(target <= p.maxMinutes, `цель не должна превышать потолок тарифа «${p.label}»`);
+  }
+}
+
+// А сама калибровка тарифа: на медианной карточке потолок штук обязан
+// отдавать почти всё обещанное время. Иначе «до 20 минут» — это цена
+// за число карточек, названное минутами.
+for (const id of PLAN_IDS) {
+  const p = PLANS[id];
+  const share = minutesOfChars(p.maxItems * CARD_CHARS) / p.maxMinutes;
+  assert.ok(
+    share >= 0.8,
+    `на тарифе «${p.label}» потолок в ${p.maxItems} карточек отдаёт лишь ` +
+    `${Math.round(share * 100)}% обещанных ${p.maxMinutes} минут`,
+  );
+}
 
 // Состояний у источника два: он заведён или убран. Выключенных не бывает —
 // переключатель убран из интерфейса, а вместе с ним и третье состояние,
@@ -1574,6 +2067,13 @@ assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного 
 // Прислать ссылку боту — тот же жест, что вставить её в форму. Отвечать
 // на него подсказкой «напиши /start» значит делать вид, что не понял.
 assert.equal(parseUpdate(privateStart("https://t.me/durov")).kind, "link", "ссылка заводит источник");
+// Язык нужен и этой ветке: у читателя, чьё первое сообщение — ссылка,
+// строка заводится здесь, а следующий /start язык уже не переписывает.
+assert.equal(
+  localeOfUpdate(privateStart("https://t.me/durov", { language_code: "ru" })),
+  "ru",
+  "ссылка тоже приносит язык интерфейса",
+);
 assert.equal(parseUpdate(privateStart("@eugene_rid")).kind, "link", "@имя — тоже ссылка");
 assert.equal(parseUpdate(privateStart("simonwillison.net")).kind, "link", "голый домен — тоже");
 assert.equal(
@@ -1935,7 +2435,7 @@ const subscribedPress = {
 };
 assert.deepEqual(
   parseUpdate(subscribedPress),
-  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", callbackId: "cb1" },
+  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", locale: "en", callbackId: "cb1" },
   "нажатие «Я подписался» разбирается, а не проваливается в ignore",
 );
 
@@ -2000,7 +2500,8 @@ assert.deepEqual(
 // сохранение там, где читатель всего лишь выбрал интересы.
 for (const id of PLAN_IDS) {
   const p = PLANS[id];
-  const counts = normalize(Array.from({ length: p.maxTopics }, () => 1), p.digestSizes[0]);
+  const places = itemsForMinutes(p.maxMinutes, cardMinutes(0, DEFAULT_VOICE), p.maxItems);
+  const counts = normalize(Array.from({ length: p.maxTopics }, () => 1), places);
   assert.equal(counts.length, p.maxTopics, `цели считаются на все темы тарифа «${p.label}»`);
   assert.ok(
     counts.every((count) => count >= 1),
@@ -2104,12 +2605,24 @@ for (const prop of ["left", "right"]) {
   const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
   assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
 }
-// А требование key держится на том, что они соседи. Разведут по разным
-// родителям — проверка выше станет суеверием, и упасть она должна здесь.
+// А требование key держится на том, что каждый стоит не один. Соседями
+// они быть перестали, когда между ними встал поиск: left соседствует
+// со временем выпуска, right — с кнопкой поиска. Останется который-нибудь
+// из них единственным ребёнком — проверка выше станет суеверием,
+// и упасть она должна здесь.
+const tabsSource = readFileSync("src/components/feed-tabs.tsx", "utf8");
+const rowFrom = tabsSource.indexOf("{left}");
+const rowTo = tabsSource.indexOf("</header>");
+// Оба конца названы явно: indexOf отдаёт -1, а slice с -1 молча вернёт
+// хвост файла — проверка осталась бы зелёной, не посмотрев на шапку вовсе.
+assert.ok(rowFrom >= 0 && rowTo > rowFrom, "шапку ленты рисует feed-tabs");
+const headerRow = tabsSource.slice(rowFrom, rowTo);
+assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left стоит рядом с кнопками");
+assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 assert.match(
-  readFileSync("src/components/feed-tabs.tsx", "utf8"),
-  /\{left\}\s*\{right\}/,
-  "left и right стоят соседями — иначе key им не нужен",
+  headerRow,
+  /formatMinutes\(reading\.minutes[^)]*\)/,
+  "время выпуска стоит рядом с его датой: это два факта об одном выпуске",
 );
 
 
@@ -2588,6 +3101,169 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   );
 }
 
+// --- поиск по прошлым выпускам ------------------------------------------------
+// Отрывок приходит из ts_headline с метками внутри текста статьи. Метки —
+// управляющие символы, а не разметка: вставить в чужой текст <b> значит
+// однажды отрисовать оттуда же чужой <script>.
+{
+  const plain = highlight("просто текст");
+  assert.deepEqual(plain, [{ text: "просто текст", mark: false }], "текст без меток идёт целиком");
+
+  const marked = highlight(`про ${HL_START}уран${HL_END} и дальше`);
+  assert.deepEqual(
+    marked,
+    [
+      { text: "про ", mark: false },
+      { text: "уран", mark: true },
+      { text: " и дальше", mark: false },
+    ],
+    "метки режут отрывок на обычный текст и найденное",
+  );
+  assert.ok(
+    !marked.some((part) => part.text.includes(HL_START) || part.text.includes(HL_END)),
+    "сами метки в вывод не уезжают: иначе они видны на странице",
+  );
+
+  // Отрывок обрезается по словам, и закрывающая метка может не доехать.
+  // Подсветить остаток значит залить половину карточки.
+  const cut = highlight(`начало ${HL_START}уран`);
+  assert.deepEqual(
+    cut,
+    [{ text: "начало ", mark: false }, { text: "уран", mark: false }],
+    "незакрытая метка не подсвечивает хвост",
+  );
+
+  const marks = (text: string) => highlight(text).filter((part) => part.mark).length;
+  assert.equal(marks(`${HL_START}раз${HL_END} и ${HL_START}два${HL_END}`), 2, "меток бывает несколько");
+  assert.deepEqual(highlight(""), [], "пустой отрывок не даёт пустого куска");
+
+  // Ищут вопросом, а не ключевыми словами: «где я видел про uranium
+  // и дата-центры». Все слова разом требуют «видел», которого в тексте нет.
+  assert.equal(anyOf("uranium"), null, "одно слово ослаблять нечем");
+  assert.equal(anyOf("  "), null, "пустой запрос ослаблять нечем");
+  assert.equal(anyOf("uranium дата-центры"), "uranium or дата-центры");
+  assert.equal(
+    anyOf("  где я видел  про uranium "),
+    "где or я or видел or про or uranium",
+    "лишние пробелы не делают пустых слов",
+  );
+  // Оператор самого websearch, а не подмена «&» на «|» в готовом tsquery:
+  // в запросе бывает «AT&T», и такая подмена ломает не оператор, а слово.
+  assert.equal(anyOf("AT&T Verizon"), "AT&T or Verizon", "слово с амперсандом остаётся словом");
+
+  // Запрет остаётся запретом: «уран ИЛИ НЕ обогащение» отвечает почти всем
+  // архивом — ровно обратное тому, о чём просили.
+  assert.equal(anyOf("уран -обогащение"), null, "запрещённое слово в ослабление не идёт");
+  assert.equal(anyOf("уран реактор -обогащение"), "уран or реактор");
+  assert.equal(anyOf("дата-центры уран"), "дата-центры or уран", "дефис внутри слова остаётся");
+  // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
+  assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
+
+  // Словарь решает, сводятся ли словоформы, и заметно это только
+  // по ненайденному.
+  assert.equal(tsConfigFor("русском"), "russian");
+  assert.equal(tsConfigFor("английском"), "english");
+  assert.equal(tsConfigFor("португальском (бразильский)"), "portuguese");
+
+// --- два языка интерфейса ---------------------------------------------------
+// Пропущенный ключ ловит типизация: `ru` объявлен как `Dict`, и собраться
+// без него нельзя. Чего она не ловит — русской строки, забытой в английском
+// словаре: тип у неё тот же самый. А видит её ровно тот читатель, ради
+// которого словарь и заводили.
+{
+  const cyrillic = /[а-яА-ЯёЁ]/;
+  const found: string[] = [];
+
+  const walk = (node: unknown, path: string) => {
+    if (typeof node === "string") {
+      if (cyrillic.test(node)) found.push(`${path}: ${node}`);
+      return;
+    }
+    if (typeof node === "function") {
+      // Аргументы подставляем правдоподобные: строки принимают имя тарифа
+      // или причину отказа, числа — количество. Функция, которой они
+      // не подошли, проверку не заваливает: её строки увидит глаз.
+      for (const args of [[1], [2], [5], ["Pro"], ["Pro", 5, 7], [1, "Pro"]]) {
+        try {
+          const out = (node as (...a: unknown[]) => unknown)(...args);
+          if (typeof out === "string" && cyrillic.test(out)) found.push(`${path}(): ${out}`);
+        } catch {
+          // подошли не те аргументы — пробуем следующие
+        }
+      }
+      return;
+    }
+    if (node && typeof node === "object") {
+      for (const [key, value] of Object.entries(node)) walk(value, `${path}.${key}`);
+    }
+  };
+
+  walk(EN_DICT, "en");
+  assert.deepEqual(found, [], "в английском словаре осталась русская строка");
+}
+
+// Языки названы строкой, и эта строка лежит сразу в трёх словарях: скорость
+// чтения, словарь поиска и флажок. Переименуй язык в списке — и остальные
+// молча откатятся к значению по умолчанию: время выпуска посчитается русской
+// меркой, поиск возьмёт русский стеммер, флажок исчезнет. Ни одной ошибки
+// при этом не будет.
+for (const [name, table] of [
+  ["словарь поиска", TS_CONFIGS],
+  ["скорость чтения", CHARS_PER_MINUTE],
+] as const) {
+  const orphans = Object.keys(table).filter((key) => !LANGUAGES.includes(key));
+  assert.deepEqual(orphans, [], `${name}: ключи разъехались со списком языков`);
+}
+  assert.equal(
+    tsConfigFor(SOURCE_LANGUAGE),
+    "russian",
+    "язык источника заранее неизвестен: русская конфигурация разбирает и латиницу",
+  );
+  assert.equal(
+    tsConfigFor("японском"),
+    "russian",
+    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
+  );
+  assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
+  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
+  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
+  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
+  // в списке обязан получить словарь или попасть сюда осознанно, иначе
+  // он молча уедет на русский.
+  assert.deepEqual(
+    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
+    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
+    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
+  );
+
+  // Недавние запросы лежат в браузере, и что там лежит — знает не наш код:
+  // ключ переживает наши правки и правится из консоли. Разбор обязан
+  // отвечать пустой историей, а не исключением посреди отрисовки шапки.
+  assert.deepEqual(recentFrom(null), [], "пустое хранилище — пустая история");
+  assert.deepEqual(recentFrom("не json"), [], "мусор в ключе не роняет шапку");
+  assert.deepEqual(recentFrom('{"q":"уран"}'), [], "объект вместо списка — тоже мусор");
+  assert.deepEqual(recentFrom('["уран", 7, null, "гпу"]'), ["уран", "гпу"], "не строки выбрасываются");
+  assert.deepEqual(
+    recentFrom('["1","2","3","4","5","6","7"]').length,
+    5,
+    "длинный список подрезается: подсказок ровно столько, сколько помещается",
+  );
+  // Строка рисуется списком, и два одинаковых запроса — это два одинаковых
+  // ключа React и одна и та же подсказка дважды. Наша запись повторов
+  // не делает, но ключ правят и снаружи.
+  assert.deepEqual(recentFrom('["Уран","уран","гпу"]'), ["Уран", "гпу"], "повторы не доезжают до строки");
+  assert.deepEqual(recentFrom('["", "  ", "уран"]'), ["уран"], "пустая подсказка вела бы в поиск без запроса");
+
+  assert.deepEqual(remember(["гпу"], "уран"), ["уран", "гпу"], "свежий запрос идёт первым");
+  assert.deepEqual(remember(["уран", "гпу"], "гпу"), ["гпу", "уран"], "повтор поднимается, а не удваивается");
+  // Регистр не различие: «Uranium» следом за «uranium» — это один поиск,
+  // и две подсказки вместо одной съедают место, ничего не добавляя.
+  assert.deepEqual(remember(["uranium"], "Uranium"), ["Uranium"], "регистр не заводит второй подсказки");
+  assert.deepEqual(remember(["уран"], "   "), ["уран"], "пустой запрос историю не трогает");
+  assert.deepEqual(remember(["уран"], "  гпу "), ["гпу", "уран"], "пробелы по краям в подсказку не едут");
+  assert.equal(remember(["1", "2", "3", "4", "5"], "6").length, 5, "история не растёт");
+}
+
 // Сюжет: дедуп сделан видимым.
 //
 // Проверяется то, что на живых данных уже разъехалось: «первоисточник»
@@ -2678,10 +3354,10 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.equal(laterBy(4000), "3 дня позже");
 
   // «1 материалов» — та же ловушка, только в новой строке.
-  assert.equal(alsoLine(1), "О том же написали ещё 1 твой источник");
-  assert.equal(alsoLine(3), "О том же написали ещё 3 твоих источника");
-  assert.equal(alsoLine(5), "О том же написали ещё 5 твоих источников");
-  assert.equal(alsoLine(11), "О том же написали ещё 11 твоих источников");
+  assert.equal(alsoLine(1), "Ещё 1 источник");
+  assert.equal(alsoLine(3), "Ещё 3 источника");
+  assert.equal(alsoLine(5), "Ещё 5 источников");
+  assert.equal(alsoLine(11), "Ещё 11 источников");
   assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
   assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
   assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
@@ -2782,6 +3458,189 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     if (language === SOURCE_LANGUAGE) continue;
     assert.ok(voiceFor(language), `нет голоса для языка «${language}»`);
   }
+}
+
+// --- какие миграции сверка формы схемы вообще может проверить ------------------
+// Молчание сверки о файле, который ей ничего не обещал, — не ответ. Пока
+// эти две причины были одной, миграция из одних индексов уходила в журнал
+// мимо базы (0041), а миграция данных — вместе с тринадцатью источниками,
+// которые должна была убрать (0031).
+{
+  const { skippable, silent } = fileCoverage();
+  assert.ok(skippable.has("0039_item_enriched.sql"), "файл из одной колонки сверка доказывает целиком");
+  assert.ok(silent.has("0041_story_index.sql"), "файл из одних индексов схеме не обещает ничего");
+  assert.ok(!skippable.has("0041_story_index.sql"), "и пропускать его по молчанию сверки нельзя");
+  assert.ok(silent.has("0003_seed.sql"), "сид — это данные, и сверка формы схемы про них не знает");
+  assert.ok(silent.has("0031_sources_only_added_or_removed.sql"), "update — тоже данные");
+
+  // Файл, который делает и то и другое: колонка есть, индекса может не быть,
+  // и «обещанное уже есть» пропустило бы половину файла. Но и в отчёт
+  // о невыполненных он не идёт — выполнялся он из-за колонки.
+  for (const both of ["0012_summary_quality.sql", "0030_source_soft_delete.sql"]) {
+    assert.ok(!skippable.has(both), `${both}: колонка вместе с индексом не доказывается целиком`);
+    assert.ok(!silent.has(both), `${both}: но обещания форме схемы у него есть`);
+  }
+
+  // Самое важное: файл, чьё ограничение позже переопределили, обязан
+  // остаться пропускаемым. Выполнить 0035 заново значит вернуть
+  // model_calls_stage_check к старому списку этапов и стереть чужие —
+  // это уже случалось.
+  assert.ok(
+    skippable.has("0035_video_stage.sql"),
+    "переопределённое позже ограничение не делает файл невыполненным",
+  );
+
+  // Наборы не пересекаются, и это не тавтология: пересекись они — файл
+  // и выполнялся бы, и записывался без выполнения, смотря кто спросит.
+  assert.ok(
+    [...skippable].every((file) => !silent.has(file)),
+    "файл либо доказуем сверкой целиком, либо не обещал ей ничего",
+  );
+  // Каждый файл каталога попадает ровно в один из трёх случаев: доказуем,
+  // невидим сверке или смешанный. Считаем их поимённо — так новый файл
+  // сразу виден в том случае, куда попал.
+  const files = readdirSync("db/migrations").filter((name) => name.endsWith(".sql"));
+  const mixed = files.filter((file) => !skippable.has(file) && !silent.has(file));
+  assert.equal(
+    skippable.size + silent.size + mixed.length, files.length,
+    "каждый файл каталога попадает ровно в один случай",
+  );
+  assert.ok(mixed.includes("0012_summary_quality.sql"), "0012 — смешанный: колонка и индекс");
+}
+
+// --- время чтения --------------------------------------------------------------
+// Число, похожее на измеренное, но придуманное, — худший вид подписи:
+// проверить его читателю нечем до самого перехода по ссылке.
+{
+  assert.equal(readingTime(null), null, "текста нет — времени нет");
+  assert.equal(readingTime(0), null, "пустой текст времени не даёт");
+  assert.equal(readingTime(599), null, "анонс короче порога остаётся без подписи");
+  assert.equal(readingTime(600), "~1 мин", "минута — нижняя граница, а не ноль");
+  // Числа — с живого потока и уже без разметки: медиана и девяностый
+  // перцентиль длины текста статьи.
+  assert.equal(readingTime(5894), "~5 мин", "медианная статья живого потока");
+  assert.equal(readingTime(23003), "~19 мин", "девяностый перцентиль");
+  // Выше часа — в часах: «~104 мин» читатель пересчитывает в уме.
+  assert.equal(readingTime(72000), "~1 ч");
+  assert.equal(readingTime(124771), "~2 ч", "самая длинная статья потока");
+}
+
+// --- замок развёртывания переживает собственный rsync ---------------------
+// Замок лежит внутри того же каталога, который развёртывание синхронизирует
+// с --delete. Не исключён — и первый же шаг отправки сносит его: защита
+// от двух развёртываний внахлёст остаётся в тексте скрипта и исчезает из дела.
+// 21 сентября 2026 соседняя сессия вошла в эту щель и снесла чужой
+// docker-compose.yml посреди развёртывания.
+{
+  const deploy = readFileSync("deploy/deploy.sh", "utf8");
+  const lock = /^LOCK=\$DIR\/(\S+)$/m.exec(deploy);
+  assert.ok(lock, "замок развёртывания лежит внутри $DIR и найден в скрипте");
+  // Ищется внутри самого вызова, а не по всему файлу: исключение, о котором
+  // сказано в комментарии или переехавшее в чужую команду, замок не спасает.
+  const rsync = /^rsync (?:.*\\\n)*.*$/m.exec(deploy)?.[0] ?? "";
+  assert.ok(
+    rsync.includes("--delete") && rsync.includes(`"$HOST:$DIR/"`),
+    "вызов rsync в deploy.sh найден целиком",
+  );
+  assert.ok(
+    rsync.includes(`--exclude '${lock![1]}'`),
+    `rsync --delete сносит ${lock![1]}: замок надо исключить из отправки`,
+  );
+  // --delete-excluded удаляет именно исключённое: с ним замок умирает
+  // снова, а строка исключения остаётся на месте и выглядит защитой.
+  assert.ok(
+    !rsync.includes("--delete-excluded"),
+    "--delete-excluded сносит ровно то, что исключено, вместе с замком",
+  );
+  // compose-файл развёртывание заводит в $DIR само — и само же сносило шагом
+  // раньше. Прогон, умерший между rsync и cp, оставлял хост без файла
+  // насовсем: даже логи контейнера после этого посмотреть нечем.
+  //
+  // Косая в начале обязательна: исключение без неё попадает и в исходник
+  // deploy/docker-compose.yml — тогда следующему cp нечего будет копировать,
+  // а на хосте останется старая копия — отказ, похожий на успех.
+  const made = /cp \$DIR\/\S+ \$DIR\/(\S+)"/.exec(deploy);
+  assert.ok(made, "развёртывание заводит compose-файл в $DIR своим cp");
+  assert.ok(
+    rsync.includes(`--exclude '/${made![1]}'`),
+    `rsync --delete сносит ${made![1]}: нужно --exclude '/${made![1]}' с косой`,
+  );
+}
+
+// День из адреса проверяется до запроса: в SQL он уходит кастом к date,
+// и непроверенная строка роняла бы ленту вместо того, чтобы открыть последний
+// выпуск. Строго по форме и по календарю.
+assert.ok(isDay("2026-09-21"), "обычный день проходит");
+assert.ok(isDay("2024-02-29"), "29 февраля високосного года — день");
+assert.equal(isDay("2026-02-31"), false, "31 февраля — не день, хотя Date дотянул бы его до марта");
+assert.equal(isDay("2026-9-1"), false, "без нулей — не та форма, что в базе и в адресе");
+assert.equal(isDay(""), false, "пустой параметр — не день, а «последний выпуск»");
+assert.equal(isDay(["2026-09-21", "2026-09-20"]), false, "повторённый параметр приезжает массивом");
+assert.equal(isDay(undefined), false, "нет параметра — нет дня");
+assert.ok(isDay("0026-01-01"), "год ниже сотни — тоже день: Date.UTC читал бы его как 1926");
+assert.equal(isDay("0000-02-30"), false, "календарь проверяется и у таких лет");
+
+// --- Обзор для коллег: сводка блоков с выбором и тексты для копирования ---
+{
+  const card = (id: number, title: string, summary: string | null = "Описание") => ({
+    id, title, title_ru: null, summary, source_label: `Источник ${id}`, url: `https://s${id}.test/a`,
+  });
+  const feed = [card(1, "Первая"), card(2, "Вторая"), card(3, "Третья")].map(blockOf);
+
+  // Первое открытие: порядок выпуска, а не порядок нажатий.
+  assert.deepEqual(reconcile([], [feed[0], feed[2]]).map((b) => b.id), [1, 3]);
+
+  // Правки и порядок оставшихся переживают смену выбора; новые — в конец.
+  const edited = [{ ...feed[2], title: "Моя третья" }, feed[0]];
+  const next = reconcile(edited, feed);
+  assert.deepEqual(next.map((b) => b.id), [3, 1, 2]);
+  assert.equal(next[0].title, "Моя третья");
+
+  // Снятое уходит, повтор не заводится.
+  assert.deepEqual(reconcile(edited, [feed[0]]).map((b) => b.id), [1]);
+  assert.deepEqual(reconcile([feed[0], feed[0]], [feed[0], feed[0]]).map((b) => b.id), [1]);
+
+  // Перестановка за край не двигает ничего и отдаёт тот же массив.
+  assert.deepEqual(move([1, 2, 3], 0, 1), [2, 1, 3]);
+  assert.deepEqual(move([1, 2, 3], 2, 1), [1, 3, 2]);
+  const same = [1, 2, 3];
+  assert.equal(move(same, 0, -1), same);
+  assert.equal(move(same, 2, 3), same);
+
+  // Персональный заголовок выпуска, а не исходный; пустое описание — пустая строка.
+  assert.equal(blockOf({ ...card(4, "Orig", null), title_ru: "Перевод" }).title, "Перевод");
+  assert.equal(blockOf(card(4, "Orig", null)).summary, "");
+
+  // Дата выпуска на языке читателя, одна на шапку и на обзор.
+  assert.equal(formatDay("2026-09-21", "ru"), "21 сентября 2026 г.");
+  assert.equal(formatDay("2026-09-21", "en"), "September 21, 2026");
+
+  // Текст: каждая новость один раз, со ссылкой; пустое вступление
+  // не оставляет пустого абзаца.
+  const text = overviewText({ title: "Обзор", intro: "", blocks: [feed[1], feed[0]] });
+  assert.equal(
+    text,
+    [
+      "Обзор",
+      "1. Вторая\nОписание\nИсточник 2: https://s2.test/a",
+      "2. Первая\nОписание\nИсточник 1: https://s1.test/a",
+    ].join("\n\n"),
+  );
+  assert.ok(overviewText({ title: "  ", intro: "Вступление", blocks: [] }).startsWith("Вступление"));
+  // Стёртый заголовок блока подменяется источником — строка с одним номером
+  // читалась бы как обрыв.
+  assert.ok(overviewText({ title: "", intro: "", blocks: [{ ...feed[0], title: " " }] }).startsWith("1. Источник 1"));
+
+  // Markdown из тех же данных: заголовки, ссылка словами, скобка в адресе закодирована.
+  const md = overviewMarkdown({
+    title: "Обзор", intro: "Коротко.", blocks: [{ ...feed[0], url: "https://s1.test/a_(b)" }],
+  });
+  assert.equal(md, "# Обзор\n\nКоротко.\n\n## 1. Первая\n\nОписание\n\n[Источник 1](https://s1.test/a_%28b%29)");
+  // Скобка в названии источника закрыла бы ссылку раньше времени.
+  assert.ok(
+    overviewMarkdown({ title: "", intro: "", blocks: [{ ...feed[0], source: "A]B[C", url: "https://s1.test/a b" }] })
+      .endsWith("[A\\]B\\[C](https://s1.test/a%20b)"),
+  );
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

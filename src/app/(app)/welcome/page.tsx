@@ -3,6 +3,7 @@ import { currentReader } from "@/lib/session";
 import { getReaderTopics } from "@/lib/readers";
 import { effectivePlan } from "@/lib/lemon";
 import { onboardingStep, suggestSources, topicOptions } from "@/lib/onboarding";
+import { dictOf } from "@/lib/i18n";
 import { InterestsStep, ReadyStep, SourcesStep } from "./wizard";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,9 @@ export default async function WelcomePage() {
 
   const plan = effectivePlan(reader);
   const step = await onboardingStep(reader.id);
+  // Подписи под предложенными источниками собираются на сервере: словарь
+  // берётся из уже загруженной строки, лишнего запроса за ним нет.
+  const t = dictOf(reader.ui_language);
 
   if (step === "interests") {
     return (
@@ -42,7 +46,7 @@ export default async function WelcomePage() {
       <SourcesStep
         plan={plan}
         topics={topics.map((topic) => topic.label)}
-        suggestions={await suggestSources(reader.id, topics.map((topic) => topic.slug), plan)}
+        suggestions={await suggestSources(reader.id, topics.map((topic) => topic.slug), plan, t.onboarding)}
       />
     );
   }

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 480" role="img" aria-labelledby="title">
+  <title id="title">Reporta signal through noise illustration</title>
+  <rect width="720" height="480" fill="#FAF9F6"/>
+  <g fill="none" stroke="#171716" stroke-linecap="round">
+    <path d="M84 103H624M84 135H470M84 167H576M84 199H364M84 231H632M84 263H454M84 295H588M84 327H396M84 359H652" stroke-width="4"/>
+    <path d="M146 78l32 53M202 78l32 53M258 78l32 53M314 78l32 53M370 78l32 53M426 78l32 53M482 78l32 53M538 78l32 53M594 78l32 53" stroke-width="2"/>
+    <path d="M146 349l32 53M202 349l32 53M258 349l32 53M314 349l32 53M370 349l32 53M426 349l32 53M482 349l32 53M538 349l32 53M594 349l32 53" stroke-width="2"/>
+  </g>
+  <path d="M36 278C102 198 152 220 194 274C240 333 282 352 333 302C385 251 407 146 486 143C562 140 579 232 631 251C653 259 673 252 696 228" fill="none" stroke="#F04A32" stroke-width="22" stroke-linecap="round"/>
+  <ellipse cx="687" cy="232" rx="27" ry="21" fill="#F04A32"/>
+  <circle cx="678" cy="228" r="6" fill="#FAF9F6"/>
+  <circle cx="696" cy="228" r="6" fill="#FAF9F6"/>
+  <circle cx="678" cy="228" r="2.7" fill="#4CC9F0"/>
+  <circle cx="696" cy="228" r="2.7" fill="#4CC9F0"/>
+</svg>

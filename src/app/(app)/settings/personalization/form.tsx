@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { cn } from "@/lib/utils";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { savePersonalization } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import { CheckIcon } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -21,24 +19,35 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   COMPLEXITY, LANGUAGES, DEFAULT_COMPLEXITY, DEFAULT_STYLE, STYLES,
-  complexityAt, SOURCE_LANGUAGE,
+  complexityAt, flagOf, SOURCE_LANGUAGE,
 } from "@/lib/voice";
 import type { Reader } from "@/lib/types";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { PaywallCrown, usePaywall } from "@/components/paywall";
 import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
+import { useSettingsSave } from "@/components/settings-save";
+import { useT } from "@/components/i18n-provider";
+
+/** Флажок и показ языка одной строкой: в поле и в списке это одно и то же. */
+const languageOption = (entry: string, display: string) => (
+  <span className="flex min-w-0 items-center gap-2">
+    <span aria-hidden="true">{flagOf(entry)}</span>
+    {/* Поле у́же самого длинного языка, и «португальском (бразильский
+        вариант)» вылезал бы за него: обрезаем с многоточием. В списке
+        обрезать нечего — он расходится по содержимому. */}
+    <span className="truncate">{display}</span>
+  </span>
+);
 
 export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
+  const t = useT();
   // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
   // источника. Селект показывается целиком и погашенным, а не прячется:
   // по нему видно, что именно даёт переход.
   const translates = FEATURES.language.has(plan);
   const languagePaywall = usePaywall("language", plan);
   const [pending, startTransition] = useTransition();
-  const [saved, setSaved] = useState(false);
-  const [applying, setApplying] = useState(false);
   const form = useRef<HTMLFormElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
   const first = !profile?.onboarded_at;
 
@@ -57,124 +66,80 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   });
 
   /**
-   * `after` получает исход и не ждётся: иначе «сохраняю…» висело бы всю
-   * пересборку. Провал записи обязан сказать о себе — молча погашенная
-   * галочка читается как «сохранено», а в базе прежнее.
+   * Запись. Промисом, а не колбэком: её ждут двое — кнопка и окно
+   * «сохранить перед уходом», и второму нужен исход, чтобы решить,
+   * уходить ли.
    */
-  const save = (after?: (ok: boolean) => void) => {
-    const node = form.current;
-    // Исход сообщаем и здесь: `apply` уже зажёг спиннер, и молчаливый выход
-    // оставил бы кнопку крутиться до перезагрузки страницы.
-    if (!node) {
-      after?.(false);
-      return;
-    }
-    const data = new FormData(node);
-    startTransition(async () => {
-      try {
-        await savePersonalization(data);
-      } catch {
-        toast.error("Сохранить не вышло — попробуй ещё раз");
-        after?.(false);
-        return;
-      }
-      setSaved(true);
+  const write = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const node = form.current;
+        if (!node) return resolve(false);
+        const data = new FormData(node);
+        startTransition(async () => {
+          try {
+            await savePersonalization(data);
+          } catch {
+            // Провал записи обязан сказать о себе: молча погашенная кнопка
+            // читается как «сохранено», а в базе прежнее.
+            toast.error(t.settings.common.saveError);
+            return resolve(false);
+          }
 
-      // Язык, сложность, манера и «кто читает» уезжают в промпт дайджеста:
-      // выпуск, написанный прежними, новой настройке не соответствует.
-      // Пересборка отсюда не запускается — она откладывается до «Сохранить»
-      // или до выхода из настроек, чтобы не занимать интерфейс на минуту
-      // посреди правки.
-      const now = {
-        language: String(data.get("language") ?? ""),
-        complexity: Number(data.get("complexity")),
-        style: String(data.get("style") ?? ""),
-        reader_context: String(data.get("reader_context") ?? ""),
-      };
-      if (
-        now.language !== written.current.language ||
-        now.complexity !== written.current.complexity ||
-        now.style !== written.current.style ||
-        now.reader_context !== written.current.reader_context
-      ) {
-        // Запоминаем сразу: второе нажатие «Сохранить» без правок не должно
-        // оплачивать переписывание того же текста тем же голосом.
-        written.current = now;
-        queueRebuild("voice");
-      }
-      after?.(true);
-    });
-  };
+          // Язык, сложность, манера и «кто читает» уезжают в промпт дайджеста:
+          // выпуск, написанный прежними, новой настройке не соответствует.
+          // Сама пересборка отсюда не запускается — её решает тот, кто
+          // позвал запись.
+          const now = {
+            language: String(data.get("language") ?? ""),
+            complexity: Number(data.get("complexity")),
+            style: String(data.get("style") ?? ""),
+            reader_context: String(data.get("reader_context") ?? ""),
+          };
+          if (
+            now.language !== written.current.language ||
+            now.complexity !== written.current.complexity ||
+            now.style !== written.current.style ||
+            now.reader_context !== written.current.reader_context
+          ) {
+            // Запоминаем сразу: второе сохранение без правок не должно
+            // оплачивать переписывание того же текста тем же голосом.
+            written.current = now;
+            queueRebuild("voice");
+          }
+          resolve(true);
+        });
+      }),
+    [t],
+  );
 
-  // Сохраняем сами, с паузой после последней правки: иначе запрос уходил бы
-  // на каждую букву в текстовом поле. Пауза короткая, но не нулевая — правку,
-  // сделанную и тут же брошенную уходом со страницы, она не спасёт. Кнопка
-  // рядом отвечает не за запись, а за то, чтобы сегодняшний выпуск
-  // переписался прямо сейчас, не дожидаясь полуночи.
-  const schedule = () => {
-    setSaved(false);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(save, 900);
-  };
+  /** Переписать сегодняшний выпуск новым голосом, не дожидаясь полуночи. */
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
 
-  /** «Сохранить»: дописать недописанное и переписать выпуск, не дожидаясь полуночи. */
-  const apply = () => {
-    clearTimeout(timer.current);
-    setApplying(true);
-    save((ok) => {
-      if (!ok) {
-        setApplying(false);
-        return;
-      }
-      void flushRebuild(() => router.refresh())
-        .catch(() => {})
-        .finally(() => setApplying(false));
-    });
-  };
-
-  useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => {
-    if (!saved) return;
-    const hide = setTimeout(() => setSaved(false), 2000);
-    return () => clearTimeout(hide);
-  }, [saved]);
+  const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {first ? "Настрой ленту" : "Язык и подача"}
-          {/* Зелёный только у «сохранено»: это единственное состояние,
-              которое сообщает, что всё в порядке. «Сохраняю…» ничего
-              не обещает и красится как обычная подпись. */}
-          <span
-            aria-live="polite"
-            className={cn(
-              "flex items-center gap-1 text-xs font-normal",
-              saved && !pending ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-            )}
-          >
-            {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
-          </span>
-        </CardTitle>
+        <CardTitle>{first ? t.settings.personalization.firstTitle : t.nav.personalization}</CardTitle>
         <CardDescription>
-          {first
-            ? "Скажи, на каком языке и как писать новости. Интересы выберешь следующим шагом."
-            : // Не «как мы подбираем»: отбор здесь ни при чём — он идёт
-              // по интересам и оценкам, общим для всех. Обещать на этом
-              // экране влияние на подбор значит обещать то, чего нет.
-              "Настрой, на каком языке и как написан твой выпуск. О чём он — в «Интересах»."}
+          {first ? t.settings.personalization.firstDescription : t.settings.personalization.description}
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
+        <form ref={form} onChange={touch} onSubmit={(event) => event.preventDefault()}>
           {/* Сколько новостей в день — в «Интересах», рядом с полосой, где
               это число делится между темами: там оно одно решение, а не два.
               Здесь остаётся только то, как текст написан и для кого. */}
           <FieldGroup>
             <Field>
+              {/* «На каком языке», а не «Язык»: в списке лежит предложный
+                  падеж — форма, которая уезжает в промпт как есть, — и над
+                  «русском» заголовок в именительном не сходится ни с одним
+                  пунктом. Английский интерфейс этой проблемы не знает,
+                  и показывает обычное имя языка — см. languageNames. */}
               <FieldLabel htmlFor="language" className="flex items-center gap-1.5">
-                Язык
+                {t.settings.personalization.languageLabel}
                 {translates ? null : <PaywallCrown feature="language" plan={plan} />}
               </FieldLabel>
               {/* Список из пятнадцати, а колонка осталась свободным текстом:
@@ -190,7 +155,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     return;
                   }
                   setLanguage(value);
-                  schedule();
+                  touch();
                 }}
               >
                 {/* Не disabled: выключенный селект не ловит нажатие, и окно
@@ -199,13 +164,25 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     у подписи говорит, что раздел платный, а выбор языка
                     показывает, за что именно платить. Значение при этом
                     не меняется: окно открывается вместо него. */}
-                <SelectTrigger id="language" className="w-full">
-                  <SelectValue>{language}</SelectValue>
+                <SelectTrigger id="language" className="w-full max-w-xs">
+                  <SelectValue>
+                    {languageOption(language, t.settings.voice.languageNames[language] ?? language)}
+                  </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
+                {/* Обычный выпадающий список, а не список, подтянутый выбранным
+                    пунктом к полю: на шестнадцати языках он растягивался
+                    на весь экран и закрывал карточку целиком. Высота ограничена,
+                    остальное прокручивается. Ширина по содержимому, но не у́же
+                    поля: список наследует ширину поля, а поле стало коротким —
+                    иначе длинные языки обрезались бы и в самом списке, где
+                    их и выбирают. */}
+                <SelectContent
+                  alignItemWithTrigger={false}
+                  className="max-h-72 w-auto min-w-(--anchor-width)"
+                >
                   {(LANGUAGES.includes(language) ? LANGUAGES : [language, ...LANGUAGES]).map((entry) => (
                     <SelectItem key={entry} value={entry}>
-                      {entry}
+                      {languageOption(entry, t.settings.voice.languageNames[entry] ?? entry)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -218,8 +195,8 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
               {languagePaywall.dialog}
               <FieldDescription>
                 {translates
-                  ? "Источники остаются на своих языках, мы переводим и адаптируем."
-                  : "Выпуск приходит на языке источника — перевод есть на «Plus» и «Pro»."}
+                  ? t.settings.personalization.translatedHint
+                  : t.settings.personalization.notTranslatedHint}
               </FieldDescription>
             </Field>
 
@@ -228,14 +205,14 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 по нему можно только наугад. Скрытое поле держит значение
                 для FormData — группа меняется мимо события формы. */}
             <Field>
-              <FieldLabel>Сложность языка</FieldLabel>
+              <FieldLabel>{t.settings.personalization.complexityLabel}</FieldLabel>
               <ToggleGroup
-                aria-label="Сложность языка"
+                aria-label={t.settings.personalization.complexityLabel}
                 value={[String(complexity)]}
                 onValueChange={(value: string[]) => {
                   if (!value[0]) return;
                   setComplexity(Number(value[0]));
-                  schedule();
+                  touch();
                 }}
                 variant="outline"
                 className="grid w-full grid-cols-2 items-stretch sm:grid-cols-5"
@@ -246,27 +223,29 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     value={entry.key}
                     className="h-auto min-h-9 min-w-0 px-2 py-1.5 text-center leading-tight whitespace-normal"
                   >
-                    {entry.label}
+                    {t.settings.voice.complexity[entry.key].label}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
               <input type="hidden" name="complexity" value={complexity} />
-              <FieldDescription>{complexityAt(complexity).hint}</FieldDescription>
+              <FieldDescription>
+                {t.settings.voice.complexity[complexityAt(complexity).key].hint}
+              </FieldDescription>
             </Field>
 
             <Field>
-              <FieldLabel>Манера подачи</FieldLabel>
-              {/* Четыре варианта видны сразу, и каждый — с первой фразой
-                  описания: «нейтрально и без оценок» обещает, а «Компания
-                  выпустила новую модель…» показывает. За списком они прячутся
-                  по одному, и сравнить манеры нельзя, не открыв его дважды. */}
+              <FieldLabel>{t.settings.personalization.styleLabel}</FieldLabel>
+              {/* Четыре варианта видны сразу и выделяются так же, как деления
+                  сложности над ними: разная заливка у двух соседних групп
+                  читается как два разных элемента, и выбранное в одной
+                  перестаёт быть похоже на выбранное в другой. */}
               <ToggleGroup
-                aria-label="Манера подачи"
+                aria-label={t.settings.personalization.styleLabel}
                 value={[style]}
                 onValueChange={(value: string[]) => {
                   if (!value[0]) return;
                   setStyle(value[0]);
-                  schedule();
+                  touch();
                 }}
                 variant="outline"
                 className="grid w-full grid-cols-1 items-stretch sm:grid-cols-2 lg:grid-cols-4"
@@ -275,29 +254,12 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   <ToggleGroupItem
                     key={entry.key}
                     value={entry.key}
-                    // Выбранная карточка остаётся светлой и берёт границу:
-                    // залить её фоном нельзя — тем же фоном набран пример
-                    // внутри, и он бы исчез ровно у выбранной манеры.
-                    //
-                    // Выбор ловится по `aria-pressed`: `data-state=on` базовый
-                    // компонент не пишет вовсе, и правило по нему не сработало
-                    // бы никогда — карточка выглядела бы невыбранной, а форма
-                    // при этом сохраняла бы выбранное.
-                    className={cn(
-                      "h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal",
-                      "aria-pressed:border-foreground/50 aria-pressed:shadow-sm",
-                      "aria-pressed:bg-card hover:aria-pressed:bg-card",
-                    )}
+                    className="h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal"
                   >
-                    <span className="font-medium">{entry.label}</span>
+                    <span className="font-medium">{t.settings.voice.styles[entry.key].label}</span>
                     <span className="text-xs leading-snug font-normal text-muted-foreground">
-                      {entry.hint}
+                      {t.settings.voice.styles[entry.key].hint}
                     </span>
-                    {entry.example ? (
-                      <span className="mt-1 w-full rounded-md bg-foreground/5 px-2 py-1.5 text-[11px] leading-snug font-normal text-muted-foreground">
-                        Например: «{entry.example}»
-                      </span>
-                    ) : null}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
@@ -305,20 +267,19 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="reader_context">О себе и что важно</FieldLabel>
+              <FieldLabel htmlFor="reader_context">{t.settings.personalization.aboutLabel}</FieldLabel>
               <Textarea
                 id="reader_context"
                 name="reader_context"
                 rows={4}
                 defaultValue={profile?.reader_context ?? ""}
-                placeholder="Чем занимаешься, что за продукт, где живёшь и какие новости тебе особенно интересны"
+                placeholder={t.settings.personalization.aboutPlaceholder}
               />
               {/* Про отбор здесь не обещаем: эта строка уходит только в промпт
-                  описаний. Зато от неё зависит связь с читателем — самая
-                  слабая ось в измерении качества. */}
+                  описаний. Зато от неё зависит связь с читателем, самая слабая
+                  ось в измерении качества. */}
               <FieldDescription>
-                Отсюда берётся связь с тобой: чем конкретнее, тем точнее описания
-                объясняют, что тебе с этой новостью делать.
+                {t.settings.personalization.aboutHint}
               </FieldDescription>
             </Field>
 
@@ -327,29 +288,38 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
             {first ? (
               <Button
                 type="button"
+                // Своя занятость, а не `applying`: его зажигает «Сохранить»,
+                // а эта кнопка зовёт запись напрямую — и без признака работы
+                // двойное нажатие уходило дважды.
                 disabled={pending}
                 className="self-start"
-                onClick={() => {
-                  clearTimeout(timer.current);
-                  save();
+                onClick={async () => {
+                  // Уходим только после записи: раньше переход шёл вместе
+                  // с ней, и отказ записи уносил настройку молча. Пересборки
+                  // здесь нет и не нужно — выпуска ещё не существует.
+                  if (!(await write())) return;
                   // У блогера настройка на шаг длиннее: голос собирается
                   // с его каналов, и просить их потом — значит получить
                   // первый пост, написанный ничьим голосом.
                   router.push(FEATURES.posts.has(plan) ? "/settings/channels?first=1" : "/");
                 }}
               >
-                {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
+                {pending ? <Spinner data-icon="inline-start" /> : null}
+                {FEATURES.posts.has(plan) ? t.settings.personalization.next : t.settings.personalization.done}
               </Button>
             ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button type="button" disabled={applying} className="self-start" onClick={apply}>
-                  {applying ? <Spinner data-icon="inline-start" /> : null}
-                  Сохранить
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  Изменённый голос применим к сегодняшнему выпуску, следующие придут таким же
-                </span>
-              </div>
+              <Button
+                type="button"
+                disabled={applying || !dirty}
+                // Заметно крупнее остальных кнопок экрана: это единственное
+                // действие, ради которого сюда пришли, а в ряду одинаковых
+                // оно читалось как ещё одна настройка.
+                className="h-11 self-start px-6 text-base"
+                onClick={apply}
+              >
+                {applying ? <Spinner data-icon="inline-start" /> : null}
+                {t.settings.common.save}
+              </Button>
             )}
           </FieldGroup>
         </form>

@@ -1,3 +1,5 @@
+import type { Names } from "./rules";
+
 /** Общий справочник: по нему Jev классифицирует поток один раз на всех. */
 export type Topic = {
   id: number;
@@ -76,6 +78,14 @@ export type Kind = (typeof KINDS)[number];
 export const HORIZONS = ["noise", "months", "years"] as const;
 export type Horizon = (typeof HORIZONS)[number];
 
+/**
+ * С какой вероятности кликбейта карточка получает метку. Это правило
+ * классификации, а не оформление: ниже метка горела бы на каждой второй
+ * карточке и перестала бы что-либо значить. Лежит рядом с осями, а не
+ * в странице, чтобы вторая метка по той же оси не завела второй порог.
+ */
+export const CLICKBAIT_LABEL_NOUL = 0.6;
+
 /** Ответы Jev по одному материалу, как они ложатся в scores.axes. */
 export type Axes = {
   topic: { choice: string; confidence: number; probabilities: Record<string, number> };
@@ -116,8 +126,16 @@ export type Reader = {
   username: string | null;
   owner: boolean;
   reader_context: string;
-  digest_size: number;
+  reading_v2_enabled: boolean;
+  /**
+   * Сколько минут чтения заказано. Карточек столько, сколько уложится
+   * в это время: перевод делает `itemsForMinutes` по длине уже написанных
+   * описаний этого читателя.
+   */
+  digest_minutes: number;
   language: string;
+  /** Язык интерфейса: `en` или `ru`. Отдельно от языка выпуска. */
+  ui_language: string;
   /** 1 — объясняй с нуля, 5 — пиши как специалисту. Уходит в промпт дайджеста. */
   complexity: number;
   /** Манера письма. Незнакомое значение читается как «нейтральный». */
@@ -173,6 +191,17 @@ export type Reader = {
   voice_built_at: string | null;
   /** Посты, вставленные руками: LinkedIn и Threads наружу не отдают ничего. */
   voice_sample: string;
+  /**
+   * За чем следить: написания одного объекта на правило (`src/lib/rules.ts`).
+   * Личное и дешёвое: применяется в отборе как порядок внутри очереди темы,
+   * в вопрос Jev не уходит, справочник тем не расширяет.
+   */
+  follow_rules: Names[];
+  /**
+   * Что исключать: совпадение снимает материал с отбора и с показа.
+   * Сильнее слежения: материал с упомянутым и исключённым разом не показывается.
+   */
+  exclude_rules: Names[];
 };
 
 /**

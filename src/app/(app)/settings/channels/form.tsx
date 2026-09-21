@@ -17,6 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { NETWORK_IDS, NETWORKS } from "@/lib/networks";
 import { relativeTime } from "@/lib/relative-time";
+import { useT } from "@/components/i18n-provider";
 import type { ReaderChannel, VoiceCardRow } from "@/lib/types";
 
 /**
@@ -46,6 +47,7 @@ export function ChannelsForm({
   /** Последний шаг настройки: нужна подпись и выход в ленту. */
   onboarding?: boolean;
 }) {
+  const t = useT();
   const [input, setInput] = useState("");
   const [text, setText] = useState(sample);
   const [busy, startTransition] = useTransition();
@@ -67,8 +69,8 @@ export function ChannelsForm({
         return;
       }
       setInput("");
-      toast.success(`Добавлено: ${result.label}`, {
-        description: "Собери голос заново, чтобы лента прочитала посты",
+      toast.success(t.onboarding.channels.added(result.label), {
+        description: t.onboarding.channels.rebuildHint,
       });
       router.refresh();
     });
@@ -91,10 +93,10 @@ export function ChannelsForm({
       return;
     }
     router.refresh();
-    toast.success(`Голос собран по ${result.built_from} постам`, {
+    toast.success(t.onboarding.channels.builtToast(result.built_from), {
       description: result.ranked
-        ? "Просмотры посчитаны: каркас удачных постов взят из них"
-        : "Статистики у постов нет — собран только голос, без каркаса",
+        ? t.onboarding.channels.builtWithViews
+        : t.onboarding.channels.builtWithoutStats,
     });
     if (result.failed.length) toast.warning(result.failed.join("; "));
   };
@@ -103,13 +105,8 @@ export function ChannelsForm({
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>{onboarding ? "Последний шаг: твои площадки" : "Мои площадки"}</CardTitle>
-          <CardDescription>
-            Где ты публикуешь — столько табов будет в «Своём мнении». Откуда лента может
-            прочитать твои посты — оттуда берётся голос: публичный канал Telegram, блог
-            по RSS и аккаунт X. LinkedIn и Threads наружу не отдают ничего, для них
-            вставь несколько постов ниже.
-          </CardDescription>
+          <CardTitle>{onboarding ? t.onboarding.channels.lastStepTitle : t.nav.channels}</CardTitle>
+          <CardDescription>{t.onboarding.channels.description}</CardDescription>
         </CardHeader>
 
         <CardContent className="flex flex-col gap-4">
@@ -124,18 +121,15 @@ export function ChannelsForm({
                     add();
                   }
                 }}
-                placeholder="t.me/канал, x.com/ник или адрес блога"
+                placeholder={t.onboarding.channels.addPlaceholder}
                 disabled={busy}
               />
               <Button onClick={add} disabled={busy || !input.trim()}>
                 <PlusIcon />
-                Добавить
+                {t.onboarding.channels.add}
               </Button>
             </div>
-            <FieldDescription>
-              Адрес разбирается той же проверкой, что и источники: сохраняется только то,
-              что ответило хотя бы одним постом.
-            </FieldDescription>
+            <FieldDescription>{t.onboarding.channels.addDescription}</FieldDescription>
           </Field>
 
           <FieldGroup>
@@ -146,22 +140,22 @@ export function ChannelsForm({
                 <div key={id} className="flex items-center justify-between gap-3 py-1.5">
                   <div className="flex min-w-0 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
-                      {network.label}
+                      {t.onboarding.networks[id]}
                       {mine?.handle ? (
-                        <Badge variant="secondary">голос читается</Badge>
+                        <Badge variant="secondary">{t.onboarding.channels.readableBadge}</Badge>
                       ) : network.readable ? null : (
-                        <Badge variant="outline">только вставкой</Badge>
+                        <Badge variant="outline">{t.onboarding.channels.pasteOnlyBadge}</Badge>
                       )}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
-                      {mine?.input_url || mine?.label || `до ${network.limit} символов`}
+                      {mine?.input_url || mine?.label || t.onboarding.channels.charLimit(network.limit)}
                     </span>
                   </div>
                   <Switch
                     checked={Boolean(mine)}
                     onCheckedChange={(on) => toggle(id, on)}
                     disabled={busy}
-                    aria-label={`Публикую в ${network.label}`}
+                    aria-label={t.onboarding.channels.publishingIn(t.onboarding.networks[id])}
                   />
                 </div>
               );
@@ -171,7 +165,7 @@ export function ChannelsForm({
           {byNetwork.get("blog") ? (
             <div className="flex items-center justify-between gap-3 border-t pt-3">
               <div className="flex min-w-0 flex-col">
-                <span className="text-sm font-medium">Блог</span>
+                <span className="text-sm font-medium">{t.onboarding.channels.blogLabel}</span>
                 <span className="truncate text-xs text-muted-foreground">
                   {byNetwork.get("blog")?.input_url ?? byNetwork.get("blog")?.handle}
                 </span>
@@ -179,7 +173,7 @@ export function ChannelsForm({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Убрать блог"
+                aria-label={t.onboarding.channels.removeBlog}
                 onClick={() => toggle("blog", false)}
                 disabled={busy}
               >
@@ -192,33 +186,31 @@ export function ChannelsForm({
 
       {onboarding ? (
         <Button variant="outline" className="self-start" render={<Link href="/" />}>
-          В ленту
+          {t.onboarding.channels.toFeed}
         </Button>
       ) : null}
 
       <Card>
         <CardHeader>
-          <CardTitle>Мой голос</CardTitle>
-          <CardDescription>
-            Форма — из каких блоков собран твой пост и чем ты его открываешь; голос —
-            ритм, лицо, длина, эмодзи, место ссылки. Форма важнее: пост твоими словами,
-            но собранный новостной заметкой, читается как чужой с первой строки.
-            Два-три твоих поста уходят в промпт целиком — как образец, а не как факты.
-          </CardDescription>
+          <CardTitle>{t.onboarding.channels.voiceTitle}</CardTitle>
+          <CardDescription>{t.onboarding.channels.voiceDescription}</CardDescription>
         </CardHeader>
 
         <CardContent className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <Button onClick={build} disabled={building}>
               {building ? <Spinner /> : <RefreshCwIcon />}
-              Собрать голос заново
+              {t.onboarding.channels.rebuildVoice}
             </Button>
             <span className="text-xs text-muted-foreground">
               {card && builtAt
-                ? `Собран ${relativeTime(new Date(builtAt))} по ${card.built_from} постам${
-                    card.ranked ? " с просмотрами" : " без статистики"
-                  }${card.structure?.length ? "" : " — без формы, собери заново"}`
-                : "Ещё не собран: посты пишутся настройками подачи"}
+                ? t.onboarding.channels.builtSummary(
+                    relativeTime(new Date(builtAt), t.feed.time),
+                    card.built_from,
+                    card.ranked,
+                    Boolean(card.structure?.length),
+                  )
+                : t.onboarding.channels.notBuiltYet}
             </span>
           </div>
 
@@ -226,23 +218,24 @@ export function ChannelsForm({
             <div className="flex flex-col gap-3 text-sm">
               {/* Форма впереди голоса: пост выдаёт себя чужой формой раньше,
                   чем чужими словами, и проверять глазами надо сначала её. */}
-              {card.structure?.length ? <CardList title="Форма поста" lines={card.structure} /> : null}
-              {card.hooks?.length ? <CardList title="Чем открываешь" lines={card.hooks} /> : null}
-              <CardList title="Голос" lines={card.voice} />
+              {card.structure?.length ? (
+                <CardList title={t.onboarding.channels.structureTitle} lines={card.structure} />
+              ) : null}
+              {card.hooks?.length ? (
+                <CardList title={t.onboarding.channels.hooksTitle} lines={card.hooks} />
+              ) : null}
+              <CardList title={t.onboarding.channels.voiceListTitle} lines={card.voice} />
               {card.frame.length ? (
-                <CardList title="Каркас удачных постов" lines={card.frame} />
+                <CardList title={t.onboarding.channels.frameTitle} lines={card.frame} />
               ) : (
                 <Alert>
-                  <AlertTitle>Каркаса нет</AlertTitle>
-                  <AlertDescription>
-                    Статистики у прочитанных постов не нашлось, поэтому чем твои удачные
-                    посты отличаются от средних — неизвестно, и выдумывать это лента
-                    не станет. Добавь публичный канал Telegram или аккаунт X: просмотры
-                    там видны.
-                  </AlertDescription>
+                  <AlertTitle>{t.onboarding.channels.noFrameTitle}</AlertTitle>
+                  <AlertDescription>{t.onboarding.channels.noFrameDescription}</AlertDescription>
                 </Alert>
               )}
-              {card.taboo.length ? <CardList title="Чего у тебя не бывает" lines={card.taboo} /> : null}
+              {card.taboo.length ? (
+                <CardList title={t.onboarding.channels.tabooTitle} lines={card.taboo} />
+              ) : null}
             </div>
           ) : null}
 
@@ -252,12 +245,9 @@ export function ChannelsForm({
               value={text}
               onChange={(event) => setText(event.target.value)}
               rows={8}
-              placeholder={"Вставь три своих поста, разделяя пустой строкой.\n\nНужно для LinkedIn и Threads: оттуда прочитать посты нельзя."}
+              placeholder={t.onboarding.channels.samplePlaceholder}
             />
-            <FieldDescription>
-              Посты разделяются пустой строкой. Просмотров у вставленного нет, поэтому
-              из него берётся голос, но не каркас.
-            </FieldDescription>
+            <FieldDescription>{t.onboarding.channels.sampleDescription}</FieldDescription>
             <Button
               variant="outline"
               size="sm"
@@ -269,11 +259,14 @@ export function ChannelsForm({
                   form.set("sample", text);
                   const result = await saveSample(form);
                   if ("error" in result) toast.error(result.error);
-                  else toast.success("Сохранено", { description: "Собери голос заново" });
+                  else
+                    toast.success(t.onboarding.channels.saved, {
+                      description: t.onboarding.channels.savedDescription,
+                    });
                 })
               }
             >
-              Сохранить
+              {t.onboarding.channels.save}
             </Button>
           </Field>
         </CardContent>

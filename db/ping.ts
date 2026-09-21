@@ -53,7 +53,7 @@ async function main() {
     const feed = latestDay ? await getFeed(reader.id, latestDay) : [];
     const who = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
     console.log(
-      `  ${who}${reader.owner ? " (владелец)" : ""}: дайджест ${reader.digest_size}, ` +
+      `  ${who}${reader.owner ? " (владелец)" : ""}: выпуск на ${reader.digest_minutes} мин, ` +
       `онбординг ${reader.onboarded_at ?? "не пройден"}, ` +
       `темы ${topics.map((t) => t.slug).join(", ") || "не заданы"}, ` +
       `в последнем выпуске ${feed.length}`,

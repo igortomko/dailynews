@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeftIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LocaleToggle } from "@/components/locale-toggle";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { logout } from "@/lib/actions";
@@ -10,6 +11,8 @@ import { currentReader } from "@/lib/session";
 import { checkoutUrl, effectivePlan } from "@/lib/lemon";
 import { PLAN_IDS } from "@/lib/plans";
 import { PaywallProvider } from "@/components/paywall";
+import { UnsavedGuard } from "@/components/unsaved-guard";
+import { getDict } from "@/lib/i18n/server";
 import { SettingsNav } from "./nav";
 
 /**
@@ -20,6 +23,7 @@ import { SettingsNav } from "./nav";
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
   const reader = await currentReader();
   const plan = effectivePlan(reader);
+  const t = await getDict();
   const onboarding = !reader.onboarded_at;
   // Ссылки на оплату собираются здесь: их строит сервер из переменных
   // окружения, а окно с предложением живёт в клиентских компонентах.
@@ -28,6 +32,9 @@ export default async function SettingsLayout({ children }: { children: React.Rea
   ) as Record<string, string>;
   return (
     <PaywallProvider checkout={checkout}>
+      {/* Настройки сохраняются кнопкой, а не сами: уход с несохранённой
+          правкой перехватывается здесь, над всеми разделами сразу. */}
+      <UnsavedGuard />
       <PageHeader
         left={
           <div className="flex items-center gap-2">
@@ -43,21 +50,25 @@ export default async function SettingsLayout({ children }: { children: React.Rea
                     nativeButton={false}
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Назад к ленте"
+                    aria-label={t.nav.backToFeed}
                     // На телефоне 40, на указателе 32: под палец 28 —
                     // это иконка, а не цель. Так же сделаны шестерёнка
                     // в ленте и переключатель темы рядом.
                     className="size-10 text-muted-foreground hover:text-foreground sm:size-8"
-                    render={<Link href="/" />}
+                    // Лента подгружается заранее, пока правят настройки:
+                    // возвращение — самый частый переход отсюда, и ждать
+                    // ему нечего. Сохранение настроек сбрасывает подгруженное
+                    // само (`revalidatePath`), устаревшая лента не покажется.
+                    render={<Link href="/" prefetch={true} />}
                   />
                 }
               >
                 <ArrowLeftIcon />
               </TooltipTrigger>
-              <TooltipContent>Назад к ленте</TooltipContent>
+              <TooltipContent>{t.nav.backToFeed}</TooltipContent>
             </Tooltip>
             )}
-            <h1 className="text-sm font-medium">{onboarding ? "Знакомство" : "Настройки"}</h1>
+            <h1 className="text-sm font-medium">{onboarding ? t.nav.onboarding : t.nav.settings}</h1>
           </div>
         }
         // На телефоне колонка разделов идёт лентой поверху, и «Выйти» под ней
@@ -68,10 +79,15 @@ export default async function SettingsLayout({ children }: { children: React.Rea
             {/* Переключатель темы стоит на обеих страницах: уйти в настройки
                 и не найти его там, где он только что был, — это заставить
                 вернуться за ним в ленту. */}
+            {/* Язык интерфейса слева от темы: обе — настройки окружения,
+                а не содержимого, и живут одной парой. В ленте этой пары нет:
+                язык выбирают один раз, а место в её шапке занято тем,
+                чем пользуются каждый день. */}
+            <LocaleToggle />
             <ThemeToggle className="size-10 sm:size-8" />
             <form action={logout} className="sm:hidden">
               <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">
-                Выйти
+                {t.nav.signOut}
               </Button>
             </form>
           </div>
@@ -89,7 +105,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
         <SettingsNav plan={plan} />
         <form action={logout} className="mt-4 hidden sm:mt-auto sm:block">
           <Button variant="ghost" size="sm" type="submit" className="w-full justify-start px-2">
-            Выйти
+            {t.nav.signOut}
           </Button>
         </form>
       </aside>

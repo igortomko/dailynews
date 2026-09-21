@@ -12,8 +12,8 @@
  * Сравнение честное: те же материалы, те же шесть вопросов, а старые оценки
  * уже лежат в базе рядом со старым текстом. Меняется только формулировка.
  *
- * Ничего не пишет: ни в digest_items, ни в digests, ни в Telegram. Стоит
- * около цента — один вызов дайджеста и по вопросу на описание.
+ * Не меняет выпуск и не отправляет сообщения. Пишет кэш анализа и журнал
+ * оплаченных вызовов, соблюдает дневной бюджет выбранного читателя.
  *
  * Читатель по умолчанию — владелец; другого берёт --reader <id>. Без явного
  * читателя переписывать было бы нечего: язык, сложность и манера персональны.
@@ -85,7 +85,7 @@ async function main() {
       join dailynews.digest_items di on di.digest_id = last_day.id
       join dailynews.items i on i.id = di.item_id
       join dailynews.sources s on s.id = i.source_id
-      join dailynews.scores sc on sc.item_id = i.id
+      join dailynews.scores sc on sc.item_id = coalesce(i.dup_of, i.id)
  left join dailynews.topics t on t.id = sc.topic_id
   `;
   if (survivors.length === 0) {
@@ -118,8 +118,14 @@ async function main() {
   );
 
   const started = Date.now();
-  const digest = await writeDigest(survivors, profile.reader_context, voice);
+  const digest = await writeDigest(survivors, profile.reader_context, voice, { readerId: profile.id, force: true });
   const seconds = Math.round((Date.now() - started) / 1000);
+  if (profile.reading_v2_enabled) {
+    console.log(JSON.stringify({ verified: digest.items.filter(i => i.reading?.status === "verified").length, total: digest.items.length, requests: digest.usage.requests, seconds }));
+    for (const item of digest.items) console.log(`\n${item.title_ru}\n${item.summary}`);
+    await sql.end();
+    return;
+  }
   const fresh = await scoreSummaries(
     digest.items.map((item) => ({
       id: Number(item.id),

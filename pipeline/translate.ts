@@ -1,3 +1,4 @@
+import { budgetedFetch } from "./model-budget";
 /**
  * Перевод статьи целиком, кусками, с проверкой на молчаливое сокращение.
  *
@@ -105,8 +106,8 @@ ${blocks.join(SEPARATOR)}`;
 
 type Resolved = ReturnType<typeof resolve>;
 
-async function ask(prompt: string, config: Resolved, usage: Usage): Promise<string> {
-  const res = await fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+async function ask(prompt: string, config: Resolved, usage: Usage, readerId?: number): Promise<string> {
+  const res = await budgetedFetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${config.apiKey}` },
     body: JSON.stringify({
@@ -122,7 +123,7 @@ async function ask(prompt: string, config: Resolved, usage: Usage): Promise<stri
       messages: [{ role: "user", content: prompt }],
     }),
     signal: AbortSignal.timeout(300_000),
-  });
+  }, readerId, "translate");
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
 
   const payload = await res.json();
@@ -163,6 +164,7 @@ export function chunkProblem(source: string[], translated: string[]): string {
 export async function translateArticle(
   markdown: string,
   language: string,
+  readerId?: number,
 ): Promise<Translated> {
   const resolved = resolve();
   if (!resolved.apiKey) throw new Error("нет ключа модели: переводить нечем");
@@ -197,7 +199,7 @@ export async function translateArticle(
     // улетало мимо цикла и роняло всю статью с первой же икоты.
     for (let attempt = 0; attempt < 2 && !done; attempt++) {
       try {
-        const answer = await ask(promptFor(payload, language), resolved, usage);
+        const answer = await ask(promptFor(payload, language), resolved, usage, readerId);
         const parts = answer.split(SEPARATOR.trim()).map((p) => p.trim()).filter(Boolean);
         problem = chunkProblem(payload, parts);
         if (!problem) done = parts;

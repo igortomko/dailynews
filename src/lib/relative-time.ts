@@ -1,24 +1,80 @@
-const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
+import type { Dict } from "@/lib/i18n";
+import { feed as ruFeed } from "@/lib/i18n/ru/feed";
+
+export type TimeLabels = Dict["feed"]["time"];
+
+/**
+ * «21 сентября 2026 г.» из «2026-09-21» на языке читателя. Полдень,
+ * а не полночь: день выпуска — это день, а не момент, и полночь по UTC
+ * в западном поясе уже вчера. Одна функция на шапку ленты и на обзор —
+ * дата выпуска в двух местах обязана читаться одинаково.
+ */
+export const formatDay = (day: string, locale: string) =>
+  new Intl.DateTimeFormat(locale, { day: "numeric", month: "long", year: "numeric" }).format(
+    new Date(`${day}T12:00:00`),
+  );
 
 /**
  * «10ч» вместо «10 часов назад». В строке метаданных время стоит рядом
  * с источником и темой, и развёрнутая форма занимает там больше места,
  * чем несёт смысла: «назад» не добавляет ничего, а читается в каждой
  * карточке заново.
+ *
+ * `t` по умолчанию — русские подписи. Весь живой код язык передаёт; умолчание
+ * осталось для утверждений, которые зовут эту функцию без читателя и сверяют
+ * русский текст напрямую.
  */
-export function relativeTime(value: string | Date): string {
+export function relativeTime(value: string | Date, t: TimeLabels = ruFeed.time): string {
   const then = typeof value === "string" ? new Date(`${value}${value.length === 10 ? "T12:00:00" : ""}`) : value;
   if (Number.isNaN(then.getTime())) return "";
 
   const minutes = Math.round((Date.now() - then.getTime()) / 60_000);
-  if (minutes < 1) return "сейчас";
-  if (minutes < 60) return `${minutes}м`;
+  if (minutes < 1) return t.now;
+  if (minutes < 60) return t.minutesAgo(minutes);
 
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}ч`;
+  if (hours < 24) return t.hoursAgo(hours);
 
   const days = Math.round(hours / 24);
-  if (days < 7) return `${days}д`;
+  if (days < 7) return t.daysAgo(days);
 
-  return MONTH.format(then);
+  return t.monthDay(then);
+}
+
+/**
+ * Знаков в минуту спокойного чтения. Замер по живому потоку, уже без
+ * разметки: медиана статьи — 5894 знака, и пять минут на неё правдоподобны
+ * (около тысячи слов при двухстах в минуту). Число здесь, а не в разметке:
+ * ползунок скорости чтения однажды понадобится, и искать его придётся
+ * в одном месте.
+ */
+const CHARS_PER_MINUTE = 1200;
+
+/**
+ * Ниже этого текст — не статья, а анонс. «~1 мин» о нём не говорит ничего,
+ * зато выглядит как измеренное: догрузка уже отбрасывает всё короче ста
+ * двадцати слов, и этот порог только чуть строже.
+ *
+ * Считается по тексту без тегов, и это не мелочь: у худших материалов
+ * разметки вчетверо больше содержания — 5145 знаков HTML на 290 знаков
+ * текста. По сырой длине такой анонс перешагивал порог и получал «~4 мин».
+ */
+const MIN_CHARS = 600;
+
+/**
+ * «~5 мин» — сколько читать сам материал, а не наше описание.
+ *
+ * Показывается, только когда текст статьи у нас действительно есть: он
+ * забирается догрузкой и лежит у 50 карточек из 60 в свежем выпуске.
+ * Придумать время по длине заголовка можно, но это было бы число, похожее
+ * на измеренное, и проверить его читателю нечем до самого перехода
+ * по ссылке.
+ *
+ * Выше часа — в часах: «~104 мин» читатель всё равно пересчитывает в уме,
+ * а таких материалов в потоке единицы.
+ */
+export function readingTime(chars: number | null, t: TimeLabels = ruFeed.time): string | null {
+  if (chars === null || chars < MIN_CHARS) return null;
+  const minutes = Math.max(1, Math.round(chars / CHARS_PER_MINUTE));
+  return minutes < 60 ? t.readingMinutes(minutes) : t.readingHours(Math.round(minutes / 60));
 }

@@ -5,11 +5,10 @@ import {
   fetchBio, loginLink, parseUpdate, sendMessage, SECRET_HEADER,
 } from "@/lib/telegram";
 import {
-  ensureReader, markChannelChecked, recordFinished, recordCall, resumeReader, saveSuggestions,
+  ensureReader, markChannelChecked, recordFinished, resumeReader, saveSuggestions,
 } from "@/lib/readers";
 import { addByLink } from "@/lib/sources";
 import { rankTopics } from "../../../../pipeline/interests";
-import { jevCost } from "../../../../pipeline/cost";
 import type { Reader } from "@/lib/types";
 
 /**
@@ -80,14 +79,8 @@ const needsGate = (reader: Reader) => !reader.onboarded_at && !reader.channel_ch
 async function learnAbout(readerId: number, telegramId: number): Promise<void> {
   const bio = await fetchBio(telegramId);
   if (!bio) return;
-  const ranked = await rankTopics(bio);
+  const ranked = await rankTopics(bio, readerId);
   await saveSuggestions(readerId, bio, ranked.slugs);
-  if (ranked.inputTokens > 0) {
-    await recordCall({
-      readerId, stage: "interests", model: ranked.model,
-      tokensIn: ranked.inputTokens, costUsd: jevCost(ranked.inputTokens),
-    });
-  }
 }
 
 export async function POST(request: NextRequest) {
@@ -123,10 +116,10 @@ export async function POST(request: NextRequest) {
      * после ответа.
      */
     if (command.kind === "link") {
-      const { telegramId, chatId, text } = command;
+      const { telegramId, chatId, text, locale } = command;
       after(async () => {
         try {
-          const reader = await ensureReader(telegramId, null);
+          const reader = await ensureReader(telegramId, null, locale);
           const result = await addByLink(reader, text);
           await sendMessage(
             chatId,
@@ -167,7 +160,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    const reader = await ensureReader(command.telegramId, command.username);
+    const reader = await ensureReader(command.telegramId, command.username, command.locale);
 
     // Описание из профиля спрашиваем один раз и только у того, кто ещё
     // не настроился: оно нужно ровно на первом экране.
