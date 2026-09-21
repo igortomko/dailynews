@@ -1808,6 +1808,73 @@ async function main() {
     assert.equal(chainsLeft.n, 0, "отбор выпрямляет цепочки сам, а не надеется на прогон");
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
 
+    // Reading cache isolation, idempotent settlement and concurrent budget reservations.
+    const readingStore = await import("../pipeline/reading-store");
+    const budgetReader = await readers.ensureReader(BIG_TELEGRAM_ID + 99, "reading-test");
+    await sql`update dailynews.readers set daily_cap_usd=0.10 where id=${budgetReader.id}`;
+    const reservations = await Promise.allSettled([
+      readingStore.reserveCall(sql, budgetReader.id, 0.07, "verify", "test-model"),
+      readingStore.reserveCall(sql, budgetReader.id, 0.07, "verify", "test-model"),
+    ]);
+    assert.equal(reservations.filter((r) => r.status === "fulfilled").length, 1, "parallel reservations cannot both spend the remaining budget");
+    const accepted = reservations.find((r) => r.status === "fulfilled");
+    assert.ok(accepted?.status === "fulfilled");
+    const callId = accepted.value;
+    await readingStore.settleCall(sql, budgetReader.id, callId, { input: 10, output: 5, cached: 3, reasoning: 0, requests: 1 }, 0.01, 100);
+    await readingStore.settleCall(sql, budgetReader.id, callId, null, null, 100);
+    assert.ok(Math.abs((await readers.spentToday(budgetReader.id)) - 0.01) < 0.000001, "settlement is idempotent and releases the unused reservation");
+    const uncertain = await readingStore.reserveCall(sql, budgetReader.id, 0.08, "compose", "test-model");
+    await readingStore.settleCall(sql, budgetReader.id, uncertain, null, null, 100);
+    assert.ok(Math.abs((await readers.spentToday(budgetReader.id)) - 0.09) < 0.000001, "uncertain paid calls retain a conservative charge");
+    const record = { version: 2 as const, sourceVersion: "test-v", availability: "excerpt_only" as const, status: "unavailable" as const, document: null, notice: "Test", seconds: 0 };
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", record);
+    assert.deepEqual(await readingStore.getDocument(sql, owner.id, "reading-private-key"), record);
+    assert.equal(await readingStore.getDocument(sql, second.id, "reading-private-key"), null, "another reader cannot fetch a private summary by its key");
+    const lease = await readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v");
+    assert.ok(lease.token);
+    await assert.rejects(() => readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v"), readingStore.ReadingBusyError);
+    await readingStore.finishAnalysis(sql, "reading-shared-key", lease.token, null);
+    const renewed = await readingStore.acquireAnalysis(sql, deep[0], "reading-shared-key", "v");
+    assert.ok(renewed.token, "failed analysis can be retried");
+    await readingStore.finishAnalysis(sql, "reading-shared-key", renewed.token, null);
+    assert.equal((await readingStore.recentBaselines(sql, second.id, deep[0], "new story")).length, 0);
+    const beforeUnavailable = await readers.digestProgress(owner.id, null);
+    const [latestDigest] = await sql<{ id: number }[]>`select id::int from dailynews.digests where reader_id=${owner.id} order by day desc limit 1`;
+    const [placeholder] = await sql<{ item_id: number }[]>`select item_id::int from dailynews.digest_items where digest_id=${latestDigest.id} limit 1`;
+    if (placeholder) {
+      await sql`update dailynews.digest_items set summary_document=${sql.json(record)} where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
+      const afterUnavailable = await readers.digestProgress(owner.id, null);
+      assert.equal(afterUnavailable.items, beforeUnavailable.items - 1, "unavailable summaries do not fill usable card capacity");
+      await sql`update dailynews.digest_items set summary_document=null where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
+    }
+    const good = { ...record, status: "verified" as const };
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", good);
+    await readingStore.saveDocument(sql, owner.id, deep[0], "reading-private-key", record);
+    assert.equal((await readingStore.getDocument(sql, owner.id, "reading-private-key"))?.status, "verified", "a concurrent failure cannot downgrade a verified private cache entry");
+    console.log("  reading: scoped caches, analysis lease, reservations, settlement and new queries verified");
+
+    // Full source access can reveal an exclusion missing from the RSS teaser.
+    const { writeReadingDigest } = await import("../pipeline/reading");
+    const { compile: compileReadingRules, applyRules: applyReadingRules, NO_MATCH: noReadingMatch } = await import("../src/lib/rules");
+    const excludedNames = [["FictionalBlockedVendor"]];
+    await sql`update dailynews.readers set exclude_rules=${sql.json(excludedNames)} where id=${owner.id}`;
+    await sql`update dailynews.items set body='<p>FictionalBlockedVendor is named only in the full article.</p>', source_content_kind='article_text' where id=${deep[0]}`;
+    const filtered = await writeReadingDigest(sql, [{ id: deep[0], title: 'Neutral title', excerpt: 'Neutral teaser', body: null,
+      url: 'https://example.com/full-source', source_label: 'Source', topic_label: 'Topic', total: 0, axes: {} as import("../src/lib/types").Axes }],
+      '', { language: 'русском', complexity: 3, style: 'нейтральный' }, { readerId: owner.id });
+    assert.deepEqual(filtered.excludedIds, [deep[0]]);
+    assert.equal(filtered.items.length, 0, "excluded full sources never become unavailable placeholders");
+    assert.equal(filtered.usage.requests, 0, "excluded sources do not spend the generation budget");
+    if (placeholder) {
+      await sql`update dailynews.items set body='<p>FictionalBlockedVendor appears only here.</p>' where id=${placeholder.item_id}`;
+      const feed = await queries.getFeed(owner.id, null);
+      const visibility = applyReadingRules(feed, { follow: noReadingMatch, exclude: compileReadingRules(excludedNames) });
+      assert.ok(feed.some(item => item.id === placeholder.item_id), "the existing card remains stored");
+      assert.ok(!visibility.visible.some(item => item.id === placeholder.item_id), "full-source exclusions also hide existing cards");
+    }
+    await sql`update dailynews.readers set exclude_rules='[]'::jsonb where id=${owner.id}`;
+    console.log("  reading: full-source exclusions prevent generation and hide existing cards");
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});

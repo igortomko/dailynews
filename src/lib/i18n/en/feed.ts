@@ -135,6 +135,7 @@ export const feed = {
     workingDescription: "Takes 1–2 minutes — keep reading meanwhile",
     added: (n: number) => `added ${n}`,
     rewrote: (n: number) => `rewrote ${n}`,
+    partiallyRewritten: (updated: number, retained: number) => `Updated ${updated}; ${retained} kept their previous summaries because processing did not finish`,
     noChangeTodayTitle: "Today's digest is already like this",
     noChangeTodayDescription: "Future digests will come with the new settings",
     updated: (summary: string) => `Updated today's digest: ${summary}`,
@@ -154,7 +155,12 @@ export const feed = {
     alsoLine: (n: number): string => `${n} more ${n === 1 ? "source" : "sources"}`,
     storyTitle: (n: number): string => `One story, ${n} ${n === 1 ? "publication" : "publications"}`,
   },
+  reading: {
+    equals: "equals", then: "then", step: "Step", stage: "Stage",
+    planned: "planned", done: "completed", current: "current", unspecified: "",
+  },
   time: {
+    summaryMinute: "min", summarySecond: "s",
     now: "now",
     minutesAgo: (n: number) => `${n}m`,
     hoursAgo: (n: number) => `${n}h`,

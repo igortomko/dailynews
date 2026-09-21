@@ -1,55 +1,69 @@
 {
-  "font": "Literata",
-  "weight": 650,
-  "opticalSize": 18,
+  "font": "DM Serif Display",
+  "weight": 400,
   "text": "Reporta",
   "shaper": "HarfBuzz",
   "unitsPerEm": 1000,
   "pairPositioning": [
     {
       "letter": "R",
-      "advance": 720,
-      "nominalAdvance": 740,
-      "kerning": -20
+      "pair": "Re",
+      "advance": 606,
+      "nominalAdvance": 628,
+      "nativeKerning": -16,
+      "opticalAdjustment": -6
     },
     {
       "letter": "e",
-      "advance": 545,
-      "nominalAdvance": 555,
-      "kerning": -10
+      "pair": "ep",
+      "advance": 485,
+      "nominalAdvance": 507,
+      "nativeKerning": -10,
+      "opticalAdjustment": -12
     },
     {
       "letter": "p",
-      "advance": 651,
-      "nominalAdvance": 651,
-      "kerning": 0
+      "pair": "po",
+      "advance": 562,
+      "nominalAdvance": 578,
+      "nativeKerning": 6,
+      "opticalAdjustment": -22
     },
     {
       "letter": "o",
-      "advance": 606,
-      "nominalAdvance": 616,
-      "kerning": -10
+      "pair": "or",
+      "advance": 535,
+      "nominalAdvance": 545,
+      "nativeKerning": 0,
+      "opticalAdjustment": -10
     },
     {
       "letter": "r",
-      "advance": 527,
-      "nominalAdvance": 527,
-      "kerning": 0
+      "pair": "rt",
+      "advance": 462,
+      "nominalAdvance": 441,
+      "nativeKerning": 9,
+      "opticalAdjustment": 12
     },
     {
       "letter": "t",
-      "advance": 422,
-      "nominalAdvance": 429,
-      "kerning": -7
+      "pair": "ta",
+      "advance": 347,
+      "nominalAdvance": 361,
+      "nativeKerning": 0,
+      "opticalAdjustment": -14
     },
     {
       "letter": "a",
-      "advance": 569,
-      "nominalAdvance": 569,
-      "kerning": 0
+      "pair": null,
+      "advance": 518,
+      "nominalAdvance": 518,
+      "nativeKerning": 0,
+      "opticalAdjustment": 0
     }
   ],
   "tracking": 0,
+  "opticalKerning": true,
   "outlines": true,
-  "note": "User-requested Literata trial. Native font kerning retained; no synthetic bold or nonuniform scaling. Snake body, head and cyan eyes are unchanged vector geometry."
+  "note": "User-selected DM Serif Display Regular with manual pair adjustments added to native kerning. Comparisons share the same type scale. No synthetic bold or nonuniform scaling. Snake body, head and cyan eyes are unchanged vector geometry."
 }

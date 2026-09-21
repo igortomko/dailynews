@@ -3,6 +3,7 @@ import { sql } from "./db";
 import { effectiveVoice } from "./lemon";
 import { anyOf, HL_END, HL_OPTIONS, HL_START, tsConfigFor } from "./search";
 import { isDay } from "./day";
+import { stripHtml } from "../../pipeline/fetch";
 import type { SourceYield } from "./source-health";
 import type { Axes, Reader, Source } from "./types";
 import type { Publication } from "./story";
@@ -29,6 +30,7 @@ export type FeedItem = {
   excerpt: string;
   title_ru: string | null;
   summary: string | null;
+  summary_document?: unknown;
   image_url: string | null;
   source_label: string;
   /** Нужен сюжету: источник, повторивший сам себя, — не «ещё один источник». */
@@ -200,8 +202,11 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
   // Проверка повторяется здесь, а не только у вызывающего: параметр назван
   // как в адресе, и однажды сюда придёт сырой — в каст к date он уйти не должен.
   const safeDay = isDay(day) ? day : null;
-  const rows = await sql<FeedItem[]>`
-    select i.id, i.url, i.title, i.excerpt, di.title as title_ru, di.summary, i.image_url,
+  const rows = await sql<(FeedItem & { rule_body: string | null })[]>`
+    select i.id, i.url, i.title, i.excerpt, di.title as title_ru, di.summary, di.summary_document, i.image_url,
+           case when exists(select 1 from dailynews.readers r
+             where r.id=${readerId} and jsonb_array_length(r.exclude_rules)>0)
+             then i.body end as rule_body,
            s.label as source_label, s.id as source_id,
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
@@ -264,8 +269,9 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
   // в запросе: каст сузил бы bigint до int4 и однажды уронил бы всю ленту
   // целиком, а глобальная подмена типа в драйвере уже ломала запись
   // («to: 20 шлёт int8 в колонки int»).
-  return rows.map((row) => ({
+  return rows.map(({ rule_body, ...row }) => ({
     ...row,
+    excerpt: [row.excerpt, rule_body ? stripHtml(rule_body) : null].filter(Boolean).join("\n"),
     id: Number(row.id),
     source_id: Number(row.source_id),
     axes: typeof row.axes === "string" ? JSON.parse(row.axes) : row.axes,

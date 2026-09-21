@@ -545,15 +545,16 @@ async function rewriteFor(reader: Reader) {
   if (!digest) return { error: (await getDict()).errors.noDigestYet };
 
   const survivors = await sql<Survivor[]>`
-    select i.id::int as id, i.title, coalesce(i.excerpt, '') as excerpt, i.url,
+    select i.id::int as id, i.title, coalesce(i.excerpt, '') as excerpt, i.body, i.url,
            s.label as source_label, coalesce(t.label, '') as topic_label,
            di.total, sc.axes
       from dailynews.digest_items di
       join dailynews.items i on i.id = di.item_id
       join dailynews.sources s on s.id = i.source_id
-      join dailynews.scores sc on sc.item_id = i.id
+      join dailynews.scores sc on sc.item_id = coalesce(i.dup_of, i.id)
+      join dailynews.digests own_digest on own_digest.id = di.digest_id
  left join dailynews.topics t on t.id = sc.topic_id
-     where di.digest_id = ${digest.id}
+     where di.digest_id = ${digest.id} and own_digest.reader_id = ${reader.id}
      order by di.total desc
   `;
   if (survivors.length === 0) return { error: (await getDict()).errors.digestEmpty };
@@ -572,8 +573,9 @@ async function rewriteFor(reader: Reader) {
     })),
     reader.reader_context,
     effectiveVoice(reader),
+    { readerId: reader.id },
   );
-  await recordCall({
+  if (!written.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,
     costUsd: llmCost(written.usage),
@@ -581,19 +583,24 @@ async function rewriteFor(reader: Reader) {
 
   const byId = new Map(written.items.map((item) => [String(item.id), item]));
   let rewritten = 0;
+  let retained = 0;
   for (const survivor of survivors) {
+    if (written.excludedIds?.includes(survivor.id)) continue;
+    if (written.retainedIds?.includes(survivor.id)) { retained++; continue; }
     const item = byId.get(String(survivor.id));
     // Материал, которого модель не вернула, остаётся как был: пустое
     // описание вместо прежнего — это потеря, а не обновление.
-    if (!item?.title_ru) continue;
-    await sql`
+    if (!item?.title_ru || item.reading?.status === 'unavailable') { retained++; continue; }
+    const updated = await sql`
       update dailynews.digest_items
-         set title = ${item.title_ru}, summary = ${item.summary ?? ""}
+         set title = ${item.title_ru}, summary = ${item.summary ?? ""},
+             summary_document = ${item.reading ? sql.json(item.reading) : null}
        where digest_id = ${digest.id} and item_id = ${survivor.id}
+       returning item_id
     `;
-    rewritten += 1;
+    rewritten += updated.length;
   }
-  return { ok: true as const, rewritten, day: digest.day };
+  return { ok: true as const, rewritten, retained, day: digest.day };
 }
 
 /**
@@ -671,8 +678,9 @@ async function fillDigest(reader: Reader) {
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const written = await writeDigest(survivors, reader.reader_context, voice);
-  await recordCall({
+  const written = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
+  if (survivors.every(item => written.excludedIds?.includes(item.id))) return { ok: true as const, added: 0 };
+  if (!written.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,
     costUsd: llmCost(written.usage),
@@ -680,19 +688,19 @@ async function fillDigest(reader: Reader) {
 
   // Вторая петля измерения не пропускается: иначе догруженные описания
   // не попадут в ряд по дням, и ряд начнёт врать о том, что читатель видел.
-  const quality = await scoreSummaries(
+  const quality = written.accounted ? null : await scoreSummaries(
     written.items.map((item) => ({
       id: Number(item.id), title: item.title_ru, summary: item.summary,
     })),
     reader.reader_context,
   );
-  await recordCall({
+  if (quality) await recordCall({
     readerId: reader.id, stage: "summary", model: quality.model,
     tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
   });
 
   const writtenById = new Map(written.items.map((item) => [String(item.id), item]));
-  const qualityById = new Map(quality.scored.map((row) => [String(row.item_id), row]));
+  const qualityById = new Map((quality?.scored ?? []).map((row) => [String(row.item_id), row]));
 
   /*
     Всё письмо в базу — одной транзакцией. Врозь оно коммитится по шагу,
@@ -741,10 +749,12 @@ async function fillDigest(reader: Reader) {
        where id = ${digestId}
     `;
 
-    const [{ taken, chars }] = await tx<{ taken: number; chars: number }[]>`
-      select count(*)::int as taken,
+    const [{ taken, chars, last }] = await tx<{ taken: number; chars: number; last: number }[]>`
+      select count(*) filter (where coalesce(summary_document->>'status','verified') <> 'unavailable')::int as taken,
+             coalesce(max(position),0)::int as last,
              coalesce(sum(
-               char_length(coalesce(title, '')) + char_length(coalesce(summary, ''))
+               case when summary_document->>'status'='unavailable' then 0
+                 else char_length(coalesce(title, '')) + char_length(coalesce(summary, '')) end
              ), 0)::int as chars
         from dailynews.digest_items where digest_id = ${digestId}
     `;
@@ -761,6 +771,7 @@ async function fillDigest(reader: Reader) {
     let filled = minutesOf(chars, voice);
     for (const survivor of survivors) {
       if (filled >= target || taken + fitting.length >= plan.maxItems) break;
+      if (written.excludedIds?.includes(survivor.id)) continue;
       const text = writtenById.get(String(survivor.id));
       fitting.push(survivor);
       filled += minutesOf(cardChars(text?.title_ru ?? survivor.title, text?.summary ?? ""), voice);
@@ -774,14 +785,18 @@ async function fillDigest(reader: Reader) {
       const scored = qualityById.get(String(survivor.id));
       const inserted = await tx<{ id: number }[]>`
         insert into dailynews.digest_items
-          (digest_id, item_id, total, position, title, summary, summary_axes, summary_score)
+          (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score)
         values (
-          ${digestId}, ${survivor.id}, ${survivor.total}, ${taken + index + 1},
+          ${digestId}, ${survivor.id}, ${survivor.total}, ${last + index + 1},
           ${text?.title_ru ?? survivor.title}, ${text?.summary ?? ""},
+          ${text?.reading ? tx.json(text.reading) : null},
           ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
           ${scored?.total ?? null}
         )
-        on conflict (digest_id, item_id) do nothing
+        on conflict (digest_id, item_id) do update
+        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document
+        where dailynews.digest_items.summary_document->>'status'='unavailable'
+          and excluded.summary_document->>'status'='verified'
         returning id::int as id
       `;
       rows += inserted.length;
@@ -902,13 +917,8 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
   }
 
   try {
-    const built = await buildVoiceCard(posts);
+    const built = await buildVoiceCard(posts, reader.id);
     await saveVoiceCard(reader.id, built.card);
-    await recordCall({
-      readerId: reader.id, stage: "voice", model: built.model,
-      tokensIn: built.usage.input, tokensOut: built.usage.output,
-      costUsd: llmCost(built.usage),
-    });
     revalidatePath("/settings/channels");
     return {
       ok: true as const,
@@ -965,12 +975,7 @@ export async function writeOpinion(itemId: number): Promise<
     });
 
   try {
-    const written = await writePost(item, card, networks.map((network) => network.id));
-    await recordCall({
-      readerId: reader.id, stage: "post", model: written.model,
-      tokensIn: written.usage.input, tokensOut: written.usage.output,
-      costUsd: llmCost(written.usage),
-    });
+    const written = await writePost(item, card, networks.map((network) => network.id), reader.id);
     const saved = await saveDrafts(reader.id, item.id, written.drafts);
     return {
       ok: true as const,

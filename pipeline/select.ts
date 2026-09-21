@@ -113,6 +113,7 @@ export async function candidates(
              join dailynews.digests d on d.id = di.digest_id
              join dailynews.items p on p.id = di.item_id
             where d.reader_id = ${readerId}
+              and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
               and coalesce(p.dup_of, p.id) = coalesce(i.dup_of, i.id)
          )
        -- Представитель: оригинал, если он свой, иначе самая ранняя своя

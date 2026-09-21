@@ -128,6 +128,7 @@ export const feed: typeof En = {
     workingDescription: "Это 1–2 минуты, можно читать дальше",
     added: (n: number) => `добавили ${n}`,
     rewrote: (n: number) => `переписали ${n}`,
+    partiallyRewritten: (updated: number, retained: number) => `Обновили ${updated}; у ${retained} сохранили прежние выжимки — обработку завершить не удалось`,
     noChangeTodayTitle: "Сегодняшний выпуск уже такой",
     noChangeTodayDescription: "Следующие придут с новыми настройками",
     updated: (summary: string) => `Сегодняшний выпуск обновили: ${summary}`,
@@ -146,7 +147,12 @@ export const feed: typeof En = {
     alsoLine: (n: number): string => `Ещё ${count(n, "источник", "источника", "источников")}`,
     storyTitle: (n: number): string => `Один сюжет, ${count(n, "публикация", "публикации", "публикаций")}`,
   },
+  reading: {
+    equals: "равно", then: "затем", step: "Шаг", stage: "Этап",
+    planned: "предстоит", done: "завершён", current: "сейчас", unspecified: "",
+  },
   time: {
+    summaryMinute: "мин", summarySecond: "с",
     now: "сейчас",
     minutesAgo: (n: number) => `${n}м`,
     hoursAgo: (n: number) => `${n}ч`,

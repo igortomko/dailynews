@@ -20,5 +20,4 @@ export const theme = {
 
 export const locale = {
   toggle: "Interface language",
-  pick: (name: string) => `Switch interface to ${name}`,
 };
