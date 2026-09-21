@@ -28,7 +28,7 @@ import { SOURCE_LANGUAGE } from "./voice";
  * Названия языков — те же строки, что уходят в промпт (`voice.ts`):
  * второй список разъехался бы с первым при добавлении языка.
  */
-const CONFIGS: Record<string, string> = {
+export const TS_CONFIGS: Record<string, string> = {
   русском: "russian",
   английском: "english",
   "португальском (бразильский вариант)": "portuguese",
@@ -51,7 +51,7 @@ const CONFIGS: Record<string, string> = {
  */
 export function tsConfigFor(language: string): string {
   if (language === SOURCE_LANGUAGE) return "russian";
-  return CONFIGS[language] ?? "russian";
+  return TS_CONFIGS[language] ?? "russian";
 }
 
 /**
@@ -66,15 +66,12 @@ export const HL_START = "\u0001";
 export const HL_END = "\u0002";
 
 /**
- * Настройки отрывка. Два фрагмента, а не один: совпадение бывает и в начале
- * описания, и в конце, а показанное начало отвечает не на тот вопрос.
- *
- * Разделитель — многоточие, как и обрезанные края отрывка: штатные «...»
- * рядом с «…» по краям читаются как два разных пропуска. Пробелы вокруг
- * него Postgres всё равно срезает.
+ * Настройки отрывка. Один фрагмент, а не два: у двух отрывок перестаёт быть
+ * куском текста и становится склейкой, а склейку уже не сравнить с началом
+ * и концом описания — значит, многоточие по краям пришлось бы ставить
+ * вслепую, в том числе там, где ничего не отрезано.
  */
-export const HL_OPTIONS =
-  `StartSel=${HL_START},StopSel=${HL_END},MaxFragments=2,MaxWords=28,MinWords=14,FragmentDelimiter=…`;
+export const HL_OPTIONS = `StartSel=${HL_START},StopSel=${HL_END},MaxFragments=1,MaxWords=32,MinWords=16`;
 
 export type Part = { text: string; mark: boolean };
 

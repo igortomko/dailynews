@@ -18,15 +18,17 @@ type Found = { hits: ArchiveHit[]; loose: boolean };
  * Дата выпуска в выдаче. `dayInWords` намеренно не пишет год — выпуск
  * приходит в день выпуска, — но здесь смысл обратный: ищут как раз то,
  * что было давно, и «19 сентября» без года у прошлогоднего материала
- * выглядит свежим. Год появляется, только когда он не этот: писать его
- * у вчерашнего значит писать его всегда.
+ * выглядит свежим.
+ *
+ * Год пишется всегда, а не только у прошлых лет. Сравнивать было бы
+ * не с чем: «нынешний год» на сервере считается по UTC, а читатель живёт
+ * в своём часовом поясе, и под Новый год у половины земного шара это
+ * разные годы. Лишний год в архиве — это лишнее слово, недостающий —
+ * неверная дата.
  */
 function dayLabel(day: string): string {
-  const year = day.slice(0, 4);
   const words = dayInWords(day);
-  return year === String(new Date().getFullYear()) || words === day
-    ? words
-    : `${words} ${year}`;
+  return words === day ? day : `${words} ${day.slice(0, 4)}`;
 }
 
 function Hit({ hit }: { hit: ArchiveHit }) {
@@ -57,19 +59,24 @@ function Hit({ hit }: { hit: ArchiveHit }) {
           {hit.title}
         </a>
       </h3>
-      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-        {/* Найденное отмечается начертанием и цветом, а не заливкой: жёлтый
-            маркер живёт в светлой теме и разваливается в тёмной. */}
-        {highlight(hit.snippet).map((part, index) =>
-          part.mark ? (
-            <mark key={index} className="bg-transparent font-medium text-foreground">
-              {part.text}
-            </mark>
-          ) : (
-            <span key={index}>{part.text}</span>
-          ),
-        )}
-      </p>
+      {/* Пустого абзаца быть не должно: у материала без описания и без
+          текста отрывку взяться неоткуда, а поля вокруг пустоты читаются
+          как потерянная строка. */}
+      {hit.snippet.length > 0 ? (
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          {/* Найденное отмечается начертанием и цветом, а не заливкой: жёлтый
+              маркер живёт в светлой теме и разваливается в тёмной. */}
+          {highlight(hit.snippet).map((part, index) =>
+            part.mark ? (
+              <mark key={index} className="bg-transparent font-medium text-foreground">
+                {part.text}
+              </mark>
+            ) : (
+              <span key={index}>{part.text}</span>
+            ),
+          )}
+        </p>
+      ) : null}
     </article>
   );
 }

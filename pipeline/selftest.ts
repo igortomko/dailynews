@@ -58,7 +58,7 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
-import { anyOf, highlight, HL_END, HL_START, tsConfigFor } from "../src/lib/search";
+import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
@@ -2096,13 +2096,16 @@ for (const prop of ["left", "right"]) {
   const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
   assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
 }
-// А требование key держится на том, что они соседи. Разведут по разным
-// родителям — проверка выше станет суеверием, и упасть она должна здесь.
-assert.match(
-  readFileSync("src/components/feed-tabs.tsx", "utf8"),
-  /\{left\}\s*\{right\}/,
-  "left и right стоят соседями — иначе key им не нужен",
-);
+// А требование key держится на том, что каждый стоит не один. Соседями
+// они быть перестали, когда между ними встал поиск: left соседствует
+// с блоком кнопок, right — с кнопкой поиска внутри него. Останется
+// который-нибудь из них единственным ребёнком — проверка выше станет
+// суеверием, и упасть она должна здесь.
+const tabsSource = readFileSync("src/components/feed-tabs.tsx", "utf8");
+const headerRow = tabsSource.slice(tabsSource.indexOf("{left}"), tabsSource.indexOf("</header>"));
+assert.ok(headerRow.length > 0, "шапку ленты рисует feed-tabs");
+assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left стоит рядом с кнопками");
+assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 
 
 // —————————————————————————————————————————————————————————————————————————
@@ -2562,11 +2565,16 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
   );
   assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
-  // Список языков — один на промпт и на поиск. Разойдутся — половина
-  // читателей молча получит разбор без словаря.
-  for (const language of LANGUAGES) {
-    assert.ok(tsConfigFor(language).length > 0, `для «${language}» должен быть словарь`);
-  }
+  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
+  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
+  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
+  // в списке обязан получить словарь или попасть сюда осознанно, иначе
+  // он молча уедет на русский.
+  assert.deepEqual(
+    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
+    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
+    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
+  );
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

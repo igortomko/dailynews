@@ -12,7 +12,6 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
-import { FeedSearch } from "@/components/feed-search";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
 export const dynamic = "force-dynamic";
@@ -95,12 +94,6 @@ export default async function FeedPage({
         // Тема и настройки — одна пара: и то и другое про то, как выглядит
         // и работает лента, а не про сам выпуск.
         <div key="actions" className="flex items-center gap-2">
-        {/* Поиск рядом с датами: и то и другое — способ добраться
-            до прошлого выпуска. Стрелками к соседнему, календарём
-            к дальнему, поиском — когда помнишь слово, а не дату.
-            Поле раскрывается здесь же: страница результатов открывается
-            по Enter, а не до того, как есть что искать. */}
-        <FeedSearch />
         <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
         <Tooltip>
           <TooltipTrigger

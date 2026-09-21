@@ -411,7 +411,7 @@ async function found(readerId: number, query: string, config: string): Promise<A
     hits as (
       select i.id::int as item_id, i.url,
              coalesce(nullif(di.title, ''), i.title) as title,
-             coalesce(nullif(di.summary, ''), nullif(i.excerpt, ''), '') as body,
+             v.doc as body,
              s.label as source_label,
              t.label as topic_label,
              d.day::text as day,
@@ -423,11 +423,15 @@ async function found(readerId: number, query: string, config: string): Promise<A
         join dailynews.sources s on s.id = i.source_id
    left join dailynews.scores sc on sc.item_id = i.id
    left join dailynews.topics t on t.id = sc.topic_id
+  -- Текст один и тот же для поиска и для отрывка. Разойдись они —
+  -- совпадение по заголовку источника нашлось бы, а в карточке не было бы
+  -- ни одного отмеченного слова: выдача, по которой не понять, за что
+  -- материал в неё попал.
   cross join lateral (
-               select to_tsvector(
-                 ${config}::regconfig,
-                 concat_ws(' ', di.title, di.summary, i.title, i.excerpt)
-               ) as tsv
+               select concat_ws(' ', di.title, di.summary, i.title, i.excerpt) as doc
+             ) d0
+  cross join lateral (
+               select d0.doc, to_tsvector(${config}::regconfig, d0.doc) as tsv
              ) v
        where v.tsv @@ q.tsq
          -- Скрытое пальцем вниз не возвращается и здесь: иначе «убрать
@@ -504,6 +508,13 @@ export async function archiveSize(readerId: number): Promise<{ items: number; da
       from dailynews.digests d
       join dailynews.digest_items di on di.digest_id = d.id
      where d.reader_id = ${readerId}
+       -- Скрытое пальцем вниз не ищется, значит и не считается: число
+       -- стоит рядом со словами «искали по», и завышать его — врать
+       -- ровно там, где оно и приведено как честный ответ.
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.item_id = di.item_id and r.reader_id = ${readerId} and r.event = 'down'
+       )
   `;
   return row ?? { items: 0, days: 0 };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ArrowUpIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemCard } from "@/components/item-card";
+import { SearchButton, SearchField } from "@/components/feed-search";
 import type { FeedItem } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
@@ -97,6 +98,20 @@ export function FeedTabs({
   ];
 
   const [tab, setTab] = useState("all");
+  // Поиск живёт здесь, потому что раскрытое поле занимает всю строку шапки,
+  // а строку рисует эта же шапка. Поле поверх строки оставило бы под собой
+  // живые стрелки дат: обратный Tab уходил бы на кнопки, которых не видно.
+  const [searching, setSearching] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const wasSearching = useRef(false);
+
+  // Закрытое поле возвращает фокус туда, откуда его открыли. Иначе Escape
+  // роняет фокус в начало страницы, и клавиатурный читатель начинает путь
+  // заново — при том что закрыть поле он попросил, а не уйти из шапки.
+  useEffect(() => {
+    if (!searching && wasSearching.current) trigger.current?.focus();
+    wasSearching.current = searching;
+  }, [searching]);
 
   /**
    * Лента — список, который листают. j и k переводят фокус на соседний
@@ -107,9 +122,9 @@ export function FeedTabs({
    * клавиша отдаёт «о», «л» и «щ», и проверка по букве молча перестаёт
    * работать ровно у того, кто читает ленту по-русски.
    *
-   * «/» здесь нет намеренно: поле поиска живёт в шапке и слушает эту
-   * клавишу само. Две записи на одну клавишу разъехались бы при первой
-   * же правке любой из них.
+   * «/» раскрывает поиск — как везде, где он есть. Правило «не перехватывать
+   * набор текста» одно на все клавиши и живёт здесь же: вторая его копия
+   * рядом с полем разъехалась бы с этой при первой правке любой из них.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -119,6 +134,13 @@ export function FeedTabs({
         target &&
         (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
       ) {
+        return;
+      }
+      // «/» и по коду клавиши, и по символу: в кириллице та же клавиша
+      // отдаёт «.», а «/» приезжает с другой.
+      if (event.code === "Slash" || event.key === "/") {
+        event.preventDefault();
+        setSearching(true);
         return;
       }
       if (event.code !== "KeyJ" && event.code !== "KeyK" && event.code !== "KeyO") return;
@@ -171,12 +193,24 @@ export function FeedTabs({
       <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur">
         {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
             это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
-        {/* relative — точка отсчёта для поля поиска: оно раскрывается
-            поверх всей строки, потому что между датой и шестерёнкой
-            на телефоне места нет. */}
-        <div className="relative flex h-14 items-center justify-between gap-3 px-4 sm:h-12">
-          {left}
-          {right}
+        <div className="flex h-14 items-center justify-between gap-3 px-4 sm:h-12">
+          {searching ? (
+            // Вместо строки, а не поверх неё: между датой и шестерёнкой
+            // на телефоне остаётся сантиметр, и поле там либо нечитаемо,
+            // либо выдавливает дату за экран.
+            <SearchField onClose={() => setSearching(false)} />
+          ) : (
+            <>
+              {left}
+              {/* Поиск рядом с датами: и то и другое — способ добраться
+                  до прошлого выпуска. Стрелками к соседнему, календарём
+                  к дальнему, поиском — когда помнишь слово, а не дату. */}
+              <div className="flex items-center gap-2">
+                <SearchButton ref={trigger} onOpen={() => setSearching(true)} />
+                {right}
+              </div>
+            </>
+          )}
         </div>
         {/* Родитель flex, полоса с margin: auto. Когда вкладки помещаются,
             поля разводят их по центру; когда шире — поля схлопываются в ноль,
