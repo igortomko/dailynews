@@ -2267,6 +2267,13 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     "хвостовая пунктуация в адрес не входит",
   );
 
+  const punctuated = classifyDrop("https://example.com/a). а дальше мысль", false);
+  assert.equal(
+    punctuated?.kind === "link" && punctuated.note,
+    "а дальше мысль",
+    "снятая с адреса пунктуация в пометку не попадает",
+  );
+
   assert.equal(titleOf("Первая фраза. Вторая фраза."), "Первая фраза.", "заголовок мысли — её первая фраза");
   assert.equal(titleOf("а".repeat(200)).length, 120, "длинная фраза режется до 120 знаков");
   assert.equal(titleOf("   "), "Без заголовка", "пустая мысль всё равно получает заголовок");

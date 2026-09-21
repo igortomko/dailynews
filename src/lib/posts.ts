@@ -125,7 +125,10 @@ export async function dropSourceFor(drop: Drop): Promise<PostSource> {
   // список видов, где `manual` ещё нет.
   const [source] = await sql<{ id: number }[]>`
     insert into dailynews.sources (kind, label, url, active)
-    values ('manual', 'Свои входы', 'manual://drops', false)
+    -- active = true, как у любого неубранного источника (0031): состояние
+    -- задаёт deleted_at, а прогон этот источник не опрашивает не из-за флага,
+    -- а потому что его никто не выбрал в reader_sources.
+    values ('manual', 'Свои входы', 'manual://drops', true)
     on conflict (kind, url) do update set label = excluded.label
     returning id::int as id
   `;
@@ -153,13 +156,21 @@ export async function dropSourceFor(drop: Drop): Promise<PostSource> {
     url = syntheticUrl(drop.kind, drop.text);
   }
 
-  const note = "note" in drop && drop.note ? `\n\nПометка автора: ${drop.note}` : "";
-  const body = `${excerpt}${note}`.slice(0, 20_000);
+  // Пометка стоит перед материалом, а не после: в промпт уходит только начало
+  // текста (`blockOf`, 1200 знаков), и пометка в хвосте длинной статьи до модели
+  // не доедет — а именно она задаёт угол, ради которого её и пишут.
+  const note = "note" in drop && drop.note ? `Пометка автора: ${drop.note}\n\n` : "";
+  const body = `${note}${excerpt}`.slice(0, 20_000);
 
   const [item] = await sql<{ id: number }[]>`
     insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt, published_at)
     values (${source.id}, ${url}, ${canonUrl(url)}, ${title}, ${normalizeTitle(title)}, ${body}, now())
-    on conflict (url_canon) do update set excerpt = excluded.excerpt, title = excluded.title
+    -- title_norm обновляется вместе с title: по нему идёт дедуп через pg_trgm,
+    -- и разъехавшаяся пара «заголовок и его нормальная форма» сравнивает
+    -- новое со старым молча.
+    on conflict (url_canon) do update set excerpt = excluded.excerpt,
+                                          title = excluded.title,
+                                          title_norm = excluded.title_norm
     returning id::int as id
   `;
 

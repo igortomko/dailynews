@@ -41,7 +41,9 @@ export function classifyDrop(text: string, forwarded: boolean): Drop | null {
   const match = body.match(URL_RE);
   const url = match?.[0]?.replace(/[)\].,;]+$/, "");
   const leading = url !== undefined && body.indexOf(url) === 0;
-  const note = url ? body.slice(body.indexOf(url) + url.length).trim() : "";
+  // Резать по исходному совпадению, а не по очищенному адресу: снятая
+  // хвостовая пунктуация осталась в тексте и стала бы пометкой «).».
+  const note = match ? body.slice((match.index ?? 0) + match[0].length).trim() : "";
   if (url && leading && note.length <= 300) {
     return videoIdOf(url) ? { kind: "video", url, note } : { kind: "link", url, note };
   }
@@ -50,7 +52,7 @@ export function classifyDrop(text: string, forwarded: boolean): Drop | null {
 
 /** Заголовок мысли — её первая фраза: другого у неё нет. */
 export function titleOf(text: string): string {
-  const first = text.split(/\n|(?<=[.!?…])\s/)[0]?.trim() ?? text;
+  const first = (text.split(/\n|(?<=[.!?…])\s/)[0] ?? "").trim();
   return (first.length > 120 ? `${first.slice(0, 119)}…` : first) || "Без заголовка";
 }
 

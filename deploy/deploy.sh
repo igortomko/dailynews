@@ -95,6 +95,7 @@ fi
 # заголовки. Поэтому окружение контейнера сверяется так же, как схема базы.
 echo "→ проверка: есть ли у контейнера всё, что зовёт веб"
 NEEDED="DATABASE_URL APP_SECRET APP_URL TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET \
+POSTBOT_TOKEN POSTBOT_WEBHOOK_SECRET \
 LLM_API_KEY LLM_BASE_URL LLM_MODEL TYPESAFE_API_KEY RESEND_API_KEY KINDLE_FROM_DOMAIN"
 MISSING=$(ssh "$HOST" "for key in $NEEDED; do grep -qs \"^\$key=.\" $DIR/.env.production || echo \$key; done")
 if [ -n "$MISSING" ]; then
