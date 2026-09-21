@@ -142,6 +142,29 @@ function Bar({
 }
 
 /**
+ * Поле редактора: без рамки в покое, серое под курсором и в фокусе.
+ *
+ * Обзор читается как документ, а не как анкета: рамка вокруг каждого
+ * абзаца превращала страницу в форму из десяти полей. Что текст правится,
+ * видно ровно тогда, когда к нему тянутся. Кольца фокуса нет намеренно —
+ * его роль играет тот же серый фон.
+ *
+ * Отрицательные поля — чтобы текст поля стоял вровень со строкой над ним,
+ * а серая подложка выходила за него на восемь пикселей в обе стороны.
+ */
+const FIELD =
+  "-mx-2 w-[calc(100%+1rem)] rounded-md border-transparent bg-transparent px-2 shadow-none transition-colors hover:bg-muted focus-visible:border-transparent focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent dark:hover:bg-muted dark:focus-visible:bg-muted";
+
+/**
+ * Что показывается только по наведению на блок или по фокусу внутри него.
+ * На тапе наведения нет — там видно всегда, иначе кнопки были бы спрятаны
+ * навсегда. Прозрачностью, а не `hidden`: место держится, строка не прыгает,
+ * а с клавиатуры кнопки достижимы и проявляются вместе с фокусом.
+ */
+const QUIET =
+  "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
+
+/**
  * Кнопка в строке блока: стрелка или крестик, с подсказкой.
  *
  * aria-disabled, а не disabled: у крайнего блока стрелка выключена,
@@ -275,20 +298,17 @@ export function OverviewDialog({
         initialFocus={(type) => (type === "touch" ? popup.current : true)}
         className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 p-0 sm:max-w-2xl"
       >
-        <DialogHeader className="px-4 pt-4 pb-2">
+        <DialogHeader className="px-4 pt-4 pb-3">
           <DialogTitle>{t.dialogTitle}</DialogTitle>
           <DialogDescription>{t.issueOf(formatDay(day, locale), blocks.length)}</DialogDescription>
         </DialogHeader>
 
-        {/* Отступ сверху не декоративный: прокручиваемая область режет всё,
-            что выходит за её край, а кольцо фокуса выходит на три пикселя.
-            Без него у первого поля обводка стояла срезанной сверху. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-1 pb-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
           <Input
             aria-label={t.titleLabel}
             value={overview.title}
             onChange={(event) => update({ title: event.target.value })}
-            className="font-medium"
+            className={cn(FIELD, "font-medium")}
           />
           {/* Вступление пишет человек. Дописать его за него — значит
               вложить в его уста вывод, которого он не делал. */}
@@ -299,7 +319,7 @@ export function OverviewDialog({
             onChange={(event) => update({ intro: event.target.value })}
             // Свой минимум у каждого поля: с field-sizing: content пустое
             // поле сжимается до одних полей ввода, и `rows` ему не указ.
-            className="min-h-14 leading-relaxed"
+            className={cn(FIELD, "min-h-14 leading-relaxed")}
           />
 
           {blocks.length === 0 ? (
@@ -307,7 +327,7 @@ export function OverviewDialog({
           ) : (
             <ol className="flex flex-col gap-3">
               {blocks.map((block, index) => (
-                <li key={block.id} className="flex flex-col gap-2 rounded-lg border p-3">
+                <li key={block.id} className="group flex flex-col gap-2 rounded-lg border p-3">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="tabular-nums">{index + 1}.</span>
                     <span className="shrink-0 font-medium text-foreground/75">{block.source}</span>
@@ -321,7 +341,7 @@ export function OverviewDialog({
                     >
                       {block.url}
                     </a>
-                    <div className="ml-auto flex shrink-0 items-center">
+                    <div className={cn("ml-auto flex shrink-0 items-center", QUIET)}>
                       <BlockAction
                         label={t.up}
                         icon={ArrowUpIcon}
@@ -350,13 +370,13 @@ export function OverviewDialog({
                     aria-label={t.blockTitleLabel}
                     value={block.title}
                     onChange={(event) => patchBlock(block.id, { title: event.target.value })}
-                    className="min-h-9 font-medium"
+                    className={cn(FIELD, "min-h-9 font-medium")}
                   />
                   <Textarea
                     aria-label={t.blockSummaryLabel}
                     value={block.summary}
                     onChange={(event) => patchBlock(block.id, { summary: event.target.value })}
-                    className="leading-relaxed"
+                    className={cn(FIELD, "leading-relaxed")}
                   />
                 </li>
               ))}
