@@ -29,6 +29,15 @@ type Kind = "size" | "voice";
 
 const queued = new Set<Kind>();
 
+/**
+ * Идёт ли пересборка прямо сейчас. Кнопка запускает её, не уходя со страницы,
+ * поэтому второй запуск теперь возможен: нажал «Сохранить», поправил ещё раз
+ * и вышел — и сторож выхода завёл бы `rewriteDigest` параллельно первому.
+ * Это ровно та двойная оплата одной работы, от которой здесь и заведена
+ * очередь, плюс два спорящих тоста на одном выпуске.
+ */
+let running = false;
+
 /** Отложить пересборку. Вызывается формами настроек, ничего не ждёт. */
 export function queueRebuild(kind: Kind) {
   queued.add(kind);
@@ -40,6 +49,12 @@ export function queueRebuild(kind: Kind) {
  * идёт пересборка, а не гасила его до срока.
  */
 export async function flushRebuild(refresh: () => void) {
+  if (running) {
+    toast.info("Сохранено, но пересборка ещё идёт", {
+      description: "Нажми «Сохранить» снова, когда она закончится",
+    });
+    return;
+  }
   // Сегодняшнему выпуску менять нечего: тронули то, что решается при отборе
   // (доли тем) или не тронули ничего. Молчать тут нельзя — нажали кнопку
   // и не получили ответа, — но и обещать пересборку не за что.
@@ -55,10 +70,23 @@ export async function flushRebuild(refresh: () => void) {
 }
 
 async function run(kinds: Kind[], refresh: () => void) {
-  const running = toast.loading("Пересобираю сегодняшний выпуск…", {
+  // Сторож выхода зовёт `run` мимо кнопки, и звать его во время работы
+  // нельзя: правки подождут следующего запуска, а не поедут вторым вызовом.
+  if (running) {
+    for (const kind of kinds) queued.add(kind);
+    return;
+  }
+  running = true;
+
+  const running_toast = toast.loading("Пересобираю сегодняшний выпуск…", {
     description: "Это минута-две, можно читать дальше",
     duration: Infinity,
   });
+
+  // Что ещё не сделано. Возвращать в очередь весь список нельзя: упавшее
+  // переписывание заставило бы догрузку сходить второй раз — за деньги
+  // и ровно за тем же результатом.
+  const left = new Set(kinds);
 
   try {
     const done: string[] = [];
@@ -69,15 +97,17 @@ async function run(kinds: Kind[], refresh: () => void) {
       const result = await topUpDigest();
       if (result && "error" in result) throw new Error(result.error);
       if (result?.added) done.push(`добавлено ${result.added}`);
+      left.delete("size");
     }
 
     if (kinds.includes("voice")) {
       const result = await rewriteDigest();
       if (result && "error" in result) throw new Error(result.error);
       if (result?.rewritten) done.push(`переписано ${result.rewritten}`);
+      left.delete("voice");
     }
 
-    toast.dismiss(running);
+    toast.dismiss(running_toast);
     if (done.length === 0) {
       toast.info("Выпуск и так соответствует настройкам", {
         description: "Следующие придут с новыми",
@@ -89,12 +119,14 @@ async function run(kinds: Kind[], refresh: () => void) {
     });
     refresh();
   } catch (error) {
-    toast.dismiss(running);
+    toast.dismiss(running_toast);
     toast.error(error instanceof Error ? error.message : "Пересобрать не вышло");
-    // Возвращаем в очередь: списанная работа, которая не сделалась, —
-    // это отказ, похожий на успех. Второе «Сохранить» отвечало бы
-    // «настройки сохранены», а выпуск так и остался бы прежним.
-    for (const kind of kinds) queued.add(kind);
+    // Недоделанное возвращаем в очередь: списанная работа, которая
+    // не сделалась, — это отказ, похожий на успех. Второе «Сохранить»
+    // отвечало бы «настройки сохранены», а выпуск остался бы прежним.
+    for (const kind of left) queued.add(kind);
+  } finally {
+    running = false;
   }
 }
 

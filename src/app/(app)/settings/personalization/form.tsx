@@ -63,7 +63,12 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
    */
   const save = (after?: (ok: boolean) => void) => {
     const node = form.current;
-    if (!node) return;
+    // Исход сообщаем и здесь: `apply` уже зажёг спиннер, и молчаливый выход
+    // оставил бы кнопку крутиться до перезагрузки страницы.
+    if (!node) {
+      after?.(false);
+      return;
+    }
     const data = new FormData(node);
     startTransition(async () => {
       try {
@@ -101,10 +106,11 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
     });
   };
 
-  // Сохраняем сами, с паузой после последней правки: уход со страницы
-  // не должен стоить читателю его правок. Кнопка рядом отвечает не за запись,
-  // а за то, чтобы сегодняшний выпуск переписался прямо сейчас.
-  // Пауза нужна, чтобы не слать запрос на каждую букву в текстовом поле.
+  // Сохраняем сами, с паузой после последней правки: иначе запрос уходил бы
+  // на каждую букву в текстовом поле. Пауза короткая, но не нулевая — правку,
+  // сделанную и тут же брошенную уходом со страницы, она не спасёт. Кнопка
+  // рядом отвечает не за запись, а за то, чтобы сегодняшний выпуск
+  // переписался прямо сейчас, не дожидаясь полуночи.
   const schedule = () => {
     setSaved(false);
     clearTimeout(timer.current);
@@ -120,7 +126,9 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         setApplying(false);
         return;
       }
-      void flushRebuild(() => router.refresh()).finally(() => setApplying(false));
+      void flushRebuild(() => router.refresh())
+        .catch(() => {})
+        .finally(() => setApplying(false));
     });
   };
 
@@ -339,7 +347,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   Сохранить
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Сегодняшний выпуск перепишется этим голосом, следующие придут таким же
+                  Изменённый голос применим к сегодняшнему выпуску, следующие придут таким же
                 </span>
               </div>
             )}

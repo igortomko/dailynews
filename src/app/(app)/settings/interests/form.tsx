@@ -59,8 +59,9 @@ export function InterestsForm({
     });
   };
 
-  // Сохраняем сами, с паузой после последней правки: уход со страницы
-  // не должен стоить читателю его правок.
+  // Сохраняем сами, с паузой после последней правки: иначе запрос уходил бы
+  // на каждое движение границы. Пауза короткая, но не нулевая — правку,
+  // сделанную и тут же брошенную уходом со страницы, она не спасёт.
   const schedule = () => {
     setSaved(false);
     clearTimeout(timer.current);
@@ -76,7 +77,9 @@ export function InterestsForm({
     clearTimeout(timer.current);
     setApplying(true);
     save(() => {
-      void flushRebuild(() => router.refresh()).finally(() => setApplying(false));
+      void flushRebuild(() => router.refresh())
+        .catch(() => {})
+        .finally(() => setApplying(false));
     });
   };
 
@@ -124,7 +127,7 @@ export function InterestsForm({
                 Сохранить
               </Button>
               <span className="text-xs text-muted-foreground">
-                Новые доли работают со следующего выпуска, а размер догрузится сегодня же
+                Новые доли работают со следующего выпуска, увеличенный размер догрузим сегодня
               </span>
             </div>
           </FieldGroup>

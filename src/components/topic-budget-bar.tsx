@@ -72,7 +72,7 @@ export function TopicBudgetBar({
           их становится две. */}
       <div
         ref={bar}
-        className="relative flex h-5 w-full touch-none overflow-visible rounded-full select-none"
+        className="relative flex h-5 w-full touch-none select-none"
       >
         {counts.map((count, index) => (
           <div
@@ -119,7 +119,10 @@ export function TopicBudgetBar({
         {counts.map((count, index) => (
           <div
             key={index}
-            className="min-w-0 px-0.5 text-center"
+            // Обрезаем и ячейку: у темы с одной новостью из ста доля почти
+            // нулевая, и число под ней вылезало бы на соседей слипшимся
+            // комком цифр — ровно того, что подпись должна была спасти.
+            className="min-w-0 overflow-hidden px-0.5 text-center"
             style={{ flexGrow: count, flexBasis: 0 }}
           >
             <div className="truncate text-[11px] leading-tight text-muted-foreground">
