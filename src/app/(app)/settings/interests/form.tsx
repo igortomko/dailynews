@@ -50,13 +50,6 @@ export function InterestsForm({
       new Promise<boolean>((resolve) => {
         const node = form.current;
         if (!node) return resolve(false);
-        // Набранное в поле списка добавляется при уходе из поля. Уход
-        // делается здесь, а не нажатием на кнопку: с ней чипы появлялись бы
-        // между mousedown и mouseup, кнопка уезжала бы вниз, и первый клик
-        // пропадал. Блюр — отдельное событие, React дописывает скрытые поля
-        // до того, как форма прочитана.
-        const active = document.activeElement;
-        if (active instanceof HTMLElement && node.contains(active)) active.blur();
         startTransition(async () => {
           // Отказ приходит двумя путями: разобранным `{ error }` и исключением
           // из серверного действия. Молчать нельзя ни о том, ни о другом.
@@ -84,6 +77,21 @@ export function InterestsForm({
   const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
 
   const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
+
+  /**
+   * Закрыть поле списка до снимка правок, а не внутри записи. Уход из поля
+   * добавляет чип и зовёт `touch`; сделанный внутри `write`, он попадал бы
+   * после снимка `apply`, и форма после удачной записи оставалась бы
+   * «несохранённой» на вид. Кнопка не забирает фокус на mousedown (ниже):
+   * иначе чип появлялся бы между mousedown и mouseup, кнопка уезжала
+   * бы вниз, и первый клик пропадал.
+   */
+  const save = () => {
+    const node = form.current;
+    const active = document.activeElement;
+    if (node && active instanceof HTMLElement && node.contains(active)) active.blur();
+    void apply();
+  };
 
   return (
     <Card>
@@ -135,9 +143,9 @@ export function InterestsForm({
               // действие, ради которого сюда пришли, а в ряду одинаковых
               // оно читалось как ещё одна настройка.
               className="h-11 self-start px-6 text-base"
-              // Фокус остаётся в поле до самого клика: см. `write`.
+              // Фокус остаётся в поле до самого клика: см. `save`.
               onMouseDown={(event) => event.preventDefault()}
-              onClick={apply}
+              onClick={save}
             >
               {applying ? <Spinner data-icon="inline-start" /> : null}
               Сохранить

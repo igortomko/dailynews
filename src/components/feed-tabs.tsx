@@ -375,7 +375,25 @@ export function FeedTabs({
           </p>
         ) : null}
         <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
-      {tabs.map((tab) => {
+      {items.length === 0 && hidden > 0 ? (
+        // Выпуск есть, но исключения закрыли его целиком. Спокойно и с выходом:
+        // пустая лента без причины и без ссылки — тупик, и чинить её пошли бы
+        // в источники. Один раз на всю ленту, а не в каждой вкладке: условие
+        // про весь выпуск, а панели вкладок остаются смонтированными все.
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>Всё скрыто исключениями</EmptyTitle>
+            <EmptyDescription>
+              В выпуске {count(hidden, "карточка", "карточки", "карточек")}, и в каждой есть
+              что-то из твоего списка. Выпуск не пересобирается — освободившиеся места
+              не добираются.
+            </EmptyDescription>
+          </EmptyHeader>
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/settings/interests" />}>
+            Поправить исключения
+          </Button>
+        </Empty>
+      ) : tabs.map((tab) => {
         const list = forTab(tab.slug);
         return (
           <TabsContent
@@ -387,24 +405,7 @@ export function FeedTabs({
                кроме последней тронутой карточки. */
             className="flex flex-col [@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-25"
           >
-            {items.length === 0 && hidden > 0 ? (
-              // Выпуск есть, но исключения закрыли его целиком. Спокойно
-              // и с выходом: пустая лента без причины и без ссылки — тупик,
-              // и чинить её пошли бы в источники.
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>Всё скрыто исключениями</EmptyTitle>
-                  <EmptyDescription>
-                    В выпуске {count(hidden, "карточка", "карточки", "карточек")}, и в каждой есть
-                    что-то из твоего списка. Выпуск не пересобирается — освободившиеся места
-                    не добираются.
-                  </EmptyDescription>
-                </EmptyHeader>
-                <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/settings/interests" />}>
-                  Поправить исключения
-                </Button>
-              </Empty>
-            ) : list.length === 0 ? (
+            {list.length === 0 ? (
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>Пока пусто</EmptyTitle>

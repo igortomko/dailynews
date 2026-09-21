@@ -132,14 +132,21 @@ export const NO_MATCH: Matcher = { empty: true, test: () => false, find: () => n
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** Знак, из которого состоят слова: буква, цифра или подчёркивание. */
+const WORD = "\\p{L}\\p{N}_";
+
 /**
  * Одно выражение на все написания.
  *
- * Граница слова — «до и после нет буквы и цифры» (`\p{L}`, `\p{N}`), а не `\b`:
+ * Граница слова — «рядом нет буквы, цифры и подчёркивания», а не `\b`:
  * тот знает только латиницу и на кириллице ловит середину слова (урок
- * из lexicon.ts). Так «Apple» не находится в «Pineapple», а «Go» — в «Google»,
- * зато «C++» и «.NET» ищутся как написаны. Текст читателя экранируется
- * целиком: «a.*b» — это буквы и звёздочка, а не выражение.
+ * из lexicon.ts). Так «Apple» не находится в «Pineapple», «Go» — в «Google»
+ * и в «go_router». Граница ставится только с той стороны написания, где
+ * оно само кончается словесным знаком: у «.NET» слева точка, и «ASP.NET»
+ * его содержит; у «C++» справа плюс, и «C++17» тоже находится. Иначе
+ * оба искались бы только между пробелами — а читатель ждёт «как написано».
+ * Текст читателя экранируется целиком: «a.*b» — это буквы и звёздочка,
+ * а не выражение.
  *
  * Внутри написания пробел ловит любой пробельный разрыв: в тексте статьи
  * «Hacker\nNews» — то же самое, что «Hacker News».
@@ -154,9 +161,14 @@ export function compile(rules: Names[]): Matcher {
   }
   if (shown.size === 0) return NO_MATCH;
   const alternation = [...shown.keys()]
-    .map((key) => escapeRegex(key).replace(/ /g, "\\s+"))
+    .map((key) => {
+      const body = escapeRegex(key).replace(/ /g, "\\s+");
+      const lead = new RegExp(`^[${WORD}]`, "u").test(key) ? `(?<![${WORD}])` : "";
+      const trail = new RegExp(`[${WORD}]$`, "u").test(key) ? `(?![${WORD}])` : "";
+      return `${lead}${body}${trail}`;
+    })
     .join("|");
-  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])(?:${alternation})(?![\\p{L}\\p{N}])`, "u");
+  const pattern = new RegExp(`(?:${alternation})`, "u");
   return {
     empty: false,
     test: (text) => pattern.test(fold(text)),
@@ -165,6 +177,73 @@ export function compile(rules: Names[]): Matcher {
       return hit ? (shown.get(fold(hit[0])) ?? null) : null;
     },
   };
+}
+
+/**
+ * Слить набранное в список: каждое название — своё правило.
+ *
+ * Возвращает тот же массив, если добавить было нечего, первую причину
+ * отказа словами и непринятое целиком — поле оставляет его на месте, чтобы
+ * поправить, а не набирать заново. Одна функция на кнопку «Добавить»,
+ * на скрытое поле формы и на то, что уходит родителю: иначе набранное
+ * проходило бы в форму мимо проверок, которые видит кнопка.
+ */
+export function mergeDraft(
+  rules: Names[],
+  draft: string,
+  limit: number,
+): { next: Names[]; stopped: string | null; rejected: string[] } {
+  const next = [...rules];
+  const rejected: string[] = [];
+  let added = false;
+  let stopped: string | null = null;
+  for (const candidate of splitNames(draft)) {
+    if (candidate.length > RULE_LIMITS.chars) {
+      stopped ??= `«${candidate.slice(0, 24)}…» длиннее ${RULE_LIMITS.chars} знаков`;
+      rejected.push(candidate);
+      continue;
+    }
+    if (next.some((known) => known.some((n) => fold(n) === fold(candidate)))) {
+      stopped ??= `«${candidate}» уже есть`;
+      rejected.push(candidate);
+      continue;
+    }
+    if (next.length >= limit) {
+      stopped ??= `Не больше ${limit}. Убери одно, чтобы добавить другое`;
+      rejected.push(candidate);
+      continue;
+    }
+    next.push([candidate]);
+    added = true;
+  }
+  return { next: added ? next : rules, stopped, rejected };
+}
+
+/**
+ * Написания раскрытого правила из поля: первое остаётся именем, остальные —
+ * из ввода через запятую. Отказ — целиком, с причиной: написание из другого
+ * правила ничего не добавляет, а человек думал бы, что добавил.
+ */
+export function withVariants(
+  rules: Names[],
+  index: number,
+  input: string,
+): { next: Names[]; stopped: string | null } {
+  const shown = rules[index]?.[0];
+  if (shown === undefined) return { next: rules, stopped: null };
+  const others = splitNames(input).filter((name) => fold(name) !== fold(shown));
+  const taken = others.find((name) =>
+    rules.some((names, i) => i !== index && names.some((known) => fold(known) === fold(name))),
+  );
+  if (taken) return { next: rules, stopped: `«${taken}» уже есть в другом правиле` };
+  const long = others.find((name) => name.length > RULE_LIMITS.chars);
+  if (long) return { next: rules, stopped: `«${long.slice(0, 24)}…» длиннее ${RULE_LIMITS.chars} знаков` };
+  if (others.length + 1 > RULE_LIMITS.names) {
+    return { next: rules, stopped: `Не больше ${RULE_LIMITS.names} написаний на одно название` };
+  }
+  const names = [shown, ...others];
+  if (names.join("\n") === rules[index].join("\n")) return { next: rules, stopped: null };
+  return { next: rules.map((entry, i) => (i === index ? names : entry)), stopped: null };
 }
 
 /** Правила читателя в том виде, в каком их применяет отбор и лента. */

@@ -177,10 +177,16 @@ export async function saveInterests(formData: FormData) {
  */
 function readRules(formData: FormData): Rules | { error: string } {
   const parse = (field: string): unknown => {
+    const raw = formData.get(field);
+    // Поля нет — это не «правил нет»: вкладка со старой сборкой после
+    // развёртывания не рисует скрытых полей, и пустой список стёр бы
+    // сохранённое молча. Не разобралось — тоже отказ, а не пустота:
+    // не-массив доходит до cleanRules, и тот называет причину.
+    if (raw === null) return {};
     try {
-      return JSON.parse(String(formData.get(field) ?? "[]"));
+      return JSON.parse(String(raw));
     } catch {
-      return null;
+      return {};
     }
   };
   const follow = cleanRules("follow", parse("follow"));
