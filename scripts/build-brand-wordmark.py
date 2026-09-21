@@ -1,4 +1,5 @@
-"""Shape Bodoni Moda with HarfBuzz and export editable SVG contours."""
+"""Shape Literata with HarfBuzz and export editable SVG contours."""
+import argparse
 import io
 import json
 from pathlib import Path
@@ -11,7 +12,13 @@ from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.transformPen import TransformPen
 
 BRAND = Path(__file__).resolve().parent.parent / "public" / "brand"
-font = instantiateVariableFont(TTFont(BRAND / "fonts/bodoni-moda-variable.ttf"), {"wght": 700, "opsz": 96}, inplace=False)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--weight", type=int, choices=range(200, 901), default=650)
+parser.add_argument("--optical-size", type=int, choices=range(7, 73), default=18)
+parser.add_argument("--output-dir", type=Path, default=BRAND)
+args = parser.parse_args()
+args.output_dir.mkdir(parents=True, exist_ok=True)
+font = instantiateVariableFont(TTFont(BRAND / "fonts/literata-variable.ttf"), {"wght": args.weight, "opsz": args.optical_size}, inplace=False)
 stream = io.BytesIO()
 font.save(stream)
 face = hb.Face(stream.getvalue())
@@ -61,11 +68,11 @@ for first, last in [(2, 3), (5, 5)]:
     weave += f'<rect x="{left:.4f}" y="0" width="{right - left:.4f}" height="434"/>'
 defs = f'<defs><clipPath id="weave">{weave}</clipPath></defs>'
 open_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1529" height="434" viewBox="0 0 1529 434" role="img" aria-labelledby="title"><title id="title">Reporta</title>'
-letters = f'<g id="wordmark-bodoni-moda" fill="#080808" transform="{transform}">{"".join(paths)}</g>'
+letters = f'<g id="wordmark-literata" fill="#080808" transform="{transform}">{"".join(paths)}</g>'
 logo = f'{open_svg}{defs}{snake}{letters}<g clip-path="url(#weave)">{snake_content}</g></svg>\n'
-(BRAND / "logo-reporta.svg").write_text(logo)
-(BRAND / "logo-reporta-dark.svg").write_text(logo.replace('fill="#080808"', 'fill="#F5F5F2"'))
-(BRAND / "snake-reporta.svg").write_text(f'{open_svg}{defs}{snake}</svg>\n')
-report = {"font": "Bodoni Moda", "weight": 700, "opticalSize": 96, "text": "Reporta", "shaper": "HarfBuzz", "unitsPerEm": face.upem, "pairPositioning": positions, "tracking": 0, "outlines": True, "note": "Native font kerning retained; replacement typeface pending comparison. Snake body and head are smooth manually reconstructed Bezier curves, with exact circular cyan eyes and no raster or traced noise."}
-(BRAND / "wordmark-spec.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+(args.output_dir / "logo-reporta.svg").write_text(logo)
+(args.output_dir / "logo-reporta-dark.svg").write_text(logo.replace('fill="#080808"', 'fill="#F5F5F2"'))
+(args.output_dir / "snake-reporta.svg").write_text(f'{open_svg}{defs}{snake}</svg>\n')
+report = {"font": "Literata", "weight": args.weight, "opticalSize": args.optical_size, "text": "Reporta", "shaper": "HarfBuzz", "unitsPerEm": face.upem, "pairPositioning": positions, "tracking": 0, "outlines": True, "note": "User-requested Literata trial. Native font kerning retained; no synthetic bold or nonuniform scaling. Snake body, head and cyan eyes are unchanged vector geometry."}
+(args.output_dir / "wordmark-spec.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 print(json.dumps(report, ensure_ascii=False))
