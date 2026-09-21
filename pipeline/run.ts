@@ -266,9 +266,13 @@ async function runForReader(
     plan.maxItems - today.items,
   );
   if (missing <= 0) {
+    // «Набран» не значит «полон»: мест могло не остаться по потолку штук,
+    // и тогда выпуск короче заказа. Читатель видит это строкой в ленте,
+    // а лог говорил бы, что всё в порядке.
+    const filled = minutesOf(today.chars, voice);
     log(
-      `  ${name}: выпуск за ${day} набран (${formatMinutes(minutesOf(today.chars, voice))} ` +
-      `из ${Math.round(target)}, ${today.items} материалов) — пропуск`,
+      `  ${name}: выпуск за ${day} ${isShort(filled, target) ? "добирать нечем" : "набран"} ` +
+      `(${formatMinutes(filled)} из ${Math.round(target)}, ${today.items} материалов) — пропуск`,
     );
     return 0;
   }

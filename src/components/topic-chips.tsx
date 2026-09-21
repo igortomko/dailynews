@@ -51,7 +51,7 @@ export function TopicChips({
   // минуты влезло бы больше, чем тариф отдаёт. Молчать об этом нельзя —
   // выпуск выходил бы короче заказа каждый день, и виноватым выглядел бы
   // поток, а не наш предел.
-  const capped = minutes / perCard > plan.maxItems;
+  const capped = places < Math.round(minutes / perCard);
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
   // и без приведения полоса показывала бы не тот выпуск, который придёт.
   const [chips, setChipsState] = useState<ChipInput[]>(() =>
