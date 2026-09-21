@@ -1,0 +1,33 @@
+:root {
+  --reporta-paper: #f5f5f2;
+  --reporta-white: #ffffff;
+  --reporta-ink: #171716;
+  --reporta-muted: #62625c;
+  --reporta-line: #d6d7d0;
+  --reporta-signal: #f04a32;
+  --reporta-signal-text: #b52d1d;
+  --reporta-iris: #4cc9f0;
+  --reporta-focus: #007c9f;
+  --reporta-success: #2e6247;
+  --reporta-display: "Fraunces", "Literata", Georgia, serif;
+  --reporta-display-ru: "Literata", Georgia, serif;
+  --reporta-body: "Inter", Arial, sans-serif;
+  --reporta-mono: "DM Mono", "IBM Plex Mono", monospace;
+  --reporta-mono-ru: "IBM Plex Mono", monospace;
+  --reporta-text-caption: 0.8125rem;
+  --reporta-text-ui: 0.875rem;
+  --reporta-text-body: 1.0625rem;
+  --reporta-text-title: 2.5rem;
+  --reporta-radius: 4px;
+  --reporta-motion-duration: 900ms;
+  --reporta-motion-ease: cubic-bezier(.2, .7, .2, 1);
+}
+@keyframes reporta-arrive {
+  0% { opacity: 0; transform: translateY(8px) rotate(-3deg); }
+  55% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) rotate(0); }
+}
+.reporta-arrive { animation: reporta-arrive var(--reporta-motion-duration) var(--reporta-motion-ease) both; }
+@media (prefers-reduced-motion: reduce) {
+  .reporta-arrive { animation: none; }
+}

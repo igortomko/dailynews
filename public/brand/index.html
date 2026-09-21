@@ -1,98 +1,108 @@
 <!doctype html>
 <html lang="ru">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Reporta — brand system</title>
-    <meta name="description" content="Reporta brand system: identity, typography, color, and art direction.">
-    <link rel="icon" href="./favicon-32.png" type="image/png">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-      :root {
-        --paper: #faf9f6; --ink: #171716; --muted: #68645e;
-        --line: #dedbd3; --red: #f04a32; --blue: #4cc9f0; --dark: #171716;
-      }
-      * { box-sizing: border-box; }
-      body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, system-ui, sans-serif; }
-      .wrap { width: min(1160px, calc(100% - 40px)); margin: 0 auto; }
-      header { padding: 28px 0 100px; border-bottom: 1px solid var(--line); }
-      nav { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-      nav img { width: 186px; height: auto; }
-      nav a { color: var(--muted); font: 12px "DM Mono", monospace; letter-spacing: .04em; text-decoration: none; }
-      .hero { padding-top: 120px; max-width: 800px; }
-      .eyebrow { color: var(--red); font: 12px "DM Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
-      h1, h2 { font-family: Fraunces, Georgia, serif; font-weight: 500; letter-spacing: -.035em; }
-      h1 { max-width: 760px; margin: 22px 0; font-size: clamp(56px, 9vw, 116px); line-height: .9; }
-      .lede { max-width: 570px; margin: 28px 0 0; color: var(--muted); font-size: 19px; line-height: 1.55; }
-      section { padding: 100px 0; border-bottom: 1px solid var(--line); }
-      h2 { margin: 0 0 32px; font-size: clamp(38px, 5vw, 64px); line-height: .98; }
-      .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
-      .tile { min-height: 190px; padding: 26px; border: 1px solid var(--line); border-radius: 4px; }
-      .tile.large { grid-column: span 8; min-height: 310px; display: flex; align-items: center; }
-      .tile.small { grid-column: span 4; }
-      .tile.dark { background: var(--dark); color: var(--paper); border-color: var(--dark); }
-      .tile img { display: block; max-width: 100%; height: auto; }
-      .tile.dark img { width: 100%; }
-      .tile.approved { padding: 14px; }
-      .tile.approved img { width: 100%; }
-      .paper-lockup { display: flex; min-height: 222px; align-items: center; padding: 26px; background: var(--paper); }
-      .paper-lockup img { width: 100%; }
-      .label { margin: 0 0 28px; color: var(--muted); font: 11px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .1em; }
-      .dark .label { color: #aaa59d; }
-      .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
-      .swatch { display: flex; flex-direction: column; gap: 10px; color: var(--muted); font: 11px "DM Mono", monospace; }
-      .swatch i { display: block; width: 88px; height: 88px; border-radius: 50%; background: var(--ink); }
-      .swatch.red i { background: var(--red); } .swatch.paper i { background: var(--paper); border: 1px solid var(--line); }
-      .swatch.blue i { background: var(--blue); }
-      .type-sample { padding: 24px 0; border-top: 1px solid var(--line); }
-      .type-sample strong { display: block; font-family: Fraunces, Georgia, serif; font-size: 52px; line-height: 1; font-weight: 500; }
-      .type-sample p { max-width: 680px; margin: 12px 0 0; color: var(--muted); line-height: 1.6; }
-      .type-meta { margin-top: 12px; color: var(--red); font: 11px "DM Mono", monospace; }
-      .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-      .rule { padding: 24px; border-radius: 4px; color: var(--paper); background: var(--dark); }
-      .rule h3 { margin: 0 0 12px; font: 600 15px Inter, sans-serif; } .rule p { margin: 0; color: #b4b0a8; line-height: 1.55; }
-      .illustrations { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-      .illustration { margin: 0; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
-      .illustration img { display: block; width: 100%; height: auto; }
-      .illustration figcaption { padding: 14px 16px 16px; color: var(--muted); font: 11px "DM Mono", monospace; line-height: 1.45; }
-      footer { padding: 40px 0 64px; color: var(--muted); font: 12px "DM Mono", monospace; }
-      @media (max-width: 700px) { .wrap { width: min(100% - 28px, 1160px); } header { padding-bottom: 60px; } .hero { padding-top: 70px; } section { padding: 68px 0; } .tile.large, .tile.small { grid-column: span 12; } .rules, .illustrations { grid-template-columns: 1fr; } }
-    </style>
-  </head>
-  <body>
-    <header><div class="wrap">
-      <nav><img src="./logo-reporta.png" alt="Reporta"><a href="/">open product ↗</a></nav>
-      <div class="hero"><div class="eyebrow">Brand system / 01</div><h1>A signal with a little life in it.</h1><p class="lede">Reporta turns an endless stream into something worth opening. The worm is the editorial gesture: curious, persistent, slightly strange, and always moving through the noise.</p></div>
-    </div></header>
-    <main class="wrap">
-      <section><div class="eyebrow">Identity</div><h2>One line. Many places.</h2><div class="grid">
-        <div class="tile large approved"><img src="./logo-reporta-approved.png" alt="Approved Reporta logo on light background"></div>
-        <div class="tile small dark"><p class="label">Dark surface</p><div class="paper-lockup"><img src="./logo-reporta-approved.png" alt="Approved Reporta logo on a paper field"></div></div>
-        <div class="tile small"><p class="label">Favicon / avatar</p><img src="./favicon-180.png" width="96" height="96" alt="Reporta snake favicon"></div>
-        <div class="tile large dark"><p class="label">Standalone mark</p><img src="./mark-reporta.png" width="310" alt="Reporta snake mark"></div>
-      </div></section>
-      <section><div class="eyebrow">Palette</div><h2>Paper, ink, signal.</h2><div class="swatches">
-        <div class="swatch"><i></i><span>Ink / #171716</span></div><div class="swatch red"><i></i><span>Worm / #F04A32</span></div><div class="swatch paper"><i></i><span>Paper / #FAF9F6</span></div><div class="swatch blue"><i></i><span>Eyes / #4CC9F0</span></div>
-      </div></section>
-      <section><div class="eyebrow">Typography</div><h2>Editorial voice, useful body.</h2>
-        <div class="type-sample"><strong>Fraunces for the point of view.</strong><div class="type-meta">DISPLAY / HEADLINES / CAMPAIGN COPY</div><p>Use it when Reporta needs to sound authored, observant, and a little unexpected. Keep headlines short and let the contrast do the work.</p></div>
-        <div class="type-sample"><strong style="font-family:Inter,system-ui,sans-serif;font-size:38px;font-weight:600;letter-spacing:-.025em">Inter for everything people need to scan.</strong><div class="type-meta">UI / BODY / LABELS / DATA</div><p>Inter is already the product font. It keeps the feed, controls, source names, and metadata quiet and legible around the more expressive display voice.</p></div>
-        <div class="type-sample"><strong style="font-family:'DM Mono',monospace;font-size:32px;letter-spacing:0">DM Mono / source / system / time</strong><div class="type-meta">UTILITY / TECHNICAL MOMENTS</div></div>
-      </section>
-      <section><div class="eyebrow">Art direction</div><h2>Let the worm find a way through.</h2><div class="rules">
-        <div class="rule"><h3>Illustrations</h3><p>Use one continuous red-orange line as a compositional path: under a headline, behind a card, or around a single object. The head appears only once. Never tile it like decoration.</p></div>
-        <div class="rule"><h3>Photography</h3><p>Use documentary, close, human images with real texture. Draw the worm as a flat overlay that follows a real edge: a desk, a street, a margin, a hand. Keep opacity at 100% and shadows out.</p></div>
-        <div class="rule"><h3>Product</h3><p>Use the mark for loading, empty states, and “found something” moments. Keep it small, calm, and useful. The eyes can blink once, never loop aggressively.</p></div>
-        <div class="rule"><h3>Social</h3><p>Give the worm one job per frame: underline, lead, or escape. Leave generous paper around it. No gradients, stock newsroom imagery, or generic AI sparkles.</p></div>
-      </div></section>
-      <section><div class="eyebrow">Illustration examples</div><h2>Engraving, with one living line.</h2><div class="illustrations">
-        <figure class="illustration"><img src="./illustration-page.svg" alt="Engraved editorial page with the Reporta worm moving through it"><figcaption>01 / Editorial page: source, trace, selected detail.</figcaption></figure>
-        <figure class="illustration"><img src="./illustration-observer.svg" alt="Engraved eye with the Reporta worm moving below it"><figcaption>02 / Observation: attention is a product action.</figcaption></figure>
-        <figure class="illustration"><img src="./illustration-signal.svg" alt="Engraved signal line with the Reporta worm finding its way through"><figcaption>03 / Signal: movement through the feed, not decoration.</figcaption></figure>
-      </div></section>
-    </main>
-    <footer><div class="wrap">Reporta / Brand system v1.0 / source assets live in <code>public/brand</code></div></footer>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f5f2">
+  <meta name="description" content="Reporta: фирменный стиль, гравюрные иллюстрации, типографика и готовые материалы.">
+  <meta property="og:title" content="Reporta | Смотреть внимательнее">
+  <meta property="og:description" content="Живая линия. Редакционный характер. Фирменный стиль Reporta.">
+  <meta property="og:image" content="https://news.tomko.io/brand/brand-preview.png">
+  <title>Reporta | Фирменный стиль</title>
+  <link rel="icon" href="./favicon-32.png" type="image/png">
+  <link rel="apple-touch-icon" href="./favicon-180.png">
+  <link rel="stylesheet" href="./fonts/fonts.css">
+  <link rel="stylesheet" href="./tokens.css">
+  <link rel="stylesheet" href="./brand.css">
+  <script src="./brand.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#identity">К содержанию</a>
+  <header class="site-header"><div class="wrap nav-row">
+    <a class="brand-home" href="#top" aria-label="Reporta, в начало"><img src="./logo-reporta.png" width="760" height="216" alt="Reporta"></a>
+    <nav aria-label="Разделы брендбука"><a href="#identity">Характер</a><a href="#illustration">Гравюра</a><a href="#typography">Шрифты</a><a href="#product">Продукт</a><a href="#downloads">Файлы</a></nav>
+    <a class="icon-button" href="./reporta-brand-kit.zip" download aria-label="Скачать бренд-кит" title="Скачать бренд-кит"><img src="./icons/download.svg" alt="" width="20" height="20"></a>
+  </div></header>
+  <main id="top">
+    <div class="cover" aria-labelledby="cover-title">
+      <img class="cover-city" src="./illustrations/city.webp" alt="Гравюра: городские крыши, улицы и антенны" width="1536" height="1024" fetchpriority="high">
+      <div class="wrap cover-content"><div class="folio"><span>Независимый взгляд / Живая линия</span><span>Brand book · 02 / 2026</span></div>
+        <h1 id="cover-title"><img src="./logo-reporta-approved-transparent.png" alt="Reporta" width="1529" height="434"></h1>
+        <p class="cover-statement">Смотреть внимательнее.</p>
+        <p class="cover-description">Персональный выпуск из ваших источников.<br>С характером. С контекстом. С любопытством.</p>
+      </div>
+      <div class="cover-bottom wrap"><span>В мире много всего. Найдём ваше.</span><a href="#identity">Листать дальше <img src="./icons/arrow.svg" width="18" height="18" alt=""></a></div>
+    </div>
+    <section id="identity" class="section wrap">
+      <div class="section-heading"><p class="section-number">01 / Характер</p><h2>Серьёзное чтение.<br>Живое любопытство.</h2><p>Reporta говорит как внимательный редактор: конкретно, спокойно, с лёгкой иронией. Змейка приносит в строгую полосу одну неожиданность.</p></div>
+      <div class="identity-layout">
+        <div class="logo-specimen"><div class="specimen-top"><span class="meta">Оригинал / Светлая поверхность</span><div class="segmented" aria-label="Фон логотипа"><button type="button" class="icon-button" data-surface="light" aria-pressed="true" title="Светлый фон" aria-label="Светлый фон"><img src="./icons/sun.svg" alt=""></button><button type="button" class="icon-button" data-surface="dark" aria-pressed="false" title="Тёмный фон" aria-label="Тёмный фон"><img src="./icons/moon.svg" alt=""></button></div></div><div class="logo-field" id="logo-field"><div class="logo-paper"><img src="./logo-reporta-approved-transparent.png" alt="Утверждённый логотип Reporta" width="1529" height="434"></div></div><p class="caption">Защитное поле: высота головы змейки. Минимальная ширина слова: 160 px. На тёмном фоне сохраняем светлое поле.</p></div>
+        <div class="identity-mark"><div class="mark-field"><img src="./mark-reporta.png" alt="Утверждённый самостоятельный знак Reporta" width="300" height="152"></div><div class="favicon-row"><img src="./favicon-16.png" width="16" height="16" alt="Favicon 16 пикселей"><img src="./favicon-32.png" width="32" height="32" alt="Favicon 32 пикселя"><img src="./favicon-180.png" width="56" height="56" alt="Иконка приложения"><span class="meta">16 / 32 / 180</span></div><p class="caption">Знак используется целиком. Форма, глаза и пропорции зафиксированы.</p></div>
+      </div>
+      <div class="voice-grid"><div><span class="meta">Обещание</span><p>«Ваши источники.<br>Ваш угол зрения.»</p></div><div><span class="meta">Когда выпуск готов</span><p>«Нашлось кое-что<br>для вашего утра.»</p></div><div><span class="meta">Когда всё прочитано</span><p>«На сегодня всё.<br>Дальше живите.»</p></div></div>
+    </section>
+    <section id="illustration" class="section gallery-band"><div class="wrap">
+      <div class="section-heading"><p class="section-number">02 / Иллюстрация</p><h2>Видно каждый штрих.</h2><p>Плотная гравюра, выразительные чёрные массы, тонкая бумажная фактура. Три сюжета: читатель, внимание, мир вокруг.</p></div>
+      <div class="art-grid">
+        <figure><a href="./illustrations/observer.webp" download><img src="./illustrations/observer.webp" width="1254" height="1254" loading="lazy" alt="Гравюрный портрет читательницы с газетой"></a><figcaption><span><b>Читатель</b><small>Портрет / Выпуск / Знакомство</small></span><a class="icon-button" href="./illustrations/observer.webp" download aria-label="Скачать гравюру Читатель" title="Скачать гравюру"><img src="./icons/download.svg" alt=""></a></figcaption></figure>
+        <figure><a href="./illustrations/attention.webp" download><img src="./illustrations/attention.webp" width="1254" height="1254" loading="lazy" alt="Гравюра: рука с лупой над газетными страницами"></a><figcaption><span><b>Внимание</b><small>Поиск / Контекст / Первоисточник</small></span><a class="icon-button" href="./illustrations/attention.webp" download aria-label="Скачать гравюру Внимание" title="Скачать гравюру"><img src="./icons/download.svg" alt=""></a></figcaption></figure>
+        <figure><a href="./illustrations/city.webp" download><img class="city-crop" src="./illustrations/city.webp" width="1536" height="1024" loading="lazy" alt="Гравюрная панорама города"></a><figcaption><span><b>Большая картина</b><small>Обложка / Сюжеты / Связи</small></span><a class="icon-button" href="./illustrations/city.webp" download aria-label="Скачать гравюру Большая картина" title="Скачать гравюру"><img src="./icons/download.svg" alt=""></a></figcaption></figure>
+      </div><p class="caption">Оригинальная серия, созданная с помощью AI по направлению ваших референсов. Визуальные образы, не изображения участников реальных новостей.</p>
+    </div></section>
+    <section id="route" class="section wrap">
+      <div class="section-heading"><p class="section-number">03 / Композиция</p><h2>У линии есть работа.</h2><p>Она связывает подпись с изображением, отмечает найденное и приводит к следующему действию. Один знак на композицию, свободное поле вокруг головы.</p></div>
+      <div class="route-layout"><div class="route-art"><img src="./illustrations/attention.webp" alt="Гравюра с фирменной отметкой на поле" width="1254" height="1254" loading="lazy"><div class="route-stamp"><img src="./mark-reporta.png" alt="" width="300" height="152"></div><span class="route-note meta">Присмотритесь к деталям</span></div><div class="route-copy"><span class="meta">Редакционная отметка</span><h3>Важное бывает<br>между строк.</h3><p>Змейка появляется на полях, рядом с выбранным фрагментом. Она не закрывает лицо, текст или предмет, который нужно рассмотреть.</p><div class="route-trace" aria-hidden="true"><span></span><span class="meta route-destination">Найдено</span></div><p class="caption">В иллюстрации знак лежит поверх бумаги. В интерфейсе линия может соединять источник и выбранный сюжет. Голова в каждой сцене одна.</p></div></div>
+    </section>
+    <section id="palette" class="section palette-band"><div class="wrap">
+      <div class="section-heading"><p class="section-number">04 / Цвет</p><h2>Красный значит:<br>«вот оно».</h2><p>Бумага и чернила составляют основу. Красный отмечает редакционный выбор, голубой поддерживает фокус. Ошибки всегда сопровождаются текстом и значком.</p></div>
+      <div class="palette-grid">
+        <button class="swatch" style="--swatch:#f5f5f2" data-copy="#F5F5F2" aria-label="Скопировать цвет Paper #F5F5F2"><span class="color-chip"></span><b>Paper</b><span>#F5F5F2</span><small>Фон / Воздух</small></button>
+        <button class="swatch" style="--swatch:#171716" data-copy="#171716" aria-label="Скопировать цвет Ink #171716"><span class="color-chip"></span><b>Ink</b><span>#171716</span><small>Текст / Действие</small></button>
+        <button class="swatch" style="--swatch:#f04a32" data-copy="#F04A32" aria-label="Скопировать цвет Signal #F04A32"><span class="color-chip"></span><b>Signal</b><span>#F04A32</span><small>Знак / Выбранное</small></button>
+        <button class="swatch" style="--swatch:#4cc9f0" data-copy="#4CC9F0" aria-label="Скопировать цвет Iris #4CC9F0"><span class="color-chip"></span><b>Iris</b><span>#4CC9F0</span><small>Глаза / Фокус</small></button>
+      </div><div class="color-ratio" aria-label="Пример пропорции: 88 процентов нейтрального, 8 процентов чёрного, 4 процента акцента"><span>88% / нейтральное поле</span><i></i><i></i></div><p class="caption">Для мелкого красного текста: #B52D1D. Яркий Signal остаётся в графике. Основные кнопки чёрные, фокус обведён контрастным синим #007C9F.</p>
+    </div></section>
+    <section id="typography" class="section wrap">
+      <div class="section-heading"><p class="section-number">05 / Типографика</p><h2>Три голоса.<br>Один характер.</h2><p>Выразительный заголовок, спокойный текст, точная служебная строка. Размеры и интерлиньяж заданы по роли текста.</p></div>
+      <div class="type-row"><div><span class="meta">01 / Заголовки</span><h3>Fraunces + Literata</h3><p class="caption">Fraunces для латиницы. Literata для кириллицы.<br>400–600 · 40/46 desktop · 28/34 mobile.</p></div><div class="type-display"><p lang="en">A little more curious.</p><p>Есть о чём подумать.</p></div></div>
+      <div class="type-row"><div><span class="meta">02 / Текст и интерфейс</span><h3>Inter</h3><p class="caption">400–600 · 17/28 чтение · 14/21 интерфейс.<br>Длина строки: 55–70 знаков.</p></div><div class="type-body"><p>Хороший выпуск оставляет время подумать. Читайте в своём темпе, возвращайтесь к источникам и сохраняйте то, к чему захочется вернуться.</p><div class="sample-actions"><button class="button" type="button" data-open-article>Открыть пример <img src="./icons/arrow.svg" alt=""></button><span>6 минут чтения</span></div></div></div>
+      <div class="type-row"><div><span class="meta">03 / Метаданные</span><h3>DM Mono + IBM Plex Mono</h3><p class="caption">DM Mono для латиницы и цифр.<br>IBM Plex Mono для кириллицы. 12/18, 400.</p></div><div class="type-mono"><p lang="en">VOL. 024 / 21 SEP 2026 / 08:30</p><p>Выпуск 024 / Источник / 6 мин</p><span class="caption">Цифры одинаковой ширины. Межбуквенный интервал: 0.</span></div></div>
+      <p class="caption">Все шрифты локальные, с OFL-лицензиями. Кириллические пары заданы явно: <a href="https://github.com/google/fonts/blob/main/ofl/fraunces/METADATA.pb">Fraunces</a> и <a href="https://github.com/google/fonts/blob/main/ofl/dmmono/METADATA.pb">DM Mono</a> не содержат кириллицу.</p>
+    </section>
+    <section id="edition" class="section edition-band"><div class="wrap">
+      <div class="section-heading"><p class="section-number">06 / Редакционная полоса</p><h2>У выпуска есть лицо.</h2><p>Номер, дата, тема и первоисточник задают ритм чтения. Сохранение и раскрытие источников работают в этом демонстрационном выпуске.</p></div>
+      <div class="edition"><div class="edition-masthead"><img src="./logo-reporta.png" alt="Reporta" width="760" height="216"><div class="meta">Демонстрационный выпуск<br>№ 024 / 21.09.2026</div></div><div class="edition-heading"><h3>Ваш утренний взгляд.</h3><span class="meta">2 истории / 6 минут</span></div><div class="story-grid">
+        <article class="story"><div class="story-picture"><img src="./illustrations/observer.webp" width="1254" height="1254" alt="Читательница с газетой" loading="lazy"></div><div class="story-content"><div class="story-kicker"><span class="meta">01 / Внимание</span><button type="button" class="icon-button bookmark" aria-label="Сохранить историю о чтении" aria-pressed="false" title="Сохранить"><img src="./icons/bookmark.svg" alt=""></button></div><h4><button type="button" class="story-title" data-open-article>Что остаётся после прочитанного</button></h4><p>Отложить одну мысль, вернуться к ней вечером и посмотреть, изменилась ли она. Маленький ритуал внимательного чтения.</p><div class="story-footer"><span class="meta">Редакционный пример / 3 мин</span><button class="text-button" type="button" data-open-article>Читать <img src="./icons/arrow.svg" alt=""></button></div><details><summary>Источник и контекст</summary><p>Демонстрационный текст Reporta. В рабочем выпуске здесь будут ссылка на исходную публикацию, автор и дата. Эти материалы не выданы за реальные новости.</p></details></div></article>
+        <article class="story"><div class="story-picture"><img src="./illustrations/city.webp" width="1536" height="1024" alt="Городская панорама" loading="lazy"></div><div class="story-content"><div class="story-kicker"><span class="meta">02 / Город</span><button type="button" class="icon-button bookmark" aria-label="Сохранить историю о городе" aria-pressed="false" title="Сохранить"><img src="./icons/bookmark.svg" alt=""></button></div><h4><button type="button" class="story-title" data-open-article="city">Город, который замечаешь заново</button></h4><p>Знакомая улица меняется, когда перестаёшь смотреть только на маршрут. Истории можно искать и по дороге домой.</p><div class="story-footer"><span class="meta">Редакционный пример / 3 мин</span><button class="text-button" type="button" data-open-article="city">Читать <img src="./icons/arrow.svg" alt=""></button></div><details><summary>Источник и контекст</summary><p>Демонстрационный текст Reporta. Метаданные и гравюра показывают композицию выпуска, а не подтверждают конкретное событие.</p></details></div></article>
+      </div></div>
+    </div></section>
+    <section id="motion" class="section wrap">
+      <div class="section-heading"><p class="section-number">07 / Движение</p><h2>Короткий знак внимания.</h2><p>Один мягкий вход на 900 мс: небольшой сдвиг и поворот целого знака. Движение заканчивается, чтение продолжается.</p></div>
+      <div class="motion-layout"><div class="motion-stage" id="motion-stage"><div class="motion-mark"><img src="./mark-reporta.png" width="300" height="152" alt="Знак Reporta, пример движения"></div><p class="meta">Нашлось кое-что интересное.</p></div><div class="motion-settings"><div class="motion-controls"><button type="button" class="button secondary" id="replay"><img src="./icons/replay.svg" alt="">Повторить</button><label class="toggle"><input type="checkbox" id="motion-enabled" checked><span>Анимация</span></label></div><dl class="spec-list"><div><dt>Длительность</dt><dd>900 мс</dd></div><div><dt>Смещение</dt><dd>8 px → 0</dd></div><div><dt>Поворот</dt><dd>−3° → 0°</dd></div><div><dt>Повтор</dt><dd>Один раз при появлении</dd></div></dl><p class="caption" id="motion-note">Системная настройка уменьшения движения отключает анимацию. Геометрия знака остаётся неизменной.</p></div></div>
+    </section>
+    <section id="art-modes" class="section gallery-band"><div class="wrap">
+      <div class="section-heading"><p class="section-number">08 / Акцент</p><h2>Одна гравюра.<br>Три интонации.</h2><p>Базовая графика чёрно-белая. В особых материалах появляется один цветовой жест: красная редакционная отметка или голубое поле.</p></div><fieldset class="segmented mode-picker"><legend class="sr-only">Цветовая версия иллюстрации</legend><label><input type="radio" name="art-mode" value="mono" checked><span>Гравюра</span></label><label><input type="radio" name="art-mode" value="signal"><span>Сигнал</span></label><label><input type="radio" name="art-mode" value="iris"><span>Фокус</span></label></fieldset>
+      <div class="art-composition" data-art-mode="mono"><div class="art-composition-copy"><span class="meta">Reporta / Editorial series</span><h3>Всё начинается<br>с любопытства.</h3><p id="art-caption">Чёрно-белая версия. Базовая иллюстрация для выпуска.</p><img class="art-accent-mark" src="./mark-reporta.png" width="300" height="152" alt=""></div><img class="art-composition-image" src="./illustrations/observer.webp" alt="Вариант композиции с портретом читательницы" width="1254" height="1254" loading="lazy"></div>
+    </div></section>
+    <section id="product" class="section wrap">
+      <div class="section-heading"><p class="section-number">09 / Внутри продукта</p><h2>Уместный в малом.</h2><p>Знак встречает в ключевые моменты. В рабочей ленте главными остаются текст и управление. Здесь показаны интерактивные образцы состояний.</p></div>
+      <div class="product-demo"><div class="product-toolbar"><span class="meta">Reporta / UI states</span><div role="tablist" aria-label="Состояния продукта" class="state-tabs"><button role="tab" id="tab-loading" aria-controls="state-panel" aria-selected="true" data-state="loading">Сборка</button><button role="tab" id="tab-empty" aria-controls="state-panel" aria-selected="false" tabindex="-1" data-state="empty">Пусто</button><button role="tab" id="tab-found" aria-controls="state-panel" aria-selected="false" tabindex="-1" data-state="found">Найдено</button><button role="tab" id="tab-export" aria-controls="state-panel" aria-selected="false" tabindex="-1" data-state="export">Экспорт</button></div></div>
+      <div id="state-panel" class="state-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-loading"><img class="state-mark" src="./mark-reporta.png" width="300" height="152" alt=""><h3 id="state-title">Собираем ваш выпуск</h3><p id="state-copy">Сверяем источники и объединяем повторяющиеся сюжеты.</p><div id="state-progress" class="state-progress" role="progressbar" aria-label="Пример индикатора сборки без оценки времени"><span></span></div><button type="button" class="button secondary" id="state-action" hidden><img src="./icons/plus.svg" alt=""><span>Добавить источник</span></button><p class="caption state-caption">Демонстрация состояния · без обращения к вашему аккаунту</p></div></div>
+    </section>
+    <section id="photography" class="section photo-band"><div class="wrap">
+      <div class="section-heading"><p class="section-number">10 / Фотография</p><h2>Жизнь в кадре.<br>Характер на полях.</h2><p>Люди за настоящим занятием, естественный свет, открытые тени. Знак размещается в свободном поле. Лицо, руки и смысловой центр остаются видимыми.</p></div>
+      <div class="photo-layout"><div class="photo-workspace"><div class="photo-frame" data-crop="landscape"><img class="photo-image" src="./photography/reader.webp" width="1536" height="1024" alt="Образец арт-дирекшена: мужчина читает газету за столиком кафе" loading="lazy"><img class="photo-mark" src="./mark-reporta.png" width="300" height="152" alt="Знак Reporta на свободном поле фотографии"></div></div><div class="crop-controls"><fieldset><legend class="meta">Формат кадра</legend><label><input type="radio" name="crop" value="landscape" checked><span><b>3:2</b> Статья</span></label><label><input type="radio" name="crop" value="square"><span><b>1:1</b> Карточка</span></label><label><input type="radio" name="crop" value="portrait"><span><b>4:5</b> Социальные сети</span></label></fieldset><dl class="spec-list"><div><dt>Фокус</dt><dd>Человек и действие</dd></div><div><dt>Поля знака</dt><dd>Не менее 6%</dd></div><div><dt>Обработка</dt><dd>Нейтральная ч/б</dd></div></dl><p class="caption">AI-фотография для демонстрации стиля. В редакционных материалах используются реальные снимки с авторством и правами; документальные фото не подменяются генерацией.</p></div></div>
+    </div></section>
+    <section id="downloads" class="section wrap downloads">
+      <div class="section-heading"><p class="section-number">В работу</p><h2>Всё под рукой.</h2><p>Готовые файлы, локальные шрифты, CSS-токены и правила. Страница открывается и с диска, и на сайте.</p></div>
+      <div class="download-row"><div><h3>Reporta brand kit / v2</h3><p class="caption">Логотипы, favicon, 3 гравюры, фото, шрифты, правила и исходники страницы.</p></div><a class="button" href="./reporta-brand-kit.zip" download><img src="./icons/download.svg" alt="">Скачать всё</a></div>
+      <div class="download-links"><a href="./logo-reporta.svg" download>Логотип / SVG-контейнер <img src="./icons/download.svg" alt=""></a><a href="./logo-reporta-approved-transparent.png" download>Логотип / PNG <img src="./icons/download.svg" alt=""></a><a href="./mark-reporta.png" download>Змейка / PNG <img src="./icons/download.svg" alt=""></a><a href="./tokens.css" download>CSS-токены <img src="./icons/download.svg" alt=""></a><a href="./GUIDELINES.md" download>Правила бренда <img src="./icons/download.svg" alt=""></a><a href="./ASSETS.md" download>Файлы и происхождение <img src="./icons/download.svg" alt=""></a></div>
+      <p class="caption">SVG логотипа содержит утверждённый растр: изображение сохранено 1:1, но это не векторные контуры. PNG со змейкой имеет исходный размер 300 × 152 px; для крупной печати нужен отдельный векторный мастер.</p>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="wrap"><img src="./mark-reporta.png" width="300" height="152" alt=""><p>Смотреть внимательнее.</p><a href="https://news.tomko.io/">Открыть Reporta <img src="./icons/arrow.svg" alt=""></a><span class="meta">Brand system / v2 / 2026</span></div></footer>
+  <div class="toast" role="status" aria-live="polite" id="toast"></div>
+  <dialog id="article-dialog"><div class="dialog-header"><span class="meta">Reporta / Редакционный пример</span><button type="button" class="icon-button" data-close-dialog aria-label="Закрыть" title="Закрыть"><img src="./icons/close.svg" alt=""></button></div><h2 id="article-title">Что остаётся после прочитанного</h2><p id="article-text">Попробуйте оставить от сегодняшнего чтения одну мысль. Не самый громкий заголовок, а то, к чему хочется вернуться. Запишите её своими словами. Иногда именно эта пауза превращает поток новостей в собственную картину мира.</p><p class="caption">Это пример голоса и оформления Reporta, не новостная публикация.</p><button type="button" class="button secondary" data-close-dialog>Вернуться к выпуску</button></dialog>
+  <dialog id="source-dialog"><form id="source-form"><div class="dialog-header"><span class="meta">Демонстрация / Источник</span><button type="button" class="icon-button" data-close-dialog aria-label="Закрыть" title="Закрыть"><img src="./icons/close.svg" alt=""></button></div><h2>Откуда читаем?</h2><label class="field-label" for="source-url">Адрес сайта или RSS</label><input id="source-url" name="source" type="url" placeholder="https://example.com/feed" required><p class="caption">Ссылка останется только в этом примере. Реальный список источников не изменится.</p><button type="submit" class="button">Добавить в пример <img src="./icons/plus.svg" alt=""></button></form></dialog>
+</body>
 </html>
