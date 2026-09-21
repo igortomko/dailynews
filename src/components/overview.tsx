@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { QUIET } from "@/lib/quiet";
 import { useLocale, useT } from "@/components/i18n-provider";
 import { formatDay } from "@/lib/relative-time";
 import { move, overviewMarkdown, overviewText, type Overview } from "@/lib/overview";
@@ -154,15 +155,6 @@ function Bar({
  */
 const FIELD =
   "-mx-2 w-[calc(100%+1rem)] rounded-md border-transparent bg-transparent px-2 shadow-none transition-colors hover:bg-muted focus-visible:border-transparent focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent dark:hover:bg-muted dark:focus-visible:bg-muted";
-
-/**
- * Что показывается только по наведению на блок или по фокусу внутри него.
- * На тапе наведения нет — там видно всегда, иначе кнопки были бы спрятаны
- * навсегда. Прозрачностью, а не `hidden`: место держится, строка не прыгает,
- * а с клавиатуры кнопки достижимы и проявляются вместе с фокусом.
- */
-const QUIET =
-  "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
 
 /**
  * Кнопка в строке блока: стрелка или крестик, с подсказкой.
