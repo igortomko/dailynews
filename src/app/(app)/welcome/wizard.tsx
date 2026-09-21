@@ -265,24 +265,8 @@ export function InterestsStep({
         {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
             а отдельный экран стал бы решением, которое нельзя пропустить. */}
         <div className="mt-2 flex flex-col gap-6 border-t pt-6">
-          <NameRules
-            kind="follow"
-            initial={follow}
-            label="За чем следить"
-            hint="необязательно"
-            description="Компании, продукты, люди. Упомянутое встанет в своей теме первым. Ищется по написанию: «Figma» не найдёт «Фигму», добавь оба."
-            placeholder="Figma, Framer, Webflow"
-            onChange={setFollow}
-          />
-          <NameRules
-            kind="exclude"
-            initial={exclude}
-            label="Что исключать"
-            hint="необязательно"
-            description="Имена, продукты, фразы. Упомянутое в выпуск не попадёт. Тоже по написанию, без перевода."
-            placeholder="Название компании, имя, фраза"
-            onChange={setExclude}
-          />
+          <NameRules kind="follow" initial={follow} optional onChange={setFollow} />
+          <NameRules kind="exclude" initial={exclude} optional onChange={setExclude} />
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
