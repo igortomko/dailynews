@@ -36,5 +36,5 @@ alter table dailynews.items
       to_tsvector('russian'::regconfig, coalesce(title, '') || ' ' || coalesce(excerpt, ''))
     ) stored;
 
-insert into dailynews.migrations (name) values ('0046_search_vectors')
+insert into dailynews.migrations (name) values ('0048_search_vectors')
   on conflict (name) do nothing;

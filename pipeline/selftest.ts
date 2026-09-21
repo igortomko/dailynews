@@ -2872,12 +2872,12 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
 
   // Словарь один на векторы и на запрос, и это константа: хранимые tsvector
-  // (миграция 0046) считаются Postgres тем же словарём, и любое другое
+  // (миграция 0048) считаются Postgres тем же словарём, и любое другое
   // значение здесь искало бы слова, которых в разобранном тексте нет
   // по построению. Совпадение проверяется по самому файлу миграции, а не
   // по памяти: две копии одного решения расходятся молча.
   assert.equal(SEARCH_CONFIG, "russian", "латиницу разбирает тем же стеммером, кириллицу сводит только он");
-  const vectors = readFileSync("db/migrations/0046_search_vectors.sql", "utf8");
+  const vectors = readFileSync("db/migrations/0048_search_vectors.sql", "utf8");
   assert.equal(
     vectors.split(`to_tsvector('${SEARCH_CONFIG}'::regconfig`).length - 1,
     2,

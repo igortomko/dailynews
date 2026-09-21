@@ -15,5 +15,5 @@ alter table dailynews.items
   add column if not exists body_chars int
     generated always as (length(regexp_replace(body, '<[^>]*>', '', 'g'))) stored;
 
-insert into dailynews.migrations (name) values ('0045_item_body_chars')
+insert into dailynews.migrations (name) values ('0047_item_body_chars')
   on conflict (name) do nothing;
