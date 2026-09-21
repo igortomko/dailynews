@@ -28,6 +28,9 @@ Original references: `logo-reporta-approved.png`, `sources/mark-reporta-approved
 `sources/logo-reporta-traced.svg` preserves the old lettering as a traced comparison,
 not as the canonical logo. The continuous wordmark snake is a Bezier reconstruction
 with a smooth manually drawn Bezier head. No traced head fragments remain.
+The body is aligned to the middle of the new wordmark, passing through R, p
+and o counters behind left stems and in front of right strokes. It exits a
+at counter height without dipping below the baseline. Head and eyes are unchanged.
 Flat vector color replaces the original raster texture.
 
 Rebuild: `node scripts/build-brand-identity.mjs`. Requires Potrace 1.16 and uv;
@@ -67,6 +70,8 @@ to rebuild all pairs. Illustrations are raster assets, not vector paths.
 at the same type scale. Pair adjustments per 1000 em: Re -6, ep -12, po -22,
 or -10, rt +12, ta -14. These are added to native font kerning, not substituted
 for it. The wordmark geometry is unchanged except for horizontal glyph positions.
+Both kerning samples use the updated snake flow. The earlier low-snake logo is
+preserved separately as `type-study/dm-serif-display-low-snake.svg`.
 Use `scripts/build-brand-wordmark.py --native-kerning --output-dir OUTPUT` for
 the uncorrected comparison. The default exports the corrected canonical logo.
 Literata 600/650/700, Bodoni and earlier candidates remain historical samples.
