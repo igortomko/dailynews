@@ -679,16 +679,27 @@ async function fillDigest(reader: Reader) {
 
   // Вторая петля измерения не пропускается: иначе догруженные описания
   // не попадут в ряд по дням, и ряд начнёт врать о том, что читатель видел.
-  const quality = written.accounted ? null : await scoreSummaries(
-    written.items.map((item) => ({
-      id: Number(item.id), title: item.title_ru, summary: item.summary,
-    })),
-    reader.reader_context,
-  );
-  if (quality) await recordCall({
-    readerId: reader.id, stage: "summary", model: quality.model,
-    tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
-  });
+  //
+  // Но и уронить выпуск она не должна. Петля меряет наш промпт — она про нас,
+  // а не про читателя, — и стоит после того, как описания уже написаны
+  // и оплачены. Без этой обёртки молчащий Jev забирал с собой весь первый
+  // выпуск нового читателя: текст есть, деньги потрачены, в базе ничего.
+  // Ряд по дням в такой день просто короче, и это видно.
+  let quality: Awaited<ReturnType<typeof scoreSummaries>> | null = null;
+  try {
+    quality = written.accounted ? null : await scoreSummaries(
+      written.items.map((item) => ({
+        id: Number(item.id), title: item.title_ru, summary: item.summary,
+      })),
+      reader.reader_context,
+    );
+    if (quality) await recordCall({
+      readerId: reader.id, stage: "summary", model: quality.model,
+      tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
+    });
+  } catch (error) {
+    console.error(`качество описаний не измерено: ${(error as Error).message}`);
+  }
 
   const writtenById = new Map(written.items.map((item) => [String(item.id), item]));
   const qualityById = new Map((quality?.scored ?? []).map((row) => [String(row.item_id), row]));
@@ -736,7 +747,11 @@ async function fillDigest(reader: Reader) {
     await tx`
       update dailynews.digests
          set stats = coalesce(stats, '{}'::jsonb)
-                   || jsonb_build_object('reading_target', ${Number(target.toFixed(1))})
+                   -- Каст обязателен: у jsonb_build_object аргумент
+                   -- полиморфный ("any"), и тип нетипизированного параметра
+                   -- Postgres вывести не может — запрос падает на разборе,
+                   -- до единой строки данных. Тот же урок, что с date - ?.
+                   || jsonb_build_object('reading_target', ${Number(target.toFixed(1))}::real)
        where id = ${digestId}
     `;
 
@@ -774,7 +789,11 @@ async function fillDigest(reader: Reader) {
     for (const [index, survivor] of fitting.entries()) {
       const text = writtenById.get(String(survivor.id));
       const scored = qualityById.get(String(survivor.id));
-      const inserted = await tx<{ id: number }[]>`
+      // Возвращаем item_id, а не id: у digest_items нет собственного ключа,
+      // он составной — (digest_id, item_id). `returning id` падал здесь
+      // на каждом вызове, и видно это было только по вежливому «не получилось
+      // собрать выпуск»: у нового читателя первый выпуск не собирался вовсе.
+      const inserted = await tx<{ item_id: number }[]>`
         insert into dailynews.digest_items
           (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score)
         values (
@@ -788,7 +807,7 @@ async function fillDigest(reader: Reader) {
         set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document
         where dailynews.digest_items.summary_document->>'status'='unavailable'
           and excluded.summary_document->>'status'='verified'
-        returning id::int as id
+        returning item_id::int as item_id
       `;
       rows += inserted.length;
     }

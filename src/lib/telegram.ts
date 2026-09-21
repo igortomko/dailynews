@@ -1,4 +1,5 @@
 import { equal } from "./auth";
+import { localeOf, type Locale } from "./i18n/locale";
 import { formatMinutesLong, isShort, shortfallNote } from "./reading-time";
 
 /**
@@ -35,7 +36,7 @@ export function checkSecret(header: string | null, envName = "TELEGRAM_WEBHOOK_S
 }
 
 export type BotCommand =
-  | { kind: "start"; telegramId: number; chatId: number; username: string | null }
+  | { kind: "start"; telegramId: number; chatId: number; username: string | null; locale: Locale }
   | { kind: "help"; chatId: number }
   /** Присланная ссылка: бот заводит по ней источник, как форма в вебе. */
   | { kind: "link"; telegramId: number; chatId: number; text: string }
@@ -44,19 +45,19 @@ export type BotCommand =
   /** Нажал «продолжать» под вопросом спящему: лента включается обратно. */
   | { kind: "resume"; telegramId: number; chatId: number; afterDays: number; callbackId: string }
   /** Нажал «Я подписался» под гейтом: проверяем подписку заново. */
-  | { kind: "subscribed"; telegramId: number; chatId: number; username: string | null; callbackId: string }
+  | { kind: "subscribed"; telegramId: number; chatId: number; username: string | null; locale: Locale; callbackId: string }
   | { kind: "ignore" };
 
 type Update = {
   message?: {
     text?: unknown;
     chat?: { id?: unknown; type?: unknown };
-    from?: { id?: unknown; is_bot?: unknown; username?: unknown };
+    from?: { id?: unknown; is_bot?: unknown; username?: unknown; language_code?: unknown };
   };
   callback_query?: {
     id?: unknown;
     data?: unknown;
-    from?: { id?: unknown; is_bot?: unknown; username?: unknown };
+    from?: { id?: unknown; is_bot?: unknown; username?: unknown; language_code?: unknown };
     message?: { chat?: { id?: unknown } };
   };
 };
@@ -68,6 +69,21 @@ export const FINISHED_PREFIX = "fin";
 export const RESUME_PREFIX = "res";
 /** «Я подписался» под предложением подписаться на канал. */
 export const SUBSCRIBED_PREFIX = "sub";
+
+/**
+ * Язык интерфейса, как его называет Telegram.
+ *
+ * `language_code` приходит в каждом апдейте и выглядит как «ru», «ru-RU»,
+ * «en-US». Берём первую часть: страна нам ни о чём не говорит, а список
+ * словарей короткий, и незнакомое значение `localeOf` уже сводит
+ * к языку по умолчанию.
+ *
+ * Без этого каждый новый читатель получал английский интерфейс независимо
+ * от того, на каком языке он написал боту: ошибки нет, экран открывается,
+ * просто не на его языке.
+ */
+export const localeFromTelegram = (code: unknown): Locale =>
+  localeOf(typeof code === "string" ? code.split("-")[0].toLowerCase() : undefined);
 
 const isId = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value);
@@ -109,6 +125,7 @@ export function parseUpdate(update: unknown): BotCommand {
         telegramId: from,
         chatId: isId(chat) ? chat : from,
         username,
+        locale: localeFromTelegram(callback.from?.language_code),
         callbackId: id,
       };
     }
@@ -143,7 +160,10 @@ export function parseUpdate(update: unknown): BotCommand {
   const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
   if (command === "/start") {
     const username = typeof message.from?.username === "string" ? message.from.username : null;
-    return { kind: "start", telegramId, chatId, username };
+    return {
+      kind: "start", telegramId, chatId, username,
+      locale: localeFromTelegram(message.from?.language_code),
+    };
   }
   // Прислали ссылку — значит, хотят завести источник. Это тот же жест,
   // что и вставить её в форму, и отвечать на него подсказкой «напиши /start»

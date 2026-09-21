@@ -16,6 +16,7 @@ export const onboarding = {
       customLabel: "Custom interest",
       customPlaceholder: "In your own words: e.g. fintech in Brazil",
       add: "Add",
+      more: (n: number) => `${n} more`,
       full: (planLabel: string) =>
         `That's the full set on the ${planLabel} plan. More interests are available on a paid plan, under Subscription.`,
     },
@@ -34,6 +35,7 @@ export const onboarding = {
         `From now on, your digest arrives ${everyOtherDay ? "every other day" : "every night"}; the link is in the bot. Thanks for reading.`,
       openFeed: "Open feed",
       dontClose: "Don't close this tab.",
+      elapsed: (seconds: number) => `${seconds}s so far, usually about a minute`,
       noFreshItems: "No fresh stories for your topics yet — I'll build one tonight.",
       buildFailed: "Couldn't build the first digest — I'll try again tonight.",
       digestSummary: (added: number, topics: number) =>

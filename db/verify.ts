@@ -375,13 +375,65 @@ async function main() {
       return digest.id;
     };
 
+    /**
+     * Две формы запроса из сборки выпуска, которые не работали ни разу.
+     *
+     * `jsonb_build_object` принимает "any", и тип нетипизированного параметра
+     * Postgres вывести не может — запрос падает на разборе, до единой строки.
+     * У `digest_items` нет столбца `id`: ключ составной, и `returning id`
+     * падал на каждой вставке. Обе видны были только как вежливое
+     * «не получилось собрать первый выпуск»: у нового читателя первый выпуск
+     * не собирался вовсе, а ночной прогон пишет выпуск своим кодом и потому
+     * работал.
+     */
+    const shapes = async (digestId: number, itemId: number) => {
+      await assert.rejects(
+        sql`select jsonb_build_object('reading_target', ${1.5}) as j`,
+        /determine data type/,
+        "без каста параметр в jsonb_build_object не типизируется — это и было причиной",
+      );
+      await sql`
+        update dailynews.digests
+           set stats = coalesce(stats, '{}'::jsonb)
+                     || jsonb_build_object('reading_target', ${1.5}::real)
+         where id = ${digestId}
+      `;
+      const [{ target }] = await sql<{ target: number }[]>`
+        select (stats->>'reading_target')::float as target
+          from dailynews.digests where id = ${digestId}`;
+      assert.equal(target, 1.5, "заказ дня ложится в stats, а не теряется");
+
+      const back = await sql<{ item_id: number }[]>`
+        insert into dailynews.digest_items (digest_id, item_id, total, position, title, summary)
+        values (${digestId}, ${itemId}, 1, 99, 'проба', 'S')
+        on conflict (digest_id, item_id) do nothing
+        returning item_id::int as item_id
+      `;
+      assert.equal(back.length, 0, "уже лежащий материал не вставляется второй раз");
+      await assert.rejects(
+        sql`
+          insert into dailynews.digest_items (digest_id, item_id, total, position, title, summary)
+          values (${digestId}, ${itemId}, 1, 98, 'проба', 'S')
+          on conflict (digest_id, item_id) do nothing
+          returning id::int as id
+        `,
+        /column "id" does not exist/,
+        "у digest_items нет собственного ключа — returning id падал на каждой вставке",
+      );
+      // Убираем за собой: заказ дня — предмет отдельной проверки ниже,
+      // и оставленное здесь значение сделало бы её бессмысленной.
+      await sql`update dailynews.digests set stats = '{}'::jsonb where id = ${digestId}`;
+      console.log("  формы запросов сборки: каст и составной ключ на месте");
+    };
+
     const today = new Date().toISOString().slice(0, 10);
     // Владельцу — два материала, второму читателю — один, и подписи разные:
     // текст персонален, потому что язык и манера персональны.
-    await makeDigest(owner.id, today, [
+    const ownerDigest = await makeDigest(owner.id, today, [
       { id: ids[0], total: 120, title: "Владелец: GPT-6" },
       { id: ids[2], total: 95, title: "Владелец: уран" },
     ]);
+    await shapes(ownerDigest, ids[0]);
     await makeDigest(second.id, today, [{ id: ids[3], total: 60, title: "Vera: CBT" }]);
 
     // Материал старше своего выпуска: без этого проверка ниже проходила бы

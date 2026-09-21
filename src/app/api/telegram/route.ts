@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    const reader = await ensureReader(command.telegramId, command.username);
+    const reader = await ensureReader(command.telegramId, command.username, command.locale);
 
     // Описание из профиля спрашиваем один раз и только у того, кто ещё
     // не настроился: оно нужно ровно на первом экране.
