@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { count } from "@/lib/plural";
+import { useLocale, useT } from "@/components/i18n-provider";
 import { formatDay } from "@/lib/relative-time";
 import { move, overviewMarkdown, overviewText, type Overview } from "@/lib/overview";
 
@@ -63,6 +63,7 @@ function Bar({
   onClear: () => void;
   onOpen: () => void;
 }) {
+  const t = useT().feed.overview;
   const bar = useRef<HTMLDivElement>(null);
 
   // Сколько места плашка занимает снизу — измеряется, а не записано числом
@@ -95,7 +96,7 @@ function Bar({
     >
       <div
         role="toolbar"
-        aria-label="Выбранные новости"
+        aria-label={t.toolbarLabel}
         className={cn(
           "pointer-events-auto flex max-w-page flex-wrap items-center justify-end gap-1 rounded-2xl py-1.5 pr-1.5 pl-4",
           "bg-foreground text-background shadow-lg shadow-black/20",
@@ -105,14 +106,14 @@ function Bar({
         {/* Живая область: число меняется от каждого нажатия, и диктору
             об этом надо сказать без перевода фокуса на плашку. */}
         <span aria-live="polite" className="mr-1 text-sm font-medium tabular-nums">
-          Выбрано: {selected}
+          {t.selected(selected)}
         </span>
         <Tooltip>
           <TooltipTrigger
             render={
               <button
                 type="button"
-                aria-label="Очистить выбор"
+                aria-label={t.clearAria}
                 onClick={onClear}
                 className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-background/70 transition-colors hover:bg-background/15 hover:text-background focus-visible:ring-3 focus-visible:ring-background/40 outline-none"
               />
@@ -120,7 +121,7 @@ function Bar({
           >
             <XIcon className="size-4" />
           </TooltipTrigger>
-          <TooltipContent>Снять выбор со всех карточек</TooltipContent>
+          <TooltipContent>{t.clearTooltip}</TooltipContent>
         </Tooltip>
         {/* «Собрать», а не «написать»: текст уже готов, модель здесь
             не зовётся, и обещать её работу было бы неправдой. */}
@@ -130,7 +131,7 @@ function Bar({
           className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-3 text-sm font-medium text-foreground transition-[background-color,scale] duration-150 outline-none hover:bg-background/90 focus-visible:ring-3 focus-visible:ring-background/40 active:scale-[0.97]"
         >
           <FileTextIcon className="size-4" />
-          Собрать обзор
+          {t.build}
         </button>
       </div>
     </div>
@@ -212,6 +213,8 @@ export function OverviewDialog({
   onOpenChange: (open: boolean) => void;
   onChange: (next: Overview) => void;
 }) {
+  const t = useT().feed.overview;
+  const locale = useLocale();
   const [copied, setCopied] = useState<"text" | "markdown" | null>(null);
   // Текст, который не удалось положить в буфер: остаётся на экране
   // выделенным, чтобы его можно было скопировать руками.
@@ -251,13 +254,11 @@ export function OverviewDialog({
       // обещала бы то, чего могло не случиться.
       setCopied(format);
       setFallback(null);
-      toast.success("Обзор скопирован");
+      toast.success(t.copied);
     } catch {
       setCopied(null);
       setFallback(text);
-      toast.warning("Браузер не дал доступ к буферу", {
-        description: "Текст ниже выделен — нажми Ctrl+C или ⌘C",
-      });
+      toast.warning(t.clipboardDeniedTitle, { description: t.clipboardDeniedDescription });
     }
   };
 
@@ -272,15 +273,13 @@ export function OverviewDialog({
         className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 p-0 sm:max-w-2xl"
       >
         <DialogHeader className="px-4 pt-4 pb-3">
-          <DialogTitle>Собрать обзор</DialogTitle>
-          <DialogDescription>
-            Выпуск за {formatDay(day)} · {count(blocks.length, "новость", "новости", "новостей")}
-          </DialogDescription>
+          <DialogTitle>{t.dialogTitle}</DialogTitle>
+          <DialogDescription>{t.issueOf(formatDay(day, locale), blocks.length)}</DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
           <Input
-            aria-label="Заголовок обзора"
+            aria-label={t.titleLabel}
             value={overview.title}
             onChange={(event) => update({ title: event.target.value })}
             className="font-medium"
@@ -288,8 +287,8 @@ export function OverviewDialog({
           {/* Вступление пишет человек. Дописать его за него — значит
               вложить в его уста вывод, которого он не делал. */}
           <Textarea
-            aria-label="Вступление"
-            placeholder="Вступление — необязательно"
+            aria-label={t.introLabel}
+            placeholder={t.introPlaceholder}
             value={overview.intro}
             onChange={(event) => update({ intro: event.target.value })}
             // Свой минимум у каждого поля: с field-sizing: content пустое
@@ -298,9 +297,7 @@ export function OverviewDialog({
           />
 
           {blocks.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              В обзоре не осталось новостей — отметь карточки в ленте.
-            </p>
+            <p className="py-6 text-center text-sm text-muted-foreground">{t.empty}</p>
           ) : (
             <ol className="flex flex-col gap-3">
               {blocks.map((block, index) => (
@@ -320,13 +317,13 @@ export function OverviewDialog({
                     </a>
                     <div className="ml-auto flex shrink-0 items-center">
                       <BlockAction
-                        label="Выше"
+                        label={t.up}
                         icon={ArrowUpIcon}
                         disabled={index === 0}
                         onClick={() => update({ blocks: move(blocks, index, index - 1) })}
                       />
                       <BlockAction
-                        label="Ниже"
+                        label={t.down}
                         icon={ArrowDownIcon}
                         disabled={index === blocks.length - 1}
                         onClick={() => update({ blocks: move(blocks, index, index + 1) })}
@@ -334,7 +331,7 @@ export function OverviewDialog({
                       {/* Убрать здесь — снять выбор в ленте: состав обзора
                           и отмеченные карточки — одно состояние. */}
                       <BlockAction
-                        label="Убрать из обзора"
+                        label={t.removeBlock}
                         icon={XIcon}
                         destructive
                         onClick={() =>
@@ -344,13 +341,13 @@ export function OverviewDialog({
                     </div>
                   </div>
                   <Textarea
-                    aria-label="Заголовок новости"
+                    aria-label={t.blockTitleLabel}
                     value={block.title}
                     onChange={(event) => patchBlock(block.id, { title: event.target.value })}
                     className="min-h-9 font-medium"
                   />
                   <Textarea
-                    aria-label="Описание"
+                    aria-label={t.blockSummaryLabel}
                     value={block.summary}
                     onChange={(event) => patchBlock(block.id, { summary: event.target.value })}
                     className="leading-relaxed"
@@ -364,7 +361,7 @@ export function OverviewDialog({
             <Textarea
               ref={field}
               readOnly
-              aria-label="Текст обзора для копирования руками"
+              aria-label={t.fallbackLabel}
               value={fallback}
               className="max-h-64 min-h-40 font-mono text-xs"
             />
@@ -381,11 +378,11 @@ export function OverviewDialog({
             onClick={() => copy("markdown")}
           >
             {copied === "markdown" ? <CheckIcon /> : <CopyIcon />}
-            Скопировать Markdown
+            {t.copyMarkdown}
           </Button>
           <Button disabled={blocks.length === 0} onClick={() => copy("text")}>
             {copied === "text" ? <CheckIcon /> : <CopyIcon />}
-            Скопировать обзор
+            {t.copy}
           </Button>
         </DialogFooter>
       </DialogContent>

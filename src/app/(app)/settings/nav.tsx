@@ -1,20 +1,40 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { FEATURES, type FeatureId, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
+import { useT } from "@/components/i18n-provider";
+import type { Dict } from "@/lib/i18n";
 
-const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
-  { href: "/settings/personalization", label: "Язык и подача" },
-  { href: "/settings/sources", label: "Источники" },
-  { href: "/settings/interests", label: "Интересы" },
-  { href: "/settings/delivery", label: "Доставка", feature: "delivery" },
-  { href: "/settings/channels", label: "Мои площадки", feature: "posts" },
-  { href: "/settings/subscription", label: "Подписка" },
-  { href: "/settings/about", label: "О проекте" },
+/**
+ * Подпись берётся из словаря по ключу, а не лежит строкой: список один
+ * на оба языка, и вторая его копия разъехалась бы с первой на первом же
+ * новом разделе.
+ */
+const SECTIONS: { href: string; label: (t: Dict) => string; feature?: FeatureId }[] = [
+  { href: "/settings/personalization", label: (t) => t.nav.personalization },
+  { href: "/settings/sources", label: (t) => t.nav.sources },
+  { href: "/settings/interests", label: (t) => t.nav.interests },
+  { href: "/settings/delivery", label: (t) => t.nav.delivery, feature: "delivery" },
+  { href: "/settings/channels", label: (t) => t.nav.channels, feature: "posts" },
+  { href: "/settings/subscription", label: (t) => t.nav.subscription },
+  { href: "/settings/about", label: (t) => t.nav.about },
 ];
+
+/**
+ * Раздел, который сейчас грузится. Разделы — серверные страницы, и между
+ * нажатием и новым содержимым проходит заметное время: без признака работы
+ * нажатие читается как «не сработало», и его повторяют. Тот же приём, что
+ * у стрелок дат в ленте: про переход знает сам Next, своё состояние рядом
+ * разошлось бы с настоящим при первой отмене.
+ */
+function Busy() {
+  const { pending } = useLinkStatus();
+  return pending ? <Spinner className="ml-1.5 inline-block size-3 align-[-1px]" /> : null;
+}
 
 /**
  * «Калибровки» в списке нет намеренно, а страница осталась и открывается
@@ -30,6 +50,7 @@ const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
  */
 export function SettingsNav({ plan }: { plan: Plan }) {
   const pathname = usePathname();
+  const t = useT();
 
   return (
     <nav className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
@@ -51,10 +72,11 @@ export function SettingsNav({ plan }: { plan: Plan }) {
                 : "text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground",
             )}
           >
-            {section.label}
+            {section.label(t)}
             {locked && section.feature ? (
               <PaywallCrown feature={section.feature} plan={plan} className="ml-1.5" />
             ) : null}
+            <Busy />
           </Link>
         );
       })}

@@ -1,0 +1,69 @@
+{
+  "font": "DM Serif Display",
+  "weight": 400,
+  "text": "Reporta",
+  "shaper": "HarfBuzz",
+  "unitsPerEm": 1000,
+  "pairPositioning": [
+    {
+      "letter": "R",
+      "pair": "Re",
+      "advance": 606,
+      "nominalAdvance": 628,
+      "nativeKerning": -16,
+      "opticalAdjustment": -6
+    },
+    {
+      "letter": "e",
+      "pair": "ep",
+      "advance": 485,
+      "nominalAdvance": 507,
+      "nativeKerning": -10,
+      "opticalAdjustment": -12
+    },
+    {
+      "letter": "p",
+      "pair": "po",
+      "advance": 562,
+      "nominalAdvance": 578,
+      "nativeKerning": 6,
+      "opticalAdjustment": -22
+    },
+    {
+      "letter": "o",
+      "pair": "or",
+      "advance": 535,
+      "nominalAdvance": 545,
+      "nativeKerning": 0,
+      "opticalAdjustment": -10
+    },
+    {
+      "letter": "r",
+      "pair": "rt",
+      "advance": 462,
+      "nominalAdvance": 441,
+      "nativeKerning": 9,
+      "opticalAdjustment": 12
+    },
+    {
+      "letter": "t",
+      "pair": "ta",
+      "advance": 347,
+      "nominalAdvance": 361,
+      "nativeKerning": 0,
+      "opticalAdjustment": -14
+    },
+    {
+      "letter": "a",
+      "pair": null,
+      "advance": 518,
+      "nominalAdvance": 518,
+      "nativeKerning": 0,
+      "opticalAdjustment": 0
+    }
+  ],
+  "tracking": 0,
+  "opticalKerning": true,
+  "outlines": true,
+  "note": "User-selected DM Serif Display Regular with manual pair adjustments added to native kerning. Comparisons share the same type scale. No synthetic bold or nonuniform scaling. Snake body, head and cyan eyes are unchanged vector geometry."
+}

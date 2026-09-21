@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input";
 export function SearchForm({
   defaultValue,
   placeholder,
+  label,
+  submitLabel,
   autoFocus,
   inputRef,
   onKeyDown,
@@ -25,6 +27,11 @@ export function SearchForm({
 }: {
   defaultValue?: string;
   placeholder: string;
+  /** aria-label поля: без «use client» здесь нет хука словаря, и подпись
+   *  приходит из словаря того, кто рисует форму — страницы или шапки. */
+  label: string;
+  /** Текст невидимой кнопки отправки, той же природы, что и `label`. */
+  submitLabel: string;
   /** Фокус при появлении. Годится там, где поле и появляется вместе
    *  со страницей; в шапке ленты оно есть всегда, и фокус ставится
    *  по `inputRef`, когда его раскрыли. */
@@ -45,7 +52,7 @@ export function SearchForm({
         ref={inputRef}
         enterKeyHint="search"
         placeholder={placeholder}
-        aria-label="Поиск по выпускам"
+        aria-label={label}
         onKeyDown={onKeyDown}
         className="h-10 sm:h-8"
       />
@@ -54,7 +61,7 @@ export function SearchForm({
           и проверить его нечем. Явная кнопка отправляет форму везде
           одинаково и даёт клавиатуре и читалке экрана то, что нажимают. */}
       <button type="submit" className="sr-only">
-        Найти
+        {submitLabel}
       </button>
       {children}
     </form>

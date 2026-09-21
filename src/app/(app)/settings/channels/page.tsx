@@ -1,8 +1,9 @@
 import { currentReader } from "@/lib/session";
 import { getChannels } from "@/lib/readers";
 import { effectivePlan } from "@/lib/lemon";
-import { allows, FEATURES } from "@/lib/plans";
+import { allows } from "@/lib/plans";
 import { PlanGate } from "@/components/plan-gate";
+import { getDict } from "@/lib/i18n/server";
 import { ChannelsForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -18,12 +19,13 @@ export default async function ChannelsPage({
   // Заглушка, а не редирект: читатель должен увидеть, что раздел есть
   // и чего он стоит. Молча вернуть на ленту — отказ, похожий на поломку.
   if (!allows(plan, "posts")) {
+    const t = await getDict();
     return (
       <PlanGate
         section="posts"
         plan={plan}
-        title="Мои площадки"
-        what={FEATURES.posts.what}
+        title={t.nav.channels}
+        what={t.plans.feature.posts.what}
       />
     );
   }

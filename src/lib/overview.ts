@@ -1,5 +1,3 @@
-import { formatDay } from "./relative-time";
-
 /**
  * Обзор для коллег: несколько новостей выпуска, собранных в один текст.
  *
@@ -44,9 +42,6 @@ export const blockOf = (item: {
   source: item.source_label,
   url: item.url,
 });
-
-/** «Обзор за 21 сентября 2026 г.» — тем же форматом, каким дата стоит в шапке. */
-export const defaultTitle = (day: string) => `Обзор за ${formatDay(day)}`;
 
 /**
  * Сводит черновик с выбором в ленте.

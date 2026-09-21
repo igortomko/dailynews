@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Вход один: ссылка из бота. Она несёт номер читателя, поэтому сессия
@@ -22,15 +23,14 @@ export function LoginForm({
 }: { next: string; expired: boolean; bot: string | null }) {
   const [state, action, pending] = useActionState(login, null);
   const [showPassword, setShowPassword] = useState(false);
+  const t = useT();
 
   return (
     <Card className="w-full">
       <CardHeader>
         <CardTitle>Reporta</CardTitle>
         <CardDescription>
-          {expired
-            ? "Ссылка устарела — попроси у бота новую"
-            : "Бот пришлёт ссылку — и новости каждое утро"}
+          {expired ? t.onboarding.login.linkExpired : t.onboarding.login.tagline}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -38,12 +38,13 @@ export function LoginForm({
           {bot ? (
             <Button nativeButton={false} render={<a href={`https://t.me/${bot}?start=login`} />}>
               <SendIcon data-icon="inline-start" />
-              Войти через Telegram
+              {t.onboarding.login.viaTelegram}
             </Button>
           ) : (
             <FieldDescription>
-              Напиши боту <code className="font-mono">/start</code> — он пришлёт ссылку
-              на ленту. Она работает 10 минут.
+              {t.onboarding.login.botHintBefore}
+              <code className="font-mono">/start</code>
+              {t.onboarding.login.botHintAfter}
             </FieldDescription>
           )}
 
@@ -52,7 +53,7 @@ export function LoginForm({
               <input type="hidden" name="next" value={next} />
               <FieldGroup>
                 <Field data-invalid={state?.error ? true : undefined}>
-                  <FieldLabel htmlFor="password">Пароль</FieldLabel>
+                  <FieldLabel htmlFor="password">{t.onboarding.login.passwordLabel}</FieldLabel>
                   <Input
                     id="password"
                     name="password"
@@ -64,7 +65,7 @@ export function LoginForm({
                   {state?.error ? <FieldError>{state.error}</FieldError> : null}
                 </Field>
                 <Button type="submit" variant="outline" disabled={pending}>
-                  Войти
+                  {t.onboarding.login.signIn}
                 </Button>
               </FieldGroup>
             </form>
@@ -74,7 +75,7 @@ export function LoginForm({
               onClick={() => setShowPassword(true)}
               className="cursor-pointer self-start text-xs text-muted-foreground hover:text-foreground"
             >
-              Войти паролем
+              {t.onboarding.login.signInWithPassword}
             </button>
           )}
         </FieldGroup>

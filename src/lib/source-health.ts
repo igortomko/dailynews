@@ -1,4 +1,4 @@
-import { count } from "./plural";
+import { sources as ru } from "./i18n/ru/sources";
 
 /**
  * Был ли источник полезен лично этому читателю — и стоит ли его убрать.
@@ -83,16 +83,20 @@ export const MOSTLY_DUPLICATES = 0.5;
  * Числительное нигде не стоит подлежащим намеренно: «21 новость показано»
  * рассогласовано, а проверяют такие строки на сорока двух, где всё сходится
  * само.
+ *
+ * `t` по умолчанию русский: вызов без второго аргумента (в т.ч. в тесте)
+ * обязан вести себя как раньше, до словаря. Страница передаёт словарь
+ * читателя явно и получает те же числа на своём языке.
  */
-export function cleanupOf(source: SourceYield): string | null {
-  const perMonth = `${count(source.items, "новость", "новости", "новостей")} за месяц`;
+export function cleanupOf(source: SourceYield, t: typeof ru.cleanup = ru.cleanup): string | null {
+  const perMonth = t.itemsPerMonth(source.items);
 
   if (source.shown >= ENOUGH_SHOWN && source.opened / source.shown < RARELY_OPENED) {
-    return `${perMonth}, ${source.shown} показано, ${source.opened} открыто`;
+    return `${perMonth}, ${t.shownOpened(source.shown, source.opened)}`;
   }
 
   if (source.items >= ENOUGH_ITEMS && source.duplicates / source.items >= MOSTLY_DUPLICATES) {
-    return `${perMonth}, из них ${count(source.duplicates, "повтор", "повтора", "повторов")}`;
+    return `${perMonth}, ${t.mostlyDuplicates(source.duplicates)}`;
   }
 
   return null;

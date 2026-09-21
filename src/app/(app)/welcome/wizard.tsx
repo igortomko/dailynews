@@ -7,11 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { topicsWord, type Plan } from "@/lib/plans";
-import { count } from "@/lib/plural";
+import { type Plan } from "@/lib/plans";
+import { useT } from "@/components/i18n-provider";
 import { suggestOrder } from "@/lib/starter-topics";
 import type { Suggestion, TopicOption } from "@/lib/onboarding";
 import { finishOnboarding, saveOnboardingInterests, saveOnboardingSources } from "@/lib/actions";
+import { NameRules } from "@/components/name-rules";
+import type { Names } from "@/lib/rules";
 
 /**
  * Три экрана первого захода.
@@ -21,8 +23,6 @@ import { finishOnboarding, saveOnboardingInterests, saveOnboardingSources } from
  * читатель узнаёт от погасшей кнопки, читается как поломка, а тот же предел
  * в счётчике — как правило игры.
  */
-const STEPS = ["Интересы", "Источники", "Лента"];
-
 function Shell({
   step,
   title,
@@ -36,11 +36,12 @@ function Shell({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="mx-auto flex min-h-svh max-w-xl flex-col gap-6 px-4 py-10">
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          {STEPS.map((name, index) => (
+          {t.onboarding.wizard.steps.map((name, index) => (
             <div key={name} className="flex flex-1 flex-col gap-1.5">
               <div
                 className={cn(
@@ -75,9 +76,10 @@ function Shell({
 
 /** Счётчик выбранного. Число предела в нём — то же самое, что в проверке. */
 function Counter({ picked, limit }: { picked: number; limit: number }) {
+  const t = useT();
   return (
     <span className="text-sm tabular-nums text-muted-foreground">
-      {picked} из {limit}
+      {t.onboarding.wizard.counter(picked, limit)}
     </span>
   );
 }
@@ -125,13 +127,26 @@ export function InterestsStep({
   ranked: string[];
 }) {
   const router = useRouter();
+  const t = useT();
   const [pending, start] = useTransition();
   const [picked, setPicked] = useState<string[]>([]);
   const [mine, setMine] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  // Необязательное уточнение под темами. Сохраняется вместе с ними, до
+  // сборки первого выпуска: он собирается на последнем шаге и обязан
+  // это учесть.
+  const [follow, setFollow] = useState<Names[]>([]);
+  const [exclude, setExclude] = useState<Names[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const bySlug = new Map(options.map((option) => [option.slug, option]));
+  // Витрина стартовых интересов переведена в словаре по тому же slug;
+  // серверный label остаётся резервом для интереса, которого в витрине нет.
+  const bySlug = new Map(
+    options.map((option) => [
+      option.slug,
+      { ...option, label: t.onboarding.starterTopics[option.slug]?.label ?? option.label },
+    ]),
+  );
   const total = picked.length + mine.length;
   const full = total >= plan.maxTopics;
   // Соседи выбранного всплывают наверх: «ИИ» тянет за собой «Разработку»
@@ -161,28 +176,36 @@ export function InterestsStep({
   const next = () =>
     start(async () => {
       try {
-        const result = await saveOnboardingInterests(picked, mine);
+        const result = await saveOnboardingInterests(picked, mine, follow, exclude);
         if (result?.error) setError(result.error);
         else router.refresh();
       } catch {
         // Серверное действие может не вернуть отказ, а броситься: без этой
         // ветки нажатие выглядит съеденным — кнопка отжимается, и ничего
         // не происходит.
-        setError("Не получилось сохранить — попробуй ещё раз");
+        setError(t.onboarding.wizard.saveError);
       }
     });
 
   return (
     <Shell
       step={0}
-      title="О чём собирать ленту"
-      lead={`Выбери до ${plan.maxTopics} ${topicsWord(plan.maxTopics)} — по ним лента делит выпуск, чтобы одна тема не заняла всё. Поменять можно в любой день.`}
+      title={t.onboarding.wizard.interests.title}
+      lead={t.onboarding.wizard.interests.lead(plan.maxTopics)}
       footer={
         <div className="flex items-center justify-between gap-3">
           <Counter picked={total} limit={plan.maxTopics} />
-          <Button onClick={next} disabled={total === 0 || pending}>
+          {/* Фокус не забирается: уход из поля списка добавляет чип, контент
+              растёт, и липкий футер сдвигается на высоту отступа — клик
+              по «Дальше» пропадал. Набранное в поле и так уходит в список
+              (см. NameRules). */}
+          <Button
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={next}
+            disabled={total === 0 || pending}
+          >
             {pending ? <Spinner /> : null}
-            Дальше
+            {t.onboarding.wizard.next}
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         </div>
@@ -220,8 +243,8 @@ export function InterestsStep({
         <div className="flex gap-2">
           <Input
             value={draft}
-            aria-label="Свой интерес"
-            placeholder="Своими словами: например, финтех в Бразилии"
+            aria-label={t.onboarding.wizard.interests.customLabel}
+            placeholder={t.onboarding.wizard.interests.customPlaceholder}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter") return;
@@ -231,15 +254,36 @@ export function InterestsStep({
           />
           <Button type="button" variant="outline" onClick={addMine} disabled={full}>
             <PlusIcon data-icon="inline-start" />
-            Добавить
+            {t.onboarding.wizard.interests.add}
           </Button>
         </div>
 
         {full ? (
-          <p className="text-sm text-muted-foreground">
-            Это весь набор на тарифе «{plan.label}». Больше интересов — на платном, в «Подписке».
-          </p>
+          <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(t.plans.label[plan.id])}</p>
         ) : null}
+
+        {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
+            а отдельный экран стал бы решением, которое нельзя пропустить. */}
+        <div className="mt-2 flex flex-col gap-6 border-t pt-6">
+          <NameRules
+            kind="follow"
+            initial={follow}
+            label="За чем следить"
+            hint="необязательно"
+            description="Компании, продукты, люди. Упомянутое встанет в своей теме первым. Ищется по написанию: «Figma» не найдёт «Фигму», добавь оба."
+            placeholder="Figma, Framer, Webflow"
+            onChange={setFollow}
+          />
+          <NameRules
+            kind="exclude"
+            initial={exclude}
+            label="Что исключать"
+            hint="необязательно"
+            description="Имена, продукты, фразы. Упомянутое в выпуск не попадёт. Тоже по написанию, без перевода."
+            placeholder="Название компании, имя, фраза"
+            onChange={setExclude}
+          />
+        </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
     </Shell>
@@ -256,6 +300,7 @@ export function SourcesStep({
   suggestions: Suggestion[];
 }) {
   const router = useRouter();
+  const t = useT();
   const [pending, start] = useTransition();
   // Экран начинается заполненным, а не пустым: разбирать предложенное легче,
   // чем собирать с нуля, и читатель, который просто нажмёт «Дальше»,
@@ -282,21 +327,21 @@ export function SourcesStep({
         if (result?.error) setError(result.error);
         else router.refresh();
       } catch {
-        setError("Не получилось сохранить — попробуй ещё раз");
+        setError(t.onboarding.wizard.saveError);
       }
     });
 
   return (
     <Shell
       step={1}
-      title="Откуда читать"
-      lead={`Подобрал под ${topics.length > 1 ? "интересы" : "интерес"}: ${topics.join(", ")}. Снимай лишнее; свои ссылки добавишь потом — в настройках или прямо в боте.`}
+      title={t.onboarding.wizard.sources.title}
+      lead={t.onboarding.wizard.sources.lead(topics)}
       footer={
         <div className="flex items-center justify-between gap-3">
           <Counter picked={picked.length} limit={plan.maxSources} />
           <Button onClick={next} disabled={picked.length === 0 || pending}>
             {pending ? <Spinner /> : null}
-            Дальше
+            {t.onboarding.wizard.next}
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         </div>
@@ -335,7 +380,7 @@ export function SourcesStep({
 
         {full ? (
           <p className="mt-2 text-sm text-muted-foreground">
-            Тариф «{plan.label}» опрашивает {plan.maxSources} источников. Сними один, чтобы взять другой.
+            {t.onboarding.wizard.sources.full(t.plans.label[plan.id], plan.maxSources)}
           </p>
         ) : null}
         {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
@@ -353,6 +398,7 @@ export function SourcesStep({
  */
 export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
   const router = useRouter();
+  const t = useT();
   const [state, setState] = useState<"работаю" | "готово" | "пусто">("работаю");
   const [added, setAdded] = useState(0);
   const [note, setNote] = useState<string | null>(null);
@@ -369,29 +415,27 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
           setState("пусто");
           return;
         }
-        const count = (result && "added" in result ? result.added : 0) ?? 0;
-        setAdded(count);
-        setState(count > 0 ? "готово" : "пусто");
-        if (count === 0) setNote("Свежих материалов по твоим темам пока нет — соберу ночью.");
+        const added = (result && "added" in result ? result.added : 0) ?? 0;
+        setAdded(added);
+        setState(added > 0 ? "готово" : "пусто");
+        if (added === 0) setNote(t.onboarding.wizard.ready.noFreshItems);
       })
       // Без этой ветки упавший запрос оставляет экран со спиннером навсегда:
       // настройка сохранена, а выглядит как зависшая сборка.
       .catch(() => {
-        setNote("Не получилось собрать первый выпуск — соберу ночью.");
+        setNote(t.onboarding.wizard.ready.buildFailed);
         setState("пусто");
       });
-  }, []);
-
-  const when = plan.everyDays > 1 ? "через день" : "каждую ночь";
+  }, [t]);
 
   return (
     <Shell
       step={2}
-      title={state === "работаю" ? "Собираю первый выпуск" : "Лента готова"}
+      title={state === "работаю" ? t.onboarding.wizard.ready.buildingTitle : t.onboarding.wizard.ready.readyTitle}
       lead={
         state === "работаю"
-          ? "Отбираю из того, что уже собрано, и пишу описания. Минута-две."
-          : `Дальше выпуск будет приходить ${when}, ссылка — в бота. Спасибо, что читаешь.`
+          ? t.onboarding.wizard.ready.buildingLead
+          : t.onboarding.wizard.ready.readyLead(plan.everyDays > 1)
       }
       footer={
         state === "работаю" ? null : (
@@ -405,7 +449,7 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
               router.push("/");
             }}
           >
-            Открыть ленту
+            {t.onboarding.wizard.ready.openFeed}
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         )
@@ -414,18 +458,13 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
       {state === "работаю" ? (
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <Spinner />
-          Не закрывай вкладку.
+          {t.onboarding.wizard.ready.dontClose}
         </div>
       ) : (
         <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-          {added > 0 ? (
-            <p>
-              В первом выпуске {count(added, "материал", "материала", "материалов")} по{" "}
-              {topics} {topicsWord(topics)}.
-            </p>
-          ) : null}
+          {added > 0 ? <p>{t.onboarding.wizard.ready.digestSummary(added, topics)}</p> : null}
           {note ? <p>{note}</p> : null}
-          <p>Что читать и чего не хватает — видно в настройках: интересы, источники, подача.</p>
+          <p>{t.onboarding.wizard.ready.footerNote}</p>
         </div>
       )}
     </Shell>

@@ -115,11 +115,11 @@ export function excerptFrom(markdown: string, chars = EXCERPT_CHARS): string {
  * остался бы с оценкой по заголовку до конца окна, и шаг скоринга его
  * больше не увидит: он берёт только тех, у кого оценки нет.
  */
-async function writeText(sql: Sql, id: number, excerpt: string, body: string | null): Promise<void> {
+async function writeText(sql: Sql, id: number, excerpt: string, body: string | null, kind: "article_text" | "feed_text"): Promise<void> {
   await sql`delete from dailynews.scores where item_id = ${id}`;
   await sql`
     update dailynews.items
-       set excerpt = ${excerpt}, body = coalesce(${body}, body), enriched_at = now()
+       set excerpt = ${excerpt}, body = coalesce(${body}, body), enriched_at = now(), source_content_kind = ${kind}
      where id = ${id}
   `;
 }
@@ -152,7 +152,7 @@ export async function enrichArticles(
       // на страницу подписки и отвечает отказом.
       const stored = row.body ? stripHtml(row.body) : "";
       if (stored.length >= SHORT_EXCERPT) {
-        await writeText(sql, row.id, clipText(stored), null);
+        await writeText(sql, row.id, clipText(stored), null, "feed_text");
         done++;
         return;
       }
@@ -162,7 +162,7 @@ export async function enrichArticles(
       // Пустой excerpt писать нельзя: колонка not null, и «текст забрали,
       // но он пуст» ничем не лучше того, что было.
       if (!excerpt) throw new Error("после разбора не осталось текста");
-      await writeText(sql, row.id, excerpt, articleHtml(article.markdown) || null);
+      await writeText(sql, row.id, excerpt, articleHtml(article.markdown) || null, article.via === "feed" ? "feed_text" : "article_text");
       done++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
