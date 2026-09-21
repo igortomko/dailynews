@@ -186,7 +186,12 @@ export function FeedTabs({
               <TabsTrigger
                 key={tab.slug}
                 value={tab.slug}
-                className="px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
+                /* after:bottom-0 вместо штатных −5px: полоса вкладок
+                   прокручивается, а прокрутка по горизонтали обрезает и по
+                   вертикали — подчёркивание, вынесенное под нижний край
+                   вкладки, не рисовалось вовсе, и активная вкладка
+                   отличалась от соседних только насыщенностью текста. */
+                className="px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground group-data-horizontal/tabs:after:bottom-0 sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
               >
                 {tab.label}
                 <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>
