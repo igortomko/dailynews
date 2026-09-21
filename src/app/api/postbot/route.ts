@@ -79,9 +79,22 @@ export function parsePost(update: unknown): Incoming | null {
 }
 
 /**
- * Хозяин и только он. Бот пишет постов под чьим-то именем и тратит на это
- * деньги владельца: чужой telegram_id здесь означает «не отвечаем», а не
- * «заводим читателя».
+ * Замок на одном номере. Проверка стоит до базы и не зависит от неё:
+ * строка владельца — это данные, которые правятся, а `owner` может однажды
+ * оказаться не у того. Бот пишет посты под именем хозяина и тратит его
+ * деньги, поэтому здесь список из одного номера и никакой логики вокруг.
+ *
+ * Незаданная переменная означает «никому», а не «всем»: пустое окружение
+ * не должно открывать дверь — то же правило, что у секрета вебхука.
+ */
+function isOwner(telegramId: number): boolean {
+  const allowed = Number(process.env.POSTBOT_OWNER_ID);
+  return Number.isSafeInteger(allowed) && allowed > 0 && telegramId === allowed;
+}
+
+/**
+ * Читатель хозяина: из него берутся карточка голоса, сети и дневной потолок.
+ * Второй проверкой после номера, а не вместо неё.
  */
 async function ownerBy(telegramId: number): Promise<number | null> {
   const [row] = await sql<{ id: number }[]>`
@@ -92,6 +105,7 @@ async function ownerBy(telegramId: number): Promise<number | null> {
 }
 
 async function reply(incoming: Incoming): Promise<void> {
+  if (!isOwner(incoming.telegramId)) return;
   const readerId = await ownerBy(incoming.telegramId);
   if (!readerId) return;
 
