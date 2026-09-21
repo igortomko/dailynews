@@ -31,6 +31,7 @@ for (let i = 0; i < queue.length; i++) {
 for (let p = 0; p < mask.length; p++) if (!exterior[p]) mask[p] = 255;
 const temp = await mkdtemp(join(tmpdir(), 'reporta-mark-'));
 let contour;
+const headTransform = 'rotate(-8 210 65)';
 try {
   const smooth = await sharp(mask, { raw: { width, height, channels: 1 } }).blur(0.55).threshold(128).negate().toColourspace('b-w').raw().toBuffer();
   await writeFile(join(temp, 'mask.pgm'), Buffer.concat([Buffer.from(`P5\n${width} ${height}\n255\n`), smooth]));
@@ -41,12 +42,19 @@ try {
   const group = traced.querySelector('svg > g');
   assert(group, 'Missing mark contours');
   group.setAttribute('fill', '#FF462A');
-  contour = group.outerHTML;
+  const path = group.querySelector('path');
+  const subpaths = path.getAttribute('d').match(/M[^Mm]*?[zZ]/g);
+  assert.equal(subpaths?.length, 2, 'Expected separate closed head and body contours');
+  assert(subpaths[0].startsWith('M2323 '), 'Unexpected head contour; review trace before rotating');
+  const head = group.cloneNode(true);
+  head.querySelector('path').setAttribute('d', subpaths[0]);
+  path.setAttribute('d', subpaths[1]);
+  contour = `${group.outerHTML}<g transform="${headTransform}">${head.outerHTML}`;
 } finally { await rm(temp, { recursive: true, force: true }); }
-const source = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="152" viewBox="0 0 300 152" role="img" aria-labelledby="title"><title id="title">Reporta mark</title>${contour}<g fill="#FFFFFF"><circle cx="236" cy="39.5" r="13"/><circle cx="265.5" cy="39.5" r="13"/></g><g fill="#00B8EC"><circle cx="236" cy="39.5" r="7.5"/><circle cx="265.5" cy="39.5" r="7.5"/></g></svg>\n`;
+const source = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="152" viewBox="0 0 300 152" role="img" aria-labelledby="title"><title id="title">Reporta mark</title>${contour}<g fill="#FFFFFF"><circle cx="236" cy="39.5" r="13"/><circle cx="265.5" cy="39.5" r="13"/></g><g fill="#00B8EC"><circle cx="236" cy="39.5" r="7.5"/><circle cx="265.5" cy="39.5" r="7.5"/></g></g></svg>\n`;
 await writeFile(join(brand, 'sources/mark-reporta-clean.svg'), source);
 const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
-assert.equal(doc.querySelectorAll('path').length, 1);
+assert.equal(doc.querySelectorAll('path').length, 2);
 assert.equal(doc.querySelectorAll('circle').length, 4);
 assert.equal(doc.querySelectorAll('image, mask, filter').length, 0);
 await writeFile(join(brand, 'mark-reporta.svg'), source);
@@ -60,8 +68,8 @@ await writeFile(join(brand, 'favicon.svg'), favicon);
 export const markReport = {
   name: 'mark-reporta.svg', width: 300, height: 152,
   source: 'sources/mark-reporta-clean.svg',
-  paths: 1, eyeCircles: 4, opaqueHead: true,
-  note: 'Approved silhouette with enclosed eye cutouts filled before smoothing and tracing. No eye holes, masks or raster. Original eye centers and radii retained. Historical tracing IoU does not apply to this master.',
+  paths: 2, eyeCircles: 4, opaqueHead: true, headTransform,
+  note: 'Approved silhouette with enclosed eye cutouts filled before smoothing and tracing. Head and eyes rotated together 8 degrees upward; body unchanged. No eye holes, masks or raster. Eye geometry retained in head coordinates. Historical tracing IoU does not apply to this master.',
 };
 await writeFile(join(brand, 'mark-spec.json'), `${JSON.stringify(markReport, null, 2)}\n`);
 console.log('Exported clean vector mark and four favicon sizes.');

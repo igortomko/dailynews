@@ -11,7 +11,7 @@
 | logo-reporta-dark.svg / logo-reporta-dark.png | Transparent light lettering and red snake for dark backgrounds |
 | logo-reporta-on-dark.png | Light wordmark on a dark background, no white panel |
 | snake-reporta.svg | Standalone vector snake used inside the wordmark |
-| mark-reporta.png / mark-reporta.svg | Smoothed standalone snake, solid head and clean circular eyes |
+| mark-reporta.png / mark-reporta.svg | Smoothed standalone snake, head tilted 8 degrees upward with clean circular eyes |
 | favicon-16.png / favicon-32.png | Browser icon |
 | favicon-180.png / favicon-512.png / favicon.svg | Application and large icon |
 
