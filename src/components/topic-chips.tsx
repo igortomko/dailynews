@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useRef, useState } from "react";
-import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon } from "lucide-react";
+import Link from "next/link";
+import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon, CrownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,10 +10,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import { MIN_READING_MINUTES, READING_MINUTES, topicsWord, type Plan } from "@/lib/plans";
+import {
+  MIN_READING_MINUTES, READING_MINUTES, topicsWord, PLAN_IDS, PLANS, type Plan,
+} from "@/lib/plans";
 import { formatMinutes, itemsForMinutes } from "@/lib/reading-time";
 import { count, plural } from "@/lib/plural";
-import { usePaywall, PaywallCrown } from "@/components/paywall";
+import { usePaywall } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
@@ -107,6 +110,11 @@ export function TopicChips({
   /** Время показываем всё, какое есть в продукте: за чужим — корона. */
   const sizes = Array.from(new Set([...READING_MINUTES, minutes])).sort((a, b) => a - b);
 
+  /** Тарифы, где выпуск бывает длиннее: их имена стоят в подписи под кнопками. */
+  const bigger = PLAN_IDS
+    .filter((id) => PLANS[id].maxMinutes > plan.maxMinutes)
+    .map((id) => PLANS[id].label);
+
   const add = (label: string) => {
     const trimmed = label.trim();
     if (!trimmed) return;
@@ -167,82 +175,108 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        {/* Подпись связана с группой переключателей через aria-labelledby,
-            а не htmlFor: скрытое поле, в котором лежит значение, подписать
-            нельзя, а группа — не элемент формы. С htmlFor подпись называла
-            бы несуществующий элемент, то есть не называла бы ничего. */}
-        <FieldLabel id="digest-minutes-label" className="flex items-center gap-1.5">
-          Время чтения в выпуске
-          {plan.maxMinutes < READING_MINUTES[READING_MINUTES.length - 1] ? (
-            <PaywallCrown feature="digest" plan={plan} />
-          ) : null}
-        </FieldLabel>
+        <FieldLabel id="digest-minutes-label">Время чтения в выпуске</FieldLabel>
         {/* Заказывается время, а не штуки: «сорок новостей» не отвечает
             на вопрос, который задают перед чтением. Все пять значений видны
             сразу — за списком они прячутся по одному, и «сколько читать»
             превращается в два действия вместо одного. Значение вне списка
             (осталось от прежнего тарифа) стоит своим вариантом, пока его
             не сменили. */}
-        <ToggleGroup
-          aria-labelledby="digest-minutes-label"
-          value={[String(minutes)]}
-          onValueChange={(value: string[]) => {
-            const asked = Number(value[0]);
-            if (!value[0]) return;
-            // Время не с этого тарифа не гасится молча: молчаливый отказ
-            // читается как поломка переключателя.
-            if (asked > plan.maxMinutes) {
-              digestPaywall.open();
-              return;
-            }
-            setMinutes(asked);
-          }}
-          variant="outline"
-        >
-          {sizes.map((size) => {
-            const beyond = size > plan.maxMinutes;
-            return (
-              // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
-              // читателю, почему она погасла, становится нечем.
-              <ToggleGroupItem
-                key={size}
-                value={String(size)}
-                aria-label={`${size} ${plural(size, "минута", "минуты", "минут")}`}
-                aria-disabled={beyond || undefined}
-                className={beyond ? "text-muted-foreground/50" : undefined}
-              >
-                {size} мин
-              </ToggleGroupItem>
-            );
-          })}
-        </ToggleGroup>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <ToggleGroup
+            aria-labelledby="digest-minutes-label"
+            value={[String(minutes)]}
+            onValueChange={(value: string[]) => {
+              const asked = Number(value[0]);
+              if (!value[0]) return;
+              // Время не с этого тарифа не гасится молча: молчаливый отказ
+              // читается как поломка переключателя.
+              if (asked > plan.maxMinutes) {
+                digestPaywall.open();
+                return;
+              }
+              setMinutes(asked);
+            }}
+            variant="outline"
+          >
+            {sizes.map((size) => {
+              const beyond = size > plan.maxMinutes;
+              const word = plural(size, "минута", "минуты", "минут");
+              return (
+                // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
+                // читателю, почему она погасла, становится нечем. Корона стоит
+                // в самой кнопке, а не у подписи над группой: закрыт не раздел,
+                // а конкретные числа, и по подписи не видно, какие.
+                <ToggleGroupItem
+                  key={size}
+                  value={String(size)}
+                  aria-disabled={beyond || undefined}
+                  aria-label={beyond ? `${size} ${word}, на платном тарифе` : `${size} ${word}`}
+                  className={beyond ? "text-muted-foreground/60" : undefined}
+                >
+                  {size} мин
+                  {beyond ? (
+                    <CrownIcon className="size-3.5 text-amber-500/80" aria-hidden />
+                  ) : null}
+                </ToggleGroupItem>
+              );
+            })}
+          </ToggleGroup>
+          {/* Штуки не исчезают совсем: полоса ниже делит именно их, и без
+              этой строки «3 из 12» было бы числом из ниоткуда. Но стоят они
+              подписью к времени, а не вместо него. */}
+          <span className="text-sm text-muted-foreground">
+            примерно{" "}
+            <span className="font-medium text-foreground tabular-nums">{places}</span>{" "}
+            {plural(places, "новость", "новости", "новостей")}
+          </span>
+        </div>
         {digestPaywall.dialog}
-        {/* Штуки не исчезают совсем: полоса ниже делит именно их, и без
-            этой строки «3 из 12» было бы числом из ниоткуда. Но стоят они
-            подписью к времени, а не вместо него. */}
-        <FieldDescription>
-          Примерно {count(places, "новость", "новости", "новостей")} — столько
-          помещается в это время.{" "}
-          {capped
-            ? `На тарифе «${plan.label}» в выпуск попадает не больше ${plan.maxItems}: это ${formatMinutes(places * perCard)}.`
-            : "Меньше будет только в день, когда важного действительно меньше."}
-        </FieldDescription>
+        {capped ? (
+          // Потолок штук упёрся раньше времени — значит, заказанных минут
+          // не будет, и сказать об этом должны мы, а не пустое место в ленте.
+          <FieldDescription>
+            На тарифе «{plan.label}» в выпуск попадает не больше{" "}
+            {count(plan.maxItems, "новости", "новостей", "новостей")}: это{" "}
+            {formatMinutes(places * perCard)}.
+          </FieldDescription>
+        ) : bigger.length > 0 ? (
+          // Тарифы названы, а не спрятаны за «в других»: предел без имени
+          // того, кто его снимает, — это отказ, за которым надо идти искать.
+          // Список считается из PLANS: написанный руками, он разъедется
+          // с настоящими пределами молча.
+          <FieldDescription>
+            На тарифе «{plan.label}» до {plan.maxMinutes} минут. Дольше читать{" "}
+            <Link href="/settings/subscription" className="underline underline-offset-4">
+              на «{bigger.join("» и «")}»
+            </Link>
+          </FieldDescription>
+        ) : null}
         <input type="hidden" name="digest_minutes" value={minutes} />
       </Field>
 
-      {chips.length > 0 ? (
+      {chips.length > 1 ? (
         <Field>
+          <FieldLabel>Распределение по темам</FieldLabel>
           <TopicBudgetBar
             labels={chips.map((chip) => chip.label)}
             counts={chips.map((chip) => chip.count)}
             onChange={setCounts}
           />
-          <FieldDescription>Тяни границы, чтобы отдать теме больше или меньше</FieldDescription>
         </Field>
       ) : null}
 
       {chips.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
+        <Field>
+          <FieldLabel className="flex items-center gap-2">
+            Твои темы
+            {/* Счётчик у подписи, а не строкой под полем ввода: там он читался
+                как отказ, хотя отказом становится только на пределе. */}
+            <span className="text-xs font-normal text-muted-foreground tabular-nums">
+              {chips.length} из {plan.maxTopics}
+            </span>
+          </FieldLabel>
+          <div className="flex flex-wrap gap-2">
           {chips.map((chip, index) => (
             <Fragment key={`${chip.label}-${index}`}>
               <div
@@ -263,7 +297,7 @@ export function TopicChips({
                 }}
                 tabIndex={0}
                 role="button"
-                aria-label={`${chip.label}, ${chip.count} из ${places}. Стрелками влево и вправо — переставить`}
+                aria-label={`${chip.label}, ${chip.count} из ${places}. Стрелками влево и вправо можно переставить`}
                 className={cn(
                   "group flex h-10 items-center gap-1.5 rounded-lg border bg-card pr-1 pl-2 text-sm transition-colors select-none",
                   "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -280,8 +314,8 @@ export function TopicChips({
                     чем цветов, и повтор честнее, чем неразличимые оттенки. */}
                 <span
                   aria-hidden
-                  className="size-3 shrink-0 rounded-full border-[3px]"
-                  style={{ borderColor: colorAt(index) }}
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: colorAt(index) }}
                 />
 
                 {/* Имя правится прямо в чипе: отдельное поле «название темы»
@@ -301,10 +335,10 @@ export function TopicChips({
 
                 <span className="shrink-0 tabular-nums text-muted-foreground">{chip.count}</span>
 
-                {/* Красный по наведению: рядом стоит перетаскивание, и обе
-                    цели живут в одном чипе шириной с два пальца. Виден
-                    и без курсора — на тапе group-hover не наступает никогда,
-                    и убрать интерес с телефона было нечем. */}
+                {/* Виден всегда, красный только по наведению. Прятать его
+                    до наведения нельзя: на тапе group-hover не наступает
+                    никогда, и убрать интерес с телефона было нечем —
+                    возможность, которой нет ровно там, где она нужна. */}
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -316,7 +350,7 @@ export function TopicChips({
                           event.stopPropagation();
                           remove(index);
                         }}
-                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive [@media(hover:none)]:opacity-100"
+                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       />
                     }
                   >
@@ -380,14 +414,15 @@ export function TopicChips({
                       >
                         <PlusIcon />
                       </TooltipTrigger>
-                      <TooltipContent>Больше новостей по этой теме — место возьмётся у самой крупной</TooltipContent>
+                      <TooltipContent>Больше новостей по этой теме. Место возьмётся у самой крупной</TooltipContent>
                     </Tooltip>
                   </div>
                 </div>
               ) : null}
             </Fragment>
           ))}
-        </div>
+          </div>
+        </Field>
       ) : null}
 
       {/* Поле добавления внизу: сверху то, что уже есть, а не пустая строка. */}
@@ -398,7 +433,7 @@ export function TopicChips({
             ref={draftInput}
             value={draft}
             aria-label="Новый интерес"
-            placeholder="Например: энергетика и уран"
+            placeholder="Энергетика и уран"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -417,11 +452,11 @@ export function TopicChips({
           </Button>
         </div>
         {topicsPaywall.dialog}
-        <FieldDescription>
-          {full
-            ? `На тарифе «${plan.label}» ${plan.maxTopics} ${topicsWord(plan.maxTopics)} — убери один, чтобы добавить новый`
-            : `${chips.length} из ${plan.maxTopics} на тарифе «${plan.label}»`}
-        </FieldDescription>
+        {full ? (
+          <FieldDescription>
+            {`На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}. Убери один, чтобы добавить новый`}
+          </FieldDescription>
+        ) : null}
       </Field>
     </FieldGroup>
   );

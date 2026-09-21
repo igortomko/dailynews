@@ -44,15 +44,33 @@ export type Candidate = {
   topic_id: number | null;
   topic_label: string;
   axes: Axes;
+  /** Каталожный скор сюжета. Порядок кандидатов; персональный считает composite(). */
+  total: number;
 };
 
 /**
- * Кандидаты этого читателя: свежий оценённый поток без дублей и без того,
- * что уже уходило ему раньше.
+ * Кандидаты этого читателя: свежий оценённый поток по одному материалу
+ * на сюжет и без того, что уже уходило ему раньше.
  *
  * «Ему», а не «кому-нибудь»: выпуски других читателей на этот отбор влиять
  * не должны. Иначе первый прогнавшийся читатель вычерпывал бы поток,
  * а остальные получали бы остатки — выпуск при этом приходил бы вовремя.
+ *
+ * Кандидат — сюжет, а не материал. Раньше отбор брал `dup_of is null`, то
+ * есть глобальный оригинал, а оригиналом дедуп назначает самый ранний
+ * по времени сбора материал — из любого источника каталога, в том числе
+ * такого, которого у этого читателя нет. Тогда его собственная публикация
+ * помечена повтором и отброшена, а оригинал ему недоступен: сюжет пропадал
+ * из выпуска целиком. Один читатель со всем каталогом этого не видел;
+ * у второго и у всякого, кому тариф режет список, это сработало бы сразу —
+ * выпуск пришёл бы вовремя, без ошибок и без новости, которую его источник
+ * написал.
+ *
+ * Оценка берётся у оригинала (`scores` пишется только ему — повторы
+ * в Jev не уезжают), а текст и ссылка — у публикации из своих источников.
+ * Это тот же принцип, на котором стоит весь второй каскад: что случилось,
+ * не зависит от того, чьими глазами читать, а читать надо то, на что
+ * читатель подписан.
  */
 export async function candidates(
   sql: Db,
@@ -60,28 +78,55 @@ export async function candidates(
   sourceIds: number[],
 ): Promise<Candidate[]> {
   const rows = await sql<Candidate[]>`
-    select i.id, i.title, i.excerpt, i.body, i.url, s.label as source_label,
-           sc.topic_id::int as topic_id,
-           coalesce(t.label, 'Прочее') as topic_label,
-           sc.axes
-      from dailynews.scores sc
-      join dailynews.items i on i.id = sc.item_id
-      join dailynews.sources s on s.id = i.source_id
- left join dailynews.topics t on t.id = sc.topic_id
-     where i.dup_of is null
+    select * from (
+      -- Один материал на сюжет. Внутри сюжета предпочитается оригинал —
+      -- тот, кого выбрал дедуп: пока он среди своих источников, выпуск
+      -- собирается ровно как раньше. Своего оригинала нет — берётся самая
+      -- ранняя своя публикация, и сюжет остаётся в выпуске вместо того,
+      -- чтобы исчезнуть.
+      select distinct on (coalesce(i.dup_of, i.id))
+             i.id, i.title, i.excerpt, i.body, i.url, s.label as source_label,
+             sc.topic_id::int as topic_id,
+             coalesce(t.label, 'Прочее') as topic_label,
+             sc.axes, sc.total
+        from dailynews.items i
+        join dailynews.sources s on s.id = i.source_id
+        -- Оценка сюжета, а не строки: повторы Jev не оценивает.
+        join dailynews.scores sc on sc.item_id = coalesce(i.dup_of, i.id)
+   left join dailynews.topics t on t.id = sc.topic_id
        -- Источники тарифа: сбор общий на всех, а в выпуск попадает только
        -- то, что тариф этого читателя разрешает. Иначе бесплатный читал бы
        -- платный источник, за который платит не он.
        -- Каст обязателен: нетипизированный массив уходит в int, а id — bigint.
-       and i.source_id = any(${sourceIds}::bigint[])
-       and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
-       and not exists (
-         select 1
-           from dailynews.digest_items di
-           join dailynews.digests d on d.id = di.digest_id
-          where di.item_id = i.id and d.reader_id = ${readerId}
-       )
-     order by sc.total desc
+       where i.source_id = any(${sourceIds}::bigint[])
+         and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
+         -- «Уже уходило» считается по сюжету, а не по строке: вчера выпуск
+         -- взял одно издание, сегодня та же новость пришла от другого —
+         -- и без этого условия она вернулась бы к читателю второй раз
+         -- под другим заголовком.
+         and not exists (
+           select 1
+             from dailynews.digest_items di
+             join dailynews.digests d on d.id = di.digest_id
+             join dailynews.items p on p.id = di.item_id
+            where d.reader_id = ${readerId}
+              and coalesce(p.dup_of, p.id) = coalesce(i.dup_of, i.id)
+         )
+       -- Представитель: оригинал, если он свой, иначе самая ранняя своя
+       -- публикация — по времени публикации, а не по id, потому что id это
+       -- порядок опроса источников.
+       --
+       -- Оригинал выигрывает первым, и это намеренно расходится
+       -- с «первоисточником» в раскрытии сюжета. Там первым помечается
+       -- написавший раньше всех, а сюда едет тот, кого выбрал дедуп: у него
+       -- есть оценка, и пока он среди своих источников, выпуск собирается
+       -- как прежде. Поэтому показанная карточка вполне может стоять
+       -- в списке второй — раскрытие помечает её отдельно, чтобы это
+       -- читалось как хронология, а не как ошибка отбора.
+       order by coalesce(i.dup_of, i.id), (i.dup_of is null) desc,
+                coalesce(i.published_at, i.collected_at), i.id
+    ) story
+     order by total desc
   `;
 
   // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт
@@ -168,6 +213,47 @@ export function pickSurvivors(
     }));
 }
 
+/**
+ * Оценка сюжета — и той публикации из него, что поехала в выпуск.
+ *
+ * Весь остальной код держится на одном негласном условии: у материала,
+ * попавшего в выпуск, есть строка в `scores`. На нём стоят лента, событие
+ * чтения, отметка «дочитал» с читалки, отправка статьи и догрузка выпуска —
+ * семь мест, и каждое соединяется со `scores` внутренним join. Отбор
+ * научился брать публикацию из своих источников вместо чужого оригинала,
+ * а Jev оценивает только оригиналы, — и без этой строки такой материал
+ * исчезал бы из ленты, а его чтения не записывались бы вовсе. Ни одной
+ * ошибки: выпуск собран, письмо ушло, карточки просто нет.
+ *
+ * Поэтому условие чинится там, где оно нарушено, а не в семи следствиях,
+ * про которые в следующий раз вспомнят не все. Копия, а не новый вопрос
+ * к модели: оценка сюжета общая, и повтор — это тот же сюжет, слово
+ * в слово тот же `model` и те же оси.
+ *
+ * Перезаписью, а не «пропустить, если есть». Оценка сюжета меняется уже
+ * после того, как копия легла: у материала с обрезанным описанием догрузка
+ * снимает оценку (`pipeline/enrich.ts`), и следующий скоринг ставит новую —
+ * по полному тексту. С «пропустить» копия навсегда осталась бы оценкой
+ * по заголовку, а лента, калибровка и событие чтения читают именно её:
+ * карточка показывала бы скор, которого у сюжета уже нет.
+ */
+async function shareScore(sql: Db, ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  await sql`
+    insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+    select i.id, sc.topic_id, sc.total, sc.confidence, sc.axes, sc.model
+      from dailynews.items i
+      join dailynews.scores sc on sc.item_id = i.dup_of
+     where i.id = any(${ids}::bigint[]) and i.dup_of is not null
+    on conflict (item_id) do update
+       set topic_id = excluded.topic_id,
+           total = excluded.total,
+           confidence = excluded.confidence,
+           axes = excluded.axes,
+           model = excluded.model
+  `;
+}
+
 export async function selectSurvivors(
   sql: Db,
   readerId: number,
@@ -177,9 +263,13 @@ export async function selectSurvivors(
   sourceIds: number[],
   bestToday = 0,
 ): Promise<Survivor[]> {
-  return pickSurvivors(
+  const survivors = pickSurvivors(
     await candidates(sql, readerId, sourceIds), weights, targets, limit, bestToday,
   );
+  // Только выбранным, а не всем кандидатам: лишняя строка в scores — это
+  // лишний материал в калибровке и в отдаче источника.
+  await shareScore(sql, survivors.map((survivor) => survivor.id));
+  return survivors;
 }
 
 /** Цели по темам в виде, который нужен отбору. */

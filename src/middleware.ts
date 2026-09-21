@@ -17,7 +17,7 @@ import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 // Забыть их здесь — значит получить тихий 307 вместо платежа: отправитель
 // увидит редирект как успех доставки и больше не повторит.
 const PUBLIC = [
-  "/login", "/auth", "/api/version", "/api/telegram", "/api/lemon", "/_next", "/favicon.ico",
+  "/login", "/auth", "/api/version", "/api/telegram", "/api/lemon", "/_next", "/favicon.ico", "/brand",
 ];
 
 export async function middleware(request: NextRequest) {

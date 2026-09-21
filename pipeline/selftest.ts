@@ -38,6 +38,7 @@ import {
 import { appOrigin } from "../src/lib/auth";
 import { numberCollisions } from "../db/schema-gap";
 import { dropStrayReady } from "../db/free-port";
+import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -48,7 +49,7 @@ import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
-import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
 import {
   channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
@@ -58,10 +59,14 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
+import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
+import {
+  ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
+} from "../src/lib/source-health";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -474,6 +479,23 @@ assert.ok(
   [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
   "у каждого варианта должны быть и подпись для читателя, и требование для модели",
 );
+// Названия и подписи не повторяются: две одинаковые строки в ряду означают,
+// что выбирать не из чего, — а деления при этом разные.
+for (const field of ["label", "hint"] as const) {
+  assert.equal(
+    new Set([...COMPLEXITY, ...STYLES].map((entry) => entry[field])).size,
+    COMPLEXITY.length + STYLES.length,
+    `${field}: повтор означает два неразличимых варианта в одном ряду`,
+  );
+}
+
+// У каждого языка есть флажок. Словарь повторяет список строками, и язык,
+// добавленный только в список, остался бы в строю без значка — молча
+// и ровно у одного пункта.
+assert.ok(
+  LANGUAGES.every((entry) => flagOf(entry).length > 0),
+  "язык без флажка: словарь разъехался со списком",
+);
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
 assert.equal(styleOf("выдуманная").key, "нейтральный", "незнакомая манера читается как нейтральная");
@@ -566,6 +588,9 @@ const candidate = (
   body: null,
   url: `https://example.com/${id}`,
   source_label: "тест",
+  // Каталожный скор: порядок кандидатов из базы. Отбор пересчитывает
+  // свой из axes весами читателя, поэтому здесь он ни на что не влияет.
+  total: 0,
   topic_id: topicId,
   topic_label: `тема ${topicId ?? "нет"}`,
   axes: axes({ clickbait: { noul: clickbait }, ...extra }),
@@ -1098,31 +1123,22 @@ assert.ok(
   "но страница остаётся: ряд чисел нужен для правок отбора",
 );
 
-// Ручка границы стоит в зазоре между кусками, а не в доле от всей ширины:
-// куски выложены флексом с зазором, и доля от полной ширины промахивается
-// тем сильнее, чем правее граница — на последних ручка уезжала на соседний
-// сегмент и выглядела его ручкой.
+// Ручка границы стоит там, где кончается её левый кусок: полоса сплошная,
+// доля считается от всей ширины. Пока между кусками был зазор, к доле
+// прибавлялись пройденные зазоры — без поправки ручка промахивалась тем
+// сильнее, чем правее граница, и у правого края уезжала на соседний сегмент.
+// Вернётся зазор — вернётся и поправка, иначе промах вернётся молча.
 {
   const counts = [15, 12, 7, 3, 3];   // 40 новостей, пять тем
-  const gaps = BAR_GAP * (counts.length - 1);
 
-  assert.equal(
-    handleLeft(counts, 0),
-    `calc((100% - ${gaps}px) * 0.375 + ${BAR_GAP / 2}px)`,
-    "первая граница: доля от цветной части плюс половина зазора",
-  );
-  assert.equal(
-    handleLeft(counts, 1),
-    `calc((100% - ${gaps}px) * 0.675 + ${BAR_GAP * 1.5}px)`,
-    "вторая граница уже прошла один зазор целиком",
-  );
-  // Последняя граница обязана попасть в последний зазор, а не за полосу.
+  assert.equal(handleLeft(counts, 0), "37.5%", "первая граница — там, где кончился первый кусок");
+  assert.equal(handleLeft(counts, 1), "67.5%", "вторая граница считает оба куска слева");
   assert.equal(
     handleLeft(counts, counts.length - 2),
-    `calc((100% - ${gaps}px) * 0.925 + ${BAR_GAP * 3.5}px)`,
-    "у правого края ручка остаётся в своём зазоре",
+    "92.5%",
+    "у правого края ручка остаётся внутри полосы, а не за ней",
   );
-  assert.ok(handleLeft([1], 0).includes("100% - 0px"), "на одной теме зазоров нет");
+  assert.equal(handleLeft([1], 0), "100%", "единственная тема занимает полосу целиком");
 }
 
 // Окно с предложением показывает все тарифы, где возможность есть и которые
@@ -2298,21 +2314,23 @@ for (const prop of ["left", "right"]) {
   const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
   assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
 }
-// А требование key держится на том, что каждый из них стоит среди соседей
-// в одном ряду шапки: рядом с датой живёт ещё и время чтения выпуска.
-// Настоящую вложенность разбором текста не проверить, и проверка честно
-// ловит её след: оба проп-элемента и время — в одном <header>. Уедет
-// любой из них в другое место — здесь и упадёт; переложат их внутри
-// шапки по другим родителям — не поймает, и знать об этом надо.
-const feedTabs = readFileSync("src/components/feed-tabs.tsx", "utf8");
-const headerRow = feedTabs.slice(feedTabs.indexOf("<header"), feedTabs.indexOf("</header>"));
-assert.ok(headerRow.length > 0, "шапка ленты живёт в <header> — иначе срез пуст и проверка мертва");
-for (const prop of ["left", "right"]) {
-  assert.ok(headerRow.includes(`{${prop}}`), `${prop} рисуется в шапке ленты`);
-}
+// А требование key держится на том, что каждый стоит не один. Соседями
+// они быть перестали, когда между ними встал поиск: left соседствует
+// со временем выпуска, right — с кнопкой поиска. Останется который-нибудь
+// из них единственным ребёнком — проверка выше станет суеверием,
+// и упасть она должна здесь.
+const tabsSource = readFileSync("src/components/feed-tabs.tsx", "utf8");
+const rowFrom = tabsSource.indexOf("{left}");
+const rowTo = tabsSource.indexOf("</header>");
+// Оба конца названы явно: indexOf отдаёт -1, а slice с -1 молча вернёт
+// хвост файла — проверка осталась бы зелёной, не посмотрев на шапку вовсе.
+assert.ok(rowFrom >= 0 && rowTo > rowFrom, "шапку ленты рисует feed-tabs");
+const headerRow = tabsSource.slice(rowFrom, rowTo);
+assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left стоит рядом с кнопками");
+assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 assert.match(
   headerRow,
-  /\{left\}[\s\S]*formatMinutes\(reading\.minutes\)/,
+  /formatMinutes\(reading\.minutes\)/,
   "время выпуска стоит рядом с его датой: это два факта об одном выпуске",
 );
 
@@ -2569,7 +2587,97 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   );
 }
 
-console.log(`Самопроверка пройдена: ${checks} утверждений`);
+// --- что убрать из подписок ---------------------------------------------------
+// Ручной аудит подписок не делает никто, поэтому решение принимает код —
+// и ошибается он в обе стороны одинаково молча: промолчал о мусорном
+// источнике (ничего не случилось) или предложил убрать живой (читатель
+// убрал и больше его не увидит).
+{
+  const src = (over: Partial<SourceYield> = {}): SourceYield => ({
+    items: 42, duplicates: 2, in_my_digests: 12, shown: 12, opened: 4, ...over,
+  });
+  const why = (over: Partial<SourceYield>) => cleanupOf(src(over));
+
+  assert.equal(why({}), null, "источник, который читают, убирать не предлагают");
+
+  // Порог показов: ниже него ноль открытий — совпадение, а не сигнал.
+  assert.equal(
+    why({ shown: ENOUGH_SHOWN - 1, opened: 0 }), null,
+    "неделя показов мимо — ещё не приговор источнику",
+  );
+  assert.equal(
+    why({ shown: ENOUGH_SHOWN, opened: 0 }),
+    "42 новости за месяц, 10 показано, 0 открыто",
+    "с десятого показа ноль открытий уже значит",
+  );
+  // Ровно на минимуме кандидатом остаётся только чистый ноль: одно открытие
+  // из десяти — это уже не «не читаю», а «читаю редко», и убирать за это
+  // нельзя.
+  assert.equal(
+    why({ shown: ENOUGH_SHOWN, opened: 1 }), null,
+    "одно открытие из десяти держит источник в ленте",
+  );
+
+  // Не строгий ноль: одно открытие за сорок два показа — тот же ответ,
+  // а правило по нулю снималось бы единственным случайным нажатием.
+  assert.equal(
+    why({ shown: 42, opened: 1 }),
+    "42 новости за месяц, 42 показано, 1 открыто",
+    "одно открытие за сорок два показа не делает источник читаемым",
+  );
+  assert.equal(
+    why({ shown: 12, opened: 3 }), null,
+    "каждая четвёртая открыта — источник читают",
+  );
+  assert.equal(
+    why({ shown: 14, opened: 1 }), "42 новости за месяц, 14 показано, 1 открыто",
+    "а одно открытие из четырнадцати уже нет (живой случай: PsyPost)",
+  );
+
+  // Второй повод: половина потока — перепечатки. Ниже половины тревоги нет:
+  // горящая на обычном состоянии ничем не отличается от выключенной.
+  assert.equal(
+    why({ items: 42, duplicates: 21, shown: 0, opened: 0 }),
+    "42 новости за месяц, из них 21 повтор",
+    "половина перепечаток — повод убрать",
+  );
+  assert.equal(
+    why({ items: 42, duplicates: 18, shown: 0, opened: 0 }), null,
+    `ниже ${MOSTLY_DUPLICATES * 100}% перепечаток источник не трогаем`,
+  );
+  assert.equal(
+    why({ items: 4, duplicates: 4, shown: 0, opened: 0 }), null,
+    "четыре материала подряд — не доля, а случай",
+  );
+
+  // Согласование после числительного проверяется на тех числах, где оно
+  // ломается: на сорока двух и на двенадцати всё сходится само, а «21 новостей
+  // за месяц» и «22 повторов» — машинный текст, который никто не заметит.
+  assert.equal(
+    why({ items: 21, duplicates: 21, shown: 0, opened: 0 }),
+    "21 новость за месяц, из них 21 повтор",
+  );
+  assert.equal(
+    why({ items: 24, duplicates: 22, shown: 0, opened: 0 }),
+    "24 новости за месяц, из них 22 повтора",
+  );
+
+  // Источник без единого показа не кандидат по непрочитанности: читатель мог
+  // просто не заходить, а убирать источник за чужой отпуск нельзя.
+  assert.equal(
+    why({ shown: 0, opened: 0, duplicates: 0 }), null,
+    "без показов судить не по чему",
+  );
+
+  // Непрочитанное сильнее повторов: перепечатка, которую открывают, ленте
+  // не мешает, а место в выпуске занимает именно непрочитанный.
+  assert.equal(
+    why({ items: 42, duplicates: 40, shown: 12, opened: 0 }),
+    "42 новости за месяц, 12 показано, 0 открыто",
+    "при двух поводах сразу называется тот, что сильнее",
+  );
+}
+
 
 // --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
 // Подмена колонки при сохранении была необратимой: тариф открывается обратно,
@@ -2700,6 +2808,191 @@ console.log(`Самопроверка пройдена: ${checks} утвержд
     false,
     "и не отменяется тем, что запасной уровень дошёл до разбора",
   );
+}
+
+// --- поиск по прошлым выпускам ------------------------------------------------
+// Отрывок приходит из ts_headline с метками внутри текста статьи. Метки —
+// управляющие символы, а не разметка: вставить в чужой текст <b> значит
+// однажды отрисовать оттуда же чужой <script>.
+{
+  const plain = highlight("просто текст");
+  assert.deepEqual(plain, [{ text: "просто текст", mark: false }], "текст без меток идёт целиком");
+
+  const marked = highlight(`про ${HL_START}уран${HL_END} и дальше`);
+  assert.deepEqual(
+    marked,
+    [
+      { text: "про ", mark: false },
+      { text: "уран", mark: true },
+      { text: " и дальше", mark: false },
+    ],
+    "метки режут отрывок на обычный текст и найденное",
+  );
+  assert.ok(
+    !marked.some((part) => part.text.includes(HL_START) || part.text.includes(HL_END)),
+    "сами метки в вывод не уезжают: иначе они видны на странице",
+  );
+
+  // Отрывок обрезается по словам, и закрывающая метка может не доехать.
+  // Подсветить остаток значит залить половину карточки.
+  const cut = highlight(`начало ${HL_START}уран`);
+  assert.deepEqual(
+    cut,
+    [{ text: "начало ", mark: false }, { text: "уран", mark: false }],
+    "незакрытая метка не подсвечивает хвост",
+  );
+
+  const marks = (text: string) => highlight(text).filter((part) => part.mark).length;
+  assert.equal(marks(`${HL_START}раз${HL_END} и ${HL_START}два${HL_END}`), 2, "меток бывает несколько");
+  assert.deepEqual(highlight(""), [], "пустой отрывок не даёт пустого куска");
+
+  // Ищут вопросом, а не ключевыми словами: «где я видел про uranium
+  // и дата-центры». Все слова разом требуют «видел», которого в тексте нет.
+  assert.equal(anyOf("uranium"), null, "одно слово ослаблять нечем");
+  assert.equal(anyOf("  "), null, "пустой запрос ослаблять нечем");
+  assert.equal(anyOf("uranium дата-центры"), "uranium or дата-центры");
+  assert.equal(
+    anyOf("  где я видел  про uranium "),
+    "где or я or видел or про or uranium",
+    "лишние пробелы не делают пустых слов",
+  );
+  // Оператор самого websearch, а не подмена «&» на «|» в готовом tsquery:
+  // в запросе бывает «AT&T», и такая подмена ломает не оператор, а слово.
+  assert.equal(anyOf("AT&T Verizon"), "AT&T or Verizon", "слово с амперсандом остаётся словом");
+
+  // Запрет остаётся запретом: «уран ИЛИ НЕ обогащение» отвечает почти всем
+  // архивом — ровно обратное тому, о чём просили.
+  assert.equal(anyOf("уран -обогащение"), null, "запрещённое слово в ослабление не идёт");
+  assert.equal(anyOf("уран реактор -обогащение"), "уран or реактор");
+  assert.equal(anyOf("дата-центры уран"), "дата-центры or уран", "дефис внутри слова остаётся");
+  // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
+  assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
+
+  // Словарь решает, сводятся ли словоформы, и заметно это только
+  // по ненайденному.
+  assert.equal(tsConfigFor("русском"), "russian");
+  assert.equal(tsConfigFor("английском"), "english");
+  assert.equal(tsConfigFor("португальском (бразильский вариант)"), "portuguese");
+  assert.equal(
+    tsConfigFor(SOURCE_LANGUAGE),
+    "russian",
+    "язык источника заранее неизвестен: русская конфигурация разбирает и латиницу",
+  );
+  assert.equal(
+    tsConfigFor("японском"),
+    "russian",
+    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
+  );
+  assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
+  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
+  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
+  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
+  // в списке обязан получить словарь или попасть сюда осознанно, иначе
+  // он молча уедет на русский.
+  assert.deepEqual(
+    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
+    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
+    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
+  );
+}
+
+// Сюжет: дедуп сделан видимым.
+//
+// Проверяется то, что на живых данных уже разъехалось: «первоисточник»
+// по dup_of неверен в трёх случаях из четырёх, потому что оригиналом
+// дедуп назначает меньший id — порядок опроса источников, а не публикации.
+{
+  const pub = (
+    item_id: number,
+    source_id: number,
+    source_label: string,
+    kind: "rss" | "hackernews",
+    minutes: number,
+    points: number | null = null,
+  ) => ({
+    item_id,
+    source_id,
+    source_label,
+    kind,
+    url: `https://example.com/${item_id}`,
+    published_at: new Date(Date.UTC(2026, 8, 20, 10, 0) + minutes * 60_000),
+    points,
+  });
+
+  // Живой случай: Hacker News собран первым и стал оригиналом, а написан
+  // пост был на 103 минуты раньше.
+  const willison = pub(68, 2, "Simon Willison", "rss", 0);
+  const hn = pub(12, 1, "Hacker News", "hackernews", 103, 418);
+  assert.deepEqual(
+    storyLines([hn, willison]).map((row) => [row.source_label, row.note]),
+    [["Simon Willison", "первоисточник"], ["Hacker News", "обсуждение: 418 points"]],
+    "первоисточник — самое раннее издание, а не меньший id",
+  );
+
+  // Обсуждение раньше статьи первоисточником не становится, и отсчёт
+  // «позже» идёт от издания: иначе вторая статья получила бы «раньше».
+  const early = pub(5, 1, "Hacker News", "hackernews", 0, 91);
+  const verge = pub(9, 3, "The Verge", "rss", 60);
+  const ars = pub(11, 4, "Ars Technica", "rss", 78);
+  assert.deepEqual(
+    storyLines([ars, early, verge]).map((row) => row.note),
+    ["обсуждение: 91 points", "первоисточник", "18 минут позже"],
+    "отсчёт идёт от первого издания, обсуждение в нём не участвует",
+  );
+
+  // Кластер без единого издания: отсчитывать не от чего, и выдумывать
+  // первоисточник нельзя.
+  assert.deepEqual(
+    storyLines([pub(1, 1, "Hacker News", "hackernews", 0, null)]).map((row) => row.note),
+    ["обсуждение"],
+    "обсуждение без очков остаётся обсуждением, а не первоисточником",
+  );
+
+  // Даты нет ни у кого: у RSS она бывает неразобранной, у письма её нет
+  // вовсе. «Первоисточник» здесь — заявление о времени, которого мы
+  // не знаем, и достаться оно не должно никому.
+  const undated = (id: number, label: string) => ({
+    item_id: id, source_id: id, source_label: label, kind: "rss" as const,
+    url: `https://example.com/${id}`, published_at: null, points: null,
+  });
+  assert.deepEqual(
+    storyLines([undated(2, "Второе"), undated(1, "Первое")]).map((row) => row.note),
+    ["", ""],
+    "без даты первоисточника нет ни у кого",
+  );
+  // Одна известная дата — и он находится, а безымянный остаётся без пометки.
+  assert.deepEqual(
+    storyLines([undated(9, "Без даты"), pub(3, 3, "С датой", "rss", 0)])
+      .map((row) => [row.source_label, row.note]),
+    [["С датой", "первоисточник"], ["Без даты", ""]],
+    "известная дата делает первоисточником её, а не первого по id",
+  );
+
+  // Двенадцать кластеров из шестнадцати на живом потоке — это источник,
+  // повторивший сам себя. Строка о них соврала бы.
+  assert.equal(
+    otherSources([pub(1, 7, "Cointelegraph", "rss", 0), pub(2, 7, "Cointelegraph", "rss", 30)], 7),
+    0,
+    "источник, повторивший сам себя, не «ещё один источник»",
+  );
+  assert.equal(otherSources([willison, hn], 2), 1, "чужой источник в сюжете считается");
+
+  assert.equal(laterBy(0), "тогда же");
+  assert.equal(laterBy(1), "1 минуту позже");
+  assert.equal(laterBy(18), "18 минут позже");
+  assert.equal(laterBy(103), "2 часа позже", "минуты перестают быть минутами после часа");
+  assert.equal(laterBy(341), "6 часов позже");
+  assert.equal(laterBy(1500), "1 день позже");
+  assert.equal(laterBy(4000), "3 дня позже");
+
+  // «1 материалов» — та же ловушка, только в новой строке.
+  assert.equal(alsoLine(1), "О том же написали ещё 1 твой источник");
+  assert.equal(alsoLine(3), "О том же написали ещё 3 твоих источника");
+  assert.equal(alsoLine(5), "О том же написали ещё 5 твоих источников");
+  assert.equal(alsoLine(11), "О том же написали ещё 11 твоих источников");
+  assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
+  assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
+  assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

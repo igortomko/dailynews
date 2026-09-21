@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ArrowUpIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemCard } from "@/components/item-card";
-import type { FeedItem } from "@/lib/queries";
+import { SearchButton, SearchField } from "@/components/feed-search";
+import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
@@ -76,7 +77,7 @@ export function FeedTabs({
   right,
 }: {
   topics: ReaderTopic[];
-  items: FeedItem[];
+  items: FeedCard[];
   /** Действующий тариф: от него зависят корона и кнопка «Своё мнение». */
   plan: Plan;
   networks: NetworkId[];
@@ -108,6 +109,20 @@ export function FeedTabs({
   ];
 
   const [tab, setTab] = useState("all");
+  // Поиск живёт здесь, потому что раскрытое поле занимает всю строку шапки,
+  // а строку рисует эта же шапка. Поле поверх строки оставило бы под собой
+  // живые стрелки дат: обратный Tab уходил бы на кнопки, которых не видно.
+  const [searching, setSearching] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const wasSearching = useRef(false);
+
+  // Закрытое поле возвращает фокус туда, откуда его открыли. Иначе Escape
+  // роняет фокус в начало страницы, и клавиатурный читатель начинает путь
+  // заново — при том что закрыть поле он попросил, а не уйти из шапки.
+  useEffect(() => {
+    if (!searching && wasSearching.current) trigger.current?.focus();
+    wasSearching.current = searching;
+  }, [searching]);
 
   /**
    * Лента — список, который листают. j и k переводят фокус на соседний
@@ -117,6 +132,10 @@ export function FeedTabs({
    * Смотрим на e.code, а не на e.key: в кириллической раскладке та же
    * клавиша отдаёт «о», «л» и «щ», и проверка по букве молча перестаёт
    * работать ровно у того, кто читает ленту по-русски.
+   *
+   * «/» раскрывает поиск — как везде, где он есть. Правило «не перехватывать
+   * набор текста» одно на все клавиши и живёт здесь же: вторая его копия
+   * рядом с полем разъехалась бы с этой при первой правке любой из них.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -126,6 +145,13 @@ export function FeedTabs({
         target &&
         (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
       ) {
+        return;
+      }
+      // «/» и по коду клавиши, и по символу: в кириллице та же клавиша
+      // отдаёт «.», а «/» приезжает с другой.
+      if (event.code === "Slash" || event.key === "/") {
+        event.preventDefault();
+        setSearching(true);
         return;
       }
       if (event.code !== "KeyJ" && event.code !== "KeyK" && event.code !== "KeyO") return;
@@ -179,16 +205,31 @@ export function FeedTabs({
         {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
             это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
         <div className="flex h-14 items-center justify-between gap-3 px-4 sm:h-12">
-          <div className="flex min-w-0 items-center gap-2">
-            {left}
-            {/* Время выпуска — рядом с его датой: это две вещи об одном
-                и том же выпуске. Число карточек осталось на вкладках,
-                где оно и отвечает на свой вопрос — «сколько в этой теме». */}
-            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
-              {formatMinutes(reading.minutes)}
-            </span>
-          </div>
-          {right}
+          {searching ? (
+            // Вместо строки, а не поверх неё: между датой и шестерёнкой
+            // на телефоне остаётся сантиметр, и поле там либо нечитаемо,
+            // либо выдавливает дату за экран.
+            <SearchField onClose={() => setSearching(false)} />
+          ) : (
+            <>
+              <div className="flex min-w-0 items-center gap-2">
+                {left}
+                {/* Время выпуска — рядом с его датой: это две вещи об одном
+                    и том же выпуске. Число карточек осталось на вкладках,
+                    где оно и отвечает на свой вопрос — «сколько в этой теме». */}
+                <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+                  {formatMinutes(reading.minutes)}
+                </span>
+              </div>
+              {/* Поиск рядом с датами: и то и другое — способ добраться
+                  до прошлого выпуска. Стрелками к соседнему, календарём
+                  к дальнему, поиском — когда помнишь слово, а не дату. */}
+              <div className="flex items-center gap-2">
+                <SearchButton ref={trigger} onOpen={() => setSearching(true)} />
+                {right}
+              </div>
+            </>
+          )}
         </div>
         {/* Родитель flex, полоса с margin: auto. Когда вкладки помещаются,
             поля разводят их по центру; когда шире — поля схлопываются в ноль,
@@ -205,7 +246,15 @@ export function FeedTabs({
               <TabsTrigger
                 key={tab.slug}
                 value={tab.slug}
-                className="px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
+                /* after:bottom-0 вместо штатных −5px: полоса вкладок
+                   прокручивается, а прокрутка по горизонтали обрезает и по
+                   вертикали — подчёркивание, вынесенное под нижний край
+                   вкладки, не рисовалось вовсе, и активная вкладка
+                   отличалась от соседних только насыщенностью текста.
+                   h-full вместо штатных calc(100%-1px): вкладка на пиксель
+                   ниже полосы да ещё по центру не доставала до низа, и между
+                   подчёркиванием и границей шапки оставался уступ. */
+                className="h-full px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground group-data-horizontal/tabs:after:bottom-0 sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
               >
                 {tab.label}
                 <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>
@@ -293,7 +342,9 @@ export function FeedTabs({
                 <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">k</kbd> —
                 между материалами,{" "}
                 <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">o</kbd> —
-                открыть
+                открыть,{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">/</kbd> —
+                поиск по выпускам
               </p>
             ) : null}
           </TabsContent>

@@ -33,6 +33,12 @@ export type Plan = {
   label: string;
   /** $ в месяц. Ноль — бесплатный тариф. */
   price: number;
+  /**
+   * За чем сюда приходят, в три слова. Стоит под ценой в сравнении тарифов:
+   * столбик из чисел отвечает «сколько дают», но не «зачем брать», а решают
+   * по второму. Формулируется глаголом читателя, а не свойством продукта.
+   */
+  tagline: string;
   /** Сколько источников опрашивается. Остальные включённые просто ждут. */
   maxSources: number;
   /**
@@ -81,6 +87,7 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "free",
     label: "Бесплатный",
     price: 0,
+    tagline: "Попробовать ленту",
     maxSources: 5,
     maxTopics: 5,
     maxMinutes: 5,
@@ -96,6 +103,7 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "plus",
     label: "Plus",
     price: 3.99,
+    tagline: "Читать каждый день",
     maxSources: 40,
     maxTopics: 15,
     maxMinutes: 20,
@@ -113,6 +121,7 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "pro",
     label: "Pro",
     price: 9.99,
+    tagline: "Читать и писать",
     maxSources: 100,
     maxTopics: 30,
     // Сорок пять, а не шестьдесят: при карточке в 460 знаков потолок в сто

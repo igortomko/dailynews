@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
-import { getDigestDays, getFeed } from "@/lib/queries";
-import { digestProgress, getChannels, getReaderTopics } from "@/lib/readers";
+import { getDigestDays, getFeed, getStories } from "@/lib/queries";
+import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { sourcesForPlan } from "@/lib/plans";
 import { minutesOf } from "@/lib/reading-time";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
@@ -27,11 +28,14 @@ export default async function FeedPage({
   // Первый заход идёт своим путём: интересы, источники, первый выпуск.
   if (!reader.onboarded_at) redirect("/welcome");
 
-  const [{ day: requested }, days, topics, channels] = await Promise.all([
+  const [{ day: requested }, days, topics, channels, sources] = await Promise.all([
     searchParams,
     getDigestDays(reader.id),
     getReaderTopics(reader.id),
     getChannels(reader.id),
+    // Ни от чего здесь не зависит: ждать его после ленты значит добавить
+    // лишний круг к каждому показу.
+    readerSources(reader.id),
   ]);
   // Действующий, а не купленный: у отменённой подписки оплаченный месяц
   // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
@@ -77,7 +81,7 @@ export default async function FeedPage({
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
   const day = requested && days.includes(requested) ? requested : days[0];
-  const [items, digest] = await Promise.all([
+  const [feed, digest] = await Promise.all([
     getFeed(reader.id, day),
     // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
     // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
@@ -86,6 +90,25 @@ export default async function FeedPage({
     digestProgress(reader.id, day),
   ]);
   const minutes = minutesOf(digest.chars, effectiveVoice(reader));
+
+  // Сюжет карточки считается по тем же источникам, по которым собран выпуск:
+  // тариф уже учтён, и «твои источники» в раскрытии значит ровно то же, что
+  // в отборе. Список приезжает отдельным запросом и приклеивается здесь —
+  // Map через границу сервера не уходит, а сорок карточек не должны
+  // спрашивать базу по одной.
+  //
+  // Плюс источники самих показанных карточек. Выпуск написан раньше, а набор
+  // источников с тех пор мог измениться — читатель убрал один или понизил
+  // тариф, и `digest_items` от этого не чистится. Без объединения карточка
+  // осталась бы в ленте, но выпала бы из собственного сюжета: раскрытие
+  // показало бы только чужих и пометило бы чужой повтор первоисточником.
+  // Ничего лишнего это не открывает — сама карточка уже на странице.
+  //
+  // Number: sources.id приезжает из bigint строкой, а сюжет считает числами.
+  const mine = sourcesForPlan(sources, plan).map((source) => Number(source.id));
+  const shown = feed.map((item) => item.source_id);
+  const stories = await getStories([...new Set([...mine, ...shown])], feed.map((item) => item.id));
+  const items = feed.map((item) => ({ ...item, story: stories.get(item.id) ?? [] }));
 
   return (
     <FeedTabs
