@@ -1,16 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title">
   <title id="title">Reporta</title>
-  <desc id="desc">A signal with a little life in it.</desc>
   <rect width="1200" height="630" fill="#FAF9F6"/>
-  <circle cx="1040" cy="112" r="138" fill="#F04A32"/>
-  <path d="M942 159 C913 55 1050 17 1114 109 C1164 182 1111 277 1025 246"
-        fill="none" stroke="#FAF9F6" stroke-width="34" stroke-linecap="round"/>
-  <ellipse cx="1037" cy="128" rx="42" ry="34" fill="#FAF9F6"/>
-  <circle cx="1023" cy="123" r="8" fill="#4CC9F0"/>
-  <circle cx="1051" cy="123" r="8" fill="#4CC9F0"/>
-  <text x="88" y="270" fill="#F04A32" font-family="monospace" font-size="18" letter-spacing="4">PERSONAL SIGNAL / DAILY NEWS</text>
-  <text x="82" y="433" fill="#171716" font-family="Georgia, Times New Roman, serif" font-size="168" letter-spacing="-7">Reporta</text>
-  <path d="M92 492 C210 444 287 448 404 495 S616 562 747 494 S938 443 1095 506"
-        fill="none" stroke="#F04A32" stroke-width="18" stroke-linecap="round"/>
-  <text x="91" y="568" fill="#68645E" font-family="Arial, sans-serif" font-size="22">A signal with a little life in it.</text>
+  <image href="logo-reporta-approved.png" x="60" y="162" width="1080" height="306"/>
 </svg>

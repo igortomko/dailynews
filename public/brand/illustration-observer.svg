@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 480" role="img" aria-labelledby="title">
+  <title id="title">Reporta observer illustration</title>
+  <rect width="720" height="480" fill="#FAF9F6"/>
+  <g fill="none" stroke="#171716" stroke-linecap="round">
+    <path d="M93 239C178 118 307 88 420 133C494 163 549 215 621 239C549 263 494 315 420 345C307 390 178 360 93 239Z" stroke-width="5"/>
+    <circle cx="360" cy="239" r="98" stroke-width="5"/>
+    <circle cx="360" cy="239" r="42" stroke-width="5"/>
+    <path d="M189 180l96 85M159 208l118 58M146 240h126M159 272l118-58M189 300l96-85M530 180l-96 85M561 208l-118 58M574 240H448M561 272l-118-58M530 300l-96-85" stroke-width="2"/>
+    <path d="M320 128l74 80M284 144l100 67M252 174l117 43M238 210l123 17M238 270l123-17M252 306l117-43M284 336l100-67M320 352l74-80" stroke-width="2"/>
+  </g>
+  <path d="M48 376C146 342 190 392 262 382C343 371 373 320 435 299C502 276 560 298 604 344C637 378 661 385 691 366" fill="none" stroke="#F04A32" stroke-width="22" stroke-linecap="round"/>
+  <ellipse cx="686" cy="369" rx="27" ry="21" fill="#F04A32"/>
+  <circle cx="677" cy="365" r="6" fill="#FAF9F6"/>
+  <circle cx="695" cy="365" r="6" fill="#FAF9F6"/>
+  <circle cx="677" cy="365" r="2.7" fill="#4CC9F0"/>
+  <circle cx="695" cy="365" r="2.7" fill="#4CC9F0"/>
+</svg>

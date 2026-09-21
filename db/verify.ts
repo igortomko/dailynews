@@ -24,7 +24,9 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
+import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
+import { readingTime } from "../src/lib/relative-time";
 import { cleanupOf } from "../src/lib/source-health";
 
 
@@ -164,7 +166,10 @@ async function main() {
     assert.equal(all.length, 1, "после миграции должен быть ровно один читатель — владелец");
     const owner = all[0];
     assert.ok(owner.owner, "перенесённый читатель должен быть владельцем");
-    assert.equal(owner.digest_size, 12);
+    // 0040 перевела заказ в минуты: двенадцать карточек по полминуты —
+    // это шесть минут чтения. Перенос обязан довезти прежний выбор, а не
+    // выдать умолчание: читатель настраивал размер выпуска один раз.
+    assert.equal(owner.digest_minutes, 6, "прежние 12 карточек — это шесть минут чтения");
     assert.equal(owner.complexity, 3, "сложность по умолчанию — середина шкалы");
     assert.equal(owner.style, "нейтральный", "манера по умолчанию");
     assert.ok(owner.reader_context.length > 0, "контекст читателя должен переехать, а не обнулиться");
@@ -410,6 +415,67 @@ async function main() {
     assert.ok(stored.kind, "axes->'kind'->>'choice' не должен быть null");
     assert.equal(ownerFeed[0].axes.kind.choice, "fact", "axes должны разобраться из jsonb");
     assert.equal(ownerFeed[0].read_count, 0);
+
+    // --- время выпуска: своё у каждого ------------------------------------------
+    // Набранное вычитается из заказа этими двумя запросами. Сложи они чужие
+    // карточки со своими — и выпуск обрывался бы на середине заказа: не ошибка
+    // в логе, а просто «сегодня мало новостей» каждый день.
+    const ownerProgress = await readers.digestProgress(owner.id, today);
+    const secondProgress = await readers.digestProgress(second.id, today);
+    assert.equal(ownerProgress.items, 2, "в набранном владельца только его карточки");
+    assert.equal(secondProgress.items, 1, "второй читатель набрал своё");
+    // Одна и та же сумма считается в SQL и в коде (cardChars). Две формулы
+    // одного числа расходятся молча: заказ считался бы одним, а показанное
+    // читателю время — другим.
+    assert.equal(
+      ownerProgress.chars,
+      cardChars("Владелец: GPT-6", "S") + cardChars("Владелец: уран", "S"),
+      "знаки карточки считаются в базе и в коде одинаково",
+    );
+    // Порог слабого материала на догрузке держится за это число: возьми оно
+    // чужой выпуск — и у читателя с тихой лентой порог задрал бы сосед.
+    assert.equal(ownerProgress.best, 120, "лучший скор — из своего выпуска");
+    assert.equal(secondProgress.best, 60, "у второго читателя лучший свой");
+    assert.equal(
+      (await readers.digestProgress(owner.id, "2000-01-01")).items, 0,
+      "день без выпуска — это ноль набранного, а не чужой выпуск",
+    );
+    // Мерка карточки — тоже личная: у англоязычного выпуска длина другая,
+    // и общая мерка промахивалась бы у всех, кроме среднего читателя.
+    assert.equal(
+      await readers.cardCharsOf(second.id), cardChars("Vera: CBT", "S"),
+      "мерка карточки считается по своим описаниям",
+    );
+    assert.equal(
+      await readers.cardCharsOf(-1), 0,
+      "у читателя без выпусков мерки нет — её заменяет общая, а не ноль в делителе",
+    );
+    assert.equal(
+      (await readers.digestProgress(-1, null)).day, null,
+      "у читателя без выпусков день пуст: это и значит «первого выпуска ещё не было»",
+    );
+
+    // Заказ дня лежит при самом выпуске. Лента листается на девяносто дней
+    // назад, и старый выпуск, померенный сегодняшней настройкой, обвинялся
+    // бы в недоборе, которого не было: «≈5 из 45 — сегодня больше нечего»
+    // на выпуске, который был полон.
+    assert.equal(
+      (await readers.digestProgress(owner.id, today)).target, null,
+      "выпуск без сохранённого заказа не даёт повода считать недобор",
+    );
+    await sql`
+      update dailynews.digests
+         set stats = coalesce(stats, '{}'::jsonb) || '{"reading_target": 20}'::jsonb
+       where reader_id = ${second.id} and day = ${today}::date
+    `;
+    assert.equal(
+      (await readers.digestProgress(second.id, today)).target, 20,
+      "заказ дня читается из своего выпуска",
+    );
+    assert.equal(
+      (await readers.digestProgress(owner.id, today)).target, null,
+      "заказ соседа в свой выпуск не приезжает",
+    );
     // Время материала, а не день выпуска. Карточка показывала d.day, и все
     // материалы выпуска получали один возраст, отсчитанный от полудня того
     // дня: в ленте за сегодня везде стояло «1ч» независимо от материала.
@@ -1068,7 +1134,7 @@ async function main() {
     const survivors = await selectSurvivors(
       sql, owner.id, owner.weights, budgetTargets, 20, everySource,
     );
-    assert.equal(survivors.length, 20, "отбор должен отдать ровно digest_size");
+    assert.equal(survivors.length, 20, "отбор должен отдать ровно столько мест, сколько заказано");
     for (const { topic, target } of budget) {
       const got = survivors.filter((s) => s.topic_label === topic.label).length;
       assert.equal(got, target, `${topic.label}: просили ${target}, отбор дал ${got}`);
@@ -1134,17 +1200,19 @@ async function main() {
     );
     console.log(`  потолок: свой счёт у каждого, общий этап не на читателе`);
 
-    // Список в форме предлагает до ста. Разъедется с ограничением колонки —
-    // и выбор «100» вернёт ошибку там, где читатель ничего не нарушал.
-    const { MAX_DIGEST } = await import("../src/lib/topic-budget");
-    await sql`update dailynews.readers set digest_size = ${MAX_DIGEST} where id = ${owner.id}`;
+    // Список в форме предлагает до сорока пяти минут. Разъедется
+    // с ограничением колонки — и выбор «45» вернёт ошибку там, где читатель
+    // ничего не нарушал.
+    const { READING_MINUTES } = await import("../src/lib/plans");
+    const maxMinutes = READING_MINUTES[READING_MINUTES.length - 1];
+    await sql`update dailynews.readers set digest_minutes = ${maxMinutes} where id = ${owner.id}`;
     await rejects(
-      `update dailynews.readers set digest_size = ${MAX_DIGEST + 1} where id = ${owner.id}`,
-      /digest_size/,
+      `update dailynews.readers set digest_minutes = ${maxMinutes + 1} where id = ${owner.id}`,
+      /digest_minutes/,
       "за потолком список предлагать не должен, а база — принимать",
     );
-    await sql`update dailynews.readers set digest_size = 12 where id = ${owner.id}`;
-    console.log(`  размер дайджеста: ${MAX_DIGEST} проходит, ${MAX_DIGEST + 1} отвергается`);
+    await sql`update dailynews.readers set digest_minutes = 6 where id = ${owner.id}`;
+    console.log(`  время выпуска: ${maxMinutes} проходит, ${maxMinutes + 1} отвергается`);
 
     // Ноль в цели уронил бы отбор делением на ноль, а не спрятал тему.
     await rejects(
@@ -1281,7 +1349,13 @@ async function main() {
     // Читаются кодом не все: llm остался неиспользованным, служебные времена
     // никому не нужны. Список исключений короткий и назван вслух — молчаливое
     // исключение здесь ничем не отличалось бы от забытой колонки.
-    const SKIP = new Set(["llm", "created_at", "updated_at", "reader_context_hash"]);
+    // digest_size осталась от заказа в штуках: 0040 перевела его в минуты,
+    // а колонку не тронула — переименованная, она стала бы ловушкой
+    // («размер», а внутри минуты), снесённая отдельной миграцией стоила бы
+    // дороже, чем не читается.
+    const SKIP = new Set([
+      "llm", "created_at", "updated_at", "reader_context_hash", "digest_size",
+    ]);
     const loaded = new Set(Object.keys((await readers.getReader(owner.id)) ?? {}));
     const missed = live.filter((column) => !SKIP.has(column) && !loaded.has(column));
     assert.deepEqual(
@@ -1462,7 +1536,31 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
+    // Время чтения считается из длины текста статьи. Колонка, заведённая
+    // миграцией, но не выбранная лентой, ничем себя не выдаёт: подписи
+    // просто не будет, и выглядит это как «у материала нет текста».
+    await sql`update dailynews.items set body = ${"т".repeat(7760)} where id = ${myItem}`;
     const storyFeed = await queries.getFeed(owner.id, storyDay);
+    // strictEqual, а не equal: колонка живёт среди bigint-ов, и «"7760"»
+    // прошло бы нестрогое сравнение молча — ровно тот класс ошибки,
+    // который уже ломал сюжеты по числовым ключам.
+    assert.strictEqual(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
+    assert.strictEqual(
+      readingTime(storyFeed[0].body_chars), "≈6 мин", "и она превращается в минуты",
+    );
+
+    // У ролика текст — пересказ субтитров, а не то, что откроется
+    // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
+    await sql`update dailynews.items set transcribed_at = now() where id = ${myItem}`;
+    assert.equal(
+      (await queries.getFeed(owner.id, storyDay))[0].body_chars, null,
+      "у ролика времени чтения не бывает",
+    );
+    // Фикстура возвращается на место целиком: ниже этот же материал
+    // участвует в проверках сюжета, и оставленный текст менял бы их условия.
+    await sql`
+      update dailynews.items set transcribed_at = null, body = null where id = ${myItem}
+    `;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",
@@ -1529,7 +1627,10 @@ async function main() {
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
     `;
     assert.equal(beforeFlatten.n, 1, "цепочка должна быть заведена — иначе проверка ничего не ловит");
-    assert.equal(await flattenDupChains(sql), 1, "выпрямляется ровно одно звено");
+    assert.equal(
+      await flattenDupChains(sql), 1,
+      "считаются исправленные материалы, а не переписывания",
+    );
     const [afterFlatten] = await sql<{ n: number }[]>`
       select count(*)::int as n from dailynews.items c
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
@@ -1540,6 +1641,34 @@ async function main() {
       chainStory.get(chainRoot)?.length, 3,
       "выпрямленный сюжет собирается целиком, а не делится надвое",
     );
+
+    // Цепочка из четырёх материалов правится за два шага, но исправить надо
+    // два из них: третий и четвёртый (второй и так указывает на корень).
+    // Сложенные длины ответов насчитали бы три — число в логе прогона
+    // означало бы не то, что в нём написано.
+    const deep = [
+      await mkItem(mineSource, "deep-0", "Deep chain story zero", 400),
+      await mkItem(mineSource, "deep-1", "Deep chain story one", 350),
+      await mkItem(mineSource, "deep-2", "Deep chain story two", 300),
+      await mkItem(mineSource, "deep-3", "Deep chain story three", 250),
+    ];
+    for (let i = 1; i < deep.length; i++) {
+      await sql`update dailynews.items set dup_of = ${deep[i - 1]} where id = ${deep[i]}`;
+    }
+    assert.equal(await flattenDupChains(sql), 2, "два материала, сколько бы шагов ни ушло");
+    const deepStory = await queries.getStories([mineSource], [deep[0]]);
+    assert.equal(deepStory.get(deep[0])?.length, 4, "длинная цепочка сходится в один сюжет");
+
+    // Инвариант обеспечивается там, где потребляется: догрузка выпуска
+    // зовёт selectSurvivors мимо ночного прогона, и цепочка, оставшаяся
+    // с прошлого раза, увела бы ключ сюжета в середину без оценки.
+    await sql`update dailynews.items set dup_of = ${deep[1]} where id = ${deep[3]}`;
+    await selectSurvivors(sql, owner.id, owner.weights, storyTargets, 5, [mineSource]);
+    const [chainsLeft] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(chainsLeft.n, 0, "отбор выпрямляет цепочки сам, а не надеется на прогон");
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

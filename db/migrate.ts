@@ -23,13 +23,38 @@
  * записывается как применённый без выполнения — иначе журнал, заведённый
  * позже самих миграций, никогда не догонит базу. Каждый такой случай
  * печатается: тихо считать миграцию применённой нельзя.
+ *
+ * Но «обещания выполнены» и «обещаний нет» — разные вещи, и раньше они
+ * были одним. Индекс, `update` и `comment on` в форму схемы не входят,
+ * поэтому разрыва у такого файла не бывает никогда: сверка молчит не потому,
+ * что он применён, а потому, что ей нечего искать. Такие файлы выполняются.
+ * 0041_story_index прошла в журнал мимо базы 21 сентября 2026, 0031 — ещё
+ * 19-го, вместе с тринадцатью источниками, которые должна была убрать.
  */
 import postgres from "postgres";
 import { readFileSync, readdirSync } from "node:fs";
-import { numberCollisions, promised, schemaGaps } from "./schema-gap";
+import { fileCoverage, numberCollisions, promised, schemaGaps } from "./schema-gap";
 import { sql } from "../src/lib/db";
 
 const OWNER = process.env.SUPABASE_DB_URL;
+
+/**
+ * `npm run migrate -- --force 0041_story_index` — выполнить один файл заново.
+ *
+ * Забытое имя — это ошибка, а не «ну тогда как обычно»: молчаливый откат
+ * к полному прогону накатил бы всё, что лежит в pending, вместо одного
+ * названного файла.
+ */
+function forcedName(): string | null {
+  const at = process.argv.indexOf("--force");
+  if (at < 0) return null;
+  const name = process.argv[at + 1];
+  if (!name || name.startsWith("--")) {
+    console.error("! --force требует имя миграции: npm run migrate -- --force 0041_story_index");
+    process.exit(1);
+  }
+  return name;
+}
 
 async function main() {
   const gapsBefore = await schemaGaps(sql);
@@ -80,13 +105,57 @@ async function main() {
     const journal = await owner<{ name: string }[]>`select name from dailynews.migrations`;
     const known = new Set(journal.map((row) => row.name));
     const files = readdirSync("db/migrations").filter((file) => file.endsWith(".sql")).sort();
-    const pending = files.filter((file) => !known.has(file.replace(/\.sql$/, "")));
-
-    if (pending.length === 0) {
-      console.log(`Журнал знает все ${files.length} миграций. Накатывать нечего.`);
-      return;
+    // Повторное выполнение по имени: единственный способ починить файл,
+    // который уже лежит в журнале невыполненным. Все миграции писались
+    // идемпотентными, но гнать их пачкой всё равно нельзя (0008 отбивается
+    // на голосах из 0010), поэтому здесь именно один названный файл.
+    const forced = forcedName();
+    if (forced) {
+      const file = files.find((name) => name.replace(/\.sql$/, "") === forced);
+      if (!file) {
+        console.error(`! файла миграции ${forced} нет в db/migrations`);
+        process.exit(1);
+      }
+      console.log(`→ ${file} (принудительно, по имени)`);
+      await owner.unsafe(readFileSync(`db/migrations/${file}`, "utf8"));
+      await owner`insert into dailynews.migrations (name) values (${forced}) on conflict (name) do nothing`;
+      console.log("  применена");
+      applied++;
     }
-    console.log(`В журнале ${known.size} из ${files.length}, к разбору ${pending.length}.`);
+
+    // Дальше — общий путь. Принудительный прогон проходит по нему тоже:
+    // «команда прошла» и «база изменилась» — разные утверждения и здесь,
+    // а схема, уехавшая мимо развёрнутого кода, роняет сайт независимо
+    // от того, каким флагом её накатили.
+    const pending = forced
+      ? []
+      : files.filter((file) => !known.has(file.replace(/\.sql$/, "")));
+
+    // Журнал говорит «применена», а сверке о таком файле сказать нечего
+    // вовсе: он не обещал форме схемы ничего. До починки ворот ровно эти
+    // и уходили в журнал невыполненными — так прошли 0041 с индексом
+    // и 0031 с тринадцатью источниками. Задним числом ворота их не лечат:
+    // pending они больше не считаются.
+    //
+    // Одной строкой, а не списком: таких файлов восемь на любой живой базе,
+    // и почти все применены давно. Дюжина строк каждый прогон — это то же
+    // молчание, только шумное; поимённо их показывает `--check`.
+    const { silent, skippable } = fileCoverage();
+    const unprovable = files.filter(
+      (file) => known.has(file.replace(/\.sql$/, "")) && silent.has(file),
+    );
+    if (unprovable.length > 0) {
+      console.log(
+        `Журнал считает применёнными ${unprovable.length} файлов, о которых сверка не знает ` +
+        "ничего (индексы и данные). Поимённо: --check. Выполнить заново: --force <имя>",
+      );
+    }
+
+    if (!forced && pending.length === 0) {
+      console.log(`Журнал знает все ${files.length} миграций. Накатывать нечего.`);
+    } else if (!forced) {
+      console.log(`В журнале ${known.size} из ${files.length}, к разбору ${pending.length}.`);
+    }
 
     // Запись без файла — миграция из чужой ветки, уже стоящая в базе.
     // Молчать о ней нельзя: её изменений нет ни в одной проверке, а номер
@@ -106,19 +175,51 @@ async function main() {
     // Какой файл за какой разрыв отвечает: если разрывов у файла нет,
     // его обещания в базе уже выполнены.
     const owed = new Set(gapsBefore.map((gap) => gap.from));
+    let blind = 0;
+    const partial: string[] = [];
 
     for (const file of pending) {
       const name = file.replace(/\.sql$/, "");
-      if (!owed.has(file)) {
+      // Выполняется либо то, у чего есть разрыв, либо то, чего сверка
+      // не видит вовсе. Всё остальное записывается.
+      //
+      // Порог здесь именно такой, и это не осторожность ради осторожности.
+      // Объявления миграций отменяются следующими: 0020 увозит `profile`
+      // и `items.summary_axes`, 0037 переписывает `model_calls_stage_check`
+      // поверх 0036. Догоняющий прогон на пустом журнале выполнил бы
+      // 0002 и 0012 заново — и воскресил бы увезённое, — а 0036_blogger
+      // вернул бы ограничение к списку без `interests` и `dedup`. Сверка
+      // после прогона ищет недостающее, и воскрешённого она не заметит.
+      const run = owed.has(file) || silent.has(file);
+      if (!run) {
         console.log(`  ${file}: обещанное в базе уже есть — записываю в журнал, не выполняя`);
         await owner`insert into dailynews.migrations (name) values (${name}) on conflict (name) do nothing`;
         recorded++;
+        // Файл мог делать и что-то помимо объявлений — индекс, данные.
+        // Записан он по объявлениям, а про остальное не известно ничего.
+        if (!skippable.has(file)) partial.push(file);
         continue;
       }
-      console.log(`→ ${file}`);
+      console.log(`→ ${file}${silent.has(file) ? " (сверка его не покроет)" : ""}`);
       await owner.unsafe(readFileSync(`db/migrations/${file}`, "utf8"));
       console.log("  применена");
       applied++;
+      if (silent.has(file)) blind++;
+    }
+
+    // Сверка ниже такие файлы не покроет, и молчать об этом нельзя:
+    // «разрывов не осталось» про них не утверждает ничего.
+    if (blind > 0) {
+      console.log(
+        `\n  ${blind} из них сверка формы схемы не покроет.\n` +
+        "  Индекс смотреть в pg_indexes, изменения данных — запросом.",
+      );
+    }
+    if (partial.length > 0) {
+      console.log(
+        `\n  Записаны по объявлениям, но делают и невидимое сверке: ${partial.join(", ")}.\n` +
+        "  Выполнить целиком, если нужно: npm run migrate -- --force <имя>",
+      );
     }
   } finally {
     await owner.end({ timeout: 10 }).catch(() => {});

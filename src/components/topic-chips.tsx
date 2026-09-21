@@ -10,7 +10,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import { maxDigestOf, topicsWord, PLAN_IDS, PLANS, type Plan } from "@/lib/plans";
+import {
+  MIN_READING_MINUTES, READING_MINUTES, topicsWord, PLAN_IDS, PLANS, type Plan,
+} from "@/lib/plans";
+import { formatMinutes, itemsForMinutes } from "@/lib/reading-time";
 import { count, plural } from "@/lib/plural";
 import { usePaywall } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -20,25 +23,46 @@ import { queueRebuild } from "@/components/rebuild-queue";
 
 export function TopicChips({
   initial,
-  initialTotal,
+  initialMinutes,
+  perCard,
   inToday,
   onChange,
   plan,
 }: {
   initial: ChipInput[];
-  initialTotal: number;
-  /** Тариф: он задаёт и потолок числа интересов, и доступные размеры выпуска. */
+  /** Заказ читателя: сколько минут чтения он просит. */
+  initialMinutes: number;
+  /**
+   * Сколько минут занимает одна его карточка. Считается на сервере по уже
+   * написанным описаниям — здесь только делится, той же функцией, что
+   * и в прогоне: вторая копия арифметики разошлась бы с ней молча, и полоса
+   * делила бы места, которых не будет.
+   */
+  perCard: number;
+  /** Тариф: он задаёт и потолок числа интересов, и потолок времени. */
   plan: Plan;
-  /** Сколько материалов в последнем выпуске: с ним сверяется предложение догрузить. */
+  /** Сколько минут в последнем выпуске: с ними сверяется предложение догрузить. */
   inToday: number;
   onChange?: () => void;
 }) {
+  const [minutes, setMinutesState] = useState(initialMinutes);
+  // Места считаются из времени, а не хранятся: число карточек — следствие
+  // заказа, и вторая правда о нём разъехалась бы с первой на первой же смене
+  // языка (описания по-английски короче, и в те же минуты их влезает больше).
+  const places = itemsForMinutes(minutes, perCard, plan.maxItems);
+  // Потолок штук упёрся раньше времени: у короткой карточки в заказанные
+  // минуты влезло бы больше, чем тариф отдаёт. Молчать об этом нельзя —
+  // выпуск выходил бы короче заказа каждый день, и виноватым выглядел бы
+  // поток, а не наш предел.
+  const capped = places < Math.round(minutes / perCard);
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
-  // и без приведения полоса показывала бы не тот дайджест, который придёт.
+  // и без приведения полоса показывала бы не тот выпуск, который придёт.
   const [chips, setChipsState] = useState<ChipInput[]>(() =>
-    withCounts(initial, normalize(initial.map((chip) => chip.count), initialTotal)),
+    // `places` на первом проходе и есть места этого заказа: `minutes`
+    // заведено из `initialMinutes`. Вторая запись той же формулы разошлась бы
+    // с первой на первой же правке.
+    withCounts(initial, normalize(initial.map((chip) => chip.count), places)),
   );
-  const [total, setTotalState] = useState(initialTotal);
 
   // Скрытые поля меняются без события формы, поэтому о правке сообщаем сами:
   // иначе автосохранение их не заметит.
@@ -49,11 +73,14 @@ export function TopicChips({
 
   const setCounts = (counts: number[]) => setChips(withCounts(chips, counts));
 
-  const setTotal = (next: number) => {
-    const size = Math.min(maxDigestOf(plan), Math.max(3, Math.round(next) || 3));
-    setTotalState(size);
-    setChips(withCounts(chips, normalize(chips.map((chip) => chip.count), size)));
-    offerTopUp(size);
+  const setMinutes = (next: number) => {
+    const asked = Math.min(plan.maxMinutes, Math.max(MIN_READING_MINUTES, next));
+    setMinutesState(asked);
+    setChips(withCounts(
+      chips,
+      normalize(chips.map((chip) => chip.count), itemsForMinutes(asked, perCard, plan.maxItems)),
+    ));
+    offerTopUp(asked);
   };
 
   /**
@@ -63,8 +90,8 @@ export function TopicChips({
    * и смотрел на спиннер. Теперь правка просто откладывается: догрузка начнётся,
    * когда из настроек выйдут, и пойдёт фоном.
    */
-  const offerTopUp = (size: number) => {
-    if (size > inToday) queueRebuild("size");
+  const offerTopUp = (asked: number) => {
+    if (asked > inToday) queueRebuild("size");
   };
 
   const [draft, setDraft] = useState("");
@@ -80,14 +107,12 @@ export function TopicChips({
   const topicsPaywall = usePaywall("topics", plan);
   const digestPaywall = usePaywall("digest", plan);
 
-  /** Размеры показываем все, какие есть в продукте: за чужими — корона. */
-  const sizes = Array.from(
-    new Set([...plan.digestSizes, ...PLANS.pro.digestSizes, total]),
-  ).sort((a, b) => a - b);
+  /** Время показываем всё, какое есть в продукте: за чужим — корона. */
+  const sizes = Array.from(new Set([...READING_MINUTES, minutes])).sort((a, b) => a - b);
 
   /** Тарифы, где выпуск бывает длиннее: их имена стоят в подписи под кнопками. */
   const bigger = PLAN_IDS
-    .filter((id) => maxDigestOf(PLANS[id]) > maxDigestOf(plan))
+    .filter((id) => PLANS[id].maxMinutes > plan.maxMinutes)
     .map((id) => PLANS[id].label);
 
   const add = (label: string) => {
@@ -96,15 +121,15 @@ export function TopicChips({
     if (full) return;
     if (chips.some((chip) => chip.label.toLowerCase() === trimmed.toLowerCase())) return;
     const next = [...chips, { slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC }];
-    // Новая тема берёт место у самой крупной, а не растит дайджест:
-    // количество новостей в день читатель задал отдельно и сам.
-    setChips(withCounts(next, normalize(next.map((chip) => chip.count), total)));
+    // Новая тема берёт место у самой крупной, а не растит выпуск:
+    // сколько читать, читатель задал отдельно и сам.
+    setChips(withCounts(next, normalize(next.map((chip) => chip.count), places)));
     setDraft("");
   };
 
   const remove = (index: number) => {
     const next = chips.filter((_, i) => i !== index);
-    setChips(withCounts(next, normalize(next.map((chip) => chip.count), total)));
+    setChips(withCounts(next, normalize(next.map((chip) => chip.count), places)));
     setSelected(null);
 
     // Кнопка, по которой только что нажали, исчезает вместе с чипом,
@@ -121,7 +146,7 @@ export function TopicChips({
   const patch = (index: number, fields: Partial<ChipInput>) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, ...fields } : chip)));
 
-  /** Добавить теме место можно только отняв у соседа: сумма — это размер дайджеста. */
+  /** Добавить теме место можно только отняв у соседа: сумма — это весь выпуск. */
   const nudge = (index: number, by: number) => {
     // Отнять не у кого: у единственной темы счётчик уехал бы от суммы,
     // а «3 из 20» на экране означало бы не то, что придёт.
@@ -150,31 +175,33 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        <FieldLabel>Новостей в выпуске</FieldLabel>
-        {/* Пять значений видны сразу: за списком они прячутся по одному,
-            и «сколько читать» превращается в два действия вместо одного.
-            Шаг в двадцать — заметная разница, «37» такой разницы не несёт.
-            Значение вне списка (например, прежние 12) остаётся первым
-            вариантом, пока его не сменили. */}
+        <FieldLabel id="digest-minutes-label">Время чтения в выпуске</FieldLabel>
+        {/* Заказывается время, а не штуки: «сорок новостей» не отвечает
+            на вопрос, который задают перед чтением. Все пять значений видны
+            сразу — за списком они прячутся по одному, и «сколько читать»
+            превращается в два действия вместо одного. Значение вне списка
+            (осталось от прежнего тарифа) стоит своим вариантом, пока его
+            не сменили. */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <ToggleGroup
-            aria-label="Новостей в выпуске"
-            value={[String(total)]}
+            aria-labelledby="digest-minutes-label"
+            value={[String(minutes)]}
             onValueChange={(value: string[]) => {
-              const size = Number(value[0]);
+              const asked = Number(value[0]);
               if (!value[0]) return;
-              // Выбор размера не с этого тарифа не гасится молча: молчаливый
-              // отказ читается как поломка переключателя.
-              if (size > maxDigestOf(plan)) {
+              // Время не с этого тарифа не гасится молча: молчаливый отказ
+              // читается как поломка переключателя.
+              if (asked > plan.maxMinutes) {
                 digestPaywall.open();
                 return;
               }
-              setTotal(size);
+              setMinutes(asked);
             }}
             variant="outline"
           >
             {sizes.map((size) => {
-              const beyond = size > maxDigestOf(plan);
+              const beyond = size > plan.maxMinutes;
+              const word = plural(size, "минута", "минуты", "минут");
               return (
                 // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
                 // читателю, почему она погасла, становится нечем. Корона стоит
@@ -184,10 +211,10 @@ export function TopicChips({
                   key={size}
                   value={String(size)}
                   aria-disabled={beyond || undefined}
-                  aria-label={beyond ? `${size}, на платном тарифе` : undefined}
+                  aria-label={beyond ? `${size} ${word}, на платном тарифе` : `${size} ${word}`}
                   className={beyond ? "text-muted-foreground/60" : undefined}
                 >
-                  {size}
+                  {size} мин
                   {beyond ? (
                     <CrownIcon className="size-3.5 text-amber-500/80" aria-hidden />
                   ) : null}
@@ -195,28 +222,37 @@ export function TopicChips({
               );
             })}
           </ToggleGroup>
+          {/* Штуки не исчезают совсем: полоса ниже делит именно их, и без
+              этой строки «3 из 12» было бы числом из ниоткуда. Но стоят они
+              подписью к времени, а не вместо него. */}
           <span className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground tabular-nums">{total}</span>{" "}
-            {plural(total, "новость", "новости", "новостей")} в выпуске
+            примерно{" "}
+            <span className="font-medium text-foreground tabular-nums">{places}</span>{" "}
+            {plural(places, "новость", "новости", "новостей")}
           </span>
         </div>
         {digestPaywall.dialog}
-        {bigger.length > 0 ? (
+        {capped ? (
+          // Потолок штук упёрся раньше времени — значит, заказанных минут
+          // не будет, и сказать об этом должны мы, а не пустое место в ленте.
+          <FieldDescription>
+            На тарифе «{plan.label}» в выпуск попадает не больше{" "}
+            {count(plan.maxItems, "новости", "новостей", "новостей")}: это{" "}
+            {formatMinutes(places * perCard)}.
+          </FieldDescription>
+        ) : bigger.length > 0 ? (
           // Тарифы названы, а не спрятаны за «в других»: предел без имени
           // того, кто его снимает, — это отказ, за которым надо идти искать.
           // Список считается из PLANS: написанный руками, он разъедется
-          // с настоящими размерами молча.
+          // с настоящими пределами молча.
           <FieldDescription>
-            {/* Формы родительные: считает их «до», а не само число —
-                «до 21 новости», «до 22 новостей», «до 100 новостей». */}
-            На тарифе «{plan.label}» до{" "}
-            {count(maxDigestOf(plan), "новости", "новостей", "новостей")}. Больше новостей{" "}
+            На тарифе «{plan.label}» до {plan.maxMinutes} минут. Дольше читать{" "}
             <Link href="/settings/subscription" className="underline underline-offset-4">
               на «{bigger.join("» и «")}»
             </Link>
           </FieldDescription>
         ) : null}
-        <input type="hidden" name="digest_size" value={total} />
+        <input type="hidden" name="digest_minutes" value={minutes} />
       </Field>
 
       {chips.length > 1 ? (
@@ -261,7 +297,7 @@ export function TopicChips({
                 }}
                 tabIndex={0}
                 role="button"
-                aria-label={`${chip.label}, ${chip.count} из ${total}. Стрелками влево и вправо можно переставить`}
+                aria-label={`${chip.label}, ${chip.count} из ${places}. Стрелками влево и вправо можно переставить`}
                 className={cn(
                   "group flex h-10 items-center gap-1.5 rounded-lg border bg-card pr-1 pl-2 text-sm transition-colors select-none",
                   "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -362,7 +398,7 @@ export function TopicChips({
                       <TooltipContent>Меньше новостей по этой теме</TooltipContent>
                     </Tooltip>
                     <span className="w-16 text-center text-sm tabular-nums">
-                      {chip.count} из {total}
+                      {chip.count} из {places}
                     </span>
                     <Tooltip>
                       <TooltipTrigger

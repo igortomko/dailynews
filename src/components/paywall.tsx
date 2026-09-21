@@ -8,7 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  maxDigestOf, topicsWord, FEATURES, PLAN_IDS, PLANS,
+  topicsWord, FEATURES, PLAN_IDS, PLANS,
   type FeatureId, type Plan, type PlanId,
 } from "@/lib/plans";
 
@@ -56,7 +56,7 @@ function Offer({
         <span className="text-sm font-medium">{plan.label}</span>
         <span className="text-xs text-muted-foreground">
           {plan.maxSources} источников · {plan.maxTopics} {topicsWord(plan.maxTopics)} · до{" "}
-          {maxDigestOf(plan)} новостей
+          {plan.maxMinutes} мин чтения
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-3">

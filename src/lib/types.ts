@@ -116,7 +116,12 @@ export type Reader = {
   username: string | null;
   owner: boolean;
   reader_context: string;
-  digest_size: number;
+  /**
+   * Сколько минут чтения заказано. Карточек столько, сколько уложится
+   * в это время: перевод делает `itemsForMinutes` по длине уже написанных
+   * описаний этого читателя.
+   */
+  digest_minutes: number;
   language: string;
   /** 1 — объясняй с нуля, 5 — пиши как специалисту. Уходит в промпт дайджеста. */
   complexity: number;

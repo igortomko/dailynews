@@ -1,16 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 360" role="img" aria-labelledby="title desc">
-  <title id="title">Reporta logo for dark surfaces</title>
-  <desc id="desc">White Reporta wordmark threaded by a red-orange worm.</desc>
-  <g fill="#FAF9F6" font-family="Georgia, Times New Roman, serif" font-size="220" letter-spacing="-10">
-    <text x="102" y="246">Reporta</text>
-  </g>
-  <path d="M16 206 C94 166 140 166 218 207 S346 281 424 237 S548 166 636 221 S778 287 860 213 S988 165 1071 218 S1209 274 1321 218"
-        fill="none" stroke="#FF5A3F" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
-  <g transform="translate(1320 218)">
-    <ellipse cx="39" cy="0" rx="45" ry="35" fill="#FF5A3F"/>
-    <circle cx="25" cy="-5" r="8" fill="#161616"/>
-    <circle cx="53" cy="-5" r="8" fill="#161616"/>
-    <circle cx="25" cy="-5" r="3.5" fill="#4CC9F0"/>
-    <circle cx="53" cy="-5" r="3.5" fill="#4CC9F0"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 520" role="img" aria-labelledby="title">
+  <title id="title">Reporta approved wordmark on dark background</title>
+  <rect width="1600" height="520" fill="#171716"/>
+  <image href="logo-reporta-approved.png" x="35" y="43" width="1529" height="434"/>
 </svg>
