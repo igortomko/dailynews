@@ -26,7 +26,7 @@ import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
 import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
-import { readingTime } from "../src/lib/relative-time";
+import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { cleanupOf } from "../src/lib/source-health";
 import { applyRules, rulesOf } from "../src/lib/rules";
 import { toSlug } from "../src/lib/slug";
@@ -1682,9 +1682,10 @@ async function main() {
     // прошло бы нестрогое сравнение молча — ровно тот класс ошибки,
     // который уже ломал сюжеты по числовым ключам.
     assert.strictEqual(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
-    assert.strictEqual(
-      readingTime(storyFeed[0].body_chars), "~6 мин", "и она превращается в минуты",
-    );
+    // Во что она превращается, здесь больше не спрашивается: карточка считает
+    // время по `summaryTime` из длины нашего описания, а `body_chars` сейчас
+    // не читает никто. Утверждение про минуты проверяло бы функцию, которой
+    // в ленте уже нет, — то есть подтверждало бы работу мимо продукта.
 
     // У ролика текст — пересказ субтитров, а не то, что откроется
     // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
@@ -1725,7 +1726,7 @@ async function main() {
       "чужое издание считается ещё одним источником",
     );
     assert.deepEqual(
-      storyLines(storyBoth.get(theirItem)!).map((row) => [row.source_label, row.note]),
+      storyLines(storyBoth.get(theirItem)!, RU_DICT.feed.story).map((row) => [row.source_label, row.note]),
       [["Чужое издание", "первоисточник"], ["Моё издание", "1 час позже"]],
       "порядок и пометки считаются по времени публикации",
     );

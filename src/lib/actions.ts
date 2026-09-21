@@ -421,7 +421,8 @@ export async function discoverSource(input: string): Promise<
   const planned = planFor(raw);
   if (!("refuse" in planned)) {
     const plan = effectivePlan(await currentReader());
-    const denials = planned.candidates.map((candidate) => kindDenial(plan, candidate.kind));
+    const { plans } = await getDict();
+    const denials = planned.candidates.map((candidate) => kindDenial(plan, candidate.kind, plans));
     if (denials.every(Boolean)) return { ok: false, error: denials[0]! };
   }
 

@@ -190,7 +190,6 @@ export const feed: typeof En = {
     hoursAgo: (n: number) => `${n}ч`,
     daysAgo: (n: number) => `${n}д`,
     readingMinutes: (n: number) => `~${n} мин`,
-    readingHours: (n: number) => `~${n} ч`,
     minutesLong: (n: number): string => `~${n} ${plural(n, "минута", "минуты", "минут")}`,
     shortfall: (have: string, target: number): string =>
       `${have} из ${target}: сегодня больше действительно важного нет`,

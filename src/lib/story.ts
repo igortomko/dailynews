@@ -1,5 +1,4 @@
 import type { Dict } from "@/lib/i18n";
-import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 import { count } from "./plural";
 import type { Source } from "./types";
 
@@ -66,7 +65,7 @@ const timeOf = (value: string | Date | null): number =>
  */
 export type StoryLabels = Dict["feed"]["story"];
 
-export function laterBy(minutes: number, t: StoryLabels = ruFeed.story): string {
+export function laterBy(minutes: number, t: StoryLabels): string {
   if (minutes < 1) return t.sameTime;
   if (minutes < 60) return t.laterMinutes(minutes);
   const hours = Math.round(minutes / 60);
@@ -92,7 +91,7 @@ export type StoryLine = Publication & { note: string };
  */
 export function storyLines(
   publications: Publication[],
-  t: StoryLabels = ruFeed.story,
+  t: StoryLabels,
 ): StoryLine[] {
   const ordered = [...publications].sort(
     (a, b) => timeOf(a.published_at) - timeOf(b.published_at) || a.item_id - b.item_id,
@@ -149,7 +148,7 @@ export function otherSources(publications: Publication[], shownSourceId: number)
  * материалом; «твоих» следует из состава — в список идут только источники,
  * которые читатель выбрал сам, и чужих там не бывает.
  */
-export const alsoLine = (n: number, t: StoryLabels = ruFeed.story) => t.alsoLine(n);
+export const alsoLine = (n: number, t: StoryLabels) => t.alsoLine(n);
 
 /** Заголовок раскрытия: публикации считаются все, вместе с показанной. */
-export const storyTitle = (n: number, t: StoryLabels = ruFeed.story) => t.storyTitle(n);
+export const storyTitle = (n: number, t: StoryLabels) => t.storyTitle(n);

@@ -12,7 +12,6 @@
  * слов врал бы в разы ровно там, где проверить это некому. Знак считается
  * одинаково у всех шестнадцати языков.
  */
-import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 import type { TimeLabels } from "./relative-time";
 import { DEFAULT_COMPLEXITY, SOURCE_LANGUAGE, type Voice } from "./voice";
 import { plural } from "./plural";
@@ -148,11 +147,11 @@ export function itemsForMinutes(minutes: number, perCard: number, maxItems: numb
  * Меньше минуты не показывается нулём: выпуск, о котором написано «~0 мин»,
  * выглядит пустым, хотя в нём есть что читать.
  */
-export const formatMinutes = (minutes: number, t: TimeLabels = ruFeed.time): string =>
+export const formatMinutes = (minutes: number, t: TimeLabels): string =>
   t.readingMinutes(Math.max(1, Math.round(minutes)));
 
 /** Та же волна, но словом: в Telegram и в подписях «мин» читается обрубком. */
-export const formatMinutesLong = (minutes: number, t: TimeLabels = ruFeed.time): string =>
+export const formatMinutesLong = (minutes: number, t: TimeLabels): string =>
   t.minutesLong(Math.max(1, Math.round(minutes)));
 
 /**
@@ -175,7 +174,7 @@ export const isShort = (minutes: number, target: number): boolean =>
 export const shortfallNote = (
   minutes: number,
   target: number,
-  t: TimeLabels = ruFeed.time,
+  t: TimeLabels,
 ): string =>
   // Цель приходит дробной: она прижимается потолком штук, а он в минутах
   // не круглый. Округляет сама фраза, а не каждый, кто её показывает:
