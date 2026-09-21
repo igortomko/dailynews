@@ -62,14 +62,15 @@ transform = f'translate({x:.6f} {baseline:.6f}) scale({scale:.8f} {-scale:.8f})'
 
 # Smooth curves replace the noisy traced head; eye positions stay fixed.
 head = '<path d="M1408 188 C1426 169 1452 168 1469 173 C1487 178 1498 190 1498 207 C1498 229 1481 243 1459 243 C1445 243 1435 237 1421 242 C1396 246 1391 207 1408 188 Z" fill="#FF462A"/>'
-body = '<path d="M30 256 C90 245 112 158 184 154 C270 148 330 255 436 264 C516 270 551 211 609 212 C682 212 711 293 802 287 C883 280 937 207 1005 179 C1074 151 1100 178 1141 222 C1182 267 1214 238 1267 245 C1300 271 1336 281 1375 246 C1403 221 1404 207 1435 207" fill="none" stroke="#FF462A" stroke-width="37" stroke-linecap="butt"/>'
+body = '<path d="M30 224 C96 212 124 125 206 125 C288 125 339 220 411 220 C485 220 522 172 582 172 C650 172 694 224 759 224 C838 224 909 133 998 124 C1060 118 1100 201 1195 207 C1290 213 1351 207 1435 207" fill="none" stroke="#FF462A" stroke-width="37" stroke-linecap="butt"/>'
 eyes = '<g fill="#FFFFFF"><circle cx="1435" cy="205" r="15"/><circle cx="1473" cy="203" r="15"/></g><g fill="#00B8EC"><circle cx="1435" cy="205" r="7"/><circle cx="1473" cy="203" r="7"/></g>'
 snake_content = f'{body}{head}{eyes}'
 snake = f'<g id="snake">{snake_content}</g>'
 weave = ''
-for first, last in [(2, 3), (5, 5)]:
-    left = x + (bounds[first - 1][2] + bounds[first][0]) / 2 * scale
-    right = x + (bounds[last][2] + bounds[last + 1][0]) / 2 * scale
+# Enter counters behind the left stem; emerge in front of the right stroke.
+for index, fraction in [(0, 0.50), (2, 0.52), (3, 0.52), (5, 0.0)]:
+    left = x + (bounds[index][0] + (bounds[index][2] - bounds[index][0]) * fraction) * scale
+    right = x + (bounds[index][2] + bounds[index + 1][0]) / 2 * scale
     weave += f'<rect x="{left:.4f}" y="0" width="{right - left:.4f}" height="434"/>'
 defs = f'<defs><clipPath id="weave">{weave}</clipPath></defs>'
 open_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1529" height="434" viewBox="0 0 1529 434" role="img" aria-labelledby="title"><title id="title">Reporta</title>'
@@ -78,6 +79,6 @@ logo = f'{open_svg}{defs}{snake}{letters}<g clip-path="url(#weave)">{snake_conte
 (args.output_dir / "logo-reporta.svg").write_text(logo)
 (args.output_dir / "logo-reporta-dark.svg").write_text(logo.replace('fill="#080808"', 'fill="#F5F5F2"'))
 (args.output_dir / "snake-reporta.svg").write_text(f'{open_svg}{defs}{snake}</svg>\n')
-report = {"font": "DM Serif Display", "weight": 400, "text": text, "shaper": "HarfBuzz", "unitsPerEm": face.upem, "pairPositioning": positions, "tracking": 0, "opticalKerning": not args.native_kerning, "outlines": True, "note": "User-selected DM Serif Display Regular with manual pair adjustments added to native kerning. Comparisons share the same type scale. No synthetic bold or nonuniform scaling. Snake body, head and cyan eyes are unchanged vector geometry."}
+report = {"font": "DM Serif Display", "weight": 400, "text": text, "shaper": "HarfBuzz", "unitsPerEm": face.upem, "pairPositioning": positions, "tracking": 0, "opticalKerning": not args.native_kerning, "outlines": True, "note": "User-selected DM Serif Display Regular with manual pair adjustments added to native kerning. Comparisons share the same type scale. No synthetic bold or nonuniform scaling. Snake flows through R, p and o counters with right-stroke foreground crossings and a level exit past a. Head and cyan eyes are unchanged."}
 (args.output_dir / "wordmark-spec.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 print(json.dumps(report, ensure_ascii=False))
