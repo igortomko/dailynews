@@ -423,19 +423,23 @@ async function found(readerId: number, query: string, config: string): Promise<A
         join dailynews.sources s on s.id = i.source_id
    left join dailynews.scores sc on sc.item_id = i.id
    left join dailynews.topics t on t.id = sc.topic_id
-  -- Текст один и тот же для поиска и для отрывка. Разойдись они —
-  -- совпадение по заголовку источника нашлось бы, а в карточке не было бы
-  -- ни одного отмеченного слова: выдача, по которой не понять, за что
-  -- материал в неё попал.
+  -- Ищется по всему, отрывок режется из всего, кроме заголовка выпуска.
+  --
+  -- Разница ровно в нём, и она не косметическая с обеих сторон. Искать
+  -- по заголовку источника обязательно: «uranium» стоит там, а «уран» —
+  -- в описании. Резать отрывок из заголовка выпуска незачем: он и так
+  -- стоит строкой выше, и совпадение в нём видно там — а в отрывке
+  -- он выходил повторением самого себя, на каждой карточке.
   cross join lateral (
                -- btrim обязателен: пустая колонка оставляет в склейке
                -- висячий пробел, а отрывок приходит без него — и проверка
                -- «до конца ли дочитано» становится всегда ложной. Многоточие
                -- при этом стоит на каждом отрывке и означает уже ничего.
-               select btrim(concat_ws(' ', di.title, di.summary, i.title, i.excerpt)) as doc
+               select btrim(concat_ws(' ', di.summary, i.title, i.excerpt)) as doc,
+                      btrim(concat_ws(' ', di.title, di.summary, i.title, i.excerpt)) as searched
              ) d0
   cross join lateral (
-               select d0.doc, to_tsvector(${config}::regconfig, d0.doc) as tsv
+               select d0.doc, to_tsvector(${config}::regconfig, d0.searched) as tsv
              ) v
        where v.tsv @@ q.tsq
          -- Скрытое пальцем вниз не возвращается и здесь: иначе «убрать

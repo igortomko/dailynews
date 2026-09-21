@@ -87,14 +87,18 @@ export function highlight(text: string): Part[] {
     }
     if (open > 0) parts.push({ text: rest.slice(0, open), mark: false });
     const close = rest.indexOf(HL_END, open);
+    // Смещения считаются по длине самих меток, а не единицей: метки
+    // экспортируются, и первая же замена на что-нибудь длиннее символа
+    // оставила бы её хвост в тексте карточки, ничего не сломав по дороге.
+    const from = open + HL_START.length;
     // Незакрытая метка — это обрезанный отрывок. Остаток уходит обычным
     // текстом: подсветить «до конца строки» значит залить половину карточки.
     if (close === -1) {
-      parts.push({ text: rest.slice(open + 1), mark: false });
+      parts.push({ text: rest.slice(from), mark: false });
       break;
     }
-    parts.push({ text: rest.slice(open + 1, close), mark: true });
-    rest = rest.slice(close + 1);
+    parts.push({ text: rest.slice(from, close), mark: true });
+    rest = rest.slice(close + HL_END.length);
   }
   return parts;
 }

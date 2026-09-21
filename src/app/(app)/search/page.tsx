@@ -6,7 +6,7 @@ import { currentReader } from "@/lib/session";
 import { count } from "@/lib/plural";
 import { dayInWords, digestsWord } from "@/lib/telegram";
 import { PageHeader } from "@/components/page-header";
-import { Input } from "@/components/ui/input";
+import { SearchForm } from "@/components/search-form";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
 export const dynamic = "force-dynamic";
@@ -199,26 +199,16 @@ export default async function SearchPage({
             >
               <ChevronLeftIcon className="size-5 sm:size-4" />
             </Link>
-            {/* GET, а не действие: адрес с запросом — это и есть состояние
-                страницы, и «назад» после поиска возвращает к прошлому
-                поиску, а не к пустому полю. */}
-            <form action="/search" className="flex-1">
-              <Input
-                type="search"
-                name="q"
-                defaultValue={query}
-                autoFocus
-                enterKeyHint="search"
-                placeholder="Например: uranium дата-центры"
-                aria-label="Поиск по выпускам"
-                className="h-10 sm:h-8"
-              />
-              {/* Отправка по Enter — поведение браузера, а не наше.
-                  Явная кнопка делает его нашим. */}
-              <button type="submit" className="sr-only">
-                Найти
-              </button>
-            </form>
+            {/* Та же форма, что раскрывается в шапке ленты: адрес и имя
+                параметра у них общие, иначе поиск, начатый из ленты,
+                однажды перестанет доезжать до страницы, которая его
+                показывает. */}
+            <SearchForm
+              defaultValue={query}
+              autoFocus
+              placeholder="Например: uranium дата-центры"
+              className="flex-1"
+            />
           </div>
         }
       />

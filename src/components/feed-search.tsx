@@ -2,8 +2,8 @@
 
 import { SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SearchForm } from "@/components/search-form";
 
 /**
  * Поиск начинается прямо в ленте: нажатие раскрывает поле в шапке, а уводит
@@ -45,34 +45,22 @@ export function SearchButton({
 }
 
 /**
- * Поле на всю строку шапки. Форма обычная, GET: результат — это адрес,
- * его можно сохранить и переслать себе же, а отправка работает и до того,
- * как страница ожила.
+ * Поле на всю строку шапки. Сама форма общая со страницей результатов:
+ * адрес и имя параметра у них обязаны совпадать, а две копии договора
+ * расходятся с первой правкой любой из них.
  */
 export function SearchField({ onClose }: { onClose: () => void }) {
   return (
-    <form action="/search" className="flex w-full items-center gap-2">
-      <Input
-        type="search"
-        name="q"
-        autoFocus
-        enterKeyHint="search"
-        placeholder="Найти в прошлых выпусках: uranium дата-центры"
-        aria-label="Поиск по выпускам"
-        // Escape возвращает ленту на место. Без него поле закрывается только
-        // мышью, а открывают его с клавиатуры.
-        onKeyDown={(event) => {
-          if (event.key === "Escape") onClose();
-        }}
-        className="h-10 sm:h-8"
-      />
-      {/* Кнопка отправки есть, хотя её и не видно: форма с одним полем
-          уходит по Enter и без неё, но это поведение самого браузера,
-          и проверить его нечем. Явная кнопка отправляет форму везде
-          одинаково и даёт клавиатуре и читалке экрана то, что нажимают. */}
-      <button type="submit" className="sr-only">
-        Найти
-      </button>
+    <SearchForm
+      autoFocus
+      placeholder="Найти в прошлых выпусках: uranium дата-центры"
+      className="flex w-full items-center gap-2"
+      // Escape возвращает ленту на место. Без него поле закрывается только
+      // мышью, а открывают его с клавиатуры.
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
       <Button
         type="button"
         variant="ghost"
@@ -83,6 +71,6 @@ export function SearchField({ onClose }: { onClose: () => void }) {
       >
         <XIcon />
       </Button>
-    </form>
+    </SearchForm>
   );
 }
