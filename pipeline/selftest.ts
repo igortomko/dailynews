@@ -61,7 +61,7 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
-import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
+import { anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG } from "../src/lib/search";
 import { recentFrom, remember } from "../src/lib/search-history";
 import {
   ENOUGH_SHOWN, MOSTLY_DUPLICATES, cleanupOf, type SourceYield,
@@ -2871,31 +2871,17 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
   assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
 
-  // Словарь решает, сводятся ли словоформы, и заметно это только
-  // по ненайденному.
-  assert.equal(tsConfigFor("русском"), "russian");
-  assert.equal(tsConfigFor("английском"), "english");
-  assert.equal(tsConfigFor("португальском (бразильский вариант)"), "portuguese");
+  // Словарь один на векторы и на запрос, и это константа: хранимые tsvector
+  // (миграция 0046) считаются Postgres тем же словарём, и любое другое
+  // значение здесь искало бы слова, которых в разобранном тексте нет
+  // по построению. Совпадение проверяется по самому файлу миграции, а не
+  // по памяти: две копии одного решения расходятся молча.
+  assert.equal(SEARCH_CONFIG, "russian", "латиницу разбирает тем же стеммером, кириллицу сводит только он");
+  const vectors = readFileSync("db/migrations/0046_search_vectors.sql", "utf8");
   assert.equal(
-    tsConfigFor(SOURCE_LANGUAGE),
-    "russian",
-    "язык источника заранее неизвестен: русская конфигурация разбирает и латиницу",
-  );
-  assert.equal(
-    tsConfigFor("японском"),
-    "russian",
-    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
-  );
-  assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
-  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
-  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
-  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
-  // в списке обязан получить словарь или попасть сюда осознанно, иначе
-  // он молча уедет на русский.
-  assert.deepEqual(
-    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
-    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
-    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
+    vectors.split(`to_tsvector('${SEARCH_CONFIG}'::regconfig`).length - 1,
+    2,
+    "оба хранимых вектора считаются словарём запроса",
   );
 
   // Недавние запросы лежат в браузере, и что там лежит — знает не наш код:

@@ -185,7 +185,7 @@ export default async function SearchPage({
   const query = ((Array.isArray(q) ? q[0] : q) ?? "").trim();
   const [archive, found] = await Promise.all([
     archiveSize(reader.id),
-    query ? searchArchive(reader, query) : null,
+    query ? searchArchive(reader.id, query) : null,
   ]);
 
   return (
