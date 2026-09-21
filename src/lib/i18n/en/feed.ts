@@ -42,6 +42,17 @@ export const feed = {
     kbdSearch: "search digests",
   },
 
+  /** Личные правила поверх готового выпуска: feed-tabs.tsx и item-card.tsx */
+  rules: {
+    hiddenBefore: (n: number) => `${n} ${n === 1 ? "card" : "cards"} hidden by your`,
+    hiddenLink: "exclusions",
+    allHiddenTitle: "Everything is hidden by exclusions",
+    allHiddenDescription: (n: number) =>
+      `The digest has ${n} ${n === 1 ? "card" : "cards"}, and each mentions something from your list. The digest isn't rebuilt — freed slots aren't refilled.`,
+    fixExclusions: "Adjust exclusions",
+    followedTitle: "From your “What to follow” list",
+  },
+
   /** src/components/item-card.tsx */
   item: {
     hidden: (title: string) => `Hidden: ${title}`,

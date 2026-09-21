@@ -16,6 +16,7 @@ import { settings } from "./settings";
 import { sources } from "./sources";
 import { plans } from "./plans";
 import { onboarding } from "./onboarding";
+import { rules } from "./rules";
 
 export const en = {
   nav: shell.nav,
@@ -27,6 +28,7 @@ export const en = {
   sources,
   plans,
   onboarding,
+  rules,
 };
 
 /**

@@ -41,6 +41,17 @@ export const feed: typeof En = {
     kbdSearch: "поиск по выпускам",
   },
 
+  rules: {
+    hiddenBefore: (n: number) =>
+      `${count(n, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим`,
+    hiddenLink: "исключениям",
+    allHiddenTitle: "Всё скрыто исключениями",
+    allHiddenDescription: (n: number) =>
+      `В выпуске ${count(n, "карточка", "карточки", "карточек")}, и в каждой есть что-то из твоего списка. Выпуск не пересобирается — освободившиеся места не добираются.`,
+    fixExclusions: "Поправить исключения",
+    followedTitle: "Из твоего списка «За чем следить»",
+  },
+
   item: {
     hidden: (title: string) => `Скрыто: ${title}`,
     undo: "Вернуть",

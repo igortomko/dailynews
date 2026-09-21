@@ -279,18 +279,21 @@ async function runForReader(
   }
 
   const mySources = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
+  // За чем следить и что исключать — тем же правилом, что у первого
+  // выпуска и догрузки: правило, которое работает ночью и не работает
+  // по кнопке, читается как настройка, которая иногда не сохраняется.
+  const rules = rulesOf(reader);
   const survivors = await selectSurvivors(
     // Порог слабого материала отсчитывается от лучшего за сегодня, а не от
     // лучшего среди оставшихся: второй прогон за сутки иначе пустил бы в
     // выпуск ровно тех, кого отверг первый.
-    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, today.best,
-    // За чем следить и что исключать — тем же правилом, что у первого
-    // выпуска и догрузки: правило, которое работает ночью и не работает
-    // по кнопке, читается как настройка, которая иногда не сохраняется.
-    rulesOf(reader),
+    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, today.best, rules,
   );
   if (survivors.length === 0) {
-    log(`  ${name}: свежих материалов нет — пропуск`);
+    // Исключения названы: пустой отбор при заданном списке — это, скорее
+    // всего, список, а не поток, и лог не должен посылать искать поломку
+    // в источниках.
+    log(`  ${name}: свежих материалов нет${rules.exclude.empty ? "" : " (с учётом исключений)"} — пропуск`);
     return 0;
   }
 
