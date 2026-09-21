@@ -6,12 +6,13 @@ import { effectivePlan } from "@/lib/lemon";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
-import { SearchIcon, SettingsIcon } from "lucide-react";
+import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
+import { FeedSearch } from "@/components/feed-search";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
 export const dynamic = "force-dynamic";
@@ -96,24 +97,10 @@ export default async function FeedPage({
         <div key="actions" className="flex items-center gap-2">
         {/* Поиск рядом с датами: и то и другое — способ добраться
             до прошлого выпуска. Стрелками к соседнему, календарём
-            к дальнему, поиском — когда помнишь слово, а не дату. */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                nativeButton={false}
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Поиск по выпускам"
-                className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
-                render={<Link href="/search" />}
-              />
-            }
-          >
-            <SearchIcon />
-          </TooltipTrigger>
-          <TooltipContent>Поиск по прошлым выпускам</TooltipContent>
-        </Tooltip>
+            к дальнему, поиском — когда помнишь слово, а не дату.
+            Поле раскрывается здесь же: страница результатов открывается
+            по Enter, а не до того, как есть что искать. */}
+        <FeedSearch />
         <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
         <Tooltip>
           <TooltipTrigger

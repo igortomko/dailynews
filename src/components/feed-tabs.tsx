@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ArrowUpIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -98,7 +97,6 @@ export function FeedTabs({
   ];
 
   const [tab, setTab] = useState("all");
-  const router = useRouter();
 
   /**
    * Лента — список, который листают. j и k переводят фокус на соседний
@@ -109,9 +107,9 @@ export function FeedTabs({
    * клавиша отдаёт «о», «л» и «щ», и проверка по букве молча перестаёт
    * работать ровно у того, кто читает ленту по-русски.
    *
-   * «/» уводит в поиск по прошлым выпускам — там, где в ленте кончается
-   * память на даты. Проверяются обе стороны: в кириллице та же клавиша
-   * отдаёт «.», а «/» приезжает с другой.
+   * «/» здесь нет намеренно: поле поиска живёт в шапке и слушает эту
+   * клавишу само. Две записи на одну клавишу разъехались бы при первой
+   * же правке любой из них.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -121,11 +119,6 @@ export function FeedTabs({
         target &&
         (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
       ) {
-        return;
-      }
-      if (event.code === "Slash" || event.key === "/") {
-        event.preventDefault();
-        router.push("/search");
         return;
       }
       if (event.code !== "KeyJ" && event.code !== "KeyK" && event.code !== "KeyO") return;
@@ -158,7 +151,7 @@ export function FeedTabs({
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [router]);
+  }, []);
 
   const forTab = (slug: string) =>
     slug === "all"
@@ -178,7 +171,10 @@ export function FeedTabs({
       <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur">
         {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
             это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
-        <div className="flex h-14 items-center justify-between gap-3 px-4 sm:h-12">
+        {/* relative — точка отсчёта для поля поиска: оно раскрывается
+            поверх всей строки, потому что между датой и шестерёнкой
+            на телефоне места нет. */}
+        <div className="relative flex h-14 items-center justify-between gap-3 px-4 sm:h-12">
           {left}
           {right}
         </div>

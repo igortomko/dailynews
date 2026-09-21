@@ -116,6 +116,11 @@ export default async function SearchPage({
                 aria-label="Поиск по выпускам"
                 className="h-10 sm:h-8"
               />
+              {/* Отправка по Enter — поведение браузера, а не наше.
+                  Явная кнопка делает его нашим. */}
+              <button type="submit" className="sr-only">
+                Найти
+              </button>
             </form>
           </div>
         }
