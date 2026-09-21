@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { colorAt, handleLeft, moveBoundary } from "@/lib/topic-budget";
-import { cn } from "@/lib/utils";
 
 /**
  * Дайджест одной полосой: каждая тема — свой кусок, граница между соседями
@@ -16,10 +15,10 @@ import { cn } from "@/lib/utils";
  * справа. Тогда сумма не меняется, и размер дайджеста не уезжает сам собой,
  * пока подбираешь доли.
  *
- * Ручки показываются только у выбранного куска. Постоянно видимые ручки
- * на пяти темах — это четыре засечки поперёк полосы, и полоса перестаёт
- * читаться как доли; невидимые совсем — непонятно, что здесь вообще можно
- * тянуть. Поэтому кусок сначала выбирается, а тянется потом.
+ * Имя и число каждой темы подписаны под её куском и видны всегда. Раньше
+ * их показывала одна строка над полосой — та, на которую наведён курсор,
+ * — и ручки появлялись тоже по наведению: с пальца не наступает ни то,
+ * ни другое, и полоса на телефоне была картинкой, а не настройкой.
  */
 export function TopicBudgetBar({
   labels,
@@ -31,9 +30,6 @@ export function TopicBudgetBar({
   onChange: (next: number[]) => void;
 }) {
   const bar = useRef<HTMLDivElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const [active, setActive] = useState<number | null>(null);
-  const [hovered, setHovered] = useState<number | null>(null);
   const total = counts.reduce((sum, count) => sum + count, 0);
   const upTo = (index: number) => counts.slice(0, index + 1).reduce((sum, count) => sum + count, 0);
 
@@ -69,87 +65,30 @@ export function TopicBudgetBar({
   const nudge = (boundary: number, by: number) =>
     onChange(moveBoundary(counts, boundary, upTo(boundary) + by));
 
-  // Ручки куска, на который смотрят: левая — граница с предыдущим, правая —
-  // со следующим. Наведения достаточно, выбирать заранее не нужно: полоса,
-  // которую можно тянуть, обязана показать это до нажатия — иначе подпись
-  // «тяни границы» остаётся единственным намёком, а мышь его не видит.
-  // Выбор всё равно главнее наведения: во время перетаскивания указатель
-  // уходит на соседний кусок, и ручка не должна перепрыгивать за ним.
-  const focused = active ?? hovered;
-  const handles = focused === null
-    ? []
-    : [focused - 1, focused].filter((boundary) => boundary >= 0 && boundary < counts.length - 1);
-
-  const shown = hovered ?? active;
-
-  /**
-   * Нажатие мимо полосы снимает выбор. Иначе выбранный кусок остаётся
-   * приглушать соседей, пока не попадёшь ровно по нему второй раз, —
-   * и полоса застревает в состоянии, из которого не видно выхода.
-   * Слушаем pointerdown, а не click: он приходит до того, как под пальцем
-   * что-то откроется или перерисуется.
-   */
-  useEffect(() => {
-    if (active === null) return;
-    const dismiss = (event: PointerEvent) => {
-      if (!box.current?.contains(event.target as Node)) setActive(null);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setActive(null);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", dismiss);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [active]);
-
   return (
-    <div ref={box} className="flex flex-col gap-1.5">
-      {/* Подпись держит высоту всегда: появляясь и исчезая, она дёргала бы
-          вниз всё, что под полосой, ровно в момент перетаскивания. */}
-      <div className="h-5 text-xs text-muted-foreground" aria-hidden>
-        {shown !== null ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full" style={{ backgroundColor: colorAt(shown) }} />
-            {labels[shown]} — {counts[shown]} из {total}
-          </span>
-        ) : null}
-      </div>
-
-      <div ref={bar} className="relative flex h-5 w-full touch-none gap-1 select-none">
+    <div className="flex flex-col gap-2">
+      {/* Полоса сплошная и скруглена только по торцам: зазор между цветными
+          кусками читается как ещё одна граница, и рядом с настоящей ручкой
+          их становится две. */}
+      <div
+        ref={bar}
+        className="relative flex h-5 w-full touch-none overflow-visible rounded-full select-none"
+      >
         {counts.map((count, index) => (
-          <button
+          <div
             // Ключ по индексу, а не по названию: во время переименования
             // название пустое и неуникальное, и React путает сегменты.
             key={index}
-            type="button"
-            // Браузерной подсказки здесь нет намеренно: подпись над полосой
-            // говорит то же самое сразу и на своём месте, а title выезжал бы
-            // поверх полосы через секунду — ровно там, где в этот момент
-            // тянут границу.
-            aria-label={`${labels[index]}, ${counts[index]} из ${total}`}
-            aria-pressed={active === index}
-            onClick={() => setActive(active === index ? null : index)}
-            onPointerEnter={() => setHovered(index)}
-            onPointerLeave={() => setHovered(null)}
-            onFocus={() => setHovered(index)}
-            onBlur={() => setHovered(null)}
-            className={cn(
-              "h-full cursor-pointer rounded-full transition-opacity focus-visible:outline-none",
-              active !== null && active !== index && "opacity-40",
-              // У выбранного куска края под ручками распрямляются: скруглённый
-              // цветной торец рядом с ручкой читается как зазор, и граница
-              // выглядит не на своём месте.
-              active === index && index > 0 && "rounded-l-none",
-              active === index && index < counts.length - 1 && "rounded-r-none",
-            )}
+            // Кусок — картинка: нажимать на нём нечего, имя и число читаются
+            // подписью под ним, а тянется граница. Кнопка без действия
+            // ловила бы и фокус, и палец, ничего при этом не делая.
+            aria-hidden
+            className="h-full first:rounded-l-full last:rounded-r-full"
             style={{ flexGrow: count, flexBasis: 0, backgroundColor: colorAt(index) }}
           />
         ))}
 
-        {handles.map((boundary) => (
+        {counts.slice(0, -1).map((_, boundary) => (
           <div
             key={`handle-${boundary}`}
             role="separator"
@@ -163,13 +102,34 @@ export function TopicBudgetBar({
             onKeyDown={(event) => {
               if (event.key === "ArrowLeft") { event.preventDefault(); nudge(boundary, -1); }
               if (event.key === "ArrowRight") { event.preventDefault(); nudge(boundary, 1); }
-              if (event.key === "Escape") setActive(null);
             }}
             style={{ left: handleLeft(counts, boundary) }}
-            // Белая, а не тёмная: тёмная ручка на цветной полосе читается
-            // как ещё один кусок, только чёрный.
-            className="absolute top-1/2 h-7 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-col-resize rounded-full border border-foreground/15 bg-background shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            // Белая всегда, а не цвета фона: в тёмной теме фон почти чёрный,
+            // и ручка на цветной полосе читалась не как ручка, а как дырка
+            // между кусками — то есть ровно как то, чего на полосе нет.
+            className="absolute top-1/2 h-7 w-3 -translate-x-1/2 -translate-y-1/2 cursor-col-resize rounded-full border border-black/15 bg-white shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
           />
+        ))}
+      </div>
+
+      {/* Подписи в тех же долях, что и куски: имя над числом, обе строки
+          по центру своего куска. Длинное имя в узком куске обрезается —
+          число под ним остаётся читаемым, а оно и есть настройка. */}
+      <div className="flex w-full">
+        {counts.map((count, index) => (
+          <div
+            key={index}
+            className="min-w-0 px-0.5 text-center"
+            style={{ flexGrow: count, flexBasis: 0 }}
+          >
+            <div className="truncate text-[11px] leading-tight text-muted-foreground">
+              {labels[index]}
+            </div>
+            <div className="text-sm leading-tight font-medium tabular-nums">
+              {count}
+              <span className="sr-only"> из {total}</span>
+            </div>
+          </div>
         ))}
       </div>
     </div>

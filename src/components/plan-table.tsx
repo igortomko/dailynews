@@ -52,10 +52,10 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Тарифы</CardTitle>
+        <CardTitle>Подписка</CardTitle>
         <CardDescription>
           От тарифа зависит, за сколькими источниками следит лента, сколько у тебя
-          интересов и сколько новостей в выпуске
+          интересов и сколько новостей в выпуске.
         </CardDescription>
       </CardHeader>
 
@@ -65,13 +65,21 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
           const Icon = ICONS[id];
           const mine = plan.id === current.id;
           const buy = plan.price > current.price ? checkoutUrl(id, reader.id) : null;
+          // Понижение и смена карты живут у Lemon Squeezy: своего экрана
+          // для них нет и не будет — это был бы второй набор состояний,
+          // расходящийся с настоящим.
+          const portal = reader.portal_url;
 
           return (
             <div
               key={id}
               className={cn(
                 "flex flex-col gap-3 rounded-lg border p-4",
-                mine ? "border-foreground/30 bg-foreground/[0.03]" : "border-border",
+                // Свой тариф выделен тем же янтарным, каким помечено платное
+                // по всему продукту: корона, замок и эта карточка — про одно.
+                mine
+                  ? "border-amber-400/70 bg-amber-50 dark:bg-amber-400/10"
+                  : "border-border",
               )}
             >
               <div className="flex items-center justify-between gap-2">
@@ -82,13 +90,17 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                   />
                   {plan.label}
                 </span>
-                {mine ? <Badge variant="secondary">твой</Badge> : null}
+                {mine ? <Badge variant="secondary">Твой тариф</Badge> : null}
               </div>
 
               <div className="flex items-baseline gap-1">
                 <span className="text-2xl font-medium tabular-nums">${plan.price}</span>
                 <span className="text-xs text-muted-foreground">в месяц</span>
               </div>
+
+              {/* Зачем брать — над столбиком чисел: числа отвечают «сколько
+                  дают», а решают по «зачем». */}
+              <p className="text-sm font-medium">{plan.tagline}</p>
 
               <dl className="flex flex-col gap-1.5 text-sm">
                 {ROWS.map(({ feature, value }) => (
@@ -120,9 +132,15 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
               {/* Кнопка появляется только там, где ей есть куда вести:
                   «перейти» без настроенной оплаты — обещание без продукта. */}
               {mine ? (
-                <Button size="sm" variant="outline" className="mt-auto" disabled>
-                  Твой тариф
-                </Button>
+                portal ? (
+                  <Button size="sm" variant="outline" className="mt-auto" render={<a href={portal} />}>
+                    Управлять тарифом
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" className="mt-auto" disabled>
+                    Твой тариф
+                  </Button>
+                )
               ) : plan.price > current.price ? (
                 buy ? (
                   <Button size="sm" className="mt-auto" render={<a href={buy} />}>
@@ -149,6 +167,18 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                     </TooltipContent>
                   </Tooltip>
                 )
+              ) : portal ? (
+                // Понижение — тоже переход, и вести ему есть куда: смену
+                // тарифа принимает тот же портал. «Ниже твоего» сообщало
+                // только, что кнопка не работает, и уйти с Pro было нечем.
+                <div className="mt-auto flex flex-col gap-1.5">
+                  <Button size="sm" variant="outline" render={<a href={portal} />}>
+                    Перейти на «{plan.label}»
+                  </Button>
+                  <span className="text-center text-[11px] leading-tight text-muted-foreground">
+                    Изменится после оплаченного периода
+                  </span>
+                </div>
               ) : (
                 <Button size="sm" variant="outline" className="mt-auto" disabled>
                   Ниже твоего
@@ -159,13 +189,11 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
         })}
       </CardContent>
 
+      {/* Только состояние подписки: кнопка портала переехала в карточку
+          своего тарифа — две одинаковые ссылки на одной странице заставляют
+          выбирать между ними, хотя ведут они в одно место. */}
       {paying ? (
-        <CardContent className="flex flex-wrap items-center gap-3 pt-0">
-          {reader.portal_url ? (
-            <Button variant="outline" size="sm" render={<a href={reader.portal_url} />}>
-              Управлять подпиской
-            </Button>
-          ) : null}
+        <CardContent className="pt-0">
           <p className="text-xs text-muted-foreground">
             {ends
               ? `Подписка отменена, тариф «${current.label}» работает до ${ends.toLocaleDateString("ru-RU")}.`
