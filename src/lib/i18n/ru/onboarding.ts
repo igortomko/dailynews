@@ -39,7 +39,8 @@ export const onboarding: typeof En = {
         `Дальше выпуск будет приходить ${everyOtherDay ? "через день" : "каждую ночь"}, ссылка — в бота. Спасибо, что читаешь.`,
       openFeed: "Открыть ленту",
       dontClose: "Не закрывай вкладку.",
-      elapsed: (seconds: number) => `прошло ${count(seconds, "секунда", "секунды", "секунд")}, обычно около минуты`,
+      elapsed: (seconds: number) =>
+        `${plural(seconds, "прошла", "прошло", "прошло")} ${count(seconds, "секунда", "секунды", "секунд")}, обычно около минуты`,
       noFreshItems: "Свежих материалов по твоим темам пока нет — соберу ночью.",
       buildFailed: "Не получилось собрать первый выпуск — соберу ночью.",
       digestSummary: (added, topics) =>

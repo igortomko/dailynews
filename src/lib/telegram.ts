@@ -39,7 +39,7 @@ export type BotCommand =
   | { kind: "start"; telegramId: number; chatId: number; username: string | null; locale: Locale }
   | { kind: "help"; chatId: number }
   /** Присланная ссылка: бот заводит по ней источник, как форма в вебе. */
-  | { kind: "link"; telegramId: number; chatId: number; text: string }
+  | { kind: "link"; telegramId: number; chatId: number; text: string; locale: Locale }
   /** Ответ на «дочитал?»: единственный сигнал о том, что уехало на читалку. */
   | { kind: "finished"; telegramId: number; itemId: number; finished: boolean; callbackId: string }
   /** Нажал «продолжать» под вопросом спящему: лента включается обратно. */
@@ -168,7 +168,15 @@ export function parseUpdate(update: unknown): BotCommand {
   // Прислали ссылку — значит, хотят завести источник. Это тот же жест,
   // что и вставить её в форму, и отвечать на него подсказкой «напиши /start»
   // значит делать вид, что не понял.
-  if (looksLikeSource(text)) return { kind: "link", telegramId, chatId, text };
+  // Язык нужен и здесь: у читателя, чьё первое сообщение — ссылка, строка
+  // заводится этой веткой, а upsert при следующем /start язык уже не трогает
+  // (и правильно делает: там мог быть выбор из настроек).
+  if (looksLikeSource(text)) {
+    return {
+      kind: "link", telegramId, chatId, text,
+      locale: localeFromTelegram(message.from?.language_code),
+    };
+  }
 
   return text ? { kind: "help", chatId } : { kind: "ignore" };
 }

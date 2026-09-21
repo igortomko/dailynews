@@ -1,6 +1,7 @@
 import { sql } from "./db";
 import type { Reader, ReaderChannel, ReaderTopic, Source, Topic, VoiceCardRow } from "./types";
 import { kindleSenderName } from "./kindle-setup";
+import { DEFAULT_LOCALE, type Locale } from "./i18n/locale";
 import { effectiveVoice } from "./lemon";
 import { cardMinutes } from "./reading-time";
 import type { Rules } from "./rules";
@@ -131,8 +132,12 @@ export async function ensureReader(
    * Язык интерфейса из Telegram. Ставится только при заведении: читатель
    * мог выбрать другой в настройках, и перезаписывать его выбор тем,
    * что стоит у него в телефоне, — значит отменять решение без спроса.
+   *
+   * Тип, а не строка: в базе на колонке check по списку словарей, и
+   * ненормализованный «en-US» уронил бы вставку вместо ошибки компиляции —
+   * то есть не пустил бы читателя вовсе.
    */
-  locale?: string,
+  locale?: Locale,
 ): Promise<Reader> {
   // Владелец забирает строку, перенесённую из profile: в ней его контекст,
   // веса и пройденный онбординг. Иначе он завёлся бы вторым читателем
@@ -148,7 +153,7 @@ export async function ensureReader(
 
   const [reader] = await sql<Reader[]>`
     insert into dailynews.readers (telegram_id, username, ui_language)
-    values (${telegramId}, ${username}, coalesce(${locale ?? null}, 'en'))
+    values (${telegramId}, ${username}, ${locale ?? DEFAULT_LOCALE})
     on conflict (telegram_id) do update
       set username = excluded.username, updated_at = now()
     returning ${COLUMNS}

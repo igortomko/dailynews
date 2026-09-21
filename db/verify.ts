@@ -130,8 +130,14 @@ async function main() {
      * тоже остаётся: `ReadyForQuery` там полагается по спецификации,
      * то есть отказ идёт путём, который не зависит от правки вовсе.
      */
-    const rejects = async (statement: string, pattern: RegExp, why: string) => {
-      await assert.rejects(sql.unsafe(statement), pattern, why);
+    const rejects = async (
+      statement: string,
+      pattern: RegExp,
+      why: string,
+      /** Значения для $1…$n: часть отказов бывает только у параметра. */
+      params: unknown[] = [],
+    ) => {
+      await assert.rejects(sql.unsafe(statement, params as never[]), pattern, why);
       const [alive] = await sql<{ v: string }[]>`select 'ok'::text as v`;
       assert.equal(
         alive?.v,
@@ -387,10 +393,11 @@ async function main() {
      * работал.
      */
     const shapes = async (digestId: number, itemId: number) => {
-      await assert.rejects(
-        sql`select jsonb_build_object('reading_target', ${1.5}) as j`,
+      await rejects(
+        "select jsonb_build_object('reading_target', $1) as j",
         /determine data type/,
         "без каста параметр в jsonb_build_object не типизируется — это и было причиной",
+        [1.5],
       );
       await sql`
         update dailynews.digests
@@ -410,19 +417,19 @@ async function main() {
         returning item_id::int as item_id
       `;
       assert.equal(back.length, 0, "уже лежащий материал не вставляется второй раз");
-      await assert.rejects(
-        sql`
-          insert into dailynews.digest_items (digest_id, item_id, total, position, title, summary)
-          values (${digestId}, ${itemId}, 1, 98, 'проба', 'S')
-          on conflict (digest_id, item_id) do nothing
-          returning id::int as id
-        `,
+      await rejects(
+        `insert into dailynews.digest_items
+           (digest_id, item_id, total, position, title, summary)
+         values ($1, $2, 1, 98, 'проба', 'S')
+         on conflict (digest_id, item_id) do nothing
+         returning id::int as id`,
         /column "id" does not exist/,
         "у digest_items нет собственного ключа — returning id падал на каждой вставке",
+        [digestId, itemId],
       );
       // Убираем за собой: заказ дня — предмет отдельной проверки ниже,
       // и оставленное здесь значение сделало бы её бессмысленной.
-      await sql`update dailynews.digests set stats = '{}'::jsonb where id = ${digestId}`;
+      await sql`update dailynews.digests set stats = stats - 'reading_target' where id = ${digestId}`;
       console.log("  формы запросов сборки: каст и составной ключ на месте");
     };
 

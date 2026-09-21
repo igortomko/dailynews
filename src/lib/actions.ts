@@ -693,12 +693,18 @@ async function fillDigest(reader: Reader) {
       })),
       reader.reader_context,
     );
+  } catch (error) {
+    console.error(`качество описаний не измерено: ${(error as Error).message}`);
+  }
+  // Отдельно от самого измерения: упавшая запись расхода — это потраченные
+  // деньги без следа, и называться она должна своей причиной, а не чужой.
+  try {
     if (quality) await recordCall({
       readerId: reader.id, stage: "summary", model: quality.model,
       tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
     });
   } catch (error) {
-    console.error(`качество описаний не измерено: ${(error as Error).message}`);
+    console.error(`расход на измерение не записан: ${(error as Error).message}`);
   }
 
   const writtenById = new Map(written.items.map((item) => [String(item.id), item]));

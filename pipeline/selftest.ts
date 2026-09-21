@@ -1996,6 +1996,13 @@ assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного 
 // Прислать ссылку боту — тот же жест, что вставить её в форму. Отвечать
 // на него подсказкой «напиши /start» значит делать вид, что не понял.
 assert.equal(parseUpdate(privateStart("https://t.me/durov")).kind, "link", "ссылка заводит источник");
+// Язык нужен и этой ветке: у читателя, чьё первое сообщение — ссылка,
+// строка заводится здесь, а следующий /start язык уже не переписывает.
+assert.equal(
+  (parseUpdate(privateStart("https://t.me/durov", { language_code: "ru" })) as { locale: string }).locale,
+  "ru",
+  "ссылка тоже приносит язык интерфейса",
+);
 assert.equal(parseUpdate(privateStart("@eugene_rid")).kind, "link", "@имя — тоже ссылка");
 assert.equal(parseUpdate(privateStart("simonwillison.net")).kind, "link", "голый домен — тоже");
 assert.equal(

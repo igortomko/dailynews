@@ -116,10 +116,10 @@ export async function POST(request: NextRequest) {
      * после ответа.
      */
     if (command.kind === "link") {
-      const { telegramId, chatId, text } = command;
+      const { telegramId, chatId, text, locale } = command;
       after(async () => {
         try {
-          const reader = await ensureReader(telegramId, null);
+          const reader = await ensureReader(telegramId, null, locale);
           const result = await addByLink(reader, text);
           await sendMessage(
             chatId,
