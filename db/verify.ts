@@ -28,6 +28,8 @@ import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
 import { readingTime } from "../src/lib/relative-time";
 import { cleanupOf } from "../src/lib/source-health";
+import { applyRules, rulesOf } from "../src/lib/rules";
+import { toSlug } from "../src/lib/slug";
 
 
 
@@ -1209,6 +1211,109 @@ async function main() {
       "цели второго читателя должны решать его выпуск, а не цели первого",
     );
     console.log(`  цели персональны: ${budget[1].topic.label} — ${secondShare} мест у второго`);
+
+    // --- личные правила: за чем следить и что исключать ------------------------
+    // Правило личное: у владельца оно есть, у второго читателя нет, и один
+    // и тот же поток должен разойтись по-разному. Ломается это молча —
+    // выпуск приходит вовремя, просто с тем, что просили не показывать,
+    // — поэтому проверяется настоящий отбор и настоящая лента.
+    const [ruleSource] = await sql<{ id: number }[]>`
+      insert into dailynews.sources (kind, label, url, config)
+      values ('rss', 'Правила: издание', 'https://rules.example.com/feed', '{}'::jsonb)
+      returning id::int as id
+    `;
+    const ruleItem = async (topic: typeof topics[number], title: string, total: number, extra = {}) => {
+      const url = `https://rules.example.com/${toSlug(title)}`;
+      const [row] = await sql<{ id: number }[]>`
+        insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+        values (${ruleSource.id}, ${url}, ${url}, ${title}, ${normalizeTitle(title)}, '')
+        returning id::int as id
+      `;
+      await sql`
+        insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+        values (
+          ${row.id}, ${topic.id}, ${total}, 0.8,
+          ${sql.json(axes(topic.slug, "fact", extra) as unknown as Parameters<typeof sql.json>[0])},
+          'jev-latest'
+        )
+      `;
+      return row.id;
+    };
+    // Figma — середина очереди дизайна по скору: без правила в шесть мест
+    // не попадает, с правилом обязана встать первой. Musk — лучший
+    // материал потока: без правила берётся у любого читателя.
+    const figmaItem = await ruleItem(budget[1].topic, "Figma raises a round", 60, { clickbait: { noul: 0.35 } });
+    const muskItem = await ruleItem(budget[2].topic, "Musk buys the chain", 130, { depth: { score: 2, max: 2, confidence: 0.9 } });
+    const ruleSources = [...everySource, ruleSource.id];
+
+    const ownerRules = { follow: [["Figma", "Фигма"]], exclude: [["Musk"]] };
+    await readers.saveRules(sql, owner.id, ownerRules);
+    const ownerRuled = (await readers.getReader(owner.id))!;
+    assert.deepEqual(ownerRuled.follow_rules, ownerRules.follow, "слежение приезжает массивом, а не строкой jsonb");
+    assert.deepEqual(ownerRuled.exclude_rules, ownerRules.exclude, "исключения приезжают массивом");
+    const secondRuled = (await readers.getReader(second.id))!;
+    assert.deepEqual(secondRuled.exclude_rules, [], "у второго читателя правил нет: старые читатели получают пустую настройку");
+    await rejects(
+      `update dailynews.readers set follow_rules = '"Figma"'::jsonb where id = ${owner.id}`,
+      /readers_follow_rules_array/,
+      "строка вместо массива (урок 0005) отвергается самой базой",
+    );
+
+    const ownerTargets = targetsOf(await readers.getReaderTopics(owner.id));
+    const unruledPick = await selectSurvivors(sql, owner.id, owner.weights, ownerTargets, 12, ruleSources);
+    assert.ok(unruledPick.some((s) => Number(s.id) === muskItem), "без правил лучший материал берётся");
+    assert.ok(!unruledPick.some((s) => Number(s.id) === figmaItem), "без правил середина очереди в шесть мест не попадает");
+
+    const ruledPick = await selectSurvivors(
+      sql, owner.id, owner.weights, ownerTargets, 12, ruleSources, 0, rulesOf(ownerRuled),
+    );
+    assert.ok(!ruledPick.some((s) => Number(s.id) === muskItem), "исключённое не попадает в выпуск владельца");
+    const designPicked = ruledPick.filter((s) => s.topic_label === budget[1].topic.label);
+    assert.equal(Number(designPicked[0]?.id), figmaItem, "упомянутое встаёт первым в своей теме");
+    assert.equal(
+      designPicked.length,
+      unruledPick.filter((s) => s.topic_label === budget[1].topic.label).length,
+      "доля темы от слежения не растёт: приоритет — порядок внутри очереди, а не лишние места",
+    );
+
+    // Сорок мест, а не двенадцать: у второго цель «Дизайн» — двадцать, и круг
+    // отдаёт дизайну двадцать мест раньше, чем блокчейн получит первое.
+    // Проверяется изоляция правил, а не бюджет тем.
+    const secondPick = await selectSurvivors(
+      sql, second.id, second.weights, targetsOf(await readers.getReaderTopics(second.id)), 40, ruleSources, 0,
+      rulesOf(secondRuled),
+    );
+    assert.ok(secondPick.some((s) => Number(s.id) === muskItem), "исключение владельца не трогает выпуск соседа");
+    console.log("  правила отбора: исключённое ушло, упомянутое первое, сосед не задет");
+
+    // Готовый выпуск: исключение прячет карточку без пересборки, у соседа
+    // та же карточка остаётся. Пометка слежения находится по написанию
+    // из выпуска — «Фигма» ловится вторым написанием, называется первым.
+    const rulesDay = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
+    const ruleCards = [
+      { id: muskItem, total: 130, title: "Владелец: Маск покупает" },
+      { id: figmaItem, total: 60, title: "Владелец: Фигма подняла раунд" },
+    ];
+    await makeDigest(owner.id, rulesDay, ruleCards);
+    await makeDigest(second.id, rulesDay, ruleCards);
+    const ownerShown = applyRules(await queries.getFeed(owner.id, rulesDay), rulesOf(ownerRuled));
+    assert.deepEqual(ownerShown.visible.map((c) => Number(c.id)), [figmaItem], "исключённая карточка спрятана из готового выпуска");
+    assert.equal(ownerShown.hidden, 1, "скрытое посчитано");
+    assert.equal(ownerShown.visible[0].followed, "Figma", "пометка называет первое написание правила");
+    const secondShown = applyRules(await queries.getFeed(second.id, rulesDay), rulesOf(secondRuled));
+    assert.equal(secondShown.hidden, 0, "у соседа ничего не спрятано");
+    assert.equal(secondShown.visible.length, 2, "у соседа обе карточки на месте");
+    // Снятое правило возвращает карточку как была — без пересборки.
+    await readers.saveRules(sql, owner.id, { follow: [], exclude: [] });
+    const ownerFreed = applyRules(
+      await queries.getFeed(owner.id, rulesDay), rulesOf((await readers.getReader(owner.id))!),
+    );
+    assert.equal(ownerFreed.visible.length, 2, "снятое исключение возвращает карточку");
+    assert.equal(ownerFreed.visible[0].followed, null, "без слежения пометки нет");
+    console.log("  правила в ленте: спрятано без пересборки, возвращается снятием правила");
+    // Выпуск этой проверки убирается: дальше мерка карточки и архив
+    // считаются по выпускам владельца, и лишний день сдвинул бы их.
+    await sql`delete from dailynews.digests where day = ${rulesDay}::date`;
 
     // --- потолок расходов -------------------------------------------------------
     assert.equal(await readers.spentToday(second.id), 0, "новый читатель ничего не потратил");

@@ -55,6 +55,9 @@ import {
   channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
+import {
+  applyRules, asNames, cleanRules, compile, mentionText, NO_RULES, RULE_LIMITS, rulesOf, splitNames,
+} from "../src/lib/rules";
 import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
@@ -695,6 +698,180 @@ assert.ok(
 assert.equal(
   pickSurvivors(gloomy, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length, gloomy.length,
   "день целиком в минусе не должен оставлять читателя без выпуска",
+);
+
+// --- личные правила: за чем следить и что исключать ----------------------------
+// Правило — список написаний одного и того же. Ищется буквально, с границей
+// слова для любого алфавита; текст читателя не исполняется как regex.
+// Проверяется на числах и строках, а не на пересказе: отказ здесь выглядит
+// как выпуск, пришедший вовремя и с тем, что просили не показывать.
+assert.deepEqual(
+  splitNames("Figma, Framer\nWebflow, figma , "),
+  ["Figma", "Framer", "Webflow"],
+  "запятая и перевод строки делят; повтор без регистра и пустое выбрасываются",
+);
+
+assert.deepEqual(
+  cleanRules("follow", ["Figma", ["Framer", " framer ", "Фреймер"]]),
+  { rules: [["Figma"], ["Framer", "Фреймер"]] },
+  "строка — правило из одного написания; повтор внутри правила схлопывается",
+);
+assert.deepEqual(
+  cleanRules("follow", [["Figma"], ["figma", "Фигма"]]),
+  { rules: [["Figma"], ["Фигма"]] },
+  "написание из другого правила теряется, а не задваивается",
+);
+assert.deepEqual(cleanRules("follow", undefined), { rules: [] }, "нет поля — нет правил");
+assert.deepEqual(cleanRules("follow", [[""], [], ["  "]]), { rules: [] }, "пустые правила выбрасываются");
+assert.ok("error" in cleanRules("follow", "Figma"), "не массив — отказ, а не пустой список");
+assert.ok("error" in cleanRules("follow", [[42]]), "не строка — отказ");
+const manyRules = (n: number) => Array.from({ length: n }, (_, i) => [`имя ${i}`]);
+assert.ok(!("error" in cleanRules("follow", manyRules(RULE_LIMITS.rules.follow))), "предел слежения проходит");
+assert.ok("error" in cleanRules("follow", manyRules(RULE_LIMITS.rules.follow + 1)), "предел слежения плюс один — отказ");
+assert.ok(!("error" in cleanRules("exclude", manyRules(RULE_LIMITS.rules.exclude))), "предел исключений проходит");
+assert.ok("error" in cleanRules("exclude", manyRules(RULE_LIMITS.rules.exclude + 1)), "предел исключений плюс один — отказ");
+assert.ok("error" in cleanRules("follow", [["a", "b", "c", "d", "e", "f"]]), "шестое написание — отказ");
+assert.ok(!("error" in cleanRules("follow", [["x".repeat(RULE_LIMITS.chars)]])), "80 знаков проходят");
+assert.ok("error" in cleanRules("follow", [["x".repeat(RULE_LIMITS.chars + 1)]]), "81 знак — отказ");
+
+assert.deepEqual(asNames('[["Figma","Фигма"]]'), [["Figma", "Фигма"]], "строка в jsonb (урок 0005) читается, а не роняет ленту");
+assert.deepEqual(asNames("не json"), [], "битая строка — пустой список");
+assert.deepEqual(asNames([["", 5, "Ok"], "Solo"]), [["Ok"], ["Solo"]], "мусор внутри правила отбрасывается");
+
+const ruleNames = compile([["Apple"], ["Go"], ["Hacker News"], ["Яндекс"], ["C++"], [".NET"], ["a.*b"]]);
+assert.equal(ruleNames.test("I bought a pineapple"), false, "Apple не находится в Pineapple");
+assert.equal(ruleNames.test("Apple ships a new Mac"), true, "Apple находится словом");
+assert.equal(ruleNames.test("Google I/O keynote"), false, "Go не находится в Google");
+assert.equal(ruleNames.test("Written in Go."), true, "Go перед точкой — слово");
+assert.equal(ruleNames.test("Hacker\n   News thread"), true, "пробельный разрыв внутри написания — тот же текст");
+assert.equal(ruleNames.test("Яндекса больше нет"), false, "кириллица: другая форма — другое слово; \\b здесь ловил бы середину");
+assert.equal(ruleNames.test("«Яндекс» купил"), true, "кавычки — граница слова и для кириллицы");
+assert.equal(ruleNames.test("modern c++ features"), true, "C++ ищется как написано");
+assert.equal(ruleNames.test("abc++"), false, "C++ внутри слова не считается");
+assert.equal(ruleNames.test("using .net core"), true, ".NET ищется как написано");
+assert.equal(ruleNames.test("axxxb"), false, "текст читателя не исполняется как regex");
+assert.equal(ruleNames.test("literal a.*b here"), true, "и находится буквально");
+assert.equal(ruleNames.find("Hacker News on Go"), "Hacker News", "называется первое найденное по тексту");
+assert.equal(ruleNames.find("nothing here"), null, "нет упоминания — нет имени");
+
+const foldedNames = compile([["Фёдор"], ["Figma"]]);
+assert.equal(foldedNames.test("ФЕДОР пришёл"), true, "регистр и ё/е сходятся");
+assert.equal(foldedNames.test("Ｆｉｇｍａ"), true, "полноширинные буквы сходятся по NFKC");
+assert.equal(foldedNames.find("FIGMA rocks"), "Figma", "называется написание из правила, а не из текста");
+
+assert.equal(compile([]).empty, true, "без правил — пустой сопоставитель");
+assert.equal(compile([[" "]]).empty, true, "пустое написание — тоже пустой");
+assert.equal(NO_RULES.follow.test("что угодно"), false, "пустой сопоставитель не ловит ничего");
+assert.equal(mentionText("a", null, "", undefined, "b"), "a\nb", "пустые куски не дают лишних строк");
+const readerRules = rulesOf({ follow_rules: [["Figma"]], exclude_rules: '[["Musk"]]' });
+assert.equal(readerRules.follow.test("Figma"), true, "слежение читается из колонки");
+assert.equal(readerRules.exclude.test("Elon Musk said"), true, "исключения из строки jsonb тоже читаются");
+
+// Правила поверх готового выпуска: тот же текст, что и при отборе, плюс
+// написанное языком читателя.
+const readyCards = [
+  { id: 1, title: "Figma ships", excerpt: "", title_ru: "Figma выпустила", summary: null },
+  { id: 2, title: "Design roundup", excerpt: "Musk quoted", title_ru: "Дизайн", summary: "обзор" },
+  { id: 3, title: "Plain", excerpt: "", title_ru: "Про Маска", summary: "текст" },
+];
+const ruledCards = applyRules(
+  readyCards,
+  rulesOf({ follow_rules: [["Figma"]], exclude_rules: [["Musk"], ["Маска"]] }),
+);
+assert.deepEqual(ruledCards.visible.map((c) => c.id), [1], "исключение ловит и описание из фида, и текст выпуска");
+assert.equal(ruledCards.hidden, 2, "скрытое считается, а не пропадает молча");
+assert.equal(ruledCards.visible[0].followed, "Figma", "упомянутое из списка называется на карточке");
+assert.deepEqual(applyRules(readyCards, NO_RULES).visible.map((c) => c.id), [1, 2, 3], "без правил выпуск прежний");
+assert.equal(applyRules(readyCards, NO_RULES).visible[0].followed, null, "без правил пометок нет");
+
+// --- правила в отборе ----------------------------------------------------------
+// Исключение снимает материал до порога и очередей, слежение — порядок
+// внутри очереди темы. Круг по темам, порог и предел остаются прежними.
+const titled = (
+  id: number, topicId: number, clickbait: number, title: string, extra: Partial<Candidate> = {},
+): Candidate => ({ ...candidate(id, topicId, clickbait), title, ...extra });
+const rulePool = [
+  titled(11, 1, 0.5, "Ordinary infra note"),
+  titled(12, 1, 0.0, "Best infra note"),
+  titled(13, 1, 0.3, "Figma ships infra"),
+  titled(21, 2, 0.1, "Design roundup"),
+  titled(22, 2, 0.2, "Musk on design"),
+];
+const ruleTargets = new Map([[1, 1], [2, 1]]);
+const idsOf = (list: { id: number }[]) => list.map((s) => s.id);
+const rulesFor = (follow: string[][], exclude: string[][]) =>
+  rulesOf({ follow_rules: follow, exclude_rules: exclude });
+const unruled = pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5);
+assert.deepEqual(idsOf(unruled), [12, 21, 22, 13, 11], "без правил: круг по темам, внутри темы по скору");
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([["Nothing"]], [["Nobody"]]))),
+  idsOf(unruled),
+  "правила, которые ничего не ловят, ничего не меняют",
+);
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([["Figma"]], []))),
+  [13, 21, 12, 22, 11],
+  "упомянутое встаёт первым в своей теме, круг по темам прежний",
+);
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 2, 0, rulesFor([["Figma"]], []))),
+  [13, 21],
+  "на границе предела при равном ходе упомянутое идёт первым",
+);
+assert.deepEqual(
+  idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([], [["Musk"]]))),
+  [12, 21, 13, 11],
+  "исключённое не занимает места и не сдвигает остальных",
+);
+assert.ok(
+  !idsOf(pickSurvivors(rulePool, DEFAULT_WEIGHTS, ruleTargets, 5, 0, rulesFor([["design"]], [["Musk"]]))).includes(22),
+  "исключение побеждает слежение",
+);
+
+// Слабый материал с упоминанием не спасается: порог остаётся порогом.
+const threeTopics = new Map([[1, 1], [2, 1], [3, 1]]);
+const weakFigma = { ...weak(601, 0.2), title: "Figma weak note" };
+assert.deepEqual(
+  idsOf(pickSurvivors([...strong, weakFigma], DEFAULT_WEIGHTS, threeTopics, 20, 0, rulesFor([["Figma"]], []))),
+  idsOf(pickSurvivors(strong, DEFAULT_WEIGHTS, threeTopics, 20)),
+  "слежение не добирает слабый материал",
+);
+
+// Исключённый лучший материал не задаёт порог остальным: порог считается
+// по тому, что осталось после исключений.
+const leftoverPool = [titled(700, 1, 0, "Musk best"), ...leftovers];
+assert.equal(
+  pickSurvivors(leftoverPool, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length, 1,
+  "без правил слабые отрезаны порогом от лучшего",
+);
+assert.equal(
+  pickSurvivors(leftoverPool, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20, 0, rulesFor([], [["Musk"]])).length,
+  leftovers.length,
+  "исключённый лучший не задаёт порог тем, кто остался",
+);
+
+// Одно упоминание в нескольких написаниях — одно место.
+const withBoth = titled(800, 1, 0.1, "Figma and Framer together");
+assert.deepEqual(
+  idsOf(pickSurvivors(
+    [withBoth, titled(801, 1, 0.0, "Other")], DEFAULT_WEIGHTS, new Map([[1, 1]]), 5, 0,
+    rulesFor([["Figma"], ["Framer"]], []),
+  )),
+  [800, 801],
+  "материал с двумя упоминаниями занимает одно место и идёт первым",
+);
+
+// Ищется в описании из фида и в тексте статьи, снятой с разметки.
+const inBody = titled(900, 1, 0.1, "Plain title", {
+  excerpt: "mentions Figma", body: "<p>Built with <b>Framer</b></p>",
+});
+assert.equal(
+  pickSurvivors([inBody], DEFAULT_WEIGHTS, new Map([[1, 1]]), 5, 0, rulesFor([], [["Framer"]])).length, 0,
+  "исключение видит текст статьи под разметкой",
+);
+assert.equal(
+  pickSurvivors([inBody], DEFAULT_WEIGHTS, new Map([[1, 1]]), 5, 0, rulesFor([], [["<b>"]])).length, 1,
+  "разметка — не текст: тег не упоминание",
 );
 
 // --- выпуск для Kindle ----------------------------------------------------------
