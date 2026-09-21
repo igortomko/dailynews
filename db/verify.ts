@@ -26,7 +26,6 @@ import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
 import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
-import { readingTime } from "../src/lib/relative-time";
 import { cleanupOf } from "../src/lib/source-health";
 import { applyRules, rulesOf } from "../src/lib/rules";
 import { toSlug } from "../src/lib/slug";
@@ -1747,31 +1746,7 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
-    // Время чтения считается из длины текста статьи. Колонка, заведённая
-    // миграцией, но не выбранная лентой, ничем себя не выдаёт: подписи
-    // просто не будет, и выглядит это как «у материала нет текста».
-    await sql`update dailynews.items set body = ${"т".repeat(7760)} where id = ${myItem}`;
     const storyFeed = await queries.getFeed(owner.id, storyDay);
-    // strictEqual, а не equal: колонка живёт среди bigint-ов, и «"7760"»
-    // прошло бы нестрогое сравнение молча — ровно тот класс ошибки,
-    // который уже ломал сюжеты по числовым ключам.
-    assert.strictEqual(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
-    assert.strictEqual(
-      readingTime(storyFeed[0].body_chars), "~6 мин", "и она превращается в минуты",
-    );
-
-    // У ролика текст — пересказ субтитров, а не то, что откроется
-    // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
-    await sql`update dailynews.items set transcribed_at = now() where id = ${myItem}`;
-    assert.equal(
-      (await queries.getFeed(owner.id, storyDay))[0].body_chars, null,
-      "у ролика времени чтения не бывает",
-    );
-    // Фикстура возвращается на место целиком: ниже этот же материал
-    // участвует в проверках сюжета, и оставленный текст менял бы их условия.
-    await sql`
-      update dailynews.items set transcribed_at = null, body = null where id = ${myItem}
-    `;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",

@@ -58,13 +58,6 @@ export type FeedItem = {
    */
   kindled: boolean;
   /**
-   * Длина текста статьи, если он у нас есть. Из неё считается «~6 мин».
-   * У ролика текст — пересказ субтитров, а не то, что читатель откроет
-   * по ссылке: время чтения пересказа выдавать за длину ролика нельзя,
-   * поэтому у него здесь пусто.
-   */
-  body_chars: number | null;
-  /**
    * Попадался ли материал на глаза до этого захода. Лента идёт по убыванию
    * скора, а читают её сверху вниз — значит виденное лежит подряд с начала,
    * и граница между ним и остальным отвечает на «докуда я вчера дочитал».
@@ -214,14 +207,6 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
            -- coalesce обязателен: у письма и части фидов своей даты нет,
            -- а без неё карточка осталась бы вовсе без времени.
            coalesce(i.published_at, i.collected_at) as published_at,
-           -- Без разметки: body хранится HTML-ом (enrich кладёт статью
-           -- тегами, фид — content:encoded), и длина с тегами завышает
-           -- время чтения тем сильнее, чем больше в статье ссылок.
-           -- На живых данных текста в среднем 78% от длины, а у худших
-           -- материалов 6%: 5145 знаков разметки на 290 знаков текста —
-           -- «~4 мин» там, где читать нечего.
-           case when i.transcribed_at is null and i.body is not null
-                then length(regexp_replace(i.body, '<[^>]*>', '', 'g')) end as body_chars,
            (select count(*)::int from dailynews.reads r
              where r.item_id = i.id and r.reader_id = ${readerId}
                and r.event in ('opened', 'outbound')) as read_count,
