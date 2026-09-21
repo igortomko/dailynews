@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { savePersonalization } from "@/lib/actions";
@@ -25,7 +25,7 @@ import type { Reader } from "@/lib/types";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { PaywallCrown, usePaywall } from "@/components/paywall";
 import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
-import { markSaved, markUnsaved } from "@/components/unsaved-guard";
+import { useSettingsSave } from "@/components/settings-save";
 
 /** Флажок и название одной строкой: в поле и в списке это одно и то же. */
 const languageOption = (entry: string) => (
@@ -45,11 +45,6 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   const translates = FEATURES.language.has(plan);
   const languagePaywall = usePaywall("language", plan);
   const [, startTransition] = useTransition();
-  const [applying, setApplying] = useState(false);
-  // Тронул ли читатель хоть что-то с прошлого сохранения. Кнопка над
-  // нетронутой формой обещала бы работу, которой нет, а сторож ухода
-  // спрашивал бы о правке, которой не было.
-  const [dirty, setDirty] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const router = useRouter();
   const first = !profile?.onboarded_at;
@@ -73,7 +68,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
    * «сохранить перед уходом», и второму нужен исход, чтобы решить,
    * уходить ли.
    */
-  const save = useCallback(
+  const write = useCallback(
     () =>
       new Promise<boolean>((resolve) => {
         const node = form.current;
@@ -110,42 +105,16 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
             written.current = now;
             queueRebuild("voice");
           }
-          setDirty(false);
           resolve(true);
         });
       }),
     [],
   );
 
-  /** Правка, о которой знают кнопка и сторож ухода. Сама ничего не пишет. */
-  const touch = () => setDirty(true);
+  /** Переписать сегодняшний выпуск новым голосом, не дожидаясь полуночи. */
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
 
-  /** «Сохранить»: записать и переписать выпуск, не дожидаясь полуночи. */
-  const apply = async () => {
-    setApplying(true);
-    const ok = await save();
-    if (ok) await flushRebuild(() => router.refresh()).catch(() => {});
-    setApplying(false);
-  };
-
-  // Сторожу нужна и сама запись: из окна «сохранить перед уходом» уходят
-  // сразу после неё, не дожидаясь пересборки — она идёт минуту-две и сама
-  // расскажет о себе тостом уже на следующей странице.
-  useEffect(() => {
-    if (!dirty) {
-      markSaved();
-      return;
-    }
-    markUnsaved(async () => {
-      const ok = await save();
-      if (ok) void flushRebuild(() => router.refresh()).catch(() => {});
-      return ok;
-    });
-  }, [dirty, save, router]);
-
-  // Ушли со страницы — сторожить нечего: окно уже спросило, а без этого
-  // оно всплыло бы на соседнем разделе.
-  useEffect(() => markSaved, []);
+  const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 
   return (
     <Card>
@@ -316,12 +285,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 disabled={applying}
                 className="self-start"
                 onClick={async () => {
-                  setApplying(true);
                   // Уходим только после записи: раньше переход шёл вместе
-                  // с ней, и отказ записи уносил настройку молча.
-                  const ok = await save();
-                  setApplying(false);
-                  if (!ok) return;
+                  // с ней, и отказ записи уносил настройку молча. Пересборки
+                  // здесь нет и не нужно — выпуска ещё не существует.
+                  if (!(await write())) return;
                   // У блогера настройка на шаг длиннее: голос собирается
                   // с его каналов, и просить их потом — значит получить
                   // первый пост, написанный ничьим голосом.

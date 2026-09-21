@@ -226,10 +226,10 @@ export function TopicChips({
               этой строки «3 из 12» было бы числом из ниоткуда. Но стоят они
               подписью к времени, а не вместо него. */}
           <span className="text-sm text-muted-foreground">
-            {/* Знаком, а не словом: «≈» стоит и у времени чтения в карточке,
-                и два написания одной и той же оговорки в одном продукте
-                читаются как две разные. */}
-            <span className="font-medium text-foreground tabular-nums">≈{places}</span>{" "}
+            {/* Знаком, а не словом, и тем же, что у времени чтения
+                в карточке: два написания одной и той же оговорки в одном
+                продукте читаются как две разные. */}
+            <span className="font-medium text-foreground tabular-nums">~{places}</span>{" "}
             {plural(places, "новость", "новости", "новостей")}
           </span>
         </div>

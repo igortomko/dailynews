@@ -20,6 +20,12 @@ import { Spinner } from "@/components/ui/spinner";
  * Регистрация модулем, а не контекстом: сторож живёт в раскладке настроек,
  * форма — внутри страницы, и прокидывать через три уровня ради двух функций
  * незачем. Тот же приём, что у очереди пересборки рядом.
+ *
+ * Кнопка «назад» браузера этим не ловится: переход по истории не даёт
+ * ни нажатия на ссылку, ни `beforeunload`. Поймать её можно только ловушкой
+ * в истории — лишняя запись на каждую правку и отсчёт шагов назад при уходе,
+ * — и цена такой ловушки выше, чем дыра: из настроек уходят разделами слева,
+ * а они ссылки. Появится жалоба — чиниться будет этим, и осознанно.
  */
 type Save = () => Promise<boolean>;
 
@@ -73,7 +79,12 @@ export function UnsavedGuard() {
     // спрашивает сам и своими словами. Без этого правка пропадала бы тише
     // всего — по случайному Cmd+W.
     const onLeave = (event: BeforeUnloadEvent) => {
-      if (unsaved) event.preventDefault();
+      if (!unsaved) return;
+      event.preventDefault();
+      // Safari и старый Chromium показывают своё окно только на непустом
+      // `returnValue`: без него `preventDefault` там ничего не делает,
+      // и защита есть ровно на вид.
+      event.returnValue = "";
     };
     window.addEventListener("beforeunload", onLeave);
     return () => window.removeEventListener("beforeunload", onLeave);

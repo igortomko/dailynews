@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
@@ -10,7 +10,7 @@ import type { Plan } from "@/lib/plans";
 import { FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { flushRebuild } from "@/components/rebuild-queue";
-import { markSaved, markUnsaved } from "@/components/unsaved-guard";
+import { useSettingsSave } from "@/components/settings-save";
 
 export function InterestsForm({
   chips,
@@ -30,11 +30,6 @@ export function InterestsForm({
 }) {
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [applying, setApplying] = useState(false);
-  // Тронул ли читатель хоть что-то с прошлого сохранения. Кнопка над
-  // нетронутой формой обещала бы работу, которой нет, а сторож ухода
-  // спрашивал бы о правке, которой не было.
-  const [dirty, setDirty] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const router = useRouter();
 
@@ -43,7 +38,7 @@ export function InterestsForm({
    * «сохранить перед уходом», и второму нужен исход, чтобы решить,
    * уходить ли.
    */
-  const save = useCallback(
+  const write = useCallback(
     () =>
       new Promise<boolean>((resolve) => {
         const node = form.current;
@@ -62,46 +57,19 @@ export function InterestsForm({
             return resolve(false);
           }
           setError(null);
-          setDirty(false);
           resolve(true);
         });
       }),
     [],
   );
 
-  /** Правка, о которой знают кнопка и сторож ухода. Сама ничего не пишет. */
-  const touch = () => setDirty(true);
-
   /**
-   * «Сохранить»: записать и догрузить сегодняшний выпуск, если он стал
-   * короче заказанного. Доли тем сегодняшнему выпуску уже не помогут —
-   * он отобран, — и тост об этом честно молчит.
+   * Догрузить сегодняшний выпуск, если он стал короче заказанного. Доли тем
+   * ему уже не помогут — он отобран, — и тост об этом честно молчит.
    */
-  const apply = async () => {
-    setApplying(true);
-    const ok = await save();
-    if (ok) await flushRebuild(() => router.refresh()).catch(() => {});
-    setApplying(false);
-  };
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
 
-  // Сторожу нужна и сама запись: из окна «сохранить перед уходом» уходят
-  // сразу после неё, не дожидаясь пересборки — она идёт минуту-две и сама
-  // расскажет о себе тостом уже на следующей странице.
-  useEffect(() => {
-    if (!dirty) {
-      markSaved();
-      return;
-    }
-    markUnsaved(async () => {
-      const ok = await save();
-      if (ok) void flushRebuild(() => router.refresh()).catch(() => {});
-      return ok;
-    });
-  }, [dirty, save, router]);
-
-  // Ушли со страницы — сторожить нечего, даже если правка осталась: окно
-  // уже спросило, а без этого оно всплыло бы на соседнем разделе.
-  useEffect(() => markSaved, []);
+  const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 
   return (
     <Card>
