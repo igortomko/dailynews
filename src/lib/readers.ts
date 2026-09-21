@@ -207,13 +207,10 @@ export async function digestProgress(
            coalesce(max(di.total), 0)::float as best
       from dailynews.digests d
  left join dailynews.digest_items di on di.digest_id = d.id
-     -- Каст к text обязателен: у нетипизированного параметра Postgres
-     -- выбирает тип по колонке и падает на null там, где null означает
-     -- «последний день». Сравнение текстом, а не приведение к date: день
-     -- приходит из адреса непроверенным, и лента спрашивает заказ одним
-     -- кругом со списком дней — опечатка должна дать пусто, а не 500.
+     -- Каст обязателен: у нетипизированного параметра Postgres выбирает
+     -- тип по колонке и падает на null там, где null означает «любой день».
      where d.reader_id = ${readerId}
-       and (${day}::text is null or d.day::text = ${day}::text)
+       and (${day}::text is null or d.day = ${day}::date)
      group by d.day, d.stats
      order by d.day desc
      limit 1

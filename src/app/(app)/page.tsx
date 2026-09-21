@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { getDigestDays, getFeed, getStories } from "@/lib/queries";
+import { isDay } from "@/lib/day";
+import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
@@ -31,24 +33,31 @@ export default async function FeedPage({
   if (!reader.onboarded_at) redirect("/welcome");
 
   const { day: param } = await searchParams;
-  const requested = typeof param === "string" ? param : null;
+  // Похожее на день, но не день («2026-02-31», пустая строка, массив) —
+  // это null, то есть последний выпуск: в запрос день уходит кастом к date,
+  // и непроверенная строка из чужой ссылки роняла бы страницу.
+  const requested = isDay(param) ? param : null;
   // Всё одним кругом до базы, включая сам выпуск: раньше лента ждала список
   // дней, чтобы проверить запрошенный, и только потом шла за выпуском —
   // лишний круг на каждом показе ради ссылки на день, которого нет. Теперь
   // выпуск спрашивается сразу за запрошенный день (null — за последний),
   // а день сверяется со списком уже по пришедшему: не сошёлся — второй
   // запрос, и платит за него только чужая ссылка на день без выпуска.
-  const [days, topics, channels, sources, asked, askedDigest] = await Promise.all([
-    getDigestDays(reader.id),
-    getReaderTopics(reader.id),
-    getChannels(reader.id),
-    readerSources(reader.id),
+  //
+  // Выпуск и заказ стоят первыми: соединений в пуле пять, запросов шесть,
+  // и в очереди оказывается написанный последним — пусть это будет список
+  // площадок, а не сама лента.
+  const [asked, askedDigest, days, topics, sources, channels] = await Promise.all([
     getFeed(reader.id, requested),
     // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
     // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
     // три карточки, объявлял бы себя недобранным. Заказ берётся того дня,
     // а не сегодняшний: лента листается на девяносто дней назад.
     digestProgress(reader.id, requested),
+    getDigestDays(reader.id),
+    getReaderTopics(reader.id),
+    readerSources(reader.id),
+    getChannels(reader.id),
   ]);
   // Действующий, а не купленный: у отменённой подписки оплаченный месяц
   // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
@@ -118,10 +127,9 @@ export default async function FeedPage({
   const shown = feed.map((item) => item.source_id);
   const stories = await getStories([...new Set([...mine, ...shown])], feed.map((item) => item.id));
   // Оси остаются на сервере: карточке нужен один ответ — кликбейт ли это.
-  // Порог 0,6 — там, где метка перестаёт быть шумом на каждой второй карточке.
   const items = feed.map(({ axes, ...item }) => ({
     ...item,
-    clickbait: (axes?.clickbait?.noul ?? 0) > 0.6,
+    clickbait: (axes?.clickbait?.noul ?? 0) > CLICKBAIT_LABEL_NOUL,
     story: stories.get(item.id) ?? [],
   }));
 

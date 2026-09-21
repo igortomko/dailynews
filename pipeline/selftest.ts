@@ -38,6 +38,7 @@ import {
 import { appOrigin } from "../src/lib/auth";
 import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { readingTime } from "../src/lib/relative-time";
+import { isDay } from "../src/lib/day";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
@@ -3130,5 +3131,16 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     `rsync --delete сносит ${made![1]}: нужно --exclude '/${made![1]}' с косой`,
   );
 }
+
+// День из адреса проверяется до запроса: в SQL он уходит кастом к date,
+// и непроверенная строка роняла бы ленту вместо того, чтобы открыть последний
+// выпуск. Строго по форме и по календарю.
+assert.ok(isDay("2026-09-21"), "обычный день проходит");
+assert.ok(isDay("2024-02-29"), "29 февраля високосного года — день");
+assert.equal(isDay("2026-02-31"), false, "31 февраля — не день, хотя Date дотянул бы его до марта");
+assert.equal(isDay("2026-9-1"), false, "без нулей — не та форма, что в базе и в адресе");
+assert.equal(isDay(""), false, "пустой параметр — не день, а «последний выпуск»");
+assert.equal(isDay(["2026-09-21", "2026-09-20"]), false, "повторённый параметр приезжает массивом");
+assert.equal(isDay(undefined), false, "нет параметра — нет дня");
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
