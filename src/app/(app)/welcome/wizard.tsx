@@ -12,6 +12,8 @@ import { count } from "@/lib/plural";
 import { suggestOrder } from "@/lib/starter-topics";
 import type { Suggestion, TopicOption } from "@/lib/onboarding";
 import { finishOnboarding, saveOnboardingInterests, saveOnboardingSources } from "@/lib/actions";
+import { NameRules } from "@/components/name-rules";
+import type { Names } from "@/lib/rules";
 
 /**
  * Три экрана первого захода.
@@ -129,6 +131,11 @@ export function InterestsStep({
   const [picked, setPicked] = useState<string[]>([]);
   const [mine, setMine] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  // Необязательное уточнение под темами. Сохраняется вместе с ними, до
+  // сборки первого выпуска: он собирается на последнем шаге и обязан
+  // это учесть.
+  const [follow, setFollow] = useState<Names[]>([]);
+  const [exclude, setExclude] = useState<Names[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const bySlug = new Map(options.map((option) => [option.slug, option]));
@@ -161,7 +168,7 @@ export function InterestsStep({
   const next = () =>
     start(async () => {
       try {
-        const result = await saveOnboardingInterests(picked, mine);
+        const result = await saveOnboardingInterests(picked, mine, follow, exclude);
         if (result?.error) setError(result.error);
         else router.refresh();
       } catch {
@@ -180,7 +187,15 @@ export function InterestsStep({
       footer={
         <div className="flex items-center justify-between gap-3">
           <Counter picked={total} limit={plan.maxTopics} />
-          <Button onClick={next} disabled={total === 0 || pending}>
+          {/* Фокус не забирается: уход из поля списка добавляет чип, контент
+              растёт, и липкий футер сдвигается на высоту отступа — клик
+              по «Дальше» пропадал. Набранное в поле и так уходит в список
+              (см. NameRules). */}
+          <Button
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={next}
+            disabled={total === 0 || pending}
+          >
             {pending ? <Spinner /> : null}
             Дальше
             <ArrowRightIcon data-icon="inline-end" />
@@ -240,6 +255,29 @@ export function InterestsStep({
             Это весь набор на тарифе «{plan.label}». Больше интересов — на платном, в «Подписке».
           </p>
         ) : null}
+
+        {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
+            а отдельный экран стал бы решением, которое нельзя пропустить. */}
+        <div className="mt-2 flex flex-col gap-6 border-t pt-6">
+          <NameRules
+            kind="follow"
+            initial={follow}
+            label="За чем следить"
+            hint="необязательно"
+            description="Компании, продукты, люди. Упомянутое встанет в своей теме первым. Ищется по написанию: «Figma» не найдёт «Фигму», добавь оба."
+            placeholder="Figma, Framer, Webflow"
+            onChange={setFollow}
+          />
+          <NameRules
+            kind="exclude"
+            initial={exclude}
+            label="Что исключать"
+            hint="необязательно"
+            description="Имена, продукты, фразы. Упомянутое в выпуск не попадёт. Тоже по написанию, без перевода."
+            placeholder="Название компании, имя, фраза"
+            onChange={setExclude}
+          />
+        </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
     </Shell>

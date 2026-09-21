@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getDigestDays, getFeed, getStories } from "@/lib/queries";
+import { applyRules, rulesOf } from "@/lib/rules";
 import { isDay } from "@/lib/day";
 import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
@@ -123,11 +124,18 @@ export default async function FeedPage({
   // Ничего лишнего это не открывает — сама карточка уже на странице.
   //
   // Number: sources.id приезжает из bigint строкой, а сюжет считает числами.
+  // Личные правила поверх готового выпуска: исключённое прячется без
+  // пересборки, упомянутое из «За чем следить» получает пометку.
+  // Сама проверка — в `applyRules`, той же, что проверяют тесты.
+  const { visible, hidden } = applyRules(feed, rulesOf(reader));
+
   const mine = sourcesForPlan(sources, plan).map((source) => Number(source.id));
-  const shown = feed.map((item) => item.source_id);
-  const stories = await getStories([...new Set([...mine, ...shown])], feed.map((item) => item.id));
+  const shown = visible.map((item) => item.source_id);
+  const stories = await getStories([...new Set([...mine, ...shown])], visible.map((item) => item.id));
   // Оси остаются на сервере: карточке нужен один ответ — кликбейт ли это.
-  const items = feed.map(({ axes, ...item }) => ({
+  // Описание из фида тоже: оно нужно было правилам, а правила уже применены.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- excerpt снимается с карточки, а не читается
+  const items = visible.map(({ axes, excerpt, ...item }) => ({
     ...item,
     clickbait: (axes?.clickbait?.noul ?? 0) > CLICKBAIT_LABEL_NOUL,
     story: stories.get(item.id) ?? [],
@@ -137,6 +145,7 @@ export default async function FeedPage({
     <FeedTabs
       topics={topics}
       items={items}
+      hidden={hidden}
       plan={plan}
       networks={networks}
       // Заказ отдаём только для последнего выпуска: фраза недобора говорит

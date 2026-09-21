@@ -19,6 +19,14 @@ export type FeedItem = {
   id: number;
   url: string;
   title: string;
+  /**
+   * Описание из фида. В карточке не показывается — нужно личным правилам:
+   * исключение проверяется по тому же тексту, по которому шёл отбор,
+   * плюс по написанному языком читателя. Текст статьи сюда не едет:
+   * сорок статей на каждый показ ленты — это мегабайты ради проверки,
+   * которую отбор уже сделал.
+   */
+  excerpt: string;
   title_ru: string | null;
   summary: string | null;
   image_url: string | null;
@@ -70,9 +78,18 @@ export type FeedItem = {
  * Без осей: карточка читает из восьми одну — кликбейт, — а полный объект
  * ехал в браузер с каждой из пятидесяти карточек и весил треть полезной
  * нагрузки ленты (33 КБ из 91). Решение принимает сервер, в браузер уходит
- * ответ.
+ * ответ. Описание из фида по той же причине остаётся на сервере: его
+ * читают только личные правила, и читают до отправки.
+ *
+ * `followed` — написание из списка «За чем следить», которое в материале
+ * нашлось. Правило работает молча, в отборе, и без этой пометки читателю
+ * неоткуда узнать, что оно вообще сработало.
  */
-export type FeedCard = Omit<FeedItem, "axes"> & { story: Publication[]; clickbait: boolean };
+export type FeedCard = Omit<FeedItem, "axes" | "excerpt"> & {
+  story: Publication[];
+  clickbait: boolean;
+  followed: string | null;
+};
 
 export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`
@@ -184,7 +201,7 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
   // как в адресе, и однажды сюда придёт сырой — в каст к date он уйти не должен.
   const safeDay = isDay(day) ? day : null;
   const rows = await sql<FeedItem[]>`
-    select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
+    select i.id, i.url, i.title, i.excerpt, di.title as title_ru, di.summary, i.image_url,
            s.label as source_label, s.id as source_id,
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
