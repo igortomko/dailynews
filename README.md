@@ -1,13 +1,14 @@
 # Reporta
 
 <p align="center">
-  <img src="./public/brand/logo-reporta.png" alt="Reporta" width="760">
+  <a href="https://news.tomko.io/brand/"><img src="./public/brand/brand-preview.png" alt="Reporta: смотреть внимательнее. Гравюрный город и утверждённый логотип." width="1080"></a>
 </p>
 
 <p align="center">
   Персональная новостная лента, которая пробирается через шум и оставляет сигнал.
   <br>
-  <a href="./public/brand/index.html">Открыть brand system →</a>
+  <a href="https://news.tomko.io/brand/">Открыть интерактивный брендбук</a> ·
+  <a href="https://news.tomko.io/brand/reporta-brand-kit.zip">Скачать бренд-кит</a>
 </p>
 
 Reporta собирает поток, оценивает каждый материал по общим осям, отбирает
@@ -17,16 +18,32 @@ Reporta собирает поток, оценивает каждый матер�
 
 ### Brand assets
 
+<p align="center">
+  <img src="./public/brand/illustrations/observer.webp" alt="Гравюра: читательница" width="30%">
+  <img src="./public/brand/illustrations/attention.webp" alt="Гравюра: внимание к источнику" width="30%">
+  <img src="./public/brand/illustrations/city.webp" alt="Гравюра: город" width="30%">
+</p>
+
+Brand system v2: редакционный характер, оригинальная серия гравюр, правила
+композиции, палитра, типографика, пример выпуска, движение, цветовые версии,
+четыре интерактивных состояния продукта и фотография в трёх форматах.
+Примеры в брендбуке не изменяют аккаунт и не являются реальными новостями.
+
 - `public/brand/logo-reporta.png` — утверждённый primary logo для светлых поверхностей
 - `public/brand/logo-reporta-approved-transparent.png` — прозрачная PNG-версия для макетов
 - `public/brand/logo-reporta-on-dark.png` — утверждённый знак на тёмном поле
 - `public/brand/mark-reporta.svg` / `public/brand/mark-reporta.png` — самостоятельный знак-змейка
 - `public/brand/favicon.svg` — favicon и аватар
-- `public/brand/index.html` — палитра, типографика и правила использования
+- `public/brand/index.html` — все 10 направлений и интерактивные примеры
+- `public/brand/GUIDELINES.md` — правила использования
+- `public/brand/tokens.css` — готовые CSS-токены
+- `public/brand/reporta-brand-kit.zip` — полный набор с локальными шрифтами
 
-Основная типографика бренда: **Fraunces** для заголовков и **Inter** для
-интерфейса, текста и данных. Технические детали и исходники — в
-[brand system](./public/brand/index.html).
+Типографика: **Fraunces / Literata** для заголовков (латиница / кириллица),
+**Inter** для текста и интерфейса, **DM Mono / IBM Plex Mono** для метаданных.
+Шрифты, изображения и скрипты локальные: `public/brand/index.html` работает
+с диска без сервера. [Происхождение ассетов](./public/brand/ASSETS.md).
+SVG логотипа содержит утверждённый растр 1:1, а не векторные контуры.
 
 Новостная лента на многих читателей: собирает весь поток, оценивает каждый
 материал по осям, отбирает кодом под каждого читателя, пишет ему дайджест
