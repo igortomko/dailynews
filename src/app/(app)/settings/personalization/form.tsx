@@ -136,8 +136,12 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
               Здесь остаётся только то, как текст написан и для кого. */}
           <FieldGroup>
             <Field>
+              {/* «На каком языке», а не «Язык»: в списке лежит предложный
+                  падеж — форма, которая уезжает в промпт как есть, — и над
+                  «русском» заголовок в именительном не сходится ни с одним
+                  пунктом. */}
               <FieldLabel htmlFor="language" className="flex items-center gap-1.5">
-                Язык
+                На каком языке
                 {translates ? null : <PaywallCrown feature="language" plan={plan} />}
               </FieldLabel>
               {/* Список из пятнадцати, а колонка осталась свободным текстом:

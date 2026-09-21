@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE, verifySession } from "./auth";
@@ -19,9 +20,15 @@ export async function currentReaderId(): Promise<number> {
   return id;
 }
 
-/** Читателя могли удалить, пока кука жива: сессия есть, строки нет. */
-export async function currentReader(): Promise<Reader> {
+/**
+ * Читателя могли удалить, пока кука жива: сессия есть, строки нет.
+ *
+ * В `cache()`: строку спрашивают и раскладка, и страница, и язык интерфейса,
+ * а запрос один и тот же. Без обёртки одна отрисовка ходила бы в базу
+ * по три-четыре раза за одним и тем же ответом.
+ */
+export const currentReader = cache(async (): Promise<Reader> => {
   const reader = await getReader(await currentReaderId());
   if (!reader) redirect("/login");
   return reader;
-}
+});

@@ -38,6 +38,7 @@ import {
 import { appOrigin } from "../src/lib/auth";
 import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { readingTime } from "../src/lib/relative-time";
+import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
@@ -2874,7 +2875,20 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   // по ненайденному.
   assert.equal(tsConfigFor("русском"), "russian");
   assert.equal(tsConfigFor("английском"), "english");
-  assert.equal(tsConfigFor("португальском (бразильский вариант)"), "portuguese");
+  assert.equal(tsConfigFor("португальском (бразильский)"), "portuguese");
+
+// Языки названы строкой, и эта строка лежит сразу в трёх словарях: скорость
+// чтения, словарь поиска и флажок. Переименуй язык в списке — и остальные
+// молча откатятся к значению по умолчанию: время выпуска посчитается русской
+// меркой, поиск возьмёт русский стеммер, флажок исчезнет. Ни одной ошибки
+// при этом не будет.
+for (const [name, table] of [
+  ["словарь поиска", TS_CONFIGS],
+  ["скорость чтения", CHARS_PER_MINUTE],
+] as const) {
+  const orphans = Object.keys(table).filter((key) => !LANGUAGES.includes(key));
+  assert.deepEqual(orphans, [], `${name}: ключи разъехались со списком языков`);
+}
   assert.equal(
     tsConfigFor(SOURCE_LANGUAGE),
     "russian",

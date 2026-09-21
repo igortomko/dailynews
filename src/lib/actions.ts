@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
+import { localeOf } from "./i18n";
 import { discover, planFor, type Found } from "../../pipeline/discover";
 import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
@@ -74,6 +75,29 @@ async function denyBySection(section: Gated): Promise<{ error: string } | null> 
   const plan = effectivePlan(await currentReader());
   if (allows(plan, section)) return null;
   return { error: `Раздел доступен на тарифе «${cheapestWith(section).label}»` };
+}
+
+/**
+ * Язык интерфейса. Отдельным действием, а не полем формы настроек:
+ * переключатель стоит в шапке и работает на любой странице, в том числе
+ * там, где формы нет вовсе.
+ *
+ * Значение прижимается к известным: колонка свободная, а в базе стоит check,
+ * и незнакомая строка уронила бы запись вместо того, чтобы ничего не менять.
+ */
+export async function setUiLanguage(value: string) {
+  const readerId = await currentReaderId();
+  const locale = localeOf(value);
+  await sql`
+    update dailynews.readers
+       set ui_language = ${locale}, updated_at = now()
+     where id = ${readerId}
+  `;
+  // Раскладка перерисовывается целиком: язык читают и шапка, и разделы,
+  // и страница — обновить что-то одно значило бы оставить половину экрана
+  // на прежнем языке.
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }
 
 export async function savePersonalization(formData: FormData) {
