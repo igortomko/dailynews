@@ -46,7 +46,15 @@ export function LocaleToggle({ className }: { className?: string }) {
         size="sm"
         aria-label={t.locale.toggle}
         disabled={pending}
-        className={cn("w-auto gap-1 border-0 text-muted-foreground hover:text-foreground", className)}
+        // Высота задаётся через тот же вариант, которым её задаёт сам
+        // компонент (`data-[size=sm]:h-7`): простой `h-10` рядом с ним
+        // проигрывает по весу и не делает ничего. Под палец 40, на указателе
+        // 32 — как у переключателя темы рядом.
+        className={cn(
+          "w-auto gap-1 border-0 text-muted-foreground hover:text-foreground",
+          "data-[size=sm]:h-10 sm:data-[size=sm]:h-8",
+          className,
+        )}
       >
         <SelectValue>{LOCALE_LABELS[locale]}</SelectValue>
       </SelectTrigger>

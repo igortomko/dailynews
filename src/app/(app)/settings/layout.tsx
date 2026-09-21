@@ -83,7 +83,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
                 а не содержимого, и живут одной парой. В ленте этой пары нет:
                 язык выбирают один раз, а место в её шапке занято тем,
                 чем пользуются каждый день. */}
-            <LocaleToggle className="h-10 sm:h-8" />
+            <LocaleToggle />
             <ThemeToggle className="size-10 sm:size-8" />
             <form action={logout} className="sm:hidden">
               <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">
