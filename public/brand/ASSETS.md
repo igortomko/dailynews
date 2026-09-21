@@ -78,6 +78,13 @@ Literata 600/650/700, Bodoni and earlier candidates remain historical samples.
 
 ## Fonts and interface assets
 
+`head-study/index.html` contains six exploratory head expressions with light/dark
+previews and transparent SVG/PNG downloads. These are not approved replacements:
+the canonical logo remains unchanged. The head has an elongated silhouette,
+and each expression retains the brand red, white and cyan. Lettering, kerning
+and body paths remain identical to the canonical master. Rebuild with
+`node scripts/build-brand-head-study.mjs`; the standalone ZIP lives in `head-study/`.
+
 WOFF2 files and CSS are self-hosted in `fonts/`, with an OFL license for each
 family. Source: [Google Fonts](https://github.com/google/fonts/tree/main/ofl).
 Families: DM Serif Display (logo), Literata (Cyrillic headlines), Fraunces,
