@@ -100,6 +100,46 @@ async function main() {
   const { DEFAULT_WEIGHTS } = await import("../src/lib/types");
 
   try {
+    /**
+     * Намеренно отбитый запрос — и проверка, что поток после него цел.
+     *
+     * Простым протоколом (`sql.unsafe` без параметров, одно сообщение `Q`),
+     * а не обычным шаблоном, и это не стилистика. Отказ в расширенном
+     * протоколе сбивает обмен с PGlite: на `Execute` приходит `ReadyForQuery`,
+     * а `ErrorResponse` следом. `ReadyForQuery` означает «запрос кончился»,
+     * поэтому ошибка достаётся следующему запросу, тот отвечает через один,
+     * и дальше ответы разъезжаются с запросами до конца прогона.
+     *
+     * Видно это было как мерцание: проверка падала примерно в двух прогонах
+     * из трёх, каждый раз в другом месте и каждый раз правдоподобно —
+     * «у владельца 0 тем», «площадки читателя — только его», список
+     * несуществующих расхождений схемы. Ни одно утверждение не было неверным,
+     * неверным был ответ, который до него дошёл.
+     *
+     * Замер, на котором это поймано: триста кругов «отбитый запрос и три
+     * обычных». Без отбитых — ноль сбоев. Отбитый расширенным протоколом —
+     * 16. Отбитый простым — снова ноль: там пачки нет, одно сообщение
+     * закрывает себя само.
+     *
+     * Чинить это в PGlite по байтам пробовали трижды, и каждый раз выходило
+     * хуже: вырезанный `ReadyForQuery` оставлял клиента ждать вечно. Здесь
+     * дешевле обойти, чем чинить чужой протокол.
+     *
+     * После отказа — контрольный запрос. Обход держится на том, что простой
+     * протокол не сбивается; если это перестанет быть правдой, пусть падает
+     * здесь и с понятной причиной, а не через двести строк «у владельца 0 тем».
+     */
+    const rejects = async (statement: string, pattern: RegExp, why: string) => {
+      await assert.rejects(sql.unsafe(statement), pattern, why);
+      const [alive] = await sql<{ v: string }[]>`select 'ok'::text as v`;
+      assert.equal(
+        alive?.v,
+        "ok",
+        `после отбитого запроса («${why}») обмен с базой разъехался: ` +
+          "дальше проверять нечего, все ответы будут от соседних запросов",
+      );
+    };
+
     // --- каталог из 0003 доехал ---------------------------------------------
     const topics = await readers.catalogTopics();
     const sources = await queries.getSources();
@@ -143,8 +183,8 @@ async function main() {
     // в readers. Перенос обязан довезти значение, а не выдать умолчание —
     // и обязан пережить базу, где колонки profile.plan нет вовсе.
     assert.equal(owner.plan, "pro", "тариф владельца должен переехать как есть");
-    await assert.rejects(
-      sql`update dailynews.readers set plan = 'platinum' where id = ${owner.id}`,
+    await rejects(
+      `update dailynews.readers set plan = 'platinum' where id = ${owner.id}`,
       /plan/,
       "ограничение тарифа должно переехать вместе с колонкой",
     );
@@ -734,8 +774,8 @@ async function main() {
       insert into dailynews.sources (kind, label, url)
       values ('telegram', 'канал', 'durov')
     `;
-    await assert.rejects(
-      sql`insert into dailynews.sources (kind, label, url) values ('carrier-pigeon', 'x', 'y')`,
+    await rejects(
+      `insert into dailynews.sources (kind, label, url) values ('carrier-pigeon', 'x', 'y')`,
       /sources_kind_known/,
       "неизвестный вид источника должен отвергаться ограничением с новым именем",
     );
@@ -763,10 +803,11 @@ async function main() {
         readerId: owner.id, stage: stage as never, model: "проба", tokensIn: 1, costUsd: 0,
       });
     }
-    await assert.rejects(
-      readers.recordCall({
-        readerId: owner.id, stage: "выдуманный" as never, model: "проба", tokensIn: 1, costUsd: 0,
-      }),
+    // Не через recordCall: проверяется ограничение базы, а оно одно и то же,
+    // каким бы кодом в таблицу ни писали. Зато простым протоколом — см. rejects.
+    await rejects(
+      `insert into dailynews.model_calls (reader_id, stage, model, tokens_in, cost_usd)
+       values (${owner.id}, 'выдуманный', 'проба', 1, 0)`,
       /model_calls_stage_check/,
       "незнакомый этап отвергается ограничением, а не пишется молча",
     );
@@ -938,8 +979,8 @@ async function main() {
     // и выбор «100» вернёт ошибку там, где читатель ничего не нарушал.
     const { MAX_DIGEST } = await import("../src/lib/topic-budget");
     await sql`update dailynews.readers set digest_size = ${MAX_DIGEST} where id = ${owner.id}`;
-    await assert.rejects(
-      sql`update dailynews.readers set digest_size = ${MAX_DIGEST + 1} where id = ${owner.id}`,
+    await rejects(
+      `update dailynews.readers set digest_size = ${MAX_DIGEST + 1} where id = ${owner.id}`,
       /digest_size/,
       "за потолком список предлагать не должен, а база — принимать",
     );
@@ -947,8 +988,8 @@ async function main() {
     console.log(`  размер дайджеста: ${MAX_DIGEST} проходит, ${MAX_DIGEST + 1} отвергается`);
 
     // Ноль в цели уронил бы отбор делением на ноль, а не спрятал тему.
-    await assert.rejects(
-      sql`update dailynews.reader_topics set weight = 0 where reader_id = ${owner.id}`,
+    await rejects(
+      `update dailynews.reader_topics set weight = 0 where reader_id = ${owner.id}`,
       /weight/,
       "нулевая цель должна отвергаться базой",
     );
