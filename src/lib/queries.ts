@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "./db";
 import { effectiveVoice } from "./lemon";
 import { anyOf, HL_END, HL_OPTIONS, HL_START, tsConfigFor } from "./search";
+import { isDay } from "./day";
 import type { SourceYield } from "./source-health";
 import type { Axes, Reader, Source } from "./types";
 import type { Publication } from "./story";
@@ -179,6 +180,9 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
  * выпуска нет, спрашивает ещё раз.
  */
 export async function getFeed(readerId: number, day: string | null): Promise<FeedItem[]> {
+  // Проверка повторяется здесь, а не только у вызывающего: параметр назван
+  // как в адресе, и однажды сюда придёт сырой — в каст к date он уйти не должен.
+  const safeDay = isDay(day) ? day : null;
   const rows = await sql<FeedItem[]>`
     select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
            s.label as source_label, s.id as source_id,
@@ -220,7 +224,7 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
      -- «2026-02-31» из чужой ссылки ронял бы запрос вместо ленты.
      where d.reader_id = ${readerId}
        and d.day = coalesce(
-         ${day}::date,
+         ${safeDay}::date,
          (select max(x.day) from dailynews.digests x where x.reader_id = ${readerId})
        )
        -- Скрытое рукой не возвращается: иначе палец вниз означал бы
