@@ -24,7 +24,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
-import { cleanupReason } from "../src/lib/source-health";
+import { cleanupOf } from "../src/lib/source-health";
 
 
 
@@ -538,16 +538,16 @@ async function main() {
     assert.equal(used.opened, 1, `открыто ${used.opened}, ожидался 1 материал`);
     assert.equal(used.mean_score, 91.7, `средний скор ${used.mean_score}, ожидалось 91.7`);
     assert.equal(
-      cleanupReason(used), null,
+      cleanupOf(used), null,
       "источник, из которого читают, в кандидаты на удаление не попадает",
     );
-    // Тот же источник с непрочитанным месяцем — уже кандидат, и причина
-    // называет числа: «полезность низкая» не решается, «ни одного открытия
-    // на 12 показанных новостей» решается за секунду.
-    assert.match(
-      cleanupReason({ ...used, shown: 12, opened: 0 }) ?? "",
-      /12 показанных новостей/,
-      "непрочитанный месяц обязан попасть в кандидаты с числами",
+    // Тот же источник с непрочитанным месяцем — уже кандидат, и числа
+    // настоящие: строка, собранная не из тех колонок, выглядит убедительно
+    // ровно до первой сверки.
+    assert.equal(
+      cleanupOf({ ...used, shown: 12, opened: 0 }),
+      "5 новостей за месяц, 12 показано, 0 открыто",
+      "числа кандидата берутся из той же строки отдачи",
     );
     const empty = health.find((row) => row.id !== source.id)!;
     assert.equal(empty.items, 0, "источник без материалов показывает ноль, а не выпадает из списка");
