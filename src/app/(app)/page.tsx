@@ -21,21 +21,34 @@ export const dynamic = "force-dynamic";
 export default async function FeedPage({
   searchParams,
 }: {
-  searchParams: Promise<{ day?: string }>;
+  // Повторённый параметр приезжает массивом (урок поиска): объявить его
+  // строкой значит отдать массив в запрос и получить 500 вместо ленты.
+  searchParams: Promise<{ day?: string | string[] }>;
 }) {
   // Чья это лента, решает подписанная кука и ничто другое.
   const reader = await currentReader();
   // Первый заход идёт своим путём: интересы, источники, первый выпуск.
   if (!reader.onboarded_at) redirect("/welcome");
 
-  const [{ day: requested }, days, topics, channels, sources] = await Promise.all([
-    searchParams,
+  const { day: param } = await searchParams;
+  const requested = typeof param === "string" ? param : null;
+  // Всё одним кругом до базы, включая сам выпуск: раньше лента ждала список
+  // дней, чтобы проверить запрошенный, и только потом шла за выпуском —
+  // лишний круг на каждом показе ради ссылки на день, которого нет. Теперь
+  // выпуск спрашивается сразу за запрошенный день (null — за последний),
+  // а день сверяется со списком уже по пришедшему: не сошёлся — второй
+  // запрос, и платит за него только чужая ссылка на день без выпуска.
+  const [days, topics, channels, sources, asked, askedDigest] = await Promise.all([
     getDigestDays(reader.id),
     getReaderTopics(reader.id),
     getChannels(reader.id),
-    // Ни от чего здесь не зависит: ждать его после ленты значит добавить
-    // лишний круг к каждому показу.
     readerSources(reader.id),
+    getFeed(reader.id, requested),
+    // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
+    // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
+    // три карточки, объявлял бы себя недобранным. Заказ берётся того дня,
+    // а не сегодняшний: лента листается на девяносто дней назад.
+    digestProgress(reader.id, requested),
   ]);
   // Действующий, а не купленный: у отменённой подписки оплаченный месяц
   // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
@@ -80,15 +93,11 @@ export default async function FeedPage({
 
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
-  const day = requested && days.includes(requested) ? requested : days[0];
-  const [feed, digest] = await Promise.all([
-    getFeed(reader.id, day),
-    // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
-    // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
-    // три карточки, объявлял бы себя недобранным. Заказ берётся того дня,
-    // а не сегодняшний: лента листается на девяносто дней назад.
-    digestProgress(reader.id, day),
-  ]);
+  const known = requested === null || days.includes(requested);
+  const day = known && requested ? requested : days[0];
+  const [feed, digest] = known
+    ? [asked, askedDigest]
+    : await Promise.all([getFeed(reader.id, day), digestProgress(reader.id, day)]);
   const minutes = minutesOf(digest.chars, effectiveVoice(reader));
 
   // Сюжет карточки считается по тем же источникам, по которым собран выпуск:
@@ -108,7 +117,13 @@ export default async function FeedPage({
   const mine = sourcesForPlan(sources, plan).map((source) => Number(source.id));
   const shown = feed.map((item) => item.source_id);
   const stories = await getStories([...new Set([...mine, ...shown])], feed.map((item) => item.id));
-  const items = feed.map((item) => ({ ...item, story: stories.get(item.id) ?? [] }));
+  // Оси остаются на сервере: карточке нужен один ответ — кликбейт ли это.
+  // Порог 0,6 — там, где метка перестаёт быть шумом на каждой второй карточке.
+  const items = feed.map(({ axes, ...item }) => ({
+    ...item,
+    clickbait: (axes?.clickbait?.noul ?? 0) > 0.6,
+    story: stories.get(item.id) ?? [],
+  }));
 
   return (
     <FeedTabs
@@ -140,7 +155,11 @@ export default async function FeedPage({
                 size="icon-sm"
                 aria-label="Настройки"
                 className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
-                render={<Link href="/settings/personalization" />}
+                // Настройки подгружаются заранее, пока читают ленту: страница
+                // динамическая, и без этого каждое нажатие на шестерёнку ждало
+                // бы сервер. Раскладка и первый раздел — это один запрос
+                // о читателе, дёшево.
+                render={<Link href="/settings/personalization" prefetch={true} />}
               />
             }
           >
