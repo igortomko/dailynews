@@ -48,7 +48,7 @@ import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
-import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
 import {
   channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
@@ -467,6 +467,13 @@ assert.ok(
 assert.ok(
   [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
   "у каждого варианта должны быть и подпись для читателя, и требование для модели",
+);
+// Манеру выбирают по первой фразе, а не по названию: «Разбор» и «Ровно»
+// различаются только примером. Манера без примера выглядит в ряду пустой
+// карточкой — и выбирают соседнюю, потому что про неё понятно.
+assert.ok(
+  STYLES.every((entry) => (entry.example ?? "").trim().length > 0),
+  "у каждой манеры должен быть пример того, как начнётся описание",
 );
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
@@ -899,31 +906,22 @@ assert.ok(
   "но страница остаётся: ряд чисел нужен для правок отбора",
 );
 
-// Ручка границы стоит в зазоре между кусками, а не в доле от всей ширины:
-// куски выложены флексом с зазором, и доля от полной ширины промахивается
-// тем сильнее, чем правее граница — на последних ручка уезжала на соседний
-// сегмент и выглядела его ручкой.
+// Ручка границы стоит там, где кончается её левый кусок: полоса сплошная,
+// доля считается от всей ширины. Пока между кусками был зазор, к доле
+// прибавлялись пройденные зазоры — без поправки ручка промахивалась тем
+// сильнее, чем правее граница, и у правого края уезжала на соседний сегмент.
+// Вернётся зазор — вернётся и поправка, иначе промах вернётся молча.
 {
   const counts = [15, 12, 7, 3, 3];   // 40 новостей, пять тем
-  const gaps = BAR_GAP * (counts.length - 1);
 
-  assert.equal(
-    handleLeft(counts, 0),
-    `calc((100% - ${gaps}px) * 0.375 + ${BAR_GAP / 2}px)`,
-    "первая граница: доля от цветной части плюс половина зазора",
-  );
-  assert.equal(
-    handleLeft(counts, 1),
-    `calc((100% - ${gaps}px) * 0.675 + ${BAR_GAP * 1.5}px)`,
-    "вторая граница уже прошла один зазор целиком",
-  );
-  // Последняя граница обязана попасть в последний зазор, а не за полосу.
+  assert.equal(handleLeft(counts, 0), "37.5%", "первая граница — там, где кончился первый кусок");
+  assert.equal(handleLeft(counts, 1), "67.5%", "вторая граница считает оба куска слева");
   assert.equal(
     handleLeft(counts, counts.length - 2),
-    `calc((100% - ${gaps}px) * 0.925 + ${BAR_GAP * 3.5}px)`,
-    "у правого края ручка остаётся в своём зазоре",
+    "92.5%",
+    "у правого края ручка остаётся внутри полосы, а не за ней",
   );
-  assert.ok(handleLeft([1], 0).includes("100% - 0px"), "на одной теме зазоров нет");
+  assert.equal(handleLeft([1], 0), "100%", "единственная тема занимает полосу целиком");
 }
 
 // Окно с предложением показывает все тарифы, где возможность есть и которые

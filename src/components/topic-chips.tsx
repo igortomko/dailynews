@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useRef, useState } from "react";
-import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon } from "lucide-react";
+import Link from "next/link";
+import { XIcon, PlusIcon, MinusIcon, GripVerticalIcon, CrownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,8 +10,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import { maxDigestOf, topicsWord, PLANS, type Plan } from "@/lib/plans";
-import { usePaywall, PaywallCrown } from "@/components/paywall";
+import { maxDigestOf, topicsWord, PLAN_IDS, PLANS, type Plan } from "@/lib/plans";
+import { count, plural } from "@/lib/plural";
+import { usePaywall } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
@@ -83,6 +85,11 @@ export function TopicChips({
     new Set([...plan.digestSizes, ...PLANS.pro.digestSizes, total]),
   ).sort((a, b) => a - b);
 
+  /** Тарифы, где выпуск бывает длиннее: их имена стоят в подписи под кнопками. */
+  const bigger = PLAN_IDS
+    .filter((id) => maxDigestOf(PLANS[id]) > maxDigestOf(plan))
+    .map((id) => PLANS[id].label);
+
   const add = (label: string) => {
     const trimmed = label.trim();
     if (!trimmed) return;
@@ -143,65 +150,93 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        <FieldLabel htmlFor="digest_size" className="flex items-center gap-1.5">
-          Новостей в выпуске
-          {maxDigestOf(plan) < maxDigestOf(PLANS.pro) ? (
-            <PaywallCrown feature="digest" plan={plan} />
-          ) : null}
-        </FieldLabel>
+        <FieldLabel>Новостей в выпуске</FieldLabel>
         {/* Пять значений видны сразу: за списком они прячутся по одному,
             и «сколько читать» превращается в два действия вместо одного.
             Шаг в двадцать — заметная разница, «37» такой разницы не несёт.
             Значение вне списка (например, прежние 12) остаётся первым
             вариантом, пока его не сменили. */}
-        <ToggleGroup
-          value={[String(total)]}
-          onValueChange={(value: string[]) => {
-            const size = Number(value[0]);
-            if (!value[0]) return;
-            // Выбор размера не с этого тарифа не гасится молча: молчаливый
-            // отказ читается как поломка переключателя.
-            if (size > maxDigestOf(plan)) {
-              digestPaywall.open();
-              return;
-            }
-            setTotal(size);
-          }}
-          variant="outline"
-        >
-          {sizes.map((size) => {
-            const beyond = size > maxDigestOf(plan);
-            return (
-              // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
-              // читателю, почему она погасла, становится нечем.
-              <ToggleGroupItem
-                key={size}
-                value={String(size)}
-                aria-disabled={beyond || undefined}
-                className={beyond ? "text-muted-foreground/50" : undefined}
-              >
-                {size}
-              </ToggleGroupItem>
-            );
-          })}
-        </ToggleGroup>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <ToggleGroup
+            aria-label="Новостей в выпуске"
+            value={[String(total)]}
+            onValueChange={(value: string[]) => {
+              const size = Number(value[0]);
+              if (!value[0]) return;
+              // Выбор размера не с этого тарифа не гасится молча: молчаливый
+              // отказ читается как поломка переключателя.
+              if (size > maxDigestOf(plan)) {
+                digestPaywall.open();
+                return;
+              }
+              setTotal(size);
+            }}
+            variant="outline"
+          >
+            {sizes.map((size) => {
+              const beyond = size > maxDigestOf(plan);
+              return (
+                // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
+                // читателю, почему она погасла, становится нечем. Корона стоит
+                // в самой кнопке, а не у подписи над группой: закрыт не раздел,
+                // а конкретные числа, и по подписи не видно, какие.
+                <ToggleGroupItem
+                  key={size}
+                  value={String(size)}
+                  aria-disabled={beyond || undefined}
+                  aria-label={beyond ? `${size} — на платном тарифе` : undefined}
+                  className={beyond ? "text-muted-foreground/60" : undefined}
+                >
+                  {size}
+                  {beyond ? (
+                    <CrownIcon className="size-3.5 text-amber-500/80" aria-hidden />
+                  ) : null}
+                </ToggleGroupItem>
+              );
+            })}
+          </ToggleGroup>
+          <span className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground tabular-nums">{total}</span>{" "}
+            {plural(total, "новость", "новости", "новостей")} в выпуске
+          </span>
+        </div>
         {digestPaywall.dialog}
+        {bigger.length > 0 ? (
+          // Тарифы названы, а не спрятаны за «в других»: предел без имени
+          // того, кто его снимает, — это отказ, за которым надо идти искать.
+          // Список считается из PLANS: написанный руками, он разъедется
+          // с настоящими размерами молча.
+          <FieldDescription>
+            {/* Формы родительные: считает их «до», а не само число —
+                «до 21 новости», «до 22 новостей», «до 100 новостей». */}
+            На тарифе «{plan.label}» — до{" "}
+            {count(maxDigestOf(plan), "новости", "новостей", "новостей")}. Больше —{" "}
+            <Link href="/settings/subscription" className="underline underline-offset-4">
+              в «{bigger.join("» и «")}»
+            </Link>
+          </FieldDescription>
+        ) : null}
         <input type="hidden" name="digest_size" value={total} />
       </Field>
 
-      {chips.length > 0 ? (
+      {chips.length > 1 ? (
         <Field>
+          <FieldLabel>Распределение по темам</FieldLabel>
           <TopicBudgetBar
             labels={chips.map((chip) => chip.label)}
             counts={chips.map((chip) => chip.count)}
             onChange={setCounts}
           />
-          <FieldDescription>Тяни границы, чтобы отдать теме больше или меньше</FieldDescription>
+          <FieldDescription>
+            Тянешь границу одной темы — соседние меняются сами: сумма равна размеру выпуска
+          </FieldDescription>
         </Field>
       ) : null}
 
       {chips.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
+        <Field>
+          <FieldLabel>Твои темы</FieldLabel>
+          <div className="flex flex-wrap gap-2">
           {chips.map((chip, index) => (
             <Fragment key={`${chip.label}-${index}`}>
               <div
@@ -239,8 +274,8 @@ export function TopicChips({
                     чем цветов, и повтор честнее, чем неразличимые оттенки. */}
                 <span
                   aria-hidden
-                  className="size-3 shrink-0 rounded-full border-[3px]"
-                  style={{ borderColor: colorAt(index) }}
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: colorAt(index) }}
                 />
 
                 {/* Имя правится прямо в чипе: отдельное поле «название темы»
@@ -260,10 +295,10 @@ export function TopicChips({
 
                 <span className="shrink-0 tabular-nums text-muted-foreground">{chip.count}</span>
 
-                {/* Красный по наведению: рядом стоит перетаскивание, и обе
-                    цели живут в одном чипе шириной с два пальца. Виден
-                    и без курсора — на тапе group-hover не наступает никогда,
-                    и убрать интерес с телефона было нечем. */}
+                {/* Виден всегда, красный только по наведению. Прятать его
+                    до наведения нельзя: на тапе group-hover не наступает
+                    никогда, и убрать интерес с телефона было нечем —
+                    возможность, которой нет ровно там, где она нужна. */}
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -275,7 +310,7 @@ export function TopicChips({
                           event.stopPropagation();
                           remove(index);
                         }}
-                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-destructive/10 hover:text-destructive [@media(hover:none)]:opacity-100"
+                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       />
                     }
                   >
@@ -346,7 +381,8 @@ export function TopicChips({
               ) : null}
             </Fragment>
           ))}
-        </div>
+          </div>
+        </Field>
       ) : null}
 
       {/* Поле добавления внизу: сверху то, что уже есть, а не пустая строка. */}
@@ -357,7 +393,7 @@ export function TopicChips({
             ref={draftInput}
             value={draft}
             aria-label="Новый интерес"
-            placeholder="Например: энергетика и уран"
+            placeholder="Энергетика и уран"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
