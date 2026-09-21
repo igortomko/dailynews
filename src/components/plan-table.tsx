@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { checkoutUrl, endingAt } from "@/lib/lemon";
-import { maxDigestOf, FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
+import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
 
 /**
@@ -28,7 +28,7 @@ const ICONS: Record<PlanId, typeof CrownIcon> = {
 const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = [
   { feature: "sources", value: (plan) => String(plan.maxSources) },
   { feature: "topics", value: (plan) => String(plan.maxTopics) },
-  { feature: "digest", value: (plan) => `до ${maxDigestOf(plan)}` },
+  { feature: "digest", value: (plan) => `до ${plan.maxMinutes} мин` },
   { feature: "cadence", value: (plan) => (plan.everyDays <= 1 ? "каждый день" : "через день") },
   { feature: "delivery", value: (plan) => FEATURES.delivery.has(plan) },
   { feature: "posts", value: (plan) => FEATURES.posts.has(plan) },
@@ -55,7 +55,7 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
         <CardTitle>Тарифы</CardTitle>
         <CardDescription>
           От тарифа зависит, за сколькими источниками следит лента, сколько у тебя
-          интересов и сколько новостей в выпуске
+          интересов и на сколько минут чтения выпуск
         </CardDescription>
       </CardHeader>
 
@@ -157,6 +157,20 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
             </div>
           );
         })}
+      </CardContent>
+
+      {/* Технические пределы — мелким шрифтом и после цены: число карточек
+          решает, сколько описаний мы напишем, а не сколько читатель получит
+          времени. Обещание — минуты; штуки стоят здесь, чтобы «до 45 минут»
+          не выглядело бездонным. Считаются из PLANS, как и всё выше. */}
+      <CardContent className="pt-0">
+        <p className="text-xs text-muted-foreground">
+          Время считается по длине наших описаний, а не статей за ссылками.
+          Технический предел выпуска —{" "}
+          {PLAN_IDS.map((id) => PLANS[id].maxItems).join(" / ")} новостей
+          соответственно: если важного за день меньше, выпуск будет короче
+          заказанного, и лента скажет об этом прямо.
+        </p>
       </CardContent>
 
       {paying ? (

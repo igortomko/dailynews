@@ -1,8 +1,9 @@
 import { getDigestDays, getFeed } from "@/lib/queries";
-import { getReaderTopics } from "@/lib/readers";
+import { cardCharsOf, getReaderTopics } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { cardMinutes, digestMinutes } from "@/lib/reading-time";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -13,12 +14,20 @@ export default async function InterestsPage() {
     getReaderTopics(reader.id),
     getDigestDays(reader.id),
   ]);
-  // Сколько материалов в последнем выпуске: по нему решается, есть ли что
-  // догружать после смены числа новостей.
-  const inToday = days[0] ? (await getFeed(reader.id, days[0])).length : 0;
+  const voice = effectiveVoice(reader);
+  // Сколько времени в последнем выпуске: по нему решается, есть ли что
+  // догружать после того, как заказ подняли.
+  const items = days[0] ? await getFeed(reader.id, days[0]) : [];
+  const inToday = digestMinutes(
+    items.map((item) => ({ title: item.title_ru ?? item.title, summary: item.summary })),
+    voice,
+  );
   return (
     <InterestsForm
-      total={reader.digest_size}
+      minutes={reader.digest_minutes}
+      // Мерка этого читателя: его же описания за месяц. Форма делит ею
+      // заказ на места — той же функцией, что и прогон.
+      perCard={cardMinutes(await cardCharsOf(reader.id), voice)}
       inToday={inToday}
       plan={effectivePlan(reader)}
       chips={topics.map((topic) => ({

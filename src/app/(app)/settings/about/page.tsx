@@ -3,10 +3,12 @@ import { ArrowRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { currentReader } from "@/lib/session";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { getCollectedLast24h, getSources } from "@/lib/queries";
+import { cardCharsOf } from "@/lib/readers";
+import { cardMinutes, itemsForMinutes } from "@/lib/reading-time";
 import { newsWord } from "@/lib/telegram";
-import { digestCap, maxDigestOf, sourcesForPlan, topicsWord, PLAN_IDS, PLANS } from "@/lib/plans";
+import { minutesCap, sourcesForPlan, topicsWord, PLAN_IDS, PLANS } from "@/lib/plans";
 
 /**
  * Единственная страница настроек без своих данных — и единственная, которую
@@ -27,7 +29,15 @@ export const dynamic = "force-dynamic";
  * уже шум, в котором двенадцать ярких не найти. Масштаб при этом честный —
  * доля сохраняется, и подпись называет оба числа полностью.
  */
-function FlowGrid({ collected, digest }: { collected: number; digest: number }) {
+function FlowGrid({
+  collected,
+  digest,
+  minutes,
+}: {
+  collected: number;
+  digest: number;
+  minutes: number;
+}) {
   const CELLS = 200;
   // Клетки — это то, что вышло, и только оно. Считать их от максимума
   // из двух чисел значило рисовать сто клеток на пять новостей в тихий день:
@@ -63,8 +73,9 @@ function FlowGrid({ collected, digest }: { collected: number; digest: number }) 
         <b className="font-medium text-foreground">
           {collected} {newsWord(collected)}
         </b>{" "}
-        вышло за сутки у твоих источников. В выпуск помещается{" "}
-        <b className="font-medium text-foreground">{digest}</b>.
+        вышло за сутки у твоих источников. Ты заказал{" "}
+        <b className="font-medium text-foreground">{minutes} минут</b> чтения — это
+        примерно {digest} {newsWord(digest)}.
       </p>
     </div>
   );
@@ -77,10 +88,15 @@ export default async function AboutPage() {
   // по тому, что читателю на его тарифе и правда собирают.
   const mine = sourcesForPlan(await getSources(), plan).map((source) => source.id);
   const collected = await getCollectedLast24h(mine);
-  // Потолок тарифа, а не сохранённое число: после понижения `digest_size`
-  // остаётся от прежнего тарифа, и картинка обещала бы сотню там, где
-  // доходит десяток — споря с карточкой ниже на этом же экране.
-  const inDigest = digestCap(reader.digest_size, plan);
+  // Потолок тарифа, а не сохранённое число: после понижения `digest_minutes`
+  // остаётся от прежнего тарифа, и картинка обещала бы час там, где доходит
+  // пять минут — споря с карточкой ниже на этом же экране.
+  const minutes = minutesCap(reader.digest_minutes, plan);
+  // Клетки считаются в материалах: поток меряется штуками, и рисовать его
+  // минутами значило бы сравнивать несравнимое. Перевод тот же, что в прогоне.
+  const inDigest = itemsForMinutes(
+    minutes, cardMinutes(await cardCharsOf(reader.id), effectiveVoice(reader)), plan.maxItems,
+  );
 
   // Следующий тариф, если он есть. На Pro предложения нет: продавать
   // то, что уже куплено, — это шум в разделе, который читают один раз.
@@ -93,11 +109,11 @@ export default async function AboutPage() {
           <CardTitle>Каждое утро — только то, что стоит прочитать</CardTitle>
           <CardDescription>
             Лента читает за тебя всё, что вышло у твоих источников, и оставляет
-            столько новостей, сколько ты просил.
+            ровно столько, сколько ты просил прочитать.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <FlowGrid collected={collected} digest={inDigest} />
+          <FlowGrid collected={collected} digest={inDigest} minutes={minutes} />
         </CardContent>
       </Card>
 
@@ -118,7 +134,7 @@ export default async function AboutPage() {
               ],
               [
                 "Делим выпуск между твоими интересами",
-                "Берём лучшее по каждому интересу, потом вторые по каждому. Иначе самая шумная тема забрала бы выпуск целиком — энергетика однажды взяла восемь мест из двенадцати.",
+                "Берём лучшее по каждому интересу, потом вторые по каждому — пока не наберётся заказанное время. Иначе самая шумная тема забрала бы выпуск целиком: энергетика однажды взяла восемь мест из двенадцати. Слабым материалом норма не добивается — в тихий день выпуск просто короче.",
               ],
               [
                 "Пересказываем твоим языком",
@@ -143,8 +159,8 @@ export default async function AboutPage() {
             <CardTitle>Что меняется на «{next.label}»</CardTitle>
             <CardDescription>
               Сейчас у тебя «{plan.label}»: {plan.maxSources} источников,{" "}
-              {plan.maxTopics} {topicsWord(plan.maxTopics)}, до {maxDigestOf(plan)} новостей
-              в выпуске.
+              {plan.maxTopics} {topicsWord(plan.maxTopics)}, до {plan.maxMinutes} минут
+              чтения в выпуске.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -156,7 +172,7 @@ export default async function AboutPage() {
               {[
                 ["Источников", plan.maxSources, next.maxSources, "шире выбор, из которого собирается выпуск"],
                 ["Интересов", plan.maxTopics, next.maxTopics, "больше тем, между которыми делится выпуск"],
-                ["Новостей в выпуске", maxDigestOf(plan), maxDigestOf(next), "хватит и на кофе, и на весь день"],
+                ["Минут чтения", plan.maxMinutes, next.maxMinutes, "столько времени займёт выпуск"],
               ].map(([label, from, to, why]) => (
                 <div key={String(label)} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                   <span className="font-medium">{label}</span>

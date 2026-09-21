@@ -11,12 +11,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export function InterestsForm({
   chips,
-  total,
+  minutes,
+  perCard,
   inToday,
   plan,
 }: {
   chips: ChipInput[];
-  total: number;
+  /** Заказ: сколько минут чтения просит читатель. */
+  minutes: number;
+  /** Сколько минут занимает одна его карточка — мерка для деления на места. */
+  perCard: number;
+  /** Сколько минут в последнем выпуске. */
   inToday: number;
   plan: Plan;
 }) {
@@ -73,7 +78,8 @@ export function InterestsForm({
           <FieldGroup>
             <TopicChips
               initial={chips}
-              initialTotal={total}
+              initialMinutes={minutes}
+              perCard={perCard}
               inToday={inToday}
               plan={plan}
               onChange={schedule}

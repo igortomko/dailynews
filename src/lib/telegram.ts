@@ -1,4 +1,5 @@
 import { equal } from "./auth";
+import { formatMinutesLong, isShort } from "./reading-time";
 
 /**
  * Бот здесь делает две вещи: заводит читателя по /start и присылает ему
@@ -318,6 +319,11 @@ export async function notify(
   intro: string,
   headlines: Headline[],
   appUrl: string,
+  /**
+   * Заказано и вышло. Обещание выпуска — время, а не число карточек:
+   * «40 новостей» не отвечает на вопрос, который задают перед чтением.
+   */
+  reading: { minutes: number; target: number },
 ): Promise<void> {
   const byTopic = new Map<string, string[]>();
   for (const h of headlines) {
@@ -330,8 +336,14 @@ export async function notify(
     )
     .join("\n\n");
 
+  // Недобор называется вслух, а не заметается добором слабого материала:
+  // короткий выпуск без объяснения читается как поломка отбора.
+  const size = isShort(reading.minutes, reading.target)
+    ? `${formatMinutesLong(reading.minutes)} из ${reading.target} — сегодня больше действительно важного нет`
+    : formatMinutesLong(reading.minutes);
+
   const text = [
-    `<b>Выпуск за ${escapeHtml(dayInWords(day))}</b> — ${headlines.length} ${newsWord(headlines.length)}`,
+    `<b>Выпуск за ${escapeHtml(dayInWords(day))}</b> — ${escapeHtml(size)}`,
     intro ? escapeHtml(intro) : "",
     body,
     `<a href="${escapeHtml(appUrl)}">Читать</a>`,

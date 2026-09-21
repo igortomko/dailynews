@@ -11,6 +11,7 @@ import { ItemCard } from "@/components/item-card";
 import type { FeedItem } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
+import { formatMinutes, formatMinutesLong, isShort } from "@/lib/reading-time";
 import type { NetworkId } from "@/lib/networks";
 
 /**
@@ -70,6 +71,7 @@ export function FeedTabs({
   items,
   plan,
   networks,
+  reading,
   left,
   right,
 }: {
@@ -78,6 +80,13 @@ export function FeedTabs({
   /** Действующий тариф: от него зависят корона и кнопка «Своё мнение». */
   plan: Plan;
   networks: NetworkId[];
+  /**
+   * Сколько времени займёт выпуск и сколько его заказано.
+   *
+   * Обещание продукта — время, поэтому оно стоит в шапке рядом с датой,
+   * а не считается читателем по числу карточек.
+   */
+  reading: { minutes: number; target: number };
   left: React.ReactNode;
   right: React.ReactNode;
 }) {
@@ -168,7 +177,15 @@ export function FeedTabs({
         {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
             это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
         <div className="flex h-14 items-center justify-between gap-3 px-4 sm:h-12">
-          {left}
+          <div className="flex min-w-0 items-center gap-2">
+            {left}
+            {/* Время выпуска — рядом с его датой: это две вещи об одном
+                и том же выпуске. Число карточек осталось на вкладках,
+                где оно и отвечает на свой вопрос — «сколько в этой теме». */}
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+              {formatMinutes(reading.minutes)}
+            </span>
+          </div>
           {right}
         </div>
         {/* Родитель flex, полоса с margin: auto. Когда вкладки помещаются,
@@ -205,6 +222,17 @@ export function FeedTabs({
         до обрезанного было нельзя, горизонтальной прокрутки нет.
       */}
       <div className="mx-auto w-full max-w-page px-4 py-4 sm:py-6">
+        {/* Недобор объясняется, а не заметается добором слабого материала.
+            Короткий выпуск без единого слова читается как поломка отбора —
+            и чинить его читатель пойдёт в настройки, где всё исправно.
+            Строка появляется только при настоящем недоборе: тревога,
+            горящая каждый день, ничем не отличается от выключенной. */}
+        {isShort(reading.minutes, reading.target) ? (
+          <p className="mb-3 text-sm text-muted-foreground">
+            {formatMinutesLong(reading.minutes)} из {reading.target} — сегодня больше
+            действительно важного нет.
+          </p>
+        ) : null}
         <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
       {tabs.map((tab) => {
         const list = forTab(tab.slug);

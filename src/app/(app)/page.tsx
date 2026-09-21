@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 import { getDigestDays, getFeed } from "@/lib/queries";
 import { getChannels, getReaderTopics } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { minutesCap } from "@/lib/plans";
+import { digestMinutes } from "@/lib/reading-time";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
@@ -78,12 +80,22 @@ export default async function FeedPage({
   const day = requested && days.includes(requested) ? requested : days[0];
   const items = await getFeed(reader.id, day);
 
+  // Время считается по тому же тексту, который читатель и читает: заголовок
+  // и описание из выпуска, а не статья за ссылкой. Потолок тарифа поверх
+  // заказа — тот же, что применял прогон: иначе на экране стояло бы «19 из 45»
+  // у читателя, которому положено двадцать.
+  const minutes = digestMinutes(
+    items.map((item) => ({ title: item.title_ru ?? item.title, summary: item.summary })),
+    effectiveVoice(reader),
+  );
+
   return (
     <FeedTabs
       topics={topics}
       items={items}
       plan={plan}
       networks={networks}
+      reading={{ minutes, target: minutesCap(reader.digest_minutes, plan) }}
       // key на элементах, уезжающих в проп: шапка ленты ставит left и right
       // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
       // теряет пометку «детей ровно столько, сколько написано». React считает

@@ -24,6 +24,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
+import { cardChars } from "../src/lib/reading-time";
 
 
 
@@ -162,7 +163,10 @@ async function main() {
     assert.equal(all.length, 1, "после миграции должен быть ровно один читатель — владелец");
     const owner = all[0];
     assert.ok(owner.owner, "перенесённый читатель должен быть владельцем");
-    assert.equal(owner.digest_size, 12);
+    // 0040 перевела заказ в минуты: двенадцать карточек по полминуты —
+    // это шесть минут чтения. Перенос обязан довезти прежний выбор, а не
+    // выдать умолчание: читатель настраивал размер выпуска один раз.
+    assert.equal(owner.digest_minutes, 6, "прежние 12 карточек — это шесть минут чтения");
     assert.equal(owner.complexity, 3, "сложность по умолчанию — середина шкалы");
     assert.equal(owner.style, "нейтральный", "манера по умолчанию");
     assert.ok(owner.reader_context.length > 0, "контекст читателя должен переехать, а не обнулиться");
@@ -408,6 +412,41 @@ async function main() {
     assert.ok(stored.kind, "axes->'kind'->>'choice' не должен быть null");
     assert.equal(ownerFeed[0].axes.kind.choice, "fact", "axes должны разобраться из jsonb");
     assert.equal(ownerFeed[0].read_count, 0);
+
+    // --- время выпуска: своё у каждого ------------------------------------------
+    // Набранное вычитается из заказа этими двумя запросами. Сложи они чужие
+    // карточки со своими — и выпуск обрывался бы на середине заказа: не ошибка
+    // в логе, а просто «сегодня мало новостей» каждый день.
+    const ownerProgress = await readers.digestProgress(owner.id, today);
+    const secondProgress = await readers.digestProgress(second.id, today);
+    assert.equal(ownerProgress.items, 2, "в набранном владельца только его карточки");
+    assert.equal(secondProgress.items, 1, "второй читатель набрал своё");
+    // Одна и та же сумма считается в SQL и в коде (cardChars). Две формулы
+    // одного числа расходятся молча: заказ считался бы одним, а показанное
+    // читателю время — другим.
+    assert.equal(
+      ownerProgress.chars,
+      cardChars("Владелец: GPT-6", "S") + cardChars("Владелец: уран", "S"),
+      "знаки карточки считаются в базе и в коде одинаково",
+    );
+    // Порог слабого материала на догрузке держится за это число: возьми оно
+    // чужой выпуск — и у читателя с тихой лентой порог задрал бы сосед.
+    assert.equal(ownerProgress.best, 120, "лучший скор — из своего выпуска");
+    assert.equal(secondProgress.best, 60, "у второго читателя лучший свой");
+    assert.equal(
+      (await readers.digestProgress(owner.id, "2000-01-01")).items, 0,
+      "день без выпуска — это ноль набранного, а не чужой выпуск",
+    );
+    // Мерка карточки — тоже личная: у англоязычного выпуска длина другая,
+    // и общая мерка промахивалась бы у всех, кроме среднего читателя.
+    assert.equal(
+      await readers.cardCharsOf(second.id), cardChars("Vera: CBT", "S"),
+      "мерка карточки считается по своим описаниям",
+    );
+    assert.equal(
+      await readers.cardCharsOf(-1), 0,
+      "у читателя без выпусков мерки нет — её заменяет общая, а не ноль в делителе",
+    );
     // Время материала, а не день выпуска. Карточка показывала d.day, и все
     // материалы выпуска получали один возраст, отсчитанный от полудня того
     // дня: в ленте за сегодня везде стояло «1ч» независимо от материала.
@@ -904,7 +943,7 @@ async function main() {
     const survivors = await selectSurvivors(
       sql, owner.id, owner.weights, budgetTargets, 20, everySource,
     );
-    assert.equal(survivors.length, 20, "отбор должен отдать ровно digest_size");
+    assert.equal(survivors.length, 20, "отбор должен отдать ровно столько мест, сколько заказано");
     for (const { topic, target } of budget) {
       const got = survivors.filter((s) => s.topic_label === topic.label).length;
       assert.equal(got, target, `${topic.label}: просили ${target}, отбор дал ${got}`);
@@ -970,17 +1009,19 @@ async function main() {
     );
     console.log(`  потолок: свой счёт у каждого, общий этап не на читателе`);
 
-    // Список в форме предлагает до ста. Разъедется с ограничением колонки —
-    // и выбор «100» вернёт ошибку там, где читатель ничего не нарушал.
-    const { MAX_DIGEST } = await import("../src/lib/topic-budget");
-    await sql`update dailynews.readers set digest_size = ${MAX_DIGEST} where id = ${owner.id}`;
+    // Список в форме предлагает до сорока пяти минут. Разъедется
+    // с ограничением колонки — и выбор «45» вернёт ошибку там, где читатель
+    // ничего не нарушал.
+    const { READING_MINUTES } = await import("../src/lib/plans");
+    const maxMinutes = READING_MINUTES[READING_MINUTES.length - 1];
+    await sql`update dailynews.readers set digest_minutes = ${maxMinutes} where id = ${owner.id}`;
     await rejects(
-      `update dailynews.readers set digest_size = ${MAX_DIGEST + 1} where id = ${owner.id}`,
-      /digest_size/,
+      `update dailynews.readers set digest_minutes = ${maxMinutes + 1} where id = ${owner.id}`,
+      /digest_minutes/,
       "за потолком список предлагать не должен, а база — принимать",
     );
-    await sql`update dailynews.readers set digest_size = 12 where id = ${owner.id}`;
-    console.log(`  размер дайджеста: ${MAX_DIGEST} проходит, ${MAX_DIGEST + 1} отвергается`);
+    await sql`update dailynews.readers set digest_minutes = 6 where id = ${owner.id}`;
+    console.log(`  время выпуска: ${maxMinutes} проходит, ${maxMinutes + 1} отвергается`);
 
     // Ноль в цели уронил бы отбор делением на ноль, а не спрятал тему.
     await rejects(
@@ -1117,7 +1158,13 @@ async function main() {
     // Читаются кодом не все: llm остался неиспользованным, служебные времена
     // никому не нужны. Список исключений короткий и назван вслух — молчаливое
     // исключение здесь ничем не отличалось бы от забытой колонки.
-    const SKIP = new Set(["llm", "created_at", "updated_at", "reader_context_hash"]);
+    // digest_size осталась от заказа в штуках: 0040 перевела его в минуты,
+    // а колонку не тронула — переименованная, она стала бы ловушкой
+    // («размер», а внутри минуты), снесённая отдельной миграцией стоила бы
+    // дороже, чем не читается.
+    const SKIP = new Set([
+      "llm", "created_at", "updated_at", "reader_context_hash", "digest_size",
+    ]);
     const loaded = new Set(Object.keys((await readers.getReader(owner.id)) ?? {}));
     const missed = live.filter((column) => !SKIP.has(column) && !loaded.has(column));
     assert.deepEqual(

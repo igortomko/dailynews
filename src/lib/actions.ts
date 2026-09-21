@@ -13,8 +13,9 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, deleteChannel, freezeKindleSender, getChannels, getReader, getReaderTopics,
-  readerSources, recordCall, saveChannel, saveVoiceCard, saveVoiceSample, spentToday,
+  addReaderSource, cardCharsOf, deleteChannel, digestProgress, freezeKindleSender, getChannels,
+  getReader, getReaderTopics, readerSources, recordCall, saveChannel, saveVoiceCard,
+  saveVoiceSample, spentToday,
 } from "./readers";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { asCard, buildVoiceCard, cardFromVoice, readOwnPosts } from "../../pipeline/voice-card";
@@ -24,9 +25,10 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, digestCap, kindDenial, maxDigestOf, sourcesForPlan,
+  allows, cheapestWith, kindDenial, minutesCap, READING_MINUTES, sourcesForPlan,
   topicsWord, type Gated,
 } from "./plans";
+import { cardChars, cardMinutes, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { toSlug } from "./slug";
 import { starterBySlug } from "./starter-topics";
@@ -117,7 +119,8 @@ export async function saveInterests(formData: FormData) {
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
-  const plan = effectivePlan(await currentReader());
+  const reader = await currentReader();
+  const plan = effectivePlan(reader);
   if (chips.length > plan.maxTopics) {
     return {
       error:
@@ -134,18 +137,29 @@ export async function saveInterests(formData: FormData) {
   if (new Set(slugs).size !== slugs.length) {
     return { error: "Такой интерес уже есть — назови иначе" };
   }
-  const digestSize = Math.min(
-    maxDigestOf(plan),
-    Math.max(3, Math.round(Number(formData.get("digest_size"))) || plan.digestSizes[0]),
+  // Предел минут — тоже серверная проверка, а не только корона в форме:
+  // форму рисует браузер, а платит за лишние описания владелец ключа.
+  const minutes = minutesCap(
+    Math.max(
+      READING_MINUTES[0],
+      Math.round(Number(formData.get("digest_minutes"))) || READING_MINUTES[0],
+    ),
+    plan,
+  );
+  // Цели тем считаются в материалах, а заказ — в минутах. Перевод один
+  // и тот же, что в прогоне: мерка берётся из уже написанных описаний
+  // этого читателя, и полоса делит ровно то число мест, которое придёт.
+  const places = itemsForMinutes(
+    minutes, cardMinutes(await cardCharsOf(readerId), effectiveVoice(reader)), plan.maxItems,
   );
   // Приводим ещё раз на сервере: из формы приходит то, что нарисовал
-  // браузер, а сумма целей — это и есть обещание размера дайджеста.
+  // браузер, а сумма целей — это и есть деление выпуска между темами.
   const counts = normalize(
     chips.map((chip) => Math.max(MIN_PER_TOPIC, Math.round(Number(chip.count)) || MIN_PER_TOPIC)),
-    digestSize,
+    places,
   );
 
-  await writeTopics(readerId, chips, slugs, counts, digestSize, true);
+  await writeTopics(readerId, chips, slugs, counts, minutes, true);
 
   revalidatePath("/", "layout");
   return { ok: true as const };
@@ -169,13 +183,13 @@ async function writeTopics(
   chips: ChipInput[],
   slugs: string[],
   counts: number[],
-  digestSize: number,
+  minutes: number,
   finish: boolean,
 ): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`
       update dailynews.readers
-         set digest_size = ${digestSize},
+         set digest_minutes = ${minutes},
              onboarded_at = ${finish ? sql`coalesce(onboarded_at, now())` : sql`onboarded_at`},
              updated_at = now()
        where id = ${readerId}
@@ -531,18 +545,19 @@ async function fillDigest(reader: Reader) {
   // и в базе остался бы пустой выпуск за сегодня. Лента перестала бы
   // предлагать сбор (день-то уже есть), а калибровка посчитала бы выпуск,
   // которого читатель не получал. Ночной прогон делает так же.
-  const [existing] = await sql<{ taken: number }[]>`
-    select (select count(*)::int from dailynews.digest_items di where di.digest_id = d.id) as taken
-      from dailynews.digests d
-     where d.reader_id = ${reader.id}
-     order by d.day desc limit 1
-  `;
+  const existing = await digestProgress(reader.id, null);
 
-  // Через догрузку предел тарифа обходится так же, как через ползунок:
-  // digest_size мог остаться от прежнего тарифа, а платит за письмо
+  // Через догрузку предел тарифа обходится так же, как через заказ минут:
+  // digest_minutes мог остаться от прежнего тарифа, а платит за письмо
   // описаний владелец ключа. Потолок один и тот же, что и в прогоне.
-  const target = digestCap(reader.digest_size, effectivePlan(reader));
-  const missing = target - (existing?.taken ?? 0);
+  const plan = effectivePlan(reader);
+  const voice = effectiveVoice(reader);
+  const target = minutesCap(reader.digest_minutes, plan);
+  const missing = itemsForMinutes(
+    target - minutesOf(existing.chars, voice),
+    cardMinutes(await cardCharsOf(reader.id), voice),
+    plan.maxItems - existing.items,
+  );
   if (missing <= 0) return { ok: true as const, added: 0 };
 
   // Тот же потолок, что и в ночном прогоне: кнопка «догрузить» тратит
@@ -557,9 +572,12 @@ async function fillDigest(reader: Reader) {
   const topics = await getReaderTopics(reader.id);
   // Источники тарифа те же, что в ночном прогоне: кнопка не должна
   // приносить то, чего прогон не принёс бы.
-  const mySources = sourcesForPlan(await readerSources(reader.id), effectivePlan(reader)).map((s) => s.id);
+  const mySources = sourcesForPlan(await readerSources(reader.id), plan).map((s) => s.id);
   const survivors = await selectSurvivors(
-    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
+    // Порог слабого материала — от лучшего за сегодня, а не от лучшего
+    // среди оставшихся: иначе кнопка «добрать» приносила бы ровно тех,
+    // кого ночной отбор отверг, и тем громче, чем чаще на неё нажимать.
+    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, existing.best,
   );
   if (survivors.length === 0) {
     // Первому выпуску и догрузке нужны разные слова: «больше нет» в ответ
@@ -581,7 +599,7 @@ async function fillDigest(reader: Reader) {
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const written = await writeDigest(survivors, reader.reader_context, effectiveVoice(reader));
+  const written = await writeDigest(survivors, reader.reader_context, voice);
   await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,
@@ -640,13 +658,30 @@ async function fillDigest(reader: Reader) {
       digestId = row.id;
     }
 
-    const [{ taken }] = await tx<{ taken: number }[]>`
-      select count(*)::int as taken from dailynews.digest_items where digest_id = ${digestId}
+    const [{ taken, chars }] = await tx<{ taken: number; chars: number }[]>`
+      select count(*)::int as taken,
+             coalesce(sum(
+               char_length(coalesce(title, '')) + char_length(coalesce(summary, ''))
+             ), 0)::int as chars
+        from dailynews.digest_items where digest_id = ${digestId}
     `;
 
     // Обрезаем по настоящему остатку: выпуск, набитый поверх чужой работы,
     // пробил бы потолок тарифа — и это были бы уже настоящие деньги.
-    const fitting = survivors.slice(0, Math.max(0, target - taken));
+    //
+    // Здесь остаток меряется написанным текстом, а не оценкой: описания
+    // уже есть, и считать их приблизительно незачем. Последняя карточка
+    // переступает цель, а не не доходит до неё: разделить карточку нельзя,
+    // а недобор в полминуты зажёг бы строку «сегодня больше нечего» там,
+    // где есть всё.
+    const fitting: Survivor[] = [];
+    let filled = minutesOf(chars, voice);
+    for (const survivor of survivors) {
+      if (filled >= target || taken + fitting.length >= plan.maxItems) break;
+      const text = writtenById.get(String(survivor.id));
+      fitting.push(survivor);
+      filled += minutesOf(cardChars(text?.title_ru ?? survivor.title, text?.summary ?? ""), voice);
+    }
 
     // Дописываем только то, чего в выпуске ещё нет: два одновременных нажатия
     // иначе положили бы один материал дважды.
@@ -912,13 +947,18 @@ export async function saveOnboardingInterests(slugs: string[], custom: string[])
     };
   }
 
-  const digestSize = plan.digestSizes[0];
+  // Заказ по умолчанию — потолок тарифа: на первом экране это третье решение
+  // подряд, а тариф и так знает своё время. Поменять можно в «Интересах».
+  const minutes = plan.maxMinutes;
+  const places = itemsForMinutes(
+    minutes, cardMinutes(await cardCharsOf(reader.id), effectiveVoice(reader)), plan.maxItems,
+  );
   await writeTopics(
     reader.id,
     chips,
     chips.map((chip) => chip.slug),
-    normalize(chips.map(() => MIN_PER_TOPIC), digestSize),
-    digestSize,
+    normalize(chips.map(() => MIN_PER_TOPIC), places),
+    minutes,
     false,
   );
   revalidatePath("/", "layout");

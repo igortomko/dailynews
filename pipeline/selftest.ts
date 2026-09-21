@@ -373,17 +373,26 @@ assert.ok(
   "ограничения увезённой таблицы требоваться не должны",
 );
 
-// --- список размеров против ограничения базы -----------------------------------
+// --- список времени против ограничения базы ------------------------------------
 // Форма предлагает список, база держит check. Разъедутся — читатель выберет
 // число, которое база отвергнет, и виноватым будет выглядеть он.
-import { DIGEST_SIZES, MAX_DIGEST } from "../src/lib/topic-budget";
+import { READING_MINUTES as MINUTES_LIST, PLANS as PLANS_FOR_MINUTES } from "../src/lib/plans";
+const MAX_MINUTES = MINUTES_LIST[MINUTES_LIST.length - 1];
 assert.ok(
-  readFileSync("db/migrations/0018_digest_size_100.sql", "utf8").includes(`between 3 and ${MAX_DIGEST}`),
+  readFileSync("db/migrations/0040_reading_minutes.sql", "utf8")
+    .includes(`between 3 and ${MAX_MINUTES}`),
   "потолок списка должен совпадать с ограничением колонки",
 );
 assert.ok(
-  DIGEST_SIZES.every((size, index) => index === 0 || size > DIGEST_SIZES[index - 1]),
-  "список размеров должен идти по возрастанию",
+  MINUTES_LIST.every((size, index) => index === 0 || size > MINUTES_LIST[index - 1]),
+  "список времени должен идти по возрастанию",
+);
+// Корона над вариантом, которого нет ни на одном тарифе, ведёт в никуда:
+// читатель нажимает, ему предлагают Pro, он покупает Pro — и вариант
+// по-прежнему недоступен.
+assert.equal(
+  MAX_MINUTES, PLANS_FOR_MINUTES.pro.maxMinutes,
+  "верх списка должен совпадать с потолком самого дорогого тарифа",
 );
 
 // --- разгон перед выводом ------------------------------------------------------
@@ -545,7 +554,12 @@ assert.equal(checkSecret(null), false, "запрос без заголовка �
 // Отбор переехал из SQL в код, потому что веса стали персональными:
 // второй экземпляр формулы на SQL разъехался бы с composite() молча.
 // Здесь он проверяется без базы — на числах, а не на пересказе.
-const candidate = (id: number, topicId: number | null, clickbait: number): Candidate => ({
+const candidate = (
+  id: number,
+  topicId: number | null,
+  clickbait: number,
+  extra: Partial<Axes> = {},
+): Candidate => ({
   id,
   title: `материал ${id}`,
   excerpt: "",
@@ -554,7 +568,7 @@ const candidate = (id: number, topicId: number | null, clickbait: number): Candi
   source_label: "тест",
   topic_id: topicId,
   topic_label: `тема ${topicId ?? "нет"}`,
-  axes: axes({ clickbait: { noul: clickbait } }),
+  axes: axes({ clickbait: { noul: clickbait }, ...extra }),
 });
 
 const pool: Candidate[] = [];
@@ -589,6 +603,71 @@ assert.ok(strangerCount > 0, "лучший материал вне целей д
 assert.equal(
   pickSurvivors([candidate(999, null, 0)], DEFAULT_WEIGHTS, new Map(), 5).length, 1,
   "материал вне тем не должен уронить отбор делением на ноль",
+);
+
+// --- порог слабого материала ---------------------------------------------------
+// Выпуск заказывается минутами, и без порога норма добиралась бы чем угодно:
+// до двадцати минут всегда можно дотянуть, если брать всё подряд. Проверяется
+// на числах, а не на пересказе: отказ здесь выглядит как полный выпуск.
+const weak = (id: number, clickbait: number): Candidate =>
+  candidate(id, 1, clickbait, {
+    kind: { choice: "reprint", confidence: 0.9, probabilities: {} },
+    horizon: { choice: "noise", confidence: 0.8, probabilities: {} },
+    novelty: { score: 0, max: 2, confidence: 0.8 },
+    specifics: { score: 0, max: 2, confidence: 0.8 },
+    depth: { score: 0, max: 2, confidence: 0.8 },
+    actionable: { noul: 0 },
+  });
+
+const strong = [candidate(1, 1, 0), candidate(2, 2, 0), candidate(3, 3, 0)];
+const mixed = pickSurvivors(
+  [...strong, ...Array.from({ length: 10 }, (_, n) => weak(500 + n, 0.2))],
+  DEFAULT_WEIGHTS,
+  new Map([[1, 1], [2, 1], [3, 1]]),
+  20,
+);
+assert.equal(
+  mixed.length, strong.length,
+  "норма не добивается слабым материалом: место остаётся незанятым",
+);
+
+// Порог отсчитывается от лучшего за сегодня, а не от лучшего среди
+// оставшихся. Иначе кнопка «добрать» приносила бы ровно тех, кого ночной
+// отбор отверг, — и тем увереннее, чем беднее стал пул.
+const leftovers = Array.from({ length: 10 }, (_, n) => weak(600 + n, 0.2));
+assert.ok(
+  pickSurvivors(leftovers, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length > 0,
+  "сам по себе бедный пул отбирается: порог относителен",
+);
+assert.equal(
+  pickSurvivors(
+    leftovers, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20,
+    composite(strong[0].axes, DEFAULT_WEIGHTS),
+  ).length,
+  0,
+  "на догрузке порог держится за лучший материал сегодняшнего выпуска",
+);
+
+// Отрицательный лучший скор: доля от него больше него самого, и порог
+// выбросил бы весь выпуск — включая тот самый лучший материал.
+const gloomy = [0.9, 1].map((clickbait, index) =>
+  candidate(700 + index, 1, clickbait, {
+    topic: { choice: "other", confidence: 0.9, probabilities: {} },
+    kind: { choice: "reprint", confidence: 0.9, probabilities: {} },
+    horizon: { choice: "noise", confidence: 0.8, probabilities: {} },
+    novelty: { score: 0, max: 2, confidence: 0.8 },
+    specifics: { score: 0, max: 2, confidence: 0.8 },
+    depth: { score: 0, max: 2, confidence: 0.8 },
+    actionable: { noul: 0 },
+  }),
+);
+assert.ok(
+  composite(gloomy[0].axes, DEFAULT_WEIGHTS) < 0,
+  "проверка держится на отрицательном скоре — иначе она ни о чём",
+);
+assert.equal(
+  pickSurvivors(gloomy, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length, gloomy.length,
+  "день целиком в минусе не должен оставлять читателя без выпуска",
 );
 
 // --- выпуск для Kindle ----------------------------------------------------------
@@ -803,11 +882,102 @@ for (const hook of ["/api/telegram", "/api/lemon"]) {
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
 
+// --- время чтения -------------------------------------------------------------
+// Обещание продукта — минуты, и считаются они по нашему же тексту. Ошибка
+// здесь не падает и не видна: выпуск приходит, просто не на то время,
+// которое заказано, — а узнаётся это от читателя через месяц.
+import {
+  CARD_CHARS, cardChars, cardMinutes, charsPerMinute, digestMinutes, formatMinutes,
+  formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+} from "../src/lib/reading-time";
+import { DEFAULT_VOICE } from "../src/lib/voice";
+
+const minutesOfChars = (chars: number) => minutesOf(chars, DEFAULT_VOICE);
+
+// Карточка — это заголовок и описание вместе: читают их подряд, и считать
+// одно без другого значит занижать время на всех ста карточках сразу.
+assert.equal(
+  cardChars("аб", "вгд"), 5,
+  "в карточке считается заголовок вместе с описанием",
+);
+assert.equal(cardChars("аб", null), 2, "карточка без описания не роняет счёт");
+
+// Медиана живых выпусков: карточка около полуминуты. Уедет мерка — уедут
+// и тарифы, которые на ней построены.
+const perCard = minutesOfChars(CARD_CHARS);
+assert.ok(
+  perCard > 0.4 && perCard < 0.6,
+  `карточка должна занимать около полуминуты, вышло ${perCard.toFixed(2)}`,
+);
+
+// Язык и сложность меняют скорость. Без этого «двадцать минут» означало бы
+// разное время у русского и японского выпуска при одинаковом обещании.
+assert.ok(
+  charsPerMinute({ ...DEFAULT_VOICE, language: "японском" }) <
+    charsPerMinute({ ...DEFAULT_VOICE, language: "русском" }),
+  "иероглифический знак читается дольше буквенного",
+);
+assert.ok(
+  charsPerMinute({ ...DEFAULT_VOICE, language: SOURCE_LANGUAGE }) >
+    charsPerMinute({ ...DEFAULT_VOICE, language: "русском" }),
+  "без перевода выпуск остаётся английским, а он короче на знак",
+);
+assert.ok(
+  charsPerMinute({ ...DEFAULT_VOICE, complexity: 5 }) <
+    charsPerMinute({ ...DEFAULT_VOICE, complexity: 1 }),
+  "текст для специалиста читается медленнее, чем объяснение с нуля",
+);
+// Ноль — значение вне шкалы, и `level || 3` подменил бы его серединой:
+// тот же промах, что с ползунком сложности в промпте.
+assert.equal(
+  charsPerMinute({ ...DEFAULT_VOICE, complexity: 0 }),
+  charsPerMinute({ ...DEFAULT_VOICE, complexity: 1 }),
+  "сложность вне шкалы прижимается к краю, а не подменяется серединой",
+);
+assert.ok(
+  Number.isFinite(charsPerMinute({ ...DEFAULT_VOICE, language: "клингонском" })),
+  "незнакомый язык берёт общую мерку, а не роняет счёт",
+);
+
+// Незнакомого языка в базе быть не должно, но колонка — свободный текст,
+// и список форм обязан считаться целиком.
+assert.equal(
+  digestMinutes([{ title: "а", summary: "б" }, { title: "в", summary: "г" }], DEFAULT_VOICE),
+  minutesOfChars(4),
+  "время выпуска — сумма его карточек",
+);
+
+// Округление показывается только читателю. «≈0 мин» на непустом выпуске
+// выглядит как пустой выпуск — отказ, похожий на успех.
+assert.equal(formatMinutes(0.2), "≈1 мин", "меньше минуты не показывается нулём");
+assert.equal(formatMinutesLong(1), "≈1 минута", "единица склоняется");
+assert.equal(formatMinutesLong(3), "≈3 минуты", "тройка склоняется");
+assert.equal(formatMinutesLong(11), "≈11 минут", "одиннадцать берёт форму множественного");
+
+// Недобор меньше минуты — это разброс мерки, а не пустой день. Строка,
+// горящая каждый день, ничем не отличается от выключенной.
+assert.ok(!isShort(19.4, 20), "полминуты недобора называть вслух не о чем");
+assert.ok(isShort(7, 10), "три минуты недобора читатель должен увидеть");
+
+// Перевод заказа в места: та же арифметика в прогоне и в браузере.
+assert.equal(
+  itemsForMinutes(20, perCard, 100), Math.round(20 / perCard),
+  "места считаются делением заказа на карточку",
+);
+assert.equal(
+  itemsForMinutes(45, perCard, 10), 10,
+  "технический потолок тарифа режет оценку, а не наоборот",
+);
+assert.equal(
+  cardMinutes(0, DEFAULT_VOICE), perCard,
+  "у нового читателя мерки нет, и берётся общая",
+);
+
 // --- тарифы -----------------------------------------------------------------
 // Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
 // им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
 // решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
-import { PLAN_IDS, PLANS, kindDenial, maxDigestOf, planOf, sourcesForPlan } from "../src/lib/plans";
+import { PLAN_IDS, PLANS, kindDenial, planOf, sourcesForPlan } from "../src/lib/plans";
 import type { Source } from "../src/lib/types";
 
 assert.equal(planOf("pro").id, "pro", "известный тариф читается как он сам");
@@ -817,10 +987,22 @@ assert.ok(!PLANS.free.kinds.includes("x"), "X не должен быть дос�
 assert.ok(!PLANS.plus.kinds.includes("x"), "X не должен быть доступен на Plus");
 assert.ok(PLANS.pro.kinds.includes("x"), "X — признак Pro");
 assert.ok(
-  maxDigestOf(PLANS.free) < maxDigestOf(PLANS.plus) &&
-    maxDigestOf(PLANS.plus) < maxDigestOf(PLANS.pro),
-  "размер выпуска должен расти с тарифом",
+  PLANS.free.maxMinutes < PLANS.plus.maxMinutes && PLANS.plus.maxMinutes < PLANS.pro.maxMinutes,
+  "время выпуска должно расти с тарифом",
 );
+// Потолок штук — предохранитель под обещанием, а не вместо него. Окажись он
+// ниже заказанного времени больше чем на минуту — и строка «сегодня больше
+// действительно важного нет» загоралась бы каждый день у всех, то есть
+// перестала бы означать что-либо, кроме «тариф врёт».
+for (const id of PLAN_IDS) {
+  const p = PLANS[id];
+  const fits = minutesOfChars(p.maxItems * CARD_CHARS);
+  assert.ok(
+    !isShort(fits, p.maxMinutes),
+    `на тарифе «${p.label}» потолок в ${p.maxItems} карточек даёт ${fits.toFixed(1)} мин ` +
+    `при обещанных ${p.maxMinutes}: недобор виден читателю каждый день`,
+  );
+}
 
 // Состояний у источника два: он заведён или убран. Выключенных не бывает —
 // переключатель убран из интерфейса, а вместе с ним и третье состояние,
@@ -1991,7 +2173,8 @@ assert.deepEqual(
 // сохранение там, где читатель всего лишь выбрал интересы.
 for (const id of PLAN_IDS) {
   const p = PLANS[id];
-  const counts = normalize(Array.from({ length: p.maxTopics }, () => 1), p.digestSizes[0]);
+  const places = itemsForMinutes(p.maxMinutes, cardMinutes(0, DEFAULT_VOICE), p.maxItems);
+  const counts = normalize(Array.from({ length: p.maxTopics }, () => 1), places);
   assert.equal(counts.length, p.maxTopics, `цели считаются на все темы тарифа «${p.label}»`);
   assert.ok(
     counts.every((count) => count >= 1),
@@ -2095,12 +2278,20 @@ for (const prop of ["left", "right"]) {
   const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
   assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
 }
-// А требование key держится на том, что они соседи. Разведут по разным
-// родителям — проверка выше станет суеверием, и упасть она должна здесь.
+// А требование key держится на том, что каждый из них стоит среди соседей
+// в одном ряду шапки: рядом с датой живёт ещё и время чтения выпуска.
+// Вынесут любой из них в отдельного родителя единственным ребёнком —
+// проверка выше станет суеверием, и упасть она должна здесь.
+const feedTabs = readFileSync("src/components/feed-tabs.tsx", "utf8");
+const headerRow = feedTabs.slice(feedTabs.indexOf("<header"), feedTabs.indexOf("</header>"));
+assert.ok(headerRow.length > 0, "шапка ленты живёт в <header> — иначе срез пуст и проверка мертва");
+for (const prop of ["left", "right"]) {
+  assert.ok(headerRow.includes(`{${prop}}`), `${prop} рисуется в шапке ленты`);
+}
 assert.match(
-  readFileSync("src/components/feed-tabs.tsx", "utf8"),
-  /\{left\}\s*\{right\}/,
-  "left и right стоят соседями — иначе key им не нужен",
+  headerRow,
+  /\{left\}[\s\S]*formatMinutes\(reading\.minutes\)/,
+  "время выпуска стоит рядом с его датой: это два факта об одном выпуске",
 );
 
 

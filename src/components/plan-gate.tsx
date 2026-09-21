@@ -38,9 +38,9 @@ export function PlanGate({
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">
           Сейчас у тебя «{plan.label}»: {plan.maxTopics} {topicsWord(plan.maxTopics)},{" "}
-          {plan.maxSources} источников, до {plan.digestSizes[plan.digestSizes.length - 1]} новостей
-          в выпуске. На «{needed.label}» — {needed.maxTopics} {topicsWord(needed.maxTopics)} и{" "}
-          {needed.maxSources} источников, ${needed.price} в месяц.
+          {plan.maxSources} источников, до {plan.maxMinutes} минут чтения в выпуске.
+          На «{needed.label}» — {needed.maxTopics} {topicsWord(needed.maxTopics)},{" "}
+          {needed.maxSources} источников и до {needed.maxMinutes} минут, ${needed.price} в месяц.
         </p>
         <Button size="sm" className="self-start" render={<a href="/settings/subscription" />}>
           Перейти на «{needed.label}»
