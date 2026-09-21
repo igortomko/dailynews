@@ -11,15 +11,19 @@
 | logo-reporta-dark.svg / logo-reporta-dark.png | Transparent light lettering and red snake for dark backgrounds |
 | logo-reporta-on-dark.png | Light wordmark on a dark background, no white panel |
 | snake-reporta.svg | Standalone vector snake used inside the wordmark |
-| mark-reporta.png / mark-reporta.svg | Standalone snake, traced from the original 300 × 152 reference |
+| mark-reporta.png / mark-reporta.svg | Smoothed standalone snake, head tilted 8 degrees upward with clean circular eyes |
 | favicon-16.png / favicon-32.png | Browser icon |
 | favicon-180.png / favicon-512.png / favicon.svg | Application and large icon |
 
 SVG masters contain real paths, circles and clipping paths, with no embedded
 bitmap and no live text. Their backgrounds are transparent; eye whites are opaque.
-The standalone mark silhouette has 99.35% raster-mask IoU with its reference;
-differences are within a one-pixel source boundary. Its eyes use exact cyan circles
-(#00B8EC). The wordmark is intentionally newly typeset, not a 1:1 trace of old letters.
+The standalone mark follows the original 300 × 152 silhouette with smoothed curves.
+Enclosed cutouts around the old eyes are filled before tracing, so no background
+slivers remain beneath the white and cyan (#00B8EC) circles. Eye centers and radii
+are unchanged. Rebuild with `node scripts/build-brand-mark.mjs`; details are in
+`mark-spec.json`. `vector-report.json` preserves historical tracing measurements,
+not a fidelity claim for the cleaned mark. The wordmark is intentionally newly
+typeset, not a 1:1 trace of old letters.
 DM Serif Display Regular 400, HarfBuzz kerning plus manual pair corrections,
 zero global tracking. Details are in
 `wordmark-spec.json`; trace measurements are in `vector-report.json`.
@@ -30,7 +34,8 @@ not as the canonical logo. The continuous wordmark snake is a Bezier reconstruct
 with a smooth manually drawn Bezier head. No traced head fragments remain.
 The body is aligned to the middle of the new wordmark, passing through R, p
 and o counters behind left stems and in front of right strokes. It exits a
-at counter height without dipping below the baseline. Head and eyes are unchanged.
+at counter height without dipping below the baseline. The neck expands smoothly
+into an upward-facing head, with tilted cyan eyes, echoing the standalone mark.
 Flat vector color replaces the original raster texture.
 
 Rebuild: `node scripts/build-brand-identity.mjs`. Requires Potrace 1.16 and uv;
@@ -77,6 +82,13 @@ the uncorrected comparison. The default exports the corrected canonical logo.
 Literata 600/650/700, Bodoni and earlier candidates remain historical samples.
 
 ## Fonts and interface assets
+
+`head-study/index.html` contains six exploratory head expressions with light/dark
+previews and transparent SVG/PNG downloads. These are not approved replacements:
+the canonical logo remains unchanged. The head has an elongated silhouette,
+and each expression retains the brand red, white and cyan. Lettering, kerning
+and body paths remain identical to the canonical master. Rebuild with
+`node scripts/build-brand-head-study.mjs`; the standalone ZIP lives in `head-study/`.
 
 WOFF2 files and CSS are self-hosted in `fonts/`, with an OFL license for each
 family. Source: [Google Fonts](https://github.com/google/fonts/tree/main/ofl).

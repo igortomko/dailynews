@@ -114,7 +114,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   );
 
   /** Переписать сегодняшний выпуск новым голосом, не дожидаясь полуночи. */
-  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh(), t.feed.rebuild), [router, t]);
 
   const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { documentSchema, validateCoverage, validateSection, documentText, parseStoredReading, blockText, normalizeDocument, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
+import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
 import { splitSource, composeDocument, analyzeSource, type Ask } from "./reading";
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
 import { DEFAULT_VOICE } from "../src/lib/voice";
+import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
+import { en as EN_DICT } from "../src/lib/i18n/en/index";
 
 const evidence = (text: string, ...claimIds: string[]) => ({ text, claimIds });
 const analysis: ArticleAnalysis = { sourceVersion: "v", availability: "article_text", sections: [{
@@ -38,7 +40,9 @@ assert.equal(parts.map((p) => p.text).join(""), long);
 assert.ok(parts.at(-1)?.text.endsWith('final section.'));
 assert.ok(parts.every((p,i) => p.start === (i ? parts[i-1].end : 0)));
 assert.throws(() => splitSource('a'.repeat(160001)), /limit/);
-assert.equal(summaryTime(61), '1\u00a0мин 10\u00a0с');
+assert.equal(summaryTime(61, RU_DICT.feed.time), '1\u00a0мин 10\u00a0с');
+// «мин» и «с» тоже подписи, а не разметка: у английского они «min» и «s».
+assert.equal(summaryTime(61, EN_DICT.feed.time), '1\u00a0min 10\u00a0s');
 assert.equal(typography('на 5 км'), 'на\u00a05\u00a0км');
 assert.equal(typography('и в статье'), 'и\u00a0в\u00a0статье');
 assert.equal(typography('6 сентября'), '6\u00a0сентября');
@@ -46,6 +50,12 @@ assert.equal(typography('Шаг 1'), 'Шаг\u00a01');
 assert.equal(typography('Qwen2.5-32B и 2026-09-21'), 'Qwen2.5-32B и\u00a02026-09-21');
 assert.equal(typography('2023–2024 годы'), '2023\u2060–\u20602024 годы');
 assert.ok(documentText(valid).includes('No effect on accuracy'));
+const quotation: ReadingDocument = { ...valid, blocks: [{ kind: 'quote', attribution: 'Author', content: evidence('No effect on accuracy', 's1-b') }] };
+assert.deepEqual(validateQuotes(quotation, 'The study found No effect on accuracy in participants.'), []);
+assert.ok(validateQuotes(quotation, 'Accuracy improved.').length > 0, 'invented and translated quotations cannot pass');
+assert.ok(documentText(quotation).includes('“No effect on accuracy”\n— Author'));
+const sixSteps = { ...valid, blocks: [{ kind: 'list', numbering: 'facts', items: Array.from({length:6}, (_,i)=>evidence(`Step ${i+1}`, 's1-b')) }] };
+assert.ok(documentSchema.safeParse(sixSteps).success, 'preserve all six steps rather than merging the source sequence');
 const kindle = digestHtml('2026-09-21','',[{ title:'<unsafe>',summary:'First\n\nSecond',url:'https://example.com/?a="x"',source_label:'Source',topic_label:'Topic' }]);
 assert.ok(kindle.includes('&lt;unsafe&gt;'));
 assert.ok(kindle.includes('<p>First</p>') && kindle.includes('<p>Second</p>'));

@@ -60,10 +60,10 @@ x = 123 - x_min * scale
 baseline = 34 + y_max * scale
 transform = f'translate({x:.6f} {baseline:.6f}) scale({scale:.8f} {-scale:.8f})'
 
-# Smooth curves replace the noisy traced head; eye positions stay fixed.
-head = '<path d="M1408 188 C1426 169 1452 168 1469 173 C1487 178 1498 190 1498 207 C1498 229 1481 243 1459 243 C1445 243 1435 237 1421 242 C1396 246 1391 207 1408 188 Z" fill="#FF462A"/>'
-body = '<path d="M30 224 C96 212 124 125 206 125 C288 125 339 220 411 220 C485 220 522 172 582 172 C650 172 694 224 759 224 C838 224 909 133 998 124 C1060 118 1100 201 1195 207 C1290 213 1351 207 1435 207" fill="none" stroke="#FF462A" stroke-width="37" stroke-linecap="butt"/>'
-eyes = '<g fill="#FFFFFF"><circle cx="1435" cy="205" r="15"/><circle cx="1473" cy="203" r="15"/></g><g fill="#00B8EC"><circle cx="1435" cy="205" r="7"/><circle cx="1473" cy="203" r="7"/></g>'
+# Tangent-matched neck expands into an upward-facing head, like the standalone mark.
+head = '<path class="snake-head" d="M1372 188.5 C1395 188.5 1399 148 1420 134 C1441 120 1461 117 1478 124 C1503 134 1505 162 1487 179 C1472 193 1450 192 1431 203 C1413 216 1392 225.5 1372 225.5 Z" fill="#FF462A"/>'
+body = '<path d="M30 224 C96 212 124 125 206 125 C288 125 339 220 411 220 C485 220 522 172 582 172 C650 172 694 224 759 224 C838 224 909 133 998 124 C1060 118 1100 201 1195 207 C1290 213 1351 207 1373 207" fill="none" stroke="#FF462A" stroke-width="37" stroke-linecap="butt"/>'
+eyes = '<g fill="#FFFFFF"><circle cx="1438" cy="153" r="15"/><circle cx="1473" cy="148" r="15"/></g><g fill="#00B8EC"><circle cx="1438" cy="153" r="8.5"/><circle cx="1473" cy="148" r="8.5"/></g>'
 snake_content = f'{body}{head}{eyes}'
 snake = f'<g id="snake">{snake_content}</g>'
 weave = ''
@@ -79,6 +79,6 @@ logo = f'{open_svg}{defs}{snake}{letters}<g clip-path="url(#weave)">{snake_conte
 (args.output_dir / "logo-reporta.svg").write_text(logo)
 (args.output_dir / "logo-reporta-dark.svg").write_text(logo.replace('fill="#080808"', 'fill="#F5F5F2"'))
 (args.output_dir / "snake-reporta.svg").write_text(f'{open_svg}{defs}{snake}</svg>\n')
-report = {"font": "DM Serif Display", "weight": 400, "text": text, "shaper": "HarfBuzz", "unitsPerEm": face.upem, "pairPositioning": positions, "tracking": 0, "opticalKerning": not args.native_kerning, "outlines": True, "note": "User-selected DM Serif Display Regular with manual pair adjustments added to native kerning. Comparisons share the same type scale. No synthetic bold or nonuniform scaling. Snake flows through R, p and o counters with right-stroke foreground crossings and a level exit past a. Head and cyan eyes are unchanged."}
+report = {"font": "DM Serif Display", "weight": 400, "text": text, "shaper": "HarfBuzz", "unitsPerEm": face.upem, "pairPositioning": positions, "tracking": 0, "opticalKerning": not args.native_kerning, "outlines": True, "note": "User-selected DM Serif Display Regular with manual pair adjustments added to native kerning. Comparisons share the same type scale. No synthetic bold or nonuniform scaling. Snake flows through R, p and o counters with right-stroke foreground crossings and a level exit past a. The neck expands smoothly into an upward-facing head inspired by the standalone mark; cyan eyes follow its tilt."}
 (args.output_dir / "wordmark-spec.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 print(json.dumps(report, ensure_ascii=False))

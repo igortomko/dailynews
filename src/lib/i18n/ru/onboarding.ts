@@ -20,6 +20,7 @@ export const onboarding: typeof En = {
       customLabel: "Свой интерес",
       customPlaceholder: "Своими словами: например, финтех в Бразилии",
       add: "Добавить",
+      more: (n: number) => `Ещё ${n}`,
       full: (planLabel) =>
         `Это весь набор на тарифе «${planLabel}». Больше интересов — на платном, в «Подписке».`,
     },
@@ -38,6 +39,8 @@ export const onboarding: typeof En = {
         `Дальше выпуск будет приходить ${everyOtherDay ? "через день" : "каждую ночь"}, ссылка — в бота. Спасибо, что читаешь.`,
       openFeed: "Открыть ленту",
       dontClose: "Не закрывай вкладку.",
+      elapsed: (seconds: number) =>
+        `${plural(seconds, "Прошла", "Прошло", "Прошло")} ${count(seconds, "секунда", "секунды", "секунд")}, обычно около минуты`,
       noFreshItems: "Свежих материалов по твоим темам пока нет — соберу ночью.",
       buildFailed: "Не получилось собрать первый выпуск — соберу ночью.",
       digestSummary: (added, topics) =>

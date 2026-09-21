@@ -37,9 +37,9 @@ import {
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
 import { fileCoverage, numberCollisions } from "../db/schema-gap";
-import { readingTime } from "../src/lib/relative-time";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
 import { en as EN_DICT } from "../src/lib/i18n/en/index";
+import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { isDay } from "../src/lib/day";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
@@ -295,10 +295,18 @@ assert.ok(
 
 // --- сокращённое время -------------------------------------------------------
 const hourAgo = new Date(Date.now() - 2 * 3_600_000);
-assert.equal(relativeTime(hourAgo), "2ч", "часы пишутся одной буквой");
-assert.equal(relativeTime(new Date(Date.now() - 5 * 60_000)), "5м", "минуты пишутся одной буквой");
-assert.equal(relativeTime(new Date(Date.now() - 3 * 86_400_000)), "3д", "дни пишутся одной буквой");
-assert.ok(/[а-я]{3}/.test(relativeTime(new Date(Date.now() - 40 * 86_400_000))), "давнее пишется датой");
+assert.equal(relativeTime(hourAgo, RU_DICT.feed.time), "2ч", "часы пишутся одной буквой");
+assert.equal(relativeTime(new Date(Date.now() - 5 * 60_000), RU_DICT.feed.time), "5м", "минуты пишутся одной буквой");
+assert.equal(relativeTime(new Date(Date.now() - 3 * 86_400_000), RU_DICT.feed.time), "3д", "дни пишутся одной буквой");
+assert.ok(/[а-я]{3}/.test(relativeTime(new Date(Date.now() - 40 * 86_400_000), RU_DICT.feed.time)), "давнее пишется датой");
+// Тот же ряд по-английски. Раньше эти четыре строки проверяли, что русским
+// является умолчание функции, — а не что русским является русский словарь.
+assert.equal(relativeTime(hourAgo, EN_DICT.feed.time), "2h", "часы по-английски — своя буква");
+assert.equal(relativeTime(new Date(Date.now() - 5 * 60_000), EN_DICT.feed.time), "5m");
+assert.equal(relativeTime(new Date(Date.now() - 3 * 86_400_000), EN_DICT.feed.time), "3d");
+// 20 секунд, а не 30: минуты округляются, и полминуты — это уже «1m».
+assert.equal(relativeTime(new Date(Date.now() - 20_000), EN_DICT.feed.time), "now", "меньше минуты — словом");
+assert.equal(relativeTime(new Date(Date.now() - 20_000), RU_DICT.feed.time), "сейчас");
 
 // --- пустая строка не значение ------------------------------------------------
 // GitHub Actions подставляет пустоту вместо несуществующего секрета, и ?? её
@@ -538,10 +546,50 @@ const privateStart = (text: string, extra: Record<string, unknown> = {}) => ({
   },
 });
 
+/**
+ * Язык интерфейса из разбора апдейта.
+ *
+ * Сужение, а не каст: `as { locale: string }` обходит union, и ветка,
+ * переставшая нести язык, продолжила бы компилироваться — проверка
+ * превратилась бы в обращение к полю несуществующего объекта.
+ */
+const localeOfUpdate = (update: unknown) => {
+  const parsed = parseUpdate(update);
+  assert.ok(parsed.kind === "start" || parsed.kind === "link", "апдейт разобран в ветку с языком");
+  return parsed.locale;
+};
+
 assert.deepEqual(
   parseUpdate(privateStart("/start")),
-  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor" },
+  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor", locale: "en" },
   "обычный /start заводит читателя",
+);
+
+// --- язык интерфейса приходит из Telegram -------------------------------------
+// Без этого каждый новый читатель получал интерфейс по умолчанию независимо
+// от того, на каком языке он написал боту: ошибки нет, экран открывается,
+// просто не на его языке.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "ru" })),
+  "ru",
+  "язык из апдейта становится языком интерфейса",
+);
+// Telegram шлёт и «ru-RU», и «en-US»: страна нам ни о чём не говорит.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "ru-RU" })),
+  "ru",
+  "страна в коде языка отбрасывается",
+);
+// Словарей два, и незнакомый язык — это язык по умолчанию, а не пустой экран.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "pt-BR" })),
+  "en",
+  "язык без словаря читается как язык по умолчанию",
+);
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: 42 })),
+  "en",
+  "не строка — тоже язык по умолчанию",
 );
 assert.equal(parseUpdate(privateStart("/start@lenta_bot")).kind, "start", "/start@ИмяБота — тот же /start");
 assert.equal(parseUpdate(privateStart("/start login")).kind, "start", "полезная нагрузка не мешает");
@@ -570,7 +618,7 @@ assert.deepEqual(
   parseUpdate({
     message: { text: "/start", chat: { id: bigId, type: "private" }, from: { id: bigId } },
   }),
-  { kind: "start", telegramId: bigId, chatId: bigId, username: null },
+  { kind: "start", telegramId: bigId, chatId: bigId, username: null, locale: "en" },
   "большой telegram_id должен пережить разбор",
 );
 
@@ -1215,10 +1263,10 @@ assert.equal(
 
 // Округление показывается только читателю. «~0 мин» на непустом выпуске
 // выглядит как пустой выпуск — отказ, похожий на успех.
-assert.equal(formatMinutes(0.2), "~1 мин", "меньше минуты не показывается нулём");
-assert.equal(formatMinutesLong(1), "~1 минута", "единица склоняется");
-assert.equal(formatMinutesLong(3), "~3 минуты", "тройка склоняется");
-assert.equal(formatMinutesLong(11), "~11 минут", "одиннадцать берёт форму множественного");
+assert.equal(formatMinutes(0.2, RU_DICT.feed.time), "~1 мин", "меньше минуты не показывается нулём");
+assert.equal(formatMinutesLong(1, RU_DICT.feed.time), "~1 минута", "единица склоняется");
+assert.equal(formatMinutesLong(3, RU_DICT.feed.time), "~3 минуты", "тройка склоняется");
+assert.equal(formatMinutesLong(11, RU_DICT.feed.time), "~11 минут", "одиннадцать берёт форму множественного");
 
 // Недобор меньше минуты — это разброс мерки, а не пустой день. Строка,
 // горящая каждый день, ничем не отличается от выключенной.
@@ -1337,13 +1385,20 @@ assert.equal(
 );
 
 import {
-  FEATURES, GATED, allows, cheapestWith, topicsWord, type FeatureId, type Plan,
+  FEATURES, GATED, allows, cheapestWith, type FeatureId, type Plan,
 } from "../src/lib/plans";
 
-assert.equal(topicsWord(1), "интерес", "единственное число");
-assert.equal(topicsWord(2), "интереса", "два-четыре");
-assert.equal(topicsWord(5), "интересов", "пять и больше");
-assert.equal(topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
+// Форма числа живёт в словаре, по одной на язык: русскому нужны три,
+// английскому две, и общая функция с русскими формами по умолчанию
+// отдавала бы «15 интересов» английскому читателю — молча и складно.
+// Английский ряд проверяется впервые: до словаря его просто не было.
+assert.equal(RU_DICT.plans.topicsWord(1), "интерес", "единственное число");
+assert.equal(RU_DICT.plans.topicsWord(2), "интереса", "два-четыре");
+assert.equal(RU_DICT.plans.topicsWord(5), "интересов", "пять и больше");
+assert.equal(RU_DICT.plans.topicsWord(11), "интересов", "одиннадцать — исключение, не «интерес»");
+assert.equal(EN_DICT.plans.topicsWord(1), "interest", "английскому хватает двух форм");
+assert.equal(EN_DICT.plans.topicsWord(2), "interests");
+assert.equal(EN_DICT.plans.topicsWord(11), "interests", "одиннадцать не исключение вне русского");
 
 assert.deepEqual(PLANS.free.sections, [], "бесплатный тариф не открывает платных разделов");
 // Качество отбора — это качество сервиса, а не платная добавка: читатель
@@ -1805,12 +1860,32 @@ assert.equal(responseEnd(refused, "d3"), refused.length, "отказ тоже к
 // Тариф спрашивается не только при сохранении, но и до разбора ссылки:
 // разбор X — это уже запрос к twitterapi.io. Потратить деньги и отказать
 // после значит взять плату за отказ.
-assert.equal(kindDenial(PLANS.pro, "x"), null, "на Pro источники X разрешены");
-assert.ok(kindDenial(PLANS.free, "x"), "на бесплатном X закрыт");
-assert.ok(kindDenial(PLANS.plus, "x"), "на Plus X тоже закрыт");
-assert.match(kindDenial(PLANS.free, "x")!, /Pro/, "отказ называет тариф, который его открывает");
+assert.equal(kindDenial(PLANS.pro, "x", RU_DICT.plans), null, "на Pro источники X разрешены");
+assert.ok(kindDenial(PLANS.free, "x", RU_DICT.plans), "на бесплатном X закрыт");
+assert.ok(kindDenial(PLANS.plus, "x", RU_DICT.plans), "на Plus X тоже закрыт");
+assert.match(kindDenial(PLANS.free, "x", RU_DICT.plans)!, /Pro/, "отказ называет тариф, который его открывает");
+// Два тарифа в отказе: сегодня такого вида нет — `x` открыт ровно на Pro, —
+// и ветка склейки данными недостижима. Поэтому спрашивается словарь напрямую:
+// разделитель был русским («», «») в языконезависимом plans.ts и по-английски
+// давал «is only on the Plus», «Pro plan». Достаточно открыть любой вид
+// на двух тарифах в PLANS.kinds, чтобы это вылезло читателю.
+assert.equal(
+  RU_DICT.plans.kindOnlyOn("Посты из X", ["Plus", "Pro"]),
+  "Посты из X — только на тарифе «Plus», «Pro»",
+);
+assert.equal(
+  EN_DICT.plans.kindOnlyOn("Posts from X", ["Plus", "Pro"]),
+  "Posts from X: only on the Plus or Pro plan",
+  "разделитель принадлежит языку, а не пределам тарифа",
+);
+assert.equal(
+  EN_DICT.plans.kindOnlyOn("Posts from X", ["Pro"]),
+  "Posts from X: only on the Pro plan",
+  "один тариф — без разделителя",
+);
+
 for (const freeKind of ["rss", "hackernews", "telegram", "email"] as const) {
-  assert.equal(kindDenial(PLANS.free, freeKind), null, `${freeKind} остаётся на бесплатном тарифе`);
+  assert.equal(kindDenial(PLANS.free, freeKind, RU_DICT.plans), null, `${freeKind} остаётся на бесплатном тарифе`);
 }
 // Вид известен до всякой сети — на этом и держится отказ без запроса.
 assert.equal(
@@ -2023,6 +2098,13 @@ assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного 
 // Прислать ссылку боту — тот же жест, что вставить её в форму. Отвечать
 // на него подсказкой «напиши /start» значит делать вид, что не понял.
 assert.equal(parseUpdate(privateStart("https://t.me/durov")).kind, "link", "ссылка заводит источник");
+// Язык нужен и этой ветке: у читателя, чьё первое сообщение — ссылка,
+// строка заводится здесь, а следующий /start язык уже не переписывает.
+assert.equal(
+  localeOfUpdate(privateStart("https://t.me/durov", { language_code: "ru" })),
+  "ru",
+  "ссылка тоже приносит язык интерфейса",
+);
 assert.equal(parseUpdate(privateStart("@eugene_rid")).kind, "link", "@имя — тоже ссылка");
 assert.equal(parseUpdate(privateStart("simonwillison.net")).kind, "link", "голый домен — тоже");
 assert.equal(
@@ -2384,7 +2466,7 @@ const subscribedPress = {
 };
 assert.deepEqual(
   parseUpdate(subscribedPress),
-  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", callbackId: "cb1" },
+  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", locale: "en", callbackId: "cb1" },
   "нажатие «Я подписался» разбирается, а не проваливается в ignore",
 );
 
@@ -3241,7 +3323,7 @@ for (const [name, table] of [
   const willison = pub(68, 2, "Simon Willison", "rss", 0);
   const hn = pub(12, 1, "Hacker News", "hackernews", 103, 418);
   assert.deepEqual(
-    storyLines([hn, willison]).map((row) => [row.source_label, row.note]),
+    storyLines([hn, willison], RU_DICT.feed.story).map((row) => [row.source_label, row.note]),
     [["Simon Willison", "первоисточник"], ["Hacker News", "обсуждение: 418 points"]],
     "первоисточник — самое раннее издание, а не меньший id",
   );
@@ -3252,7 +3334,7 @@ for (const [name, table] of [
   const verge = pub(9, 3, "The Verge", "rss", 60);
   const ars = pub(11, 4, "Ars Technica", "rss", 78);
   assert.deepEqual(
-    storyLines([ars, early, verge]).map((row) => row.note),
+    storyLines([ars, early, verge], RU_DICT.feed.story).map((row) => row.note),
     ["обсуждение: 91 points", "первоисточник", "18 минут позже"],
     "отсчёт идёт от первого издания, обсуждение в нём не участвует",
   );
@@ -3260,7 +3342,7 @@ for (const [name, table] of [
   // Кластер без единого издания: отсчитывать не от чего, и выдумывать
   // первоисточник нельзя.
   assert.deepEqual(
-    storyLines([pub(1, 1, "Hacker News", "hackernews", 0, null)]).map((row) => row.note),
+    storyLines([pub(1, 1, "Hacker News", "hackernews", 0, null)], RU_DICT.feed.story).map((row) => row.note),
     ["обсуждение"],
     "обсуждение без очков остаётся обсуждением, а не первоисточником",
   );
@@ -3273,13 +3355,13 @@ for (const [name, table] of [
     url: `https://example.com/${id}`, published_at: null, points: null,
   });
   assert.deepEqual(
-    storyLines([undated(2, "Второе"), undated(1, "Первое")]).map((row) => row.note),
+    storyLines([undated(2, "Второе"), undated(1, "Первое")], RU_DICT.feed.story).map((row) => row.note),
     ["", ""],
     "без даты первоисточника нет ни у кого",
   );
   // Одна известная дата — и он находится, а безымянный остаётся без пометки.
   assert.deepEqual(
-    storyLines([undated(9, "Без даты"), pub(3, 3, "С датой", "rss", 0)])
+    storyLines([undated(9, "Без даты"), pub(3, 3, "С датой", "rss", 0)], RU_DICT.feed.story)
       .map((row) => [row.source_label, row.note]),
     [["С датой", "первоисточник"], ["Без даты", ""]],
     "известная дата делает первоисточником её, а не первого по id",
@@ -3294,22 +3376,22 @@ for (const [name, table] of [
   );
   assert.equal(otherSources([willison, hn], 2), 1, "чужой источник в сюжете считается");
 
-  assert.equal(laterBy(0), "тогда же");
-  assert.equal(laterBy(1), "1 минуту позже");
-  assert.equal(laterBy(18), "18 минут позже");
-  assert.equal(laterBy(103), "2 часа позже", "минуты перестают быть минутами после часа");
-  assert.equal(laterBy(341), "6 часов позже");
-  assert.equal(laterBy(1500), "1 день позже");
-  assert.equal(laterBy(4000), "3 дня позже");
+  assert.equal(laterBy(0, RU_DICT.feed.story), "тогда же");
+  assert.equal(laterBy(1, RU_DICT.feed.story), "1 минуту позже");
+  assert.equal(laterBy(18, RU_DICT.feed.story), "18 минут позже");
+  assert.equal(laterBy(103, RU_DICT.feed.story), "2 часа позже", "минуты перестают быть минутами после часа");
+  assert.equal(laterBy(341, RU_DICT.feed.story), "6 часов позже");
+  assert.equal(laterBy(1500, RU_DICT.feed.story), "1 день позже");
+  assert.equal(laterBy(4000, RU_DICT.feed.story), "3 дня позже");
 
   // «1 материалов» — та же ловушка, только в новой строке.
-  assert.equal(alsoLine(1), "Ещё 1 источник");
-  assert.equal(alsoLine(3), "Ещё 3 источника");
-  assert.equal(alsoLine(5), "Ещё 5 источников");
-  assert.equal(alsoLine(11), "Ещё 11 источников");
-  assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
-  assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
-  assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
+  assert.equal(alsoLine(1, RU_DICT.feed.story), "Ещё 1 источник");
+  assert.equal(alsoLine(3, RU_DICT.feed.story), "Ещё 3 источника");
+  assert.equal(alsoLine(5, RU_DICT.feed.story), "Ещё 5 источников");
+  assert.equal(alsoLine(11, RU_DICT.feed.story), "Ещё 11 источников");
+  assert.equal(storyTitle(1, RU_DICT.feed.story), "Один сюжет, 1 публикация");
+  assert.equal(storyTitle(4, RU_DICT.feed.story), "Один сюжет, 4 публикации");
+  assert.equal(storyTitle(12, RU_DICT.feed.story), "Один сюжет, 12 публикаций");
 }
 
 // --- какие миграции сверка формы схемы вообще может проверить ------------------
@@ -3358,23 +3440,6 @@ for (const [name, table] of [
     "каждый файл каталога попадает ровно в один случай",
   );
   assert.ok(mixed.includes("0012_summary_quality.sql"), "0012 — смешанный: колонка и индекс");
-}
-
-// --- время чтения --------------------------------------------------------------
-// Число, похожее на измеренное, но придуманное, — худший вид подписи:
-// проверить его читателю нечем до самого перехода по ссылке.
-{
-  assert.equal(readingTime(null), null, "текста нет — времени нет");
-  assert.equal(readingTime(0), null, "пустой текст времени не даёт");
-  assert.equal(readingTime(599), null, "анонс короче порога остаётся без подписи");
-  assert.equal(readingTime(600), "~1 мин", "минута — нижняя граница, а не ноль");
-  // Числа — с живого потока и уже без разметки: медиана и девяностый
-  // перцентиль длины текста статьи.
-  assert.equal(readingTime(5894), "~5 мин", "медианная статья живого потока");
-  assert.equal(readingTime(23003), "~19 мин", "девяностый перцентиль");
-  // Выше часа — в часах: «~104 мин» читатель пересчитывает в уме.
-  assert.equal(readingTime(72000), "~1 ч");
-  assert.equal(readingTime(124771), "~2 ч", "самая длинная статья потока");
 }
 
 // --- замок развёртывания переживает собственный rsync ---------------------

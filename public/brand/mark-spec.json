@@ -1,0 +1,11 @@
+{
+  "name": "mark-reporta.svg",
+  "width": 300,
+  "height": 152,
+  "source": "sources/mark-reporta-clean.svg",
+  "paths": 2,
+  "eyeCircles": 4,
+  "opaqueHead": true,
+  "headTransform": "rotate(-8 210 65)",
+  "note": "Approved silhouette with enclosed eye cutouts filled before smoothing and tracing. Head and eyes rotated together 8 degrees upward; body unchanged. No eye holes, masks or raster. Eye geometry retained in head coordinates. Historical tracing IoU does not apply to this master."
+}
