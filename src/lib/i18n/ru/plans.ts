@@ -28,7 +28,7 @@ export const plans: typeof En = {
     x: "Посты из X",
   },
 
-  kindOnlyOn: (kind, planNames) => `${kind} — только на тарифе «${planNames}»`,
+  kindOnlyOn: (kind, planNames) => `${kind} — только на тарифе «${planNames.join("», «")}»`,
   kindUnavailable: (kind) => `${kind} сейчас недоступны`,
 
   feature: {

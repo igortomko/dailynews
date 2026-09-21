@@ -26,6 +26,7 @@ import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
 import { cardChars } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
+import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { cleanupOf } from "../src/lib/source-health";
 import { applyRules, rulesOf } from "../src/lib/rules";
 import { toSlug } from "../src/lib/slug";
@@ -1774,7 +1775,7 @@ async function main() {
       "чужое издание считается ещё одним источником",
     );
     assert.deepEqual(
-      storyLines(storyBoth.get(theirItem)!).map((row) => [row.source_label, row.note]),
+      storyLines(storyBoth.get(theirItem)!, RU_DICT.feed.story).map((row) => [row.source_label, row.note]),
       [["Чужое издание", "первоисточник"], ["Моё издание", "1 час позже"]],
       "порядок и пометки считаются по времени публикации",
     );
