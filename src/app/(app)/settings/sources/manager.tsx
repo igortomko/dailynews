@@ -484,6 +484,11 @@ export function SourcesManager({
                     // «Убрать» без него — один и тот же вопрос без ответа,
                     // какую из них он читает.
                     aria-label={`Убрать ${source.label} из ленты`}
+                    // Красное под курсором — тот же знак, что у корзины
+                    // в списке ниже: кнопка, которая что-то уносит, обязана
+                    // краснеть в обоих местах одинаково, иначе в одном
+                    // из них она выглядит безобидной.
+                    className="hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => remove(source.id)}
                   >
                     Убрать
