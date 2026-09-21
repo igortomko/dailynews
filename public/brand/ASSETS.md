@@ -13,7 +13,10 @@
 | favicon-16.png / favicon-32.png | Browser icon |
 | favicon-180.png / favicon-512.png / favicon.svg | Application and large icon |
 
-The existing approved identity files are not regenerated for v2.
+The approved body geometry is preserved. The standalone mark now has two
+flat cyan irises (#00B8EC), rendered as vector circles in its SVG. Its PNG
+body pixels outside the irises are unchanged. Favicon exports use this version.
+Rebuild these exports with `node scripts/refine-brand-eyes.mjs`.
 Legacy files `logo-reporta-dark.*`, `social-preview.*`, `illustration-*.svg`
 are retained for compatibility but are not canonical and are not included in the kit.
 
