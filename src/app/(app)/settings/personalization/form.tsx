@@ -30,9 +30,12 @@ import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
 
 /** Флажок и название одной строкой: в поле и в списке это одно и то же. */
 const languageOption = (entry: string) => (
-  <span className="flex items-center gap-2">
+  <span className="flex min-w-0 items-center gap-2">
     <span aria-hidden="true">{flagOf(entry)}</span>
-    {entry}
+    {/* Поле у́же самого длинного языка, и «португальском (бразильский
+        вариант)» вылезал бы за него: обрезаем с многоточием. В списке
+        обрезать нечего — он расходится по содержимому. */}
+    <span className="truncate">{entry}</span>
   </span>
 );
 
@@ -230,14 +233,20 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     у подписи говорит, что раздел платный, а выбор языка
                     показывает, за что именно платить. Значение при этом
                     не меняется: окно открывается вместо него. */}
-                <SelectTrigger id="language" className="w-full">
+                <SelectTrigger id="language" className="w-full max-w-xs">
                   <SelectValue>{languageOption(language)}</SelectValue>
                 </SelectTrigger>
                 {/* Обычный выпадающий список, а не список, подтянутый выбранным
                     пунктом к полю: на шестнадцати языках он растягивался
                     на весь экран и закрывал карточку целиком. Высота ограничена,
-                    остальное прокручивается. */}
-                <SelectContent alignItemWithTrigger={false} className="max-h-72">
+                    остальное прокручивается. Ширина по содержимому, но не у́же
+                    поля: список наследует ширину поля, а поле стало коротким —
+                    иначе длинные языки обрезались бы и в самом списке, где
+                    их и выбирают. */}
+                <SelectContent
+                  alignItemWithTrigger={false}
+                  className="max-h-72 w-auto min-w-(--anchor-width)"
+                >
                   {(LANGUAGES.includes(language) ? LANGUAGES : [language, ...LANGUAGES]).map((entry) => (
                     <SelectItem key={entry} value={entry}>
                       {languageOption(entry)}
