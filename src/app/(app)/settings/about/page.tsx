@@ -78,8 +78,7 @@ function FlowGrid({
         <b className="font-medium text-foreground">
           {minutes} {plural(minutes, "минута", "минуты", "минут")}
         </b>{" "}
-        чтения — это
-        примерно {digest} {newsWord(digest)}.
+        чтения. Это ≈{digest} {newsWord(digest)}.
       </p>
     </div>
   );

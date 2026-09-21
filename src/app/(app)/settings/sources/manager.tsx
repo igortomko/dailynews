@@ -230,7 +230,11 @@ export function SourcesManager({
         toast.error(result.error);
         return;
       }
+      // Корзина, а не зелёная галочка: галочка говорит «получилось»,
+      // и над строкой об убранном источнике читается как «добавлено».
+      // Значок здесь называет само действие, а не его исход.
       toast.success(`${result.label} убран из ленты`, {
+        icon: <TrashIcon className="size-4" />,
         duration: 10_000,
         action: {
           label: "Отменить",
