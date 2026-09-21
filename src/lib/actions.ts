@@ -616,8 +616,8 @@ async function fillDigest(reader: Reader) {
       ok: true as const,
       added: 0,
       note: existing.day
-        ? "Больше свежих новостей нет"
-        : "Свежих новостей пока нет — первые придут ночью",
+        ? (await getDict()).errors.noMoreFreshNews
+        : (await getDict()).errors.noFreshNewsYet,
     };
   }
 
@@ -852,8 +852,10 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
   if (posts.length === 0) {
     return {
       error: failed.length
-        ? `Ни одна площадка не ответила: ${failed.map((entry) => `${entry.network} — ${entry.why}`).join("; ")}`
-        : "Читать нечего: добавь канал ссылкой или вставь три своих поста",
+        ? (await getDict()).errors.noChannelAnswered(
+            failed.map((entry) => `${entry.network} — ${entry.why}`).join("; "),
+          )
+        : (await getDict()).errors.nothingToReadFromYou,
     };
   }
 
@@ -873,7 +875,7 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
       failed: failed.map((entry) => `${entry.network}: ${entry.why}`),
     };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Не собралось" };
+    return { error: error instanceof Error ? error.message : (await getDict()).errors.voiceNotBuilt };
   }
 }
 
@@ -937,7 +939,7 @@ export async function writeOpinion(itemId: number): Promise<
       built_from: card.built_from,
     };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Не написалось" };
+    return { error: error instanceof Error ? error.message : (await getDict()).errors.postNotWritten };
   }
 }
 

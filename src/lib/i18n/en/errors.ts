@@ -25,7 +25,7 @@ export const errors = {
   kindleAddressEmpty: "Enter your reader's address",
   kindleAddressSuffix: "The address has to end in @kindle.com",
 
-  emptyLine: "Nothing to read there",
+  emptyLine: "Paste a link",
   checkLinkFirst: "Check the link first",
   pasteLink: "Paste a link",
   sourceGone: (reason: string) => `That source stopped answering: ${reason}`,
@@ -51,9 +51,16 @@ export const errors = {
   kindleNotApproved: "Amazon hasn't approved our address yet. Finish the setup in Delivery",
   kindleCapReached: "That's all you can send today. The limit resets tomorrow",
   kindleAlreadySending: "That article is already on its way",
-  storyNotYours: "That story isn't in any of your issues",
   noSession: "Your session is over. Sign in again",
   badRequest: "We couldn't read that request",
+
+  noFreshNewsYet: "No fresh stories yet. The first ones come tonight",
+  noMoreFreshNews: "No more fresh stories",
+  noChannelAnswered: (reasons: string) => `No channel answered: ${reasons}`,
+  nothingToReadFromYou:
+    "Nothing to read yet: add a channel by link, or paste three of your own posts",
+  voiceNotBuilt: "Couldn't build your voice",
+  postNotWritten: "Couldn't write the post",
 
   firstIssueFailed: "Couldn't build your first issue. I'll build it tonight",
 };

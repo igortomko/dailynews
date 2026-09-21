@@ -1,3 +1,5 @@
+const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
+
 import type { feed as En } from "../en/feed";
 import { count } from "@/lib/plural";
 
@@ -129,5 +131,6 @@ export const feed: typeof En = {
     daysAgo: (n: number) => `${n}д`,
     readingMinutes: (n: number) => `~${n} мин`,
     readingHours: (n: number) => `~${n} ч`,
+    monthDay: (date: Date): string => MONTH.format(date),
   },
 };

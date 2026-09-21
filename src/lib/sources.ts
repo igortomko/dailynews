@@ -2,7 +2,7 @@ import "server-only";
 import { sql } from "./db";
 import { kindDenial } from "./plans";
 import { effectivePlan } from "./lemon";
-import { dictOf, localeOf } from "./i18n";
+import { dictOf } from "./i18n";
 import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
 import { addReaderSource } from "./readers";
 import type { Reader, Source } from "./types";
@@ -41,8 +41,12 @@ export async function denyForKind(
   kind: Source["kind"],
 ): Promise<string | null> {
   const plan = effectivePlan(reader);
+  // Словарь берётся один раз на оба отказа: без него вид источника отвечал
+  // по-русски внутри английского экрана — перевод, который забыли ровно
+  // в том месте, где он и нужен.
+  const t = dictOf(reader.ui_language);
 
-  const byKind = kindDenial(plan, kind);
+  const byKind = kindDenial(plan, kind, t.plans);
   if (byKind) return byKind;
 
   const [{ n }] = await sql<{ n: number }[]>`
@@ -52,8 +56,7 @@ export async function denyForKind(
      where rs.reader_id = ${reader.id} and s.deleted_at is null and s.kind = any(${plan.kinds})
   `;
   if (n < plan.maxSources) return null;
-  const t = dictOf(localeOf(reader.ui_language)).sources;
-  return t.tooManySources(plan.label, plan.maxSources);
+  return t.sources.tooManySources(t.plans.label[plan.id], plan.maxSources);
 }
 
 /**
@@ -99,7 +102,7 @@ export type AddOutcome =
  */
 export async function addByLink(reader: Reader, input: string): Promise<AddOutcome> {
   const raw = input.trim().slice(0, 500);
-  if (!raw) return { ok: false, error: dictOf(localeOf(reader.ui_language)).sources.emptyLink };
+  if (!raw) return { ok: false, error: dictOf(reader.ui_language).sources.emptyLink };
 
   // Тариф спрашивается до сети: какой это будет вид, planFor знает без
   // единого запроса, а разбор ссылки X — уже платный запрос.

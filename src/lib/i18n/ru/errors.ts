@@ -17,7 +17,7 @@ export const errors: typeof En = {
   kindleAddressEmpty: "Впиши адрес читалки",
   kindleAddressSuffix: "Адрес должен заканчиваться на @kindle.com",
 
-  emptyLine: "Пустая строка",
+  emptyLine: "Вставь ссылку",
   checkLinkFirst: "Сначала проверь ссылку",
   pasteLink: "Вставь ссылку",
   sourceGone: (reason: string) => `Источник больше не отвечает: ${reason}`,
@@ -41,9 +41,16 @@ export const errors: typeof En = {
   kindleNotApproved: "Amazon ещё не разрешил наш адрес, доделай настройку в «Доставке»",
   kindleCapReached: "Сегодня больше отправить нельзя, завтра лимит обнулится",
   kindleAlreadySending: "Эта статья уже в пути",
-  storyNotYours: "Этой новости нет в твоих выпусках",
   noSession: "Сессия кончилась, войди заново",
   badRequest: "Не смогли прочитать запрос",
+
+  noFreshNewsYet: "Свежих новостей пока нет, первые придут ночью",
+  noMoreFreshNews: "Больше свежих новостей нет",
+  noChannelAnswered: (reasons: string) => `Ни одна площадка не ответила: ${reasons}`,
+  nothingToReadFromYou:
+    "Читать нечего: добавь канал ссылкой или вставь три своих поста",
+  voiceNotBuilt: "Не собралось",
+  postNotWritten: "Не написалось",
 
   firstIssueFailed: "Не получилось собрать первый выпуск, соберу ночью",
 };

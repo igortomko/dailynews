@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
      limit 1
   `;
   if (!mine) {
-    return NextResponse.json({ error: t.storyNotYours }, { status: 404 });
+    return NextResponse.json({ error: t.itemNotYours }, { status: 404 });
   }
 
   if (!reader) return NextResponse.json({ error: t.noSession }, { status: 401 });

@@ -1,3 +1,5 @@
+const MONTH = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short" });
+
 /** Строки области «feed». Английский задаёт форму, русский её повторяет. */
 
 const story = (n: number) => `${n} ${n === 1 ? "story" : "stories"}`;
@@ -137,5 +139,9 @@ export const feed = {
     daysAgo: (n: number) => `${n}d`,
     readingMinutes: (n: number) => `~${n} min`,
     readingHours: (n: number) => `~${n} h`,
+    // Дальше недели — дата. Форматтер свой у каждого языка: месяц называется
+    // словом, и «сент.» рядом с английским текстом читается как опечатка,
+    // а не как перевод, которого не хватило.
+    monthDay: (date: Date): string => MONTH.format(date),
   },
 };

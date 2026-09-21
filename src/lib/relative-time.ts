@@ -1,12 +1,6 @@
 import type { Dict } from "@/lib/i18n";
 import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 
-// ponytail: формат месяца в запасной ветке ниже остаётся русским всегда —
-// ни один вызывающий код внутри области feed до него не доходит (это
-// редкость за 7 дней), и заводить сюда локаль ради недостижимого пути
-// незачем. Понадобится — берём Locale тем же путём, что t ниже.
-const MONTH = new Intl.DateTimeFormat("ru", { day: "numeric", month: "short" });
-
 export type TimeLabels = Dict["feed"]["time"];
 
 /**
@@ -33,7 +27,7 @@ export function relativeTime(value: string | Date, t: TimeLabels = ruFeed.time):
   const days = Math.round(hours / 24);
   if (days < 7) return t.daysAgo(days);
 
-  return MONTH.format(then);
+  return t.monthDay(then);
 }
 
 /**

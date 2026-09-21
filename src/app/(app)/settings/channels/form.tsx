@@ -205,7 +205,7 @@ export function ChannelsForm({
             <span className="text-xs text-muted-foreground">
               {card && builtAt
                 ? t.onboarding.channels.builtSummary(
-                    relativeTime(new Date(builtAt)),
+                    relativeTime(new Date(builtAt), t.feed.time),
                     card.built_from,
                     card.ranked,
                     Boolean(card.structure?.length),
