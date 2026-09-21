@@ -178,7 +178,7 @@ export function kindDenial(plan: Plan, kind: Source["kind"]): string | null {
  * платить. Верхнее значение совпадает с потолком Pro — корона, за которой
  * нет тарифа, ведёт в никуда.
  */
-export const READING_MINUTES = [5, 10, 20, 30, 45];
+export const READING_MINUTES = [5, 10, 20, 30, PLANS.pro.maxMinutes];
 
 /**
  * Сколько минут реально придёт: заказанное читателем, прижатое потолком

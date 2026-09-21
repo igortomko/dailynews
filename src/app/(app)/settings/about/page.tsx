@@ -8,6 +8,7 @@ import { getCollectedLast24h, getSources } from "@/lib/queries";
 import { cardCharsOf } from "@/lib/readers";
 import { cardMinutes, itemsForMinutes } from "@/lib/reading-time";
 import { newsWord } from "@/lib/telegram";
+import { plural } from "@/lib/plural";
 import { minutesCap, sourcesForPlan, topicsWord, PLAN_IDS, PLANS } from "@/lib/plans";
 
 /**
@@ -74,7 +75,10 @@ function FlowGrid({
           {collected} {newsWord(collected)}
         </b>{" "}
         вышло за сутки у твоих источников. Ты заказал{" "}
-        <b className="font-medium text-foreground">{minutes} минут</b> чтения — это
+        <b className="font-medium text-foreground">
+          {minutes} {plural(minutes, "минута", "минуты", "минут")}
+        </b>{" "}
+        чтения — это
         примерно {digest} {newsWord(digest)}.
       </p>
     </div>

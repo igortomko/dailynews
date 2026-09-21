@@ -545,6 +545,10 @@ async function fillDigest(reader: Reader) {
   // и в базе остался бы пустой выпуск за сегодня. Лента перестала бы
   // предлагать сбор (день-то уже есть), а калибровка посчитала бы выпуск,
   // которого читатель не получал. Ночной прогон делает так же.
+  // Последний выпуск, какой есть. `digestProgress` всегда отдаёт объект,
+  // и «выпуска ещё не было» — это `day === null`, а не пустая ссылка:
+  // проверка на правдивость объекта была бы всегда истинной, и первый
+  // заход получал бы слова, написанные для догрузки.
   const existing = await digestProgress(reader.id, null);
 
   // Через догрузку предел тарифа обходится так же, как через заказ минут:
@@ -585,7 +589,7 @@ async function fillDigest(reader: Reader) {
     return {
       ok: true as const,
       added: 0,
-      note: existing
+      note: existing.day
         ? "Больше свежих новостей нет"
         : "Свежих новостей пока нет — первые придут ночью",
     };
@@ -657,6 +661,16 @@ async function fillDigest(reader: Reader) {
       `;
       digestId = row.id;
     }
+
+    // Заказ этого дня остаётся при самом выпуске: лента показывает недобор,
+    // сравнивая набранное с тем, что заказывали тогда, а не сегодня. Иначе
+    // читатель, поднявший заказ с пяти минут до сорока пяти, увидел бы
+    // «сегодня больше нечего» на каждом старом выпуске, который был полон.
+    await tx`
+      update dailynews.digests
+         set stats = coalesce(stats, '{}'::jsonb) || jsonb_build_object('reading_target', ${target})
+       where id = ${digestId}
+    `;
 
     const [{ taken, chars }] = await tx<{ taken: number; chars: number }[]>`
       select count(*)::int as taken,

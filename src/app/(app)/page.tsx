@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
-import { getDigestDays, getFeed } from "@/lib/queries";
+import { getDigestDays, getDigestTarget, getFeed } from "@/lib/queries";
 import { getChannels, getReaderTopics } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
-import { minutesCap } from "@/lib/plans";
 import { digestMinutes } from "@/lib/reading-time";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
@@ -78,12 +77,16 @@ export default async function FeedPage({
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
   const day = requested && days.includes(requested) ? requested : days[0];
-  const items = await getFeed(reader.id, day);
+  const [items, target] = await Promise.all([
+    getFeed(reader.id, day),
+    // Заказ того дня, а не сегодняшний: лента листается на девяносто дней
+    // назад, и старый выпуск, померенный нынешним заказом, обвинялся бы
+    // в недоборе, которого не было.
+    getDigestTarget(reader.id, day),
+  ]);
 
   // Время считается по тому же тексту, который читатель и читает: заголовок
-  // и описание из выпуска, а не статья за ссылкой. Потолок тарифа поверх
-  // заказа — тот же, что применял прогон: иначе на экране стояло бы «19 из 45»
-  // у читателя, которому положено двадцать.
+  // и описание из выпуска, а не статья за ссылкой.
   const minutes = digestMinutes(
     items.map((item) => ({ title: item.title_ru ?? item.title, summary: item.summary })),
     effectiveVoice(reader),
@@ -95,7 +98,7 @@ export default async function FeedPage({
       items={items}
       plan={plan}
       networks={networks}
-      reading={{ minutes, target: minutesCap(reader.digest_minutes, plan) }}
+      reading={{ minutes, target }}
       // key на элементах, уезжающих в проп: шапка ленты ставит left и right
       // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
       // теряет пометку «детей ровно столько, сколько написано». React считает

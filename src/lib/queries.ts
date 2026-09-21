@@ -128,6 +128,24 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
 }
 
 /**
+ * Сколько минут заказывали на этот день, или null, если неизвестно.
+ *
+ * Заказ лежит при самом выпуске (`stats.reading_target`), а не берётся
+ * из настроек читателя: настройки — это «сколько хочу сейчас», и сравнивать
+ * с ними выпуск недельной давности значит обещать задним числом. Старые
+ * выпуски заказа не несут, и тогда ответ — «неизвестно»: молчать о недоборе
+ * честнее, чем вычислить его из чужого числа.
+ */
+export async function getDigestTarget(readerId: number, day: string): Promise<number | null> {
+  const [row] = await sql<{ target: number | null }[]>`
+    select (stats->>'reading_target')::float as target
+      from dailynews.digests
+     where reader_id = ${readerId} and day = ${day}::date
+  `;
+  return row?.target ?? null;
+}
+
+/**
  * Лента: только то, что дошло до дайджеста этого читателя. Весь остальной
  * поток остаётся в items — он нужен калибровке и дедупу, но показывать его
  * незачем, иначе отбор теряет смысл.

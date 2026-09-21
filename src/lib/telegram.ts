@@ -1,5 +1,5 @@
 import { equal } from "./auth";
-import { formatMinutesLong, isShort } from "./reading-time";
+import { formatMinutesLong, isShort, shortfallNote } from "./reading-time";
 
 /**
  * Бот здесь делает две вещи: заводит читателя по /start и присылает ему
@@ -339,7 +339,7 @@ export async function notify(
   // Недобор называется вслух, а не заметается добором слабого материала:
   // короткий выпуск без объяснения читается как поломка отбора.
   const size = isShort(reading.minutes, reading.target)
-    ? `${formatMinutesLong(reading.minutes)} из ${reading.target} — сегодня больше действительно важного нет`
+    ? shortfallNote(reading.minutes, reading.target)
     : formatMinutesLong(reading.minutes);
 
   const text = [

@@ -91,7 +91,15 @@ export const minutesOf = (chars: number, voice: Voice): number =>
  * здесь нет — в SQL их пришлось бы приписывать руками на каждой строке.
  */
 export const cardChars = (title: string, summary: string | null | undefined): number =>
-  title.length + (summary?.length ?? 0);
+  points(title) + points(summary ?? "");
+
+/**
+ * Знаки, а не единицы UTF-16. `.length` считает суррогатную пару за два,
+ * а `char_length` в Postgres — за один: на эмодзи в заголовке две формулы
+ * одного числа разъезжаются, и равенство, которое здесь объявлено, держалось
+ * бы только на текстах без них.
+ */
+const points = (text: string): number => [...text].length;
 
 export const digestMinutes = (
   cards: { title: string; summary: string | null }[],
@@ -167,3 +175,11 @@ export const SHORTFALL_MIN = 1;
 
 export const isShort = (minutes: number, target: number): boolean =>
   target - minutes >= SHORTFALL_MIN;
+
+/**
+ * Как о недоборе говорят читателю. Одна формулировка на ленту и на бота:
+ * розданная по местам, она правится в одном и остаётся прежней в другом —
+ * и два экрана обещают разное про один и тот же выпуск.
+ */
+export const shortfallNote = (minutes: number, target: number): string =>
+  `${formatMinutesLong(minutes)} из ${target} — сегодня больше действительно важного нет`;

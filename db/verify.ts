@@ -447,6 +447,32 @@ async function main() {
       await readers.cardCharsOf(-1), 0,
       "у читателя без выпусков мерки нет — её заменяет общая, а не ноль в делителе",
     );
+    assert.equal(
+      (await readers.digestProgress(-1, null)).day, null,
+      "у читателя без выпусков день пуст: это и значит «первого выпуска ещё не было»",
+    );
+
+    // Заказ дня лежит при самом выпуске. Лента листается на девяносто дней
+    // назад, и старый выпуск, померенный сегодняшней настройкой, обвинялся
+    // бы в недоборе, которого не было: «≈5 из 45 — сегодня больше нечего»
+    // на выпуске, который был полон.
+    assert.equal(
+      await queries.getDigestTarget(owner.id, today), null,
+      "выпуск без сохранённого заказа не даёт повода считать недобор",
+    );
+    await sql`
+      update dailynews.digests
+         set stats = coalesce(stats, '{}'::jsonb) || '{"reading_target": 20}'::jsonb
+       where reader_id = ${second.id} and day = ${today}::date
+    `;
+    assert.equal(
+      await queries.getDigestTarget(second.id, today), 20,
+      "заказ дня читается из своего выпуска",
+    );
+    assert.equal(
+      await queries.getDigestTarget(owner.id, today), null,
+      "заказ соседа в свой выпуск не приезжает",
+    );
     // Время материала, а не день выпуска. Карточка показывала d.day, и все
     // материалы выпуска получали один возраст, отсчитанный от полудня того
     // дня: в ленте за сегодня везде стояло «1ч» независимо от материала.

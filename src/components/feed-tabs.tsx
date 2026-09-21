@@ -11,7 +11,7 @@ import { ItemCard } from "@/components/item-card";
 import type { FeedItem } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
-import { formatMinutes, formatMinutesLong, isShort } from "@/lib/reading-time";
+import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
 import type { NetworkId } from "@/lib/networks";
 
 /**
@@ -81,12 +81,14 @@ export function FeedTabs({
   plan: Plan;
   networks: NetworkId[];
   /**
-   * Сколько времени займёт выпуск и сколько его заказано.
+   * Сколько времени займёт выпуск и сколько его заказывали в тот день.
    *
    * Обещание продукта — время, поэтому оно стоит в шапке рядом с датой,
-   * а не считается читателем по числу карточек.
+   * а не считается читателем по числу карточек. Заказ — `null` у выпусков,
+   * которые его не сохранили: о недоборе тогда молчим, а не считаем его
+   * по сегодняшней настройке.
    */
-  reading: { minutes: number; target: number };
+  reading: { minutes: number; target: number | null };
   left: React.ReactNode;
   right: React.ReactNode;
 }) {
@@ -227,10 +229,9 @@ export function FeedTabs({
             и чинить его читатель пойдёт в настройки, где всё исправно.
             Строка появляется только при настоящем недоборе: тревога,
             горящая каждый день, ничем не отличается от выключенной. */}
-        {isShort(reading.minutes, reading.target) ? (
+        {reading.target !== null && isShort(reading.minutes, reading.target) ? (
           <p className="mb-3 text-sm text-muted-foreground">
-            {formatMinutesLong(reading.minutes)} из {reading.target} — сегодня больше
-            действительно важного нет.
+            {shortfallNote(reading.minutes, reading.target)}.
           </p>
         ) : null}
         <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">

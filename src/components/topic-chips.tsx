@@ -159,7 +159,11 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        <FieldLabel htmlFor="digest_minutes" className="flex items-center gap-1.5">
+        {/* Подпись связана с группой переключателей через aria-labelledby,
+            а не htmlFor: скрытое поле, в котором лежит значение, подписать
+            нельзя, а группа — не элемент формы. С htmlFor подпись называла
+            бы несуществующий элемент, то есть не называла бы ничего. */}
+        <FieldLabel id="digest-minutes-label" className="flex items-center gap-1.5">
           Время чтения в выпуске
           {plan.maxMinutes < READING_MINUTES[READING_MINUTES.length - 1] ? (
             <PaywallCrown feature="digest" plan={plan} />
@@ -172,6 +176,7 @@ export function TopicChips({
             (осталось от прежнего тарифа) стоит своим вариантом, пока его
             не сменили. */}
         <ToggleGroup
+          aria-labelledby="digest-minutes-label"
           value={[String(minutes)]}
           onValueChange={(value: string[]) => {
             const asked = Number(value[0]);
