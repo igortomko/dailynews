@@ -168,52 +168,51 @@ export function FeedTabs({
   const [searching, setSearching] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
 
-  const [picked, setPicked] = useState<Picked>({ day, ids: [], draft: null });
+  const blank = (): Picked => ({ day, ids: [], draft: null });
+  const [picked, setPicked] = useState<Picked>(blank);
   const [editing, setEditing] = useState(false);
   // Сброс прямо в рендере, а не в эффекте: React перерисует до фиксации,
   // и ни один кадр с чужим выбором на экран не попадёт. Вернувшийся
   // на ту же дату начинает с чистого листа — «очищается» значит очищается,
-  // а не «прячется до возвращения».
+  // а не «прячется до возвращения». Ниже по коду `picked` уже этого дня:
+  // обработчики про чужую дату не знают и знать не должны.
   if (picked.day !== day) {
-    setPicked({ day, ids: [], draft: null });
+    setPicked(blank());
     setEditing(false);
   }
-  const current: Picked = picked.day === day ? picked : { day, ids: [], draft: null };
   // Только то, что есть в ленте сейчас: карточка, скрытая или ушедшая
   // с обновлением данных, из выбора выпадает сама — в порядке выпуска.
-  const chosen = items.filter((item) => current.ids.includes(item.id));
+  const chosen = items.filter((item) => picked.ids.includes(item.id));
   const selectedIds = new Set(chosen.map((item) => item.id));
 
   const pick = (id: number, next: boolean) =>
-    setPicked((prev) => {
-      const base = prev.day === day ? prev : { day, ids: [], draft: null };
-      const ids = next
-        ? base.ids.includes(id)
-          ? base.ids
-          : [...base.ids, id]
-        : base.ids.filter((entry) => entry !== id);
-      return { ...base, ids };
-    });
+    setPicked((prev) => ({
+      ...prev,
+      ids: next
+        ? prev.ids.includes(id)
+          ? prev.ids
+          : [...prev.ids, id]
+        : prev.ids.filter((entry) => entry !== id),
+    }));
 
   // Очистка снимает выбор, но не стирает заголовок и вступление: набранное
   // руками дороже трёх галочек, и его нечем вернуть.
   const clear = () =>
     setPicked((prev) => ({
-      day,
+      ...prev,
       ids: [],
-      draft: prev.day === day && prev.draft ? { ...prev.draft, blocks: [] } : null,
+      draft: prev.draft && { ...prev.draft, blocks: [] },
     }));
 
   // Черновик сводится с выбором при открытии: оставшиеся блоки — со своими
   // правками и в своём порядке, новые — в конец, снятые — вон.
   const openEditor = () => {
     setPicked((prev) => {
-      const base = prev.day === day ? prev : { day, ids: [], draft: null };
-      const blocks = reconcile(base.draft?.blocks ?? [], chosen.map(blockOf));
-      const draft = base.draft
-        ? { ...base.draft, blocks }
+      const blocks = reconcile(prev.draft?.blocks ?? [], chosen.map(blockOf));
+      const draft = prev.draft
+        ? { ...prev.draft, blocks }
         : { title: defaultTitle(day), intro: "", blocks };
-      return { day, ids: blocks.map((block) => block.id), draft };
+      return { ...prev, ids: blocks.map((block) => block.id), draft };
     });
     setEditing(true);
   };
@@ -221,7 +220,7 @@ export function FeedTabs({
   // Пока редактор открыт, состав блоков — единственная правда о выборе:
   // убранный блок снимает галочку с карточки.
   const editDraft = (draft: Overview) =>
-    setPicked({ day, ids: draft.blocks.map((block) => block.id), draft });
+    setPicked((prev) => ({ ...prev, ids: draft.blocks.map((block) => block.id), draft }));
 
   const selecting = chosen.length > 0;
   const wasSearching = useRef(false);
@@ -535,10 +534,10 @@ export function FeedTabs({
       <SelectionBar count={chosen.length} onClear={clear} onOpen={openEditor} />
       {/* Монтируется только с черновиком: до первого «Собрать» ему нечего
           показывать, а состояние копирования не должно жить зря. */}
-      {current.draft ? (
+      {picked.draft ? (
         <OverviewDialog
           day={day}
-          overview={current.draft}
+          overview={picked.draft}
           open={editing}
           onOpenChange={setEditing}
           onChange={editDraft}

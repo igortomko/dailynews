@@ -3179,7 +3179,6 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
       "2. Первая\nОписание\nИсточник 1: https://s1.test/a",
     ].join("\n\n"),
   );
-  assert.equal(text.split("https://s1.test/a").length, 2);
   assert.ok(overviewText({ title: "  ", intro: "Вступление", blocks: [] }).startsWith("Вступление"));
   // Стёртый заголовок блока подменяется источником — строка с одним номером
   // читалась бы как обрыв.
@@ -3190,6 +3189,11 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     title: "Обзор", intro: "Коротко.", blocks: [{ ...feed[0], url: "https://s1.test/a_(b)" }],
   });
   assert.equal(md, "# Обзор\n\nКоротко.\n\n## 1. Первая\n\nОписание\n\n[Источник 1](https://s1.test/a_%28b%29)");
+  // Скобка в названии источника закрыла бы ссылку раньше времени.
+  assert.ok(
+    overviewMarkdown({ title: "", intro: "", blocks: [{ ...feed[0], source: "A]B[C", url: "https://s1.test/a b" }] })
+      .endsWith("[A\\]B\\[C](https://s1.test/a%20b)"),
+  );
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

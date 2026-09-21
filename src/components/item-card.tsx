@@ -368,7 +368,7 @@ export function ItemCard({
             <Checkbox
               checked={selected}
               onCheckedChange={(next) => onSelectedChange(next)}
-              aria-label={`Добавить в обзор: ${title}`}
+              aria-label={`${selected ? "Убрать из обзора" : "Добавить в обзор"}: ${title}`}
               className={cn(
                 "size-4 bg-card transition-[opacity,background-color,border-color] duration-150",
                 // На тапе цель под палец — сорок пикселей вокруг.

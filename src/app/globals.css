@@ -194,13 +194,15 @@
   /*
     Тосты и плашка выбора живут внизу по центру. Пока плашка на экране,
     тосты поднимаются над ней: «Статья ушла на Kindle» иначе ложится
-    ровно на «Выбрано: 3». Сдвиг, а не отступ: положение тостера задано
+    ровно на «Выбрано: 3». Высоту плашки меряет она сама и кладёт
+    в --selection-bar-lift на html; нет плашки — нет переменной, и сдвиг
+    нулевой. Сдвиг, а не отступ: положение тостера задано
     инлайн-переменными sonner, и с ними спорить пришлось бы через
     !important. Правило здесь, а не в компоненте: тостер стоит в корневом
     макете и о ленте не знает.
   */
-  body:has([data-slot="selection-bar"]) [data-sonner-toaster][data-y-position="bottom"] {
-    translate: 0 -3.5rem;
+  [data-sonner-toaster][data-y-position="bottom"] {
+    translate: 0 calc(-1 * var(--selection-bar-lift, 0px));
   }
   body {
     @apply bg-background text-foreground;

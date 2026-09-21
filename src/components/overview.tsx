@@ -39,8 +39,8 @@ import { move, overviewMarkdown, overviewText, type Overview } from "@/lib/overv
  * к трём карточкам. На узком экране переносится: «Выбрано: 12» и кнопка
  * не обязаны стоять в одну строку.
  *
- * `data-slot` читает globals.css: пока плашка на экране, тосты поднимаются
- * над ней — оба живут внизу по центру и иначе ложились бы друг на друга.
+ * Тосты живут там же, внизу по центру, и пока плашка на экране, они
+ * поднимаются над ней на её измеренную высоту (см. `Bar`).
  */
 export function SelectionBar({
   count: selected,
@@ -51,9 +51,45 @@ export function SelectionBar({
   onClear: () => void;
   onOpen: () => void;
 }) {
-  if (selected === 0) return null;
+  return selected === 0 ? null : <Bar count={selected} onClear={onClear} onOpen={onOpen} />;
+}
+
+function Bar({
+  count: selected,
+  onClear,
+  onOpen,
+}: {
+  count: number;
+  onClear: () => void;
+  onOpen: () => void;
+}) {
+  const bar = useRef<HTMLDivElement>(null);
+
+  // Сколько места плашка занимает снизу — измеряется, а не записано числом
+  // в двух местах: на узком экране она переносится на две строки, и тост,
+  // поднятый на константу, ложился бы на верхнюю. Переменная живёт на html,
+  // пока плашка на экране; globals.css поднимает на неё тосты.
+  //
+  // Меряется обёртка, а не сама плашка: обёртка держит отступ снизу вместе
+  // с safe-area и не анимируется, а плашка въезжает снизу, и её положение
+  // в момент монтирования на восемь пикселей ниже конечного.
+  useEffect(() => {
+    const node = bar.current;
+    if (!node) return;
+    const root = document.documentElement;
+    const apply = () => root.style.setProperty("--selection-bar-lift", `${node.offsetHeight + 8}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--selection-bar-lift");
+    };
+  }, []);
+
   return (
     <div
+      ref={bar}
       data-slot="selection-bar"
       className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
     >
@@ -132,11 +168,10 @@ function BlockAction({
             onClick={disabled ? undefined : onClick}
             className={cn(
               "flex size-7 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-              disabled
-                ? "text-muted-foreground/30"
-                : destructive
-                  ? "cursor-pointer text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive"
-                  : "cursor-pointer text-muted-foreground/60 hover:bg-muted hover:text-foreground",
+              disabled && "text-muted-foreground/30",
+              !disabled && "cursor-pointer text-muted-foreground/60",
+              !disabled && destructive && "hover:bg-destructive/10 hover:text-destructive",
+              !disabled && !destructive && "hover:bg-muted hover:text-foreground",
             )}
           />
         }
@@ -221,7 +256,7 @@ export function OverviewDialog({
       setCopied(null);
       setFallback(text);
       toast.warning("Браузер не дал доступ к буферу", {
-        description: "Текст ниже выделен — нажми ⌘C",
+        description: "Текст ниже выделен — нажми Ctrl+C или ⌘C",
       });
     }
   };

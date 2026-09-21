@@ -105,14 +105,21 @@ export function overviewText({ title, intro, blocks }: Overview): string {
   return [...head, ...body].join("\n\n");
 }
 
-/** Скобка в адресе закрывала бы ссылку раньше времени. */
-const mdUrl = (url: string) => url.replace(/\(/g, "%28").replace(/\)/g, "%29");
+/**
+ * Ссылка в Markdown ломается изнутри: скобка в адресе закрывает её раньше
+ * времени, квадратная скобка в названии источника — обрывает текст ссылки.
+ * Название приходит из каталога, адрес — из фида, и ни тому, ни другому
+ * здесь верить нельзя.
+ */
+const MD_URL: Record<string, string> = { "(": "%28", ")": "%29", "<": "%3C", ">": "%3E", " ": "%20" };
+const mdUrl = (url: string) => url.replace(/[()<> ]/g, (char) => MD_URL[char]);
+const mdText = (text: string) => text.replace(/[[\]\\]/g, "\\$&");
 
 /** Markdown из тех же данных: заголовки, абзацы, ссылка на источник словами. */
 export function overviewMarkdown({ title, intro, blocks }: Overview): string {
   const head = [title.trim() ? `# ${title.trim()}` : "", intro.trim()].filter(Boolean);
   const body = blocks.map((block, index) =>
-    [`## ${heading(block, index)}`, block.summary.trim(), `[${block.source}](${mdUrl(block.url)})`]
+    [`## ${heading(block, index)}`, block.summary.trim(), `[${mdText(block.source)}](${mdUrl(block.url)})`]
       .filter(Boolean)
       .join("\n\n"),
   );
