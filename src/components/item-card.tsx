@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { relativeTime } from "@/lib/relative-time";
+import { readingTime } from "@/lib/relative-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { OpinionDialog } from "@/components/opinion-dialog";
@@ -63,19 +63,6 @@ function report(
     .catch(() => new Promise((resolve) => setTimeout(resolve, 1500)).then(send))
     .catch((error) => console.warn(`событие «${body.event}» не доехало:`, error));
 }
-
-/**
- * Полная дата для подсказки. «4д» отвечает на «давно ли», но не на «какого
- * числа» — а это разные вопросы, и второй возникает ровно тогда, когда
- * материал обсуждают с кем-то ещё.
- */
-const EXACT = new Intl.DateTimeFormat("ru", {
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
 /**
  * Классы для иконки, которая появляется или уходит по состоянию. Обе (все
@@ -206,12 +193,22 @@ export function ItemCard({
 
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
+  const minutes = readingTime(item.body_chars);
   const others = otherSources(item.story, item.source_id);
   const lines = others > 0 ? storyLines(item.story) : [];
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
   const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
+  // Тема — одной строкой вместе с источником и временем чтения.
+  //
+  // Тип материала и горизонт отсюда убраны. «Факт» стоял у 58% карточек
+  // выпуска, «месяцы» — у 44%: метка, которая есть почти у всех, не отличает
+  // карточку от соседней, а слова взяты из нашей шкалы, а не из языка
+  // читателя. В отборе и в «Калибровке» обе оси работают по-прежнему —
+  // там значения стоят рядом друг с другом и сравниваются. В строке
+  // остаётся метка, которая сообщает об отклонении, — «кликбейт» выше.
+  const topic = showTopic ? item.topic_label : null;
 
   if (vote === "down") {
     return (
@@ -242,19 +239,16 @@ export function ItemCard({
       ref={article}
       className="group border-b py-5 transition-opacity duration-150 last:border-0"
     >
-      {/* В покое остаётся только источник. Время и тема нужны, когда уже
-          присматриваешься к материалу, а в списке они тянут строку
-          и спорят с заголовком. Место под них держится всегда,
-          поэтому строка не дёргается при наведении.
+      {/* Одна строка, а не две. Пока метаданные проявлялись по наведению,
+          в покое их место занимало время чтения — и получалось два ряда,
+          живущих по разным правилам.
+
+          Времени публикации здесь больше нет. «2д» и «≈41 мин» стоят рядом,
+          оба про время и оба про разное: одно — давно ли вышло, второе —
+          сколько читать. Глаз складывает их в одно число и спотыкается.
+          Из двух оставлено то, что отвечает на «открывать ли сейчас».
           Разделитель — запятая: точки с пробелами по бокам растягивали
           ряд сильнее, чем несли смысла.
-
-          Тип материала и горизонт отсюда убраны. «Факт» стоял у 58%
-          карточек выпуска, «месяцы» у 44%: метка, которая есть почти
-          у всех, ничего не отличает — она только удлиняет строку
-          и говорит на языке нашей шкалы, а не читателя. В отборе
-          и в «Калибровке» обе оси работают по-прежнему. Метка остаётся
-          там, где сообщает об отклонении, — «кликбейт» ниже.
 
           Шапка во всю ширину карточки, а не внутри текстовой колонки:
           там её правый край упирался в картинку, и кнопки у карточек
@@ -281,31 +275,17 @@ export function ItemCard({
               не дёргалась при наведении, — и «кликбейт» за этим местом
               висел в пустоте, оторванный от того, к чему относится. */}
           {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
+          {/* Время чтения: «открывать ли сейчас» спрашивают раньше и чаще,
+              чем «про что это». Пусто, когда текста статьи у нас нет:
+              у 124 карточек из 200 его не бывает, и выдуманное число там
+              было бы неотличимо от измеренного. */}
+          {minutes ? <span className="shrink-0">{minutes}</span> : null}
           {/* min-w-0 обязателен: truncate обрезает только то, чему разрешили
               сузиться, а гибкий элемент по умолчанию не уже своего
               содержимого. Строка в одну линию держала ширину всей карточки,
               и на телефоне лента уезжала за край экрана — заголовок и текст
               обрезались справа, а докрутить до них было нельзя. */}
-          <span className="min-w-0 truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <time
-                    dateTime={new Date(item.published_at).toISOString()}
-                    // Часовой пояс сервера и читателя разные, и точная дата
-                    // на них расходится. Значение читателя верное,
-                    // предупреждение о несовпадении — шум.
-                    suppressHydrationWarning
-                    className="cursor-default"
-                  />
-                }
-              >
-                {relativeTime(item.published_at)}
-              </TooltipTrigger>
-              <TooltipContent>{EXACT.format(new Date(item.published_at))}</TooltipContent>
-            </Tooltip>
-            {showTopic && item.topic_label ? `, ${item.topic_label}` : ""}
-          </span>
+          {topic ? <span className="min-w-0 truncate">{topic}</span> : null}
         </span>
 
         {/* Оценка тоже по наведению: нужна раз на десяток материалов,

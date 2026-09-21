@@ -96,7 +96,17 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             {going ? <Spinner className="size-4" /> : null}
           {FORMAT.format(new Date(`${day}T12:00:00`))}
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-auto p-0">
+        {/* Календарь прибит к экрану, а не к странице: кнопка даты живёт
+            в прибитой шапке и при прокрутке остаётся на месте, а слежение
+            за ней пересчитывало положение каждым кадром и отставало от него
+            — календарь дёргался, пока страница едет. Считаем один раз
+            при открытии и больше не трогаем. */}
+        <PopoverContent
+          align="start"
+          positionMethod="fixed"
+          disableAnchorTracking
+          className="w-auto p-0"
+        >
           <Calendar
             mode="single"
             locale={ru}

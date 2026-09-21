@@ -156,7 +156,7 @@ export function DeliveryForm({
           <CardDescription>
             {step === "done"
               ? "Выпуск уходит книгой на читалку."
-              : "Ты можешь автоматически получать выпуск на свой Kindle. Это два шага."}
+              : "Ты можешь автоматически получать выпуск на свой Kindle. Это 2 шага."}
           </CardDescription>
         </CardHeader>
 

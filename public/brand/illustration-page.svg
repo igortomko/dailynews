@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 480" role="img" aria-labelledby="title">
+  <title id="title">Reporta editorial page illustration</title>
+  <rect width="720" height="480" fill="#FAF9F6"/>
+  <g fill="none" stroke="#171716" stroke-linecap="round">
+    <path d="M122 76H488V392H122Z" stroke-width="5"/>
+    <path d="M150 112H352M150 136H430M150 160H402M150 220H454M150 244H426M150 268H442M150 292H390M150 348H330" stroke-width="7"/>
+    <path d="M388 104V184H458V104Z" stroke-width="4"/>
+    <path d="M396 174L450 112M396 148L430 104M420 184L458 142" stroke-width="2"/>
+    <path d="M164 330l130-94M164 348l156-112M218 362l126-92M286 362l102-75" stroke-width="2"/>
+  </g>
+  <path d="M68 310C126 220 185 228 226 266C272 310 304 328 358 292C417 252 424 193 484 178C549 161 580 212 618 258C644 290 668 292 694 260" fill="none" stroke="#F04A32" stroke-width="22" stroke-linecap="round"/>
+  <ellipse cx="686" cy="264" rx="27" ry="21" fill="#F04A32"/>
+  <circle cx="677" cy="260" r="6" fill="#FAF9F6"/>
+  <circle cx="695" cy="260" r="6" fill="#FAF9F6"/>
+  <circle cx="677" cy="260" r="2.7" fill="#4CC9F0"/>
+  <circle cx="695" cy="260" r="2.7" fill="#4CC9F0"/>
+</svg>

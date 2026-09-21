@@ -184,7 +184,7 @@ export function TopicChips({
                   key={size}
                   value={String(size)}
                   aria-disabled={beyond || undefined}
-                  aria-label={beyond ? `${size} — на платном тарифе` : undefined}
+                  aria-label={beyond ? `${size}, на платном тарифе` : undefined}
                   className={beyond ? "text-muted-foreground/60" : undefined}
                 >
                   {size}
@@ -209,10 +209,10 @@ export function TopicChips({
           <FieldDescription>
             {/* Формы родительные: считает их «до», а не само число —
                 «до 21 новости», «до 22 новостей», «до 100 новостей». */}
-            На тарифе «{plan.label}» — до{" "}
-            {count(maxDigestOf(plan), "новости", "новостей", "новостей")}. Больше —{" "}
+            На тарифе «{plan.label}» до{" "}
+            {count(maxDigestOf(plan), "новости", "новостей", "новостей")}. Больше новостей{" "}
             <Link href="/settings/subscription" className="underline underline-offset-4">
-              в «{bigger.join("» и «")}»
+              на «{bigger.join("» и «")}»
             </Link>
           </FieldDescription>
         ) : null}
@@ -227,15 +227,19 @@ export function TopicChips({
             counts={chips.map((chip) => chip.count)}
             onChange={setCounts}
           />
-          <FieldDescription>
-            Тянешь границу одной темы — соседние меняются сами: сумма равна размеру выпуска
-          </FieldDescription>
         </Field>
       ) : null}
 
       {chips.length > 0 ? (
         <Field>
-          <FieldLabel>Твои темы</FieldLabel>
+          <FieldLabel className="flex items-center gap-2">
+            Твои темы
+            {/* Счётчик у подписи, а не строкой под полем ввода: там он читался
+                как отказ, хотя отказом становится только на пределе. */}
+            <span className="text-xs font-normal text-muted-foreground tabular-nums">
+              {chips.length} из {plan.maxTopics}
+            </span>
+          </FieldLabel>
           <div className="flex flex-wrap gap-2">
           {chips.map((chip, index) => (
             <Fragment key={`${chip.label}-${index}`}>
@@ -257,7 +261,7 @@ export function TopicChips({
                 }}
                 tabIndex={0}
                 role="button"
-                aria-label={`${chip.label}, ${chip.count} из ${total}. Стрелками влево и вправо — переставить`}
+                aria-label={`${chip.label}, ${chip.count} из ${total}. Стрелками влево и вправо можно переставить`}
                 className={cn(
                   "group flex h-10 items-center gap-1.5 rounded-lg border bg-card pr-1 pl-2 text-sm transition-colors select-none",
                   "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -374,7 +378,7 @@ export function TopicChips({
                       >
                         <PlusIcon />
                       </TooltipTrigger>
-                      <TooltipContent>Больше новостей по этой теме — место возьмётся у самой крупной</TooltipContent>
+                      <TooltipContent>Больше новостей по этой теме. Место возьмётся у самой крупной</TooltipContent>
                     </Tooltip>
                   </div>
                 </div>
@@ -412,11 +416,11 @@ export function TopicChips({
           </Button>
         </div>
         {topicsPaywall.dialog}
-        <FieldDescription>
-          {full
-            ? `На тарифе «${plan.label}» ${plan.maxTopics} ${topicsWord(plan.maxTopics)} — убери один, чтобы добавить новый`
-            : `${chips.length} из ${plan.maxTopics} на тарифе «${plan.label}»`}
-        </FieldDescription>
+        {full ? (
+          <FieldDescription>
+            {`На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}. Убери один, чтобы добавить новый`}
+          </FieldDescription>
+        ) : null}
       </Field>
     </FieldGroup>
   );

@@ -1,7 +1,7 @@
 # Reporta
 
 <p align="center">
-  <img src="./public/brand/logo-reporta.svg" alt="Reporta" width="760">
+  <img src="./public/brand/logo-reporta.png" alt="Reporta" width="760">
 </p>
 
 <p align="center">
@@ -17,8 +17,9 @@ Reporta собирает поток, оценивает каждый матер�
 
 ### Brand assets
 
-- `public/brand/logo-reporta.svg` — прозрачный логотип для светлых поверхностей
-- `public/brand/logo-reporta-dark.svg` — прозрачный логотип для тёмных поверхностей
+- `public/brand/logo-reporta.png` — утверждённый primary logo для светлых поверхностей
+- `public/brand/logo-reporta-approved-transparent.png` — прозрачная PNG-версия для макетов
+- `public/brand/logo-reporta-on-dark.png` — утверждённый знак на тёмном поле
 - `public/brand/mark-reporta.svg` — самостоятельный знак
 - `public/brand/favicon.svg` — favicon и аватар
 - `public/brand/index.html` — палитра, типографика и правила использования

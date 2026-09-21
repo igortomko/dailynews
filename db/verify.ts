@@ -25,6 +25,7 @@ import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
 import { otherSources, storyLines } from "../src/lib/story";
+import { readingTime } from "../src/lib/relative-time";
 import { cleanupOf } from "../src/lib/source-health";
 
 
@@ -479,6 +480,129 @@ async function main() {
       `  калибровка: ${ownerCalibration.totals.opened}/${ownerCalibration.totals.shown} у владельца, ` +
       `${secondCalibration.totals.opened}/${secondCalibration.totals.shown} у второго`,
     );
+
+    // --- поиск по прошлым выпускам ----------------------------------------------
+    // «Где я видел про uranium и дата-центры» — вопрос к своему архиву,
+    // а не к интернету. Ошибка здесь той же породы, что и чужая лента:
+    // выдача приходит быстро, выглядит осмысленной и собрана не из твоего.
+    {
+      const { HL_START } = await import("../src/lib/search");
+      // Описание пишется читателю его языком — по нему и ищут первым делом.
+      const [before] = await sql<{ summary: string | null }[]>`
+        select summary from dailynews.digest_items where item_id = ${ids[2]}
+      `;
+      // Описание длиннее отрывка намеренно: у короткого обрезать нечего,
+      // и обе проверки многоточия ниже прошли бы, ничего не измерив.
+      await sql`
+        update dailynews.digest_items
+           set summary = 'Спотовая цена на уран обновила максимум, дата-центры разгоняют спрос '
+                      || 'на энергию, а запуск новых блоков отстаёт от графика на годы; трейдеры '
+                      || 'закладывают дефицит топлива до конца десятилетия, добытчики обещают '
+                      || 'нарастить объёмы, но разрешения выдаются медленнее, чем строятся шахты'
+         where item_id = ${ids[2]}
+      `;
+
+      // Словарь поиска выбирается по языку выпуска, а его решает тариф:
+      // у платного перевод есть, у бесплатного текст остаётся языком
+      // источника. Читатели ниже заявлены явно — иначе проверка меряла бы
+      // тариф из фикстуры, а не поиск.
+      const ru = { ...owner, plan: "pro", language: "русском" };
+
+      const archive = await queries.archiveSize(owner.id);
+      assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
+      assert.deepEqual(
+        await queries.archiveSize(second.id),
+        { items: 1, days: 1 },
+        "в чужой архив соседние выпуски не попадают",
+      );
+
+      const byRussian = await queries.searchArchive(ru, "уран");
+      assert.equal(byRussian.hits.length, 1, "слово из описания выпуска обязано находиться");
+      assert.equal(String(byRussian.hits[0].item_id), String(ids[2]));
+      assert.equal(byRussian.loose, false, "по одному слову ослаблять нечего");
+      assert.ok(
+        byRussian.hits[0].snippet.includes(HL_START),
+        "найденное в отрывке обязано быть отмечено: иначе выдачу нечем читать",
+      );
+      // Многоточие означает «здесь отрезано», и проверяются обе стороны
+      // сразу: отрывок начинается с первых слов описания — слева резать
+      // нечего, — а конец в него не поместился, и справа резать пришлось.
+      // Поставленное с обеих сторон всегда обещало бы текст, которого нет.
+      assert.ok(
+        !byRussian.hits[0].snippet.startsWith("…"),
+        `отрывок с начала описания не помечается обрезанным: ${byRussian.hits[0].snippet}`,
+      );
+      assert.ok(
+        byRussian.hits[0].snippet.endsWith("…"),
+        `у обрезанного конца многоточие обязано быть: ${byRussian.hits[0].snippet}`,
+      );
+      assert.equal(byRussian.hits[0].title, "Владелец: уран", "заголовок берётся из выпуска");
+      assert.equal(byRussian.hits[0].day, today, "у находки есть день выпуска, чтобы вернуться");
+
+      // Ищут тем словом, которое запомнили: «уран» стоит в описании выпуска,
+      // «uranium» — в заголовке источника. Одно без другого — половина поиска.
+      const byEnglish = await queries.searchArchive(ru, "uranium");
+      assert.equal(byEnglish.hits.length, 1, "исходный заголовок обязан искаться наравне");
+      assert.equal(String(byEnglish.hits[0].item_id), String(ids[2]));
+
+      // Словоформа, а не подстрока: «цены» и «цена» — одно слово.
+      assert.equal(
+        (await queries.searchArchive(ru, "цены")).hits.length,
+        1,
+        "поиск обязан сводить словоформы, иначе он работает только точным попаданием",
+      );
+      // Словарь один на оба текста, и это не компромисс: у русской
+      // конфигурации Postgres латиница уходит в английский стеммер.
+      // «цены» находит «цена» в описании выпуска, «prices» — «price»
+      // в заголовке источника, и это один и тот же поиск.
+      assert.equal(
+        (await queries.searchArchive(ru, "prices")).hits.length,
+        1,
+        "словоформа английского заголовка обязана сводиться тем же словарём",
+      );
+
+      // Самое дорогое здесь — чужой архив: он приходит вовремя и не твой.
+      const stranger = await queries.searchArchive(second, "уран");
+      assert.equal(stranger.hits.length, 0, "выпуск соседа в своём поиске не находится");
+      assert.equal(
+        (await queries.searchArchive(ru, "CBT")).hits.length,
+        0,
+        "и в обратную сторону тоже: владелец не ищет по выпуску второго",
+      );
+
+      // Ищут вопросом: все слова разом дают ноль, хотя ответ лежит в архиве.
+      const asked = await queries.searchArchive(ru, "где я видел про uranium");
+      assert.equal(asked.loose, true, "ослабление обязано называться вслух");
+      assert.equal(String(asked.hits[0].item_id), String(ids[2]));
+      assert.equal(
+        (await queries.searchArchive(ru, "кварки бозоны")).loose,
+        false,
+        "ослабление, не нашедшее ничего, ослаблением не объявляется",
+      );
+
+      // Палец вниз убирает материал из ленты — и из поиска тоже: иначе
+      // «убрать» означало бы «убрать с одной страницы из двух».
+      await sql`
+        insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+        values (${owner.id}, ${ids[2]}, 'down', 95, 0.8)
+      `;
+      assert.equal(
+        (await queries.searchArchive(ru, "уран")).hits.length,
+        0,
+        "скрытое пальцем вниз в поиске не всплывает",
+      );
+      // Убирается ровно вставленное, и описание возвращается на место:
+      // проверка, оставляющая след, однажды объяснит чужой провал.
+      await sql`
+        delete from dailynews.reads
+         where reader_id = ${owner.id} and item_id = ${ids[2]} and event = 'down'
+      `;
+      await sql`
+        update dailynews.digest_items set summary = ${before?.summary ?? null}
+         where item_id = ${ids[2]}
+      `;
+      console.log("  поиск: свой архив находится, чужой — нет");
+    }
 
     // --- отбор: своё не повторяется, чужое не исчезает ---------------------------
     // Самая дорогая ошибка многопользовательского отбора: первый прогнавшийся
@@ -1339,7 +1463,31 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
+    // Время чтения считается из длины текста статьи. Колонка, заведённая
+    // миграцией, но не выбранная лентой, ничем себя не выдаёт: подписи
+    // просто не будет, и выглядит это как «у материала нет текста».
+    await sql`update dailynews.items set body = ${"т".repeat(7760)} where id = ${myItem}`;
     const storyFeed = await queries.getFeed(owner.id, storyDay);
+    // strictEqual, а не equal: колонка живёт среди bigint-ов, и «"7760"»
+    // прошло бы нестрогое сравнение молча — ровно тот класс ошибки,
+    // который уже ломал сюжеты по числовым ключам.
+    assert.strictEqual(storyFeed[0].body_chars, 7760, "лента отдаёт длину текста статьи");
+    assert.strictEqual(
+      readingTime(storyFeed[0].body_chars), "≈6 мин", "и она превращается в минуты",
+    );
+
+    // У ролика текст — пересказ субтитров, а не то, что откроется
+    // по ссылке. Время чтения пересказа выдавать за длину ролика нельзя.
+    await sql`update dailynews.items set transcribed_at = now() where id = ${myItem}`;
+    assert.equal(
+      (await queries.getFeed(owner.id, storyDay))[0].body_chars, null,
+      "у ролика времени чтения не бывает",
+    );
+    // Фикстура возвращается на место целиком: ниже этот же материал
+    // участвует в проверках сюжета, и оставленный текст менял бы их условия.
+    await sql`
+      update dailynews.items set transcribed_at = null, body = null where id = ${myItem}
+    `;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",
@@ -1406,7 +1554,10 @@ async function main() {
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
     `;
     assert.equal(beforeFlatten.n, 1, "цепочка должна быть заведена — иначе проверка ничего не ловит");
-    assert.equal(await flattenDupChains(sql), 1, "выпрямляется ровно одно звено");
+    assert.equal(
+      await flattenDupChains(sql), 1,
+      "считаются исправленные материалы, а не переписывания",
+    );
     const [afterFlatten] = await sql<{ n: number }[]>`
       select count(*)::int as n from dailynews.items c
         join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
@@ -1417,6 +1568,34 @@ async function main() {
       chainStory.get(chainRoot)?.length, 3,
       "выпрямленный сюжет собирается целиком, а не делится надвое",
     );
+
+    // Цепочка из четырёх материалов правится за два шага, но исправить надо
+    // два из них: третий и четвёртый (второй и так указывает на корень).
+    // Сложенные длины ответов насчитали бы три — число в логе прогона
+    // означало бы не то, что в нём написано.
+    const deep = [
+      await mkItem(mineSource, "deep-0", "Deep chain story zero", 400),
+      await mkItem(mineSource, "deep-1", "Deep chain story one", 350),
+      await mkItem(mineSource, "deep-2", "Deep chain story two", 300),
+      await mkItem(mineSource, "deep-3", "Deep chain story three", 250),
+    ];
+    for (let i = 1; i < deep.length; i++) {
+      await sql`update dailynews.items set dup_of = ${deep[i - 1]} where id = ${deep[i]}`;
+    }
+    assert.equal(await flattenDupChains(sql), 2, "два материала, сколько бы шагов ни ушло");
+    const deepStory = await queries.getStories([mineSource], [deep[0]]);
+    assert.equal(deepStory.get(deep[0])?.length, 4, "длинная цепочка сходится в один сюжет");
+
+    // Инвариант обеспечивается там, где потребляется: догрузка выпуска
+    // зовёт selectSurvivors мимо ночного прогона, и цепочка, оставшаяся
+    // с прошлого раза, увела бы ключ сюжета в середину без оценки.
+    await sql`update dailynews.items set dup_of = ${deep[1]} where id = ${deep[3]}`;
+    await selectSurvivors(sql, owner.id, owner.weights, storyTargets, 5, [mineSource]);
+    const [chainsLeft] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(chainsLeft.n, 0, "отбор выпрямляет цепочки сам, а не надеется на прогон");
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

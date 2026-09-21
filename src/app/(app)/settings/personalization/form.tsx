@@ -21,12 +21,20 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   COMPLEXITY, LANGUAGES, DEFAULT_COMPLEXITY, DEFAULT_STYLE, STYLES,
-  complexityAt, SOURCE_LANGUAGE,
+  complexityAt, flagOf, SOURCE_LANGUAGE,
 } from "@/lib/voice";
 import type { Reader } from "@/lib/types";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { PaywallCrown, usePaywall } from "@/components/paywall";
 import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
+
+/** Флажок и название одной строкой: в поле и в списке это одно и то же. */
+const languageOption = (entry: string) => (
+  <span className="flex items-center gap-2">
+    <span aria-hidden="true">{flagOf(entry)}</span>
+    {entry}
+  </span>
+);
 
 export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
   // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
@@ -37,6 +45,15 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [applying, setApplying] = useState(false);
+  // Тронул ли читатель хоть что-то с прошлого нажатия. Кнопка над нетронутой
+  // формой отвечала бы «настройки сохранены» на форму, которую не меняли:
+  // ответ на действие, которого не было.
+  const [dirty, setDirty] = useState(false);
+  // Номер последней правки. Пересборка идёт минуту-две, и тост зовёт читать
+  // дальше: за это время форму успевают тронуть ещё раз. Гасить кнопку
+  // по итогу прошлого захода нельзя — новая правка осталась бы без способа
+  // доехать до выпуска, а кнопка сказала бы, что всё сделано.
+  const edits = useRef(0);
   const form = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
@@ -74,7 +91,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
       try {
         await savePersonalization(data);
       } catch {
-        toast.error("Сохранить не вышло — попробуй ещё раз");
+        toast.error("Не удалось сохранить. Попробуй ещё раз");
         after?.(false);
         return;
       }
@@ -101,6 +118,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         // оплачивать переписывание того же текста тем же голосом.
         written.current = now;
         queueRebuild("voice");
+      } else {
+        // Покрутил и вернул как было — это не правка. Кнопка над формой,
+        // равной сохранённому, обещала бы работу, которой нет.
+        setDirty(false);
       }
       after?.(true);
     });
@@ -112,6 +133,8 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   // рядом отвечает не за запись, а за то, чтобы сегодняшний выпуск
   // переписался прямо сейчас, не дожидаясь полуночи.
   const schedule = () => {
+    edits.current += 1;
+    setDirty(true);
     setSaved(false);
     clearTimeout(timer.current);
     timer.current = setTimeout(save, 900);
@@ -121,12 +144,20 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   const apply = () => {
     clearTimeout(timer.current);
     setApplying(true);
+    const mark = edits.current;
     save((ok) => {
       if (!ok) {
         setApplying(false);
         return;
       }
       void flushRebuild(() => router.refresh())
+        .then((outcome) => {
+          // Отменил или не дождался прошлого захода — кнопка остаётся живой:
+          // нажать ещё раз тут единственный способ довести дело до конца.
+          // Правка, сделанная пока шла работа, тоже держит её живой.
+          const applied = outcome === "done" || outcome === "idle";
+          if (applied && edits.current === mark) setDirty(false);
+        })
         .catch(() => {})
         .finally(() => setApplying(false));
     });
@@ -160,10 +191,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         <CardDescription>
           {first
             ? "Скажи, на каком языке и как писать новости. Интересы выберешь следующим шагом."
-            : // Не «как мы подбираем»: отбор здесь ни при чём — он идёт
+            : // Не «как мы подбираем»: отбор здесь ни при чём, он идёт
               // по интересам и оценкам, общим для всех. Обещать на этом
               // экране влияние на подбор значит обещать то, чего нет.
-              "Настрой, на каком языке и как написан твой выпуск. О чём он — в «Интересах»."}
+              "На каком языке и как написан твой выпуск. О чём он, выбираешь в «Интересах»."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -200,12 +231,16 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     показывает, за что именно платить. Значение при этом
                     не меняется: окно открывается вместо него. */}
                 <SelectTrigger id="language" className="w-full">
-                  <SelectValue>{language}</SelectValue>
+                  <SelectValue>{languageOption(language)}</SelectValue>
                 </SelectTrigger>
-                <SelectContent>
+                {/* Обычный выпадающий список, а не список, подтянутый выбранным
+                    пунктом к полю: на шестнадцати языках он растягивался
+                    на весь экран и закрывал карточку целиком. Высота ограничена,
+                    остальное прокручивается. */}
+                <SelectContent alignItemWithTrigger={false} className="max-h-72">
                   {(LANGUAGES.includes(language) ? LANGUAGES : [language, ...LANGUAGES]).map((entry) => (
                     <SelectItem key={entry} value={entry}>
-                      {entry}
+                      {languageOption(entry)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -219,7 +254,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
               <FieldDescription>
                 {translates
                   ? "Источники остаются на своих языках, мы переводим и адаптируем."
-                  : "Выпуск приходит на языке источника — перевод есть на «Plus» и «Pro»."}
+                  : "Выпуск приходит на языке источника. Перевод есть на «Plus» и «Pro»."}
               </FieldDescription>
             </Field>
 
@@ -256,10 +291,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
 
             <Field>
               <FieldLabel>Манера подачи</FieldLabel>
-              {/* Четыре варианта видны сразу, и каждый — с первой фразой
-                  описания: «нейтрально и без оценок» обещает, а «Компания
-                  выпустила новую модель…» показывает. За списком они прячутся
-                  по одному, и сравнить манеры нельзя, не открыв его дважды. */}
+              {/* Четыре варианта видны сразу и выделяются так же, как деления
+                  сложности над ними: разная заливка у двух соседних групп
+                  читается как два разных элемента, и выбранное в одной
+                  перестаёт быть похоже на выбранное в другой. */}
               <ToggleGroup
                 aria-label="Манера подачи"
                 value={[style]}
@@ -275,29 +310,12 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   <ToggleGroupItem
                     key={entry.key}
                     value={entry.key}
-                    // Выбранная карточка остаётся светлой и берёт границу:
-                    // залить её фоном нельзя — тем же фоном набран пример
-                    // внутри, и он бы исчез ровно у выбранной манеры.
-                    //
-                    // Выбор ловится по `aria-pressed`: `data-state=on` базовый
-                    // компонент не пишет вовсе, и правило по нему не сработало
-                    // бы никогда — карточка выглядела бы невыбранной, а форма
-                    // при этом сохраняла бы выбранное.
-                    className={cn(
-                      "h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal",
-                      "aria-pressed:border-foreground/50 aria-pressed:shadow-sm",
-                      "aria-pressed:bg-card hover:aria-pressed:bg-card",
-                    )}
+                    className="h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal"
                   >
                     <span className="font-medium">{entry.label}</span>
                     <span className="text-xs leading-snug font-normal text-muted-foreground">
                       {entry.hint}
                     </span>
-                    {entry.example ? (
-                      <span className="mt-1 w-full rounded-md bg-foreground/5 px-2 py-1.5 text-[11px] leading-snug font-normal text-muted-foreground">
-                        Например: «{entry.example}»
-                      </span>
-                    ) : null}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
@@ -314,11 +332,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 placeholder="Чем занимаешься, что за продукт, где живёшь и какие новости тебе особенно интересны"
               />
               {/* Про отбор здесь не обещаем: эта строка уходит только в промпт
-                  описаний. Зато от неё зависит связь с читателем — самая
-                  слабая ось в измерении качества. */}
+                  описаний. Зато от неё зависит связь с читателем, самая слабая
+                  ось в измерении качества. */}
               <FieldDescription>
-                Отсюда берётся связь с тобой: чем конкретнее, тем точнее описания
-                объясняют, что тебе с этой новостью делать.
+                Чем подробнее напишешь, тем точнее объясним, чем новость важна тебе.
               </FieldDescription>
             </Field>
 
@@ -341,15 +358,18 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
               </Button>
             ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button type="button" disabled={applying} className="self-start" onClick={apply}>
-                  {applying ? <Spinner data-icon="inline-start" /> : null}
-                  Сохранить
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  Изменённый голос применим к сегодняшнему выпуску, следующие придут таким же
-                </span>
-              </div>
+              <Button
+                type="button"
+                disabled={applying || !dirty}
+                // Заметно крупнее остальных кнопок экрана: это единственное
+                // действие, ради которого сюда пришли, а в ряду одинаковых
+                // оно читалось как ещё одна настройка.
+                className="h-11 self-start px-6 text-base"
+                onClick={apply}
+              >
+                {applying ? <Spinner data-icon="inline-start" /> : null}
+                Сохранить
+              </Button>
             )}
           </FieldGroup>
         </form>

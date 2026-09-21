@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { colorAt, handleLeft, moveBoundary } from "@/lib/topic-budget";
+import { cn } from "@/lib/utils";
 
 /**
  * Дайджест одной полосой: каждая тема — свой кусок, граница между соседями
@@ -83,7 +84,14 @@ export function TopicBudgetBar({
             // подписью под ним, а тянется граница. Кнопка без действия
             // ловила бы и фокус, и палец, ничего при этом не делая.
             aria-hidden
-            className="h-full first:rounded-l-full last:rounded-r-full"
+            // Скругление по номеру, а не через `last:`: ручки лежат в том же
+            // флексе и стоят в разметке после кусков, поэтому последним
+            // ребёнком оказывалась ручка, а правый торец полосы — прямым.
+            className={cn(
+              "h-full",
+              index === 0 && "rounded-l-full",
+              index === counts.length - 1 && "rounded-r-full",
+            )}
             style={{ flexGrow: count, flexBasis: 0, backgroundColor: colorAt(index) }}
           />
         ))}
