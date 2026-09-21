@@ -546,10 +546,50 @@ const privateStart = (text: string, extra: Record<string, unknown> = {}) => ({
   },
 });
 
+/**
+ * Язык интерфейса из разбора апдейта.
+ *
+ * Сужение, а не каст: `as { locale: string }` обходит union, и ветка,
+ * переставшая нести язык, продолжила бы компилироваться — проверка
+ * превратилась бы в обращение к полю несуществующего объекта.
+ */
+const localeOfUpdate = (update: unknown) => {
+  const parsed = parseUpdate(update);
+  assert.ok(parsed.kind === "start" || parsed.kind === "link", "апдейт разобран в ветку с языком");
+  return parsed.locale;
+};
+
 assert.deepEqual(
   parseUpdate(privateStart("/start")),
-  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor" },
+  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor", locale: "en" },
   "обычный /start заводит читателя",
+);
+
+// --- язык интерфейса приходит из Telegram -------------------------------------
+// Без этого каждый новый читатель получал интерфейс по умолчанию независимо
+// от того, на каком языке он написал боту: ошибки нет, экран открывается,
+// просто не на его языке.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "ru" })),
+  "ru",
+  "язык из апдейта становится языком интерфейса",
+);
+// Telegram шлёт и «ru-RU», и «en-US»: страна нам ни о чём не говорит.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "ru-RU" })),
+  "ru",
+  "страна в коде языка отбрасывается",
+);
+// Словарей два, и незнакомый язык — это язык по умолчанию, а не пустой экран.
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: "pt-BR" })),
+  "en",
+  "язык без словаря читается как язык по умолчанию",
+);
+assert.equal(
+  localeOfUpdate(privateStart("/start", { language_code: 42 })),
+  "en",
+  "не строка — тоже язык по умолчанию",
 );
 assert.equal(parseUpdate(privateStart("/start@lenta_bot")).kind, "start", "/start@ИмяБота — тот же /start");
 assert.equal(parseUpdate(privateStart("/start login")).kind, "start", "полезная нагрузка не мешает");
@@ -578,7 +618,7 @@ assert.deepEqual(
   parseUpdate({
     message: { text: "/start", chat: { id: bigId, type: "private" }, from: { id: bigId } },
   }),
-  { kind: "start", telegramId: bigId, chatId: bigId, username: null },
+  { kind: "start", telegramId: bigId, chatId: bigId, username: null, locale: "en" },
   "большой telegram_id должен пережить разбор",
 );
 
@@ -2058,6 +2098,13 @@ assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного 
 // Прислать ссылку боту — тот же жест, что вставить её в форму. Отвечать
 // на него подсказкой «напиши /start» значит делать вид, что не понял.
 assert.equal(parseUpdate(privateStart("https://t.me/durov")).kind, "link", "ссылка заводит источник");
+// Язык нужен и этой ветке: у читателя, чьё первое сообщение — ссылка,
+// строка заводится здесь, а следующий /start язык уже не переписывает.
+assert.equal(
+  localeOfUpdate(privateStart("https://t.me/durov", { language_code: "ru" })),
+  "ru",
+  "ссылка тоже приносит язык интерфейса",
+);
 assert.equal(parseUpdate(privateStart("@eugene_rid")).kind, "link", "@имя — тоже ссылка");
 assert.equal(parseUpdate(privateStart("simonwillison.net")).kind, "link", "голый домен — тоже");
 assert.equal(
@@ -2419,7 +2466,7 @@ const subscribedPress = {
 };
 assert.deepEqual(
   parseUpdate(subscribedPress),
-  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", callbackId: "cb1" },
+  { kind: "subscribed", telegramId: 4242, chatId: 777, username: "igor", locale: "en", callbackId: "cb1" },
   "нажатие «Я подписался» разбирается, а не проваливается в ignore",
 );
 
