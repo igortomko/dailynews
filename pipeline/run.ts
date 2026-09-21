@@ -1,8 +1,8 @@
 import { sql } from "../src/lib/db";
 import { DEFAULT_WEIGHTS, type Reader, type Source } from "../src/lib/types";
 import {
-  allReaders, getReaderTopics, lastActivityAt, pauseReader, pendingKindleAsks,
-  readerSources, recordCall, spentToday, topicsInUse, wakeReader,
+  allReaders, digestProgress, getReaderTopics, lastActivityAt, pauseReader,
+  pendingKindleAsks, perCardOf, readerSources, recordCall, spentToday, topicsInUse, wakeReader,
 } from "../src/lib/readers";
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -19,7 +19,10 @@ import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoI
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { digestCap, issuesToday, sourcesForPlan } from "../src/lib/plans";
+import { issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
+import {
+  cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf,
+} from "../src/lib/reading-time";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
 
@@ -239,31 +242,47 @@ async function runForReader(
     return 0;
   }
 
-  // Потолок тарифа поверх ползунка: digest_size мог остаться от прежнего
+  // Потолок тарифа поверх заказа: digest_minutes мог остаться от прежнего
   // тарифа, а платит за письмо описаний владелец ключа. Тот же потолок
   // стоит на догрузке из интерфейса — иначе он обходился бы кнопкой.
-  const digestSize = digestCap(reader.digest_size, plan);
+  const voice = effectiveVoice(reader);
+  const perCard = await perCardOf(reader);
+  const target = targetMinutes(reader.digest_minutes, plan, perCard);
 
   // Сколько уже лежит в сегодняшнем выпуске. Состав дописывается, а не
   // заменяется: прочитанное утром не должно исчезать из ленты. Но без этого
-  // вычитания повторный прогон дописывал бы ещё digestSize материалов поверх,
-  // и выпуск рос бы с каждым запуском — сорок, восемьдесят, сто двадцать.
-  // Выглядело бы это как «сегодня много новостей».
-  const [today] = await sql<{ taken: number }[]>`
-    select count(*)::int as taken
-      from dailynews.digests d
-      join dailynews.digest_items di on di.digest_id = d.id
-     where d.reader_id = ${reader.id} and d.day = ${day}
-  `;
-  const missing = digestSize - today.taken;
+  // вычитания повторный прогон дописывал бы ещё целый заказ поверх, и выпуск
+  // рос бы с каждым запуском — сорок, восемьдесят, сто двадцать. Выглядело бы
+  // это как «сегодня много новостей».
+  //
+  // Набранное вычитается настоящим текстом, а не оценкой: описания уже
+  // написаны, и мерить их приблизительно незачем.
+  const today = await digestProgress(reader.id, day);
+  const missing = itemsForMinutes(
+    target - minutesOf(today.chars, voice),
+    perCard,
+    // Технический потолок тарифа: оценка «сколько карточек в минуту»
+    // промахивается, и без него промах оплачивался бы карточками.
+    plan.maxItems - today.items,
+  );
   if (missing <= 0) {
-    log(`  ${name}: выпуск за ${day} уже полон (${today.taken} из ${digestSize}) — пропуск`);
+    // «Набран» не значит «полон»: мест могло не остаться по потолку штук,
+    // и тогда выпуск короче заказа. Читатель видит это строкой в ленте,
+    // а лог говорил бы, что всё в порядке.
+    const filled = minutesOf(today.chars, voice);
+    log(
+      `  ${name}: выпуск за ${day} ${isShort(filled, target) ? "добирать нечем" : "набран"} ` +
+      `(${formatMinutes(filled)} из ${Math.round(target)}, ${today.items} материалов) — пропуск`,
+    );
     return 0;
   }
 
   const mySources = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
   const survivors = await selectSurvivors(
-    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources,
+    // Порог слабого материала отсчитывается от лучшего за сегодня, а не от
+    // лучшего среди оставшихся: второй прогон за сутки иначе пустил бы в
+    // выпуск ровно тех, кого отверг первый.
+    sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, today.best,
   );
   if (survivors.length === 0) {
     log(`  ${name}: свежих материалов нет — пропуск`);
@@ -282,7 +301,7 @@ async function runForReader(
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const digest = await writeDigest(survivors, reader.reader_context, effectiveVoice(reader));
+  const digest = await writeDigest(survivors, reader.reader_context, voice);
   const digestCost = llmCost(digest.usage);
   await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
@@ -320,6 +339,22 @@ async function runForReader(
     ? quality.scored.reduce((sum, row) => sum + row.total, 0) / quality.scored.length
     : null;
 
+  const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
+
+  /**
+   * Сколько времени займёт выпуск. Считается по написанному тексту, а не
+   * по заказу: карточек столько, сколько уложилось, и разница между
+   * заказанным и вышедшим — это и есть то, о чём читателю говорят вслух.
+   */
+  const minutes = minutesOf(
+    today.chars +
+      survivors.reduce((chars, survivor) => {
+        const text = writtenById.get(String(survivor.id));
+        return chars + cardChars(text?.title_ru ?? survivor.title, text?.summary ?? "");
+      }, 0),
+    voice,
+  );
+
   // Ползунок сложности меняет промпт — а меняется ли текст, видно только
   // по ряду этих двух чисел рядом с положением ползунка.
   const measured = digest.items.map((item) => readability(item.summary));
@@ -340,6 +375,10 @@ async function runForReader(
         plan: plan.id,
         words_per_sentence: Number(perSentence.toFixed(1)),
         long_word_share: Number(longShare.toFixed(3)),
+        // Заказ и то, что вышло, — рядом: обещание, которого никто не мерит,
+        // расходится с выпуском молча, и узнаётся это от читателя.
+        reading_target: Number(target.toFixed(1)),
+        reading_minutes: Number(minutes.toFixed(1)),
         // Что на самом деле ушло в провайдера: модель выводит writeDigest,
         // своя копия резолюции разошлась бы с ней на пустой строке.
         digest_model: digest.model,
@@ -362,7 +401,6 @@ async function runForReader(
     select count(*)::int as taken from dailynews.digest_items where digest_id = ${row.id}
   `;
 
-  const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
   const qualityById = new Map((quality?.scored ?? []).map((q) => [String(q.item_id), q]));
 
   for (const [index, survivor] of survivors.entries()) {
@@ -385,7 +423,8 @@ async function runForReader(
   }
 
   log(
-    `  ${name}: ${survivors.length} материалов, ` +
+    `  ${name}: ${formatMinutes(minutes)} из ${Math.round(target)} заказанных, ` +
+    `${survivors.length} материалов, ` +
     (meanQuality === null
       ? "качество не меряли (промпт один на всех), "
       : `качество ${meanQuality.toFixed(0)} из 85 по ${quality?.scored.length} описаниям, `) +
@@ -400,7 +439,16 @@ async function runForReader(
     `(${digest.usage.reasoning} рассуждение)`,
   );
 
-  await deliver(reader, day, digest.intro, survivors, writtenById, name);
+  // Недобор называется вслух и здесь: молча пришедший короткий выпуск
+  // неотличим от поломки отбора. Причина не называется — их три (порог
+  // слабого материала, потолок штук тарифа, бедный поток), и угаданная
+  // отправит чинить не то: строка, объясняющая недобор, не должна сама
+  // быть догадкой.
+  if (isShort(minutes, target)) {
+    log(`    недобор: подходящего меньше, чем заказано`);
+  }
+
+  await deliver(reader, day, digest.intro, survivors, writtenById, name, { minutes, target });
   return digestCost + qualityCost;
 }
 
@@ -412,6 +460,7 @@ async function deliver(
   survivors: Survivor[],
   writtenById: Map<string, { title_ru: string; summary: string }>,
   name: string,
+  reading: { minutes: number; target: number },
 ): Promise<void> {
   const titleOf = (s: Survivor) => writtenById.get(String(s.id))?.title_ru ?? s.title;
 
@@ -431,6 +480,7 @@ async function deliver(
         Number(reader.telegram_id), day, intro,
         survivors.map((s) => ({ title: titleOf(s), topic: s.topic_label })),
         appUrl,
+        reading,
       );
       await sql`
         update dailynews.digests set sent_at = now()

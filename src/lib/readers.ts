@@ -1,6 +1,8 @@
 import { sql } from "./db";
 import type { Reader, ReaderChannel, ReaderTopic, Source, Topic, VoiceCardRow } from "./types";
 import { kindleSenderName } from "./kindle-setup";
+import { effectiveVoice } from "./lemon";
+import { cardMinutes } from "./reading-time";
 
 /**
  * Всё, что знает о читателях. Живёт отдельно от queries.ts, потому что нужно
@@ -24,7 +26,7 @@ import { kindleSenderName } from "./kindle-setup";
  */
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
-  reader_context, digest_size, weights, language, complexity, style,
+  reader_context, digest_minutes, weights, language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
@@ -148,6 +150,98 @@ export async function ensureReader(
     return (await getReader(reader.id)) ?? reader;
   }
   return reader;
+}
+
+/**
+ * Мерка этого читателя в минутах: сколько времени занимает его карточка.
+ *
+ * Ею и прогон, и догрузка, и форма интересов переводят заказанные минуты
+ * в число мест. Одной функцией, потому что зовётся она из трёх мест,
+ * а собрана из двух личных вещей — его описаний и его голоса: три копии
+ * этой сборки разъехались бы молча, и заказ считался бы по-разному
+ * в форме и в прогоне.
+ */
+export async function perCardOf(reader: Reader): Promise<number> {
+  return cardMinutes(await cardCharsOf(reader.id), effectiveVoice(reader));
+}
+
+/**
+ * Что уже лежит в выпуске за день: сколько карточек, сколько в них знаков
+ * и какой скор у лучшей.
+ *
+ * Одним запросом и одной функцией на обоих, кто дописывает выпуск, — ночной
+ * прогон и кнопка догрузки. Считать «сколько осталось» двумя копиями значит
+ * разойтись на первой же правке: одна копия дописывала бы поверх потолка,
+ * и увидеть это можно было бы только в счёте.
+ *
+ * Знаки — чтобы вычесть из заказа уже прочитанное настоящим текстом,
+ * а не оценкой. Лучший скор — чтобы порог «слабого» на догрузке отсчитывался
+ * от того же места, что и ночью: пул кандидатов к вечеру беднеет, и порог,
+ * привязанный к нему, пустил бы в выпуск ровно тех, кого ночью отверг.
+ */
+export type DigestProgress = {
+  day: string | null;
+  items: number;
+  chars: number;
+  best: number;
+  /**
+   * Сколько минут заказывали на этот день, или null у выпусков, которые
+   * заказа не сохранили. Заказ лежит при выпуске, а не берётся из настроек:
+   * настройки — это «сколько хочу сейчас», и мерить ими выпуск недельной
+   * давности значит обещать задним числом. Неизвестен — молчим о недоборе.
+   */
+  target: number | null;
+};
+
+export async function digestProgress(
+  readerId: number,
+  day: string | null,
+): Promise<DigestProgress> {
+  const [row] = await sql<DigestProgress[]>`
+    select d.day::text as day,
+           (d.stats->>'reading_target')::float as target,
+           count(di.*)::int as items,
+           coalesce(sum(
+             char_length(coalesce(di.title, '')) + char_length(coalesce(di.summary, ''))
+           ), 0)::int as chars,
+           coalesce(max(di.total), 0)::float as best
+      from dailynews.digests d
+ left join dailynews.digest_items di on di.digest_id = d.id
+     -- Каст обязателен: у нетипизированного параметра Postgres выбирает
+     -- тип по колонке и падает на null там, где null означает «любой день».
+     where d.reader_id = ${readerId}
+       and (${day}::text is null or d.day = ${day}::date)
+     group by d.day, d.stats
+     order by d.day desc
+     limit 1
+  `;
+  return row ?? { day: null, items: 0, chars: 0, best: 0, target: null };
+}
+
+/**
+ * Мерка этого читателя: сколько знаков в его карточке.
+ *
+ * Нужна, чтобы перевести заказанные минуты в число мест до того, как
+ * карточки написаны. Своя, а не общая: у англоязычного выпуска длина другая,
+ * у «как специалисту» — тоже, и общее число промахивалось бы у всех, кроме
+ * среднего читателя, которого не существует. Тридцать дней — чтобы одна
+ * ночь с короткими описаниями не сдвинула мерку.
+ *
+ * Ноль означает «мерить нечего»: у нового читателя выпусков ещё нет,
+ * и за него отвечает CARD_CHARS.
+ */
+export async function cardCharsOf(readerId: number): Promise<number> {
+  const [row] = await sql<{ chars: number }[]>`
+    select coalesce(avg(
+             char_length(coalesce(di.title, '')) + char_length(coalesce(di.summary, ''))
+           ), 0)::float as chars
+      from dailynews.digest_items di
+      join dailynews.digests d on d.id = di.digest_id
+     where d.reader_id = ${readerId}
+       and d.day > current_date - 30
+       and coalesce(di.summary, '') <> ''
+  `;
+  return row?.chars ?? 0;
 }
 
 /** Потрачено на модель за сегодня. Потолок считается по читателю: вход
