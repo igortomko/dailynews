@@ -1,6 +1,14 @@
 import type { Axes } from "../src/lib/types";
 import { checkLexicon, repeatsHeadline } from "./lexicon";
 import { complexityAt, styleOf, DEFAULT_VOICE, type Voice } from "../src/lib/voice";
+import { stripHtml } from "./fetch";
+
+/**
+ * Сколько знаков статьи уходит в промпт на материал. Вход тарифицируется:
+ * на двадцати материалах это разница между 21 и 45 тысячами токенов,
+ * то есть центы за прогон, — а без текста описание писать не из чего.
+ */
+const ARTICLE_CHARS = 3500;
 
 export { DEFAULT_VOICE, type Voice };
 
@@ -8,11 +16,32 @@ export type Survivor = {
   id: number;
   title: string;
   excerpt: string;
+  /** Текст статьи целиком, если его забрали по ссылке (pipeline/enrich.ts). */
+  body?: string | null;
   url: string;
   source_label: string;
   topic_label: string;
   total: number;
   axes: Axes;
+};
+
+/**
+ * Что уходит в промпт как текст материала: статья целиком, если её забрали
+ * по ссылке, и только иначе — то, что дал фид.
+ *
+ * Раньше здесь всегда стоял excerpt, и это был потолок качества описаний,
+ * которого не видно ни в одной проверке: у 32 материалов из 40 фид отдавал
+ * меньше двухсот знаков, а у 19 — ничего. Конспект писался по заголовку
+ * и выходил гладким пересказом самого себя. Описание длиннее собственного
+ * источника было у 37 материалов из 40.
+ *
+ * Потолок больше прежнего, но не «вся статья»: вход тарифицируется,
+ * а первых тысяч знаков хватает, чтобы сказать, что в материале.
+ * Блок стоит последним в промпте и общий кэш начала запроса не рвёт.
+ */
+export const textFor = (s: Survivor) => {
+  const full = s.body ? stripHtml(s.body) : "";
+  return full.length > s.excerpt.length ? full.slice(0, ARTICLE_CHARS) : s.excerpt.slice(0, 900);
 };
 
 export type Written = {
@@ -157,7 +186,7 @@ export async function writeDigest(
       `--- id: ${s.id}`,
       `ЗАГОЛОВОК: ${s.title}`,
       `ИСТОЧНИК: ${s.source_label} · тема: ${s.topic_label}`,
-      `ТЕКСТ: ${s.excerpt.slice(0, 900) || "(нет)"}`,
+      `ТЕКСТ: ${textFor(s) || "(нет)"}`,
     ].join("\n"))
     .join("\n\n");
 

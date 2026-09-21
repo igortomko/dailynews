@@ -19,6 +19,8 @@ export type Candidate = {
   id: number;
   title: string;
   excerpt: string;
+  /** Текст статьи целиком, если его удалось забрать по ссылке. */
+  body: string | null;
   url: string;
   source_label: string;
   topic_id: number | null;
@@ -40,7 +42,7 @@ export async function candidates(
   sourceIds: number[],
 ): Promise<Candidate[]> {
   const rows = await sql<Candidate[]>`
-    select i.id, i.title, i.excerpt, i.url, s.label as source_label,
+    select i.id, i.title, i.excerpt, i.body, i.url, s.label as source_label,
            sc.topic_id::int as topic_id,
            coalesce(t.label, 'Прочее') as topic_label,
            sc.axes
@@ -125,6 +127,7 @@ export function pickSurvivors(
       id: row.id,
       title: row.title,
       excerpt: row.excerpt,
+      body: row.body,
       url: row.url,
       source_label: row.source_label,
       topic_label: row.topic_label,

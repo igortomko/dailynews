@@ -9,6 +9,7 @@
  * источник начнёт падать регулярно, а не заранее.
  */
 import { parseHTML } from "linkedom";
+import { fetchText } from "./fetch";
 
 /**
  * Динамический импорт, а не обычный: defuddle отдаёт подпуть ./node только
@@ -51,14 +52,23 @@ const MIN_WORDS = 120;
 
 const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
+/**
+ * Ходит тем же путём, что и сбор: имя разрешается в адрес до запроса,
+ * внутренние диапазоны отвергаются, каждое перенаправление проверяется
+ * заново, у ответа есть потолок по байтам.
+ *
+ * Свой fetch с `redirect: "follow"` здесь был безопасен ровно пока сюда
+ * приходила одна ссылка, которую читатель сам выбрал отправить на читалку.
+ * Ночной прогон ходит по всем ссылкам всех чужих фидов подряд — а это
+ * тот же самый вход, от которого закрывались в форме добавления источника:
+ * публичный хост умеет увести на 127.0.0.1, и «HTTP 401» на внутреннем
+ * адресе уже ответ.
+ */
 async function get(url: string, headers: Record<string, string> = {}): Promise<string> {
-  const res = await fetch(url, {
-    headers: { "user-agent": UA, accept: "text/html,application/xhtml+xml", ...headers },
-    redirect: "follow",
-    signal: AbortSignal.timeout(30_000),
+  return fetchText(url, 30_000, {
+    accept: "text/html,application/xhtml+xml",
+    headers: { "user-agent": UA, ...headers },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
 }
 
 /** Разбор готового HTML: одинаков для текста из фида и для скачанной страницы. */

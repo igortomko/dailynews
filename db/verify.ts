@@ -22,6 +22,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
+import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
+import { WINDOW_DAYS } from "../pipeline/select";
 
 
 
@@ -1175,6 +1177,39 @@ async function main() {
     `;
     assert.equal(left.n, 0, "снятая оценка не мешает переоценить ролик по конспекту");
     console.log("  расшифровка: неудачная попытка повторяется, удачная — нет");
+
+    // Фид часто не отдаёт текста вовсе: у Hacker News описания нет
+    // по устройству API, рассылка кладёт в него служебную строку
+    // в двадцать знаков. Дальше по потоку это выглядело как работающий
+    // продукт — оценка по заголовку, «конспект» по заголовку, ни ошибки,
+    // ни предупреждения. Запрос догрузки читается здесь целиком: колонка,
+    // заведённая миграцией, но не выбранная кодом, ничем себя не выдаёт.
+    const mk = async (url: string, canon: string, excerpt: string) => (await sql<{ id: number }[]>`
+      insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+      select id, ${url}, ${canon}, 'Материал', 'материал', ${excerpt}
+        from dailynews.sources limit 1
+      returning id
+    `)[0];
+
+    const bare = await mk("https://example.com/bare", "example.com/bare", "");
+    const short = await mk("https://example.com/short", "example.com/short", "Community Wisdom 298");
+    const full = await mk("https://example.com/full", "example.com/full", "ф".repeat(SHORT_EXCERPT + 1));
+    const clip = await mk(
+      "https://www.youtube.com/watch?v=zzzzzzzzzzz", "youtube.com/watch?v=zzzzzzzzzzz", "",
+    );
+
+    const needText = async () => (await pendingArticles(sql, WINDOW_DAYS)).map((row) => row.id);
+    const queue = await needText();
+    assert.equal(queue.includes(bare.id), true, "материал без текста ждёт догрузки");
+    assert.equal(queue.includes(short.id), true, "служебная строка из рассылки — тоже отсутствие текста");
+    assert.equal(queue.includes(full.id), false, "за статьёй, которую фид отдал целиком, не ходят");
+    // Ролику текст достаётся из субтитров, а не со страницы: две догрузки
+    // на один материал — это лишний запрос и перезаписанный конспект.
+    assert.equal(queue.includes(clip.id), false, "ролики забирает расшифровка, а не догрузка статей");
+
+    await sql`update dailynews.items set enriched_at = now() where id = ${bare.id}`;
+    assert.equal((await needText()).includes(bare.id), false, "с отметкой за ним больше не ходят");
+    console.log("  догрузка статьи: пустой и служебный текст ждут, полный и ролик — нет");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
