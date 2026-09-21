@@ -22,6 +22,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
+import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
+import { WINDOW_DAYS } from "../pipeline/select";
 
 
 
@@ -100,6 +102,39 @@ async function main() {
   const { DEFAULT_WEIGHTS } = await import("../src/lib/types");
 
   try {
+    /**
+     * Намеренно отбитый запрос — и проверка, что поток после него цел.
+     *
+     * Сама поломка снята у истока (`dropStrayReady` в db/free-port.ts):
+     * отбивая запрос, PGlite отвечал на `Parse`/`Execute` парой
+     * `ErrorResponse` + `ReadyForQuery`, а второй `ReadyForQuery` присылал
+     * на `Sync`. Лишний `Z` закрывал в postgres.js следующий запрос до того,
+     * как пришли его строки, и дальше ответы ехали на один до конца прогона.
+     *
+     * Видно это было как мерцание: проверка падала в 16 прогонах из 60,
+     * каждый раз в другом месте и каждый раз правдоподобно — «у владельца
+     * 0 тем», «площадки читателя — только его», список несуществующих
+     * расхождений схемы. Ни одно утверждение не было неверным, неверным был
+     * ответ, который до него дошёл.
+     *
+     * Контрольный запрос остаётся сторожем: он стоит три микросекунды,
+     * а без него возврат этой поломки — хоть из новой версии PGlite, хоть
+     * из снятой правки — снова читался бы как «у владельца 0 тем» через
+     * двести строк. Простой протокол (`sql.unsafe`, одно сообщение `Q`)
+     * тоже остаётся: `ReadyForQuery` там полагается по спецификации,
+     * то есть отказ идёт путём, который не зависит от правки вовсе.
+     */
+    const rejects = async (statement: string, pattern: RegExp, why: string) => {
+      await assert.rejects(sql.unsafe(statement), pattern, why);
+      const [alive] = await sql<{ v: string }[]>`select 'ok'::text as v`;
+      assert.equal(
+        alive?.v,
+        "ok",
+        `после отбитого запроса («${why}») обмен с базой разъехался: ` +
+          "дальше проверять нечего, все ответы будут от соседних запросов",
+      );
+    };
+
     // --- каталог из 0003 доехал ---------------------------------------------
     const topics = await readers.catalogTopics();
     const sources = await queries.getSources();
@@ -143,8 +178,8 @@ async function main() {
     // в readers. Перенос обязан довезти значение, а не выдать умолчание —
     // и обязан пережить базу, где колонки profile.plan нет вовсе.
     assert.equal(owner.plan, "pro", "тариф владельца должен переехать как есть");
-    await assert.rejects(
-      sql`update dailynews.readers set plan = 'platinum' where id = ${owner.id}`,
+    await rejects(
+      `update dailynews.readers set plan = 'platinum' where id = ${owner.id}`,
       /plan/,
       "ограничение тарифа должно переехать вместе с колонкой",
     );
@@ -734,8 +769,8 @@ async function main() {
       insert into dailynews.sources (kind, label, url)
       values ('telegram', 'канал', 'durov')
     `;
-    await assert.rejects(
-      sql`insert into dailynews.sources (kind, label, url) values ('carrier-pigeon', 'x', 'y')`,
+    await rejects(
+      `insert into dailynews.sources (kind, label, url) values ('carrier-pigeon', 'x', 'y')`,
       /sources_kind_known/,
       "неизвестный вид источника должен отвергаться ограничением с новым именем",
     );
@@ -763,10 +798,11 @@ async function main() {
         readerId: owner.id, stage: stage as never, model: "проба", tokensIn: 1, costUsd: 0,
       });
     }
-    await assert.rejects(
-      readers.recordCall({
-        readerId: owner.id, stage: "выдуманный" as never, model: "проба", tokensIn: 1, costUsd: 0,
-      }),
+    // Не через recordCall: проверяется ограничение базы, а оно одно и то же,
+    // каким бы кодом в таблицу ни писали. Зато простым протоколом — см. rejects.
+    await rejects(
+      `insert into dailynews.model_calls (reader_id, stage, model, tokens_in, cost_usd)
+       values (${owner.id}, 'выдуманный', 'проба', 1, 0)`,
       /model_calls_stage_check/,
       "незнакомый этап отвергается ограничением, а не пишется молча",
     );
@@ -938,8 +974,8 @@ async function main() {
     // и выбор «100» вернёт ошибку там, где читатель ничего не нарушал.
     const { MAX_DIGEST } = await import("../src/lib/topic-budget");
     await sql`update dailynews.readers set digest_size = ${MAX_DIGEST} where id = ${owner.id}`;
-    await assert.rejects(
-      sql`update dailynews.readers set digest_size = ${MAX_DIGEST + 1} where id = ${owner.id}`,
+    await rejects(
+      `update dailynews.readers set digest_size = ${MAX_DIGEST + 1} where id = ${owner.id}`,
       /digest_size/,
       "за потолком список предлагать не должен, а база — принимать",
     );
@@ -947,8 +983,8 @@ async function main() {
     console.log(`  размер дайджеста: ${MAX_DIGEST} проходит, ${MAX_DIGEST + 1} отвергается`);
 
     // Ноль в цели уронил бы отбор делением на ноль, а не спрятал тему.
-    await assert.rejects(
-      sql`update dailynews.reader_topics set weight = 0 where reader_id = ${owner.id}`,
+    await rejects(
+      `update dailynews.reader_topics set weight = 0 where reader_id = ${owner.id}`,
       /weight/,
       "нулевая цель должна отвергаться базой",
     );
@@ -1141,6 +1177,39 @@ async function main() {
     `;
     assert.equal(left.n, 0, "снятая оценка не мешает переоценить ролик по конспекту");
     console.log("  расшифровка: неудачная попытка повторяется, удачная — нет");
+
+    // Фид часто не отдаёт текста вовсе: у Hacker News описания нет
+    // по устройству API, рассылка кладёт в него служебную строку
+    // в двадцать знаков. Дальше по потоку это выглядело как работающий
+    // продукт — оценка по заголовку, «конспект» по заголовку, ни ошибки,
+    // ни предупреждения. Запрос догрузки читается здесь целиком: колонка,
+    // заведённая миграцией, но не выбранная кодом, ничем себя не выдаёт.
+    const mk = async (url: string, canon: string, excerpt: string) => (await sql<{ id: number }[]>`
+      insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt)
+      select id, ${url}, ${canon}, 'Материал', 'материал', ${excerpt}
+        from dailynews.sources limit 1
+      returning id
+    `)[0];
+
+    const bare = await mk("https://example.com/bare", "example.com/bare", "");
+    const short = await mk("https://example.com/short", "example.com/short", "Community Wisdom 298");
+    const full = await mk("https://example.com/full", "example.com/full", "ф".repeat(SHORT_EXCERPT + 1));
+    const clip = await mk(
+      "https://www.youtube.com/watch?v=zzzzzzzzzzz", "youtube.com/watch?v=zzzzzzzzzzz", "",
+    );
+
+    const needText = async () => (await pendingArticles(sql, WINDOW_DAYS)).map((row) => row.id);
+    const queue = await needText();
+    assert.equal(queue.includes(bare.id), true, "материал без текста ждёт догрузки");
+    assert.equal(queue.includes(short.id), true, "служебная строка из рассылки — тоже отсутствие текста");
+    assert.equal(queue.includes(full.id), false, "за статьёй, которую фид отдал целиком, не ходят");
+    // Ролику текст достаётся из субтитров, а не со страницы: две догрузки
+    // на один материал — это лишний запрос и перезаписанный конспект.
+    assert.equal(queue.includes(clip.id), false, "ролики забирает расшифровка, а не догрузка статей");
+
+    await sql`update dailynews.items set enriched_at = now() where id = ${bare.id}`;
+    assert.equal((await needText()).includes(bare.id), false, "с отметкой за ним больше не ходят");
+    console.log("  догрузка статьи: пустой и служебный текст ждут, полный и ролик — нет");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {

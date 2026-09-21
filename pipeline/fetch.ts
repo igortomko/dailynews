@@ -65,7 +65,7 @@ const MAX_REDIRECTS = 5;
  */
 export async function requestPublic(
   url: string,
-  options: { timeoutMs?: number; accept?: string } = {},
+  options: { timeoutMs?: number; accept?: string; headers?: Record<string, string> } = {},
 ): Promise<Response> {
   const deadline = Date.now() + (options.timeoutMs ?? 20_000);
   let current = new URL(url);
@@ -77,7 +77,7 @@ export async function requestPublic(
     await assertPublic(current);
 
     const res = await fetch(current, {
-      headers: { "user-agent": UA, accept: options.accept ?? "*/*" },
+      headers: { "user-agent": UA, accept: options.accept ?? "*/*", ...options.headers },
       signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       // Не "follow": перенаправление — это новый адрес, и его нужно
       // проверить тем же порядком, что и первый.
@@ -99,8 +99,12 @@ export async function requestPublic(
  * Текст по внешнему адресу: свой таймаут на всю цепочку и потолок на размер —
  * иначе один зависший или бесконечный фид держит весь прогон.
  */
-export async function fetchText(url: string, timeoutMs = 20_000): Promise<string> {
-  const res = await requestPublic(url, { timeoutMs });
+export async function fetchText(
+  url: string,
+  timeoutMs = 20_000,
+  options: { accept?: string; headers?: Record<string, string> } = {},
+): Promise<string> {
+  const res = await requestPublic(url, { timeoutMs, ...options });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const length = Number(res.headers.get("content-length") ?? 0);
@@ -131,7 +135,7 @@ async function getJson<T>(url: string, timeoutMs = 20_000): Promise<T> {
 }
 
 /** Запускает задачи пачками по `limit`, чтобы не раскладывать источник на лопатки. */
-async function pooled<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+export async function pooled<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
   await Promise.all(

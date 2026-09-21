@@ -7,6 +7,7 @@ import {
 import { fetchAllSources } from "./fetch";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { askDuplicates, markDuplicates } from "./dedup";
+import { enrichArticles } from "./enrich";
 import { composite, scoreAll, type Scorable } from "./score";
 import { writeDigest, type Survivor } from "./digest";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
@@ -128,7 +129,13 @@ export async function transcribeVideos(): Promise<{ done: number; cost: number }
       if (!transcript) {
         // Субтитров у ролика нет вовсе — это ответ, а не сбой: отмечаем,
         // иначе он опрашивался бы каждую ночь до конца окна свежести.
-        await sql`update dailynews.items set transcribed_at = now() where id = ${video.id}`;
+        // enriched_at заодно: текста со страницы у ролика не бывает,
+        // а без отметки догрузка статей выбирала бы его каждую ночь
+        // вместе с колонкой body, чтобы тут же отбросить.
+        await sql`
+          update dailynews.items set transcribed_at = now(), enriched_at = now()
+           where id = ${video.id}
+        `;
         noCaptions++;
         continue;
       }
@@ -136,7 +143,7 @@ export async function transcribeVideos(): Promise<{ done: number; cost: number }
       await sql`
         update dailynews.items
            set excerpt = ${writeup.summary}, body = ${articleHtml(writeup.article) || null},
-               transcribed_at = now()
+               transcribed_at = now(), enriched_at = now()
          where id = ${video.id}
       `;
       // Оценка снимается вместе с текстом, по которому её ставили: ролик,
@@ -532,6 +539,18 @@ async function main() {
   const videos = await transcribeVideos();
   if (videos.done > 0) {
     log(`   расшифровано роликов: ${videos.done} (${videos.cost.toFixed(3)} $)`);
+  }
+
+  // Фид часто не отдаёт текста вовсе, и без этого шага и оценка, и дайджест
+  // работали по одному заголовку — молча и на вид исправно.
+  const articles = await enrichArticles(sql, WINDOW_DAYS, log);
+  if (articles.done + articles.failed + articles.transient > 0) {
+    log(
+      `   догружено статей: ${articles.done}` +
+      (articles.failed > 0 ? `, не отдали текст: ${articles.failed}` : "") +
+      (articles.transient > 0 ? `, не дозвонились (повторим): ${articles.transient}` : "") +
+      (articles.pending > 0 ? `, ждут следующего прогона: ${articles.pending}` : ""),
+    );
   }
 
   log("2. Дедуп");

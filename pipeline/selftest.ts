@@ -37,14 +37,16 @@ import {
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
 import { numberCollisions } from "../db/schema-gap";
+import { dropStrayReady } from "../db/free-port";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { dupVerdict, sameStoryQuestion } from "./dedup";
 import { composite } from "./score";
-import { matchWritten, parseDigest } from "./digest";
+import { matchWritten, parseDigest, textFor, type Survivor } from "./digest";
+import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
-import { parseFeed } from "./fetch";
+import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
 import { BAR_GAP, MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
 import {
@@ -547,6 +549,7 @@ const candidate = (id: number, topicId: number | null, clickbait: number): Candi
   id,
   title: `материал ${id}`,
   excerpt: "",
+  body: null,
   url: `https://example.com/${id}`,
   source_label: "тест",
   topic_id: topicId,
@@ -2292,6 +2295,67 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.equal(titleOf("   "), "Без заголовка", "пустая мысль всё равно получает заголовок");
 }
 
+// --- лишний ReadyForQuery от PGlite -------------------------------------------
+// Отбивая запрос, PGlite отвечает на `Parse`/`Execute` парой `ErrorResponse`
+// + `ReadyForQuery`, а потом ещё раз `ReadyForQuery` — на `Sync`. Настоящий
+// Postgres шлёт его только на `Sync`. Лишний `Z` закрывал в postgres.js
+// следующий запрос до того, как пришли его строки, и дальше ответы ехали
+// на один: `npm run verify:db` падала в 16 прогонах из 60, каждый раз
+// в другом месте и каждый раз правдоподобно.
+{
+  const frame = (tag: string, body = Buffer.alloc(0)) => {
+    const out = Buffer.alloc(5 + body.length);
+    out.write(tag, 0, "latin1");
+    out.writeInt32BE(4 + body.length, 1);
+    body.copy(out, 5);
+    return out;
+  };
+  const request = (tag: string) => new Uint8Array(frame(tag));
+  const ERROR = frame("E", Buffer.from("Snope\0"));
+  const READY = frame("Z", Buffer.from("I"));
+
+  assert.deepEqual(
+    dropStrayReady(request("E"), Buffer.concat([ERROR, READY])),
+    ERROR,
+    "на Execute ReadyForQuery не приходит — лишний снимается",
+  );
+  assert.deepEqual(
+    dropStrayReady(request("P"), Buffer.concat([ERROR, READY])),
+    ERROR,
+    "на Parse — то же самое: ошибка бывает и там",
+  );
+  // Sync и простой Query — единственные, кому `Z` полагается. Сними его
+  // у них, и клиент не дождётся конца запроса вовсе.
+  assert.deepEqual(
+    dropStrayReady(request("S"), READY), READY,
+    "ответ на Sync не трогаем",
+  );
+  assert.deepEqual(
+    dropStrayReady(request("Q"), Buffer.concat([ERROR, READY])),
+    Buffer.concat([ERROR, READY]),
+    "простой Query закрывается своим ReadyForQuery",
+  );
+  const rows = Buffer.concat([frame("D", Buffer.from("x")), frame("C", Buffer.from("SELECT 1\0"))]);
+  assert.deepEqual(
+    dropStrayReady(request("E"), rows), rows,
+    "успешный ответ не меняется ни на байт",
+  );
+  // Стартовое сообщение идёт без тега: первый байт — старший байт длины.
+  // Его `Z` — это «соединение готово», и без него клиент не подключится.
+  const startup = new Uint8Array(Buffer.from([0, 0, 0, 8, 0, 3, 0, 0]));
+  assert.deepEqual(
+    dropStrayReady(startup, READY), READY,
+    "ответ на стартовое сообщение не трогаем",
+  );
+  // Кадры, которые не разобрались, проходят насквозь: испортить протокол
+  // хуже, чем не чинить.
+  const junk = Buffer.from([0x5a, 0x00, 0x00]);
+  assert.deepEqual(
+    dropStrayReady(request("E"), junk), junk,
+    "неразобранный ответ проходит как есть",
+  );
+}
+
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
 
 // --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
@@ -2319,3 +2383,110 @@ console.log(`Самопроверка пройдена: ${checks} утвержд
     "сам выбор при этом остаётся: гасится применение, а не колонка",
   );
 }
+
+// --- догрузка текста статьи ----------------------------------------------------
+// Материал приезжал в оценку и в дайджест тем, что отдал фид, а фид часто
+// не отдаёт ничего: у Hacker News описания нет по устройству API, рассылка
+// кладёт служебную строку в двадцать знаков. Описание писалось по заголовку
+// и выходило гладким пересказом самого себя — без единой ошибки.
+{
+  const survivor = (extra: object) =>
+    ({ id: 1, title: "t", excerpt: "", source_label: "s", topic_label: "тема",
+       url: "https://example.com", total: 0, axes: {} , ...extra }) as never as Survivor;
+
+  assert.equal(
+    textFor(survivor({ excerpt: "Community Wisdom 298", body: articleHtml("Полный текст статьи, которого фид не дал.") })),
+    "Полный текст статьи, которого фид не дал.",
+    "когда статью забрали по ссылке, в промпт уходит она, а не строка из фида",
+  );
+
+  // Обратный случай: фид отдал статью целиком, ходить было некуда.
+  // Без сравнения длин догрузка, вернувшая огрызок, заменила бы хороший
+  // текст на плохой — и это не было бы видно ни в одной проверке.
+  assert.equal(
+    textFor(survivor({ excerpt: "Фид отдал статью целиком, и она длиннее.", body: articleHtml("Коротко") })),
+    "Фид отдал статью целиком, и она длиннее.",
+    "короткий разбор не затирает длинный текст из фида",
+  );
+
+  assert.equal(
+    textFor(survivor({ excerpt: "из фида", body: null })),
+    "из фида",
+    "без догруженного текста остаётся то, что дал фид",
+  );
+
+  // Разметка не должна уезжать в промпт: модель платит за неё как за текст.
+  assert.equal(
+    excerptFrom("## Заголовок\n\nПервый абзац статьи."),
+    "Заголовок Первый абзац статьи.",
+    "в excerpt уходит текст, а не markdown с разметкой",
+  );
+
+  // Обрывок на середине слова уедет и в оценку Jev, и в промпт дайджеста
+  // как часть текста материала.
+  const long = "Первое предложение здесь. " + "Ещё одно предложение текста. ".repeat(40);
+  const cut = excerptFrom(long, 120);
+  assert.equal(cut.endsWith("."), true, "excerpt режется по границе предложения");
+  assert.equal(cut.length <= 120, true, "и не длиннее заданного потолка");
+
+  // Порог щедрый нарочно: 500 знаков анонса — это лид, а не статья,
+  // и написать по нему конспект так же нечем, как по заголовку.
+  assert.equal(SHORT_EXCERPT > 500, true, "лид из фида считается отсутствием текста");
+}
+
+// --- текст, который уже лежит в базе -------------------------------------------
+// Письмо рассылки приезжает со сбором целиком, но через разбор статьи
+// не проходит: оно свёрстано таблицами, defuddle не признаёт его статьёй
+// и оставляет меньше ста двадцати слов. У выпуска Lenny's в excerpt было
+// двадцать знаков служебной строки при пяти тысячах знаков письма рядом.
+{
+  const letter = "<table><tr><td>" + "Абзац письма с настоящим содержанием. ".repeat(30) + "</td></tr></table>";
+  const text = stripHtml(letter);
+  assert.equal(text.length >= SHORT_EXCERPT, true, "текст письма из базы проходит порог сам");
+  assert.equal(clipText(text, 100).endsWith("."), true, "и режется по границе предложения");
+  assert.equal(clipText("Коротко.", 100), "Коротко.", "короткий текст остаётся целым");
+}
+
+// --- отказ по существу против оборванной связи ---------------------------------
+// Отметка о попытке стоит дорого молча: поставленная на временную ошибку,
+// она лишает материал текста до конца его окна свежести — повторно за ним
+// уже не пойдут. Поэтому «сайт ответил» и «связь не состоялась» разделены.
+{
+  for (const definitive of [
+    "не смог забрать текст (direct: HTTP 403; reader: HTTP 403)",
+    "не смог забрать текст (direct: текста меньше 120 слов; reader: HTTP 403)",
+    "не смог забрать текст (feed: текста меньше 120 слов; direct: HTTP 401)",
+    "после разбора не осталось текста",
+    "адрес ведёт во внутреннюю сеть (127.0.0.1)",
+  ]) {
+    assert.equal(refusedForGood(definitive), true, `окончательный отказ: ${definitive.slice(0, 40)}`);
+  }
+
+  for (const temporary of [
+    "не смог забрать текст (direct: fetch failed)",
+    "не смог забрать текст (direct: ECONNRESET)",
+    "не смог забрать текст (direct: ENOTFOUND)",
+    "The operation was aborted due to timeout",
+    "не смог забрать текст (direct: CERT_HAS_EXPIRED)",
+  ]) {
+    assert.equal(refusedForGood(temporary), false, `временная помеха: ${temporary.slice(0, 40)}`);
+  }
+
+  // Уровни отвечают по-разному, и строка приходит одна на всех. Если хоть
+  // один отказ был не по существу, сходить стоит ещё раз: проверка на отказ
+  // обязана стоять после проверки на связь, иначе «HTTP 403» второго уровня
+  // закроет тему за оборвавшийся первый. Без этого случая тест проходит
+  // при любом порядке — обе ветки дают один ответ на чистых строках.
+  assert.equal(
+    refusedForGood("не смог забрать текст (direct: ECONNRESET; reader: HTTP 403)"),
+    false,
+    "оборванное соединение на одном уровне важнее отказа на другом",
+  );
+  assert.equal(
+    refusedForGood("не смог забрать текст (direct: fetch failed; reader: текста меньше 120 слов)"),
+    false,
+    "и не отменяется тем, что запасной уровень дошёл до разбора",
+  );
+}
+
+console.log(`Самопроверка пройдена: ${checks} утверждений`);

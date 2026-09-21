@@ -115,17 +115,15 @@ export async function schemaGaps(sql: Db, dir = "db/migrations"): Promise<Gap[]>
    * как «ни одна миграция не применена» — развёртывание встаёт с ложной
    * причиной, и искать её идут не туда.
    *
-   * Повтор, а не сразу отказ: PGlite за сокетом (db/verify.ts) время
-   * от времени отдаёт на этот запрос ноль строк вместо схемы — не ошибку,
-   * а пустой набор. На живом Postgres повтор ничего не меняет, а здесь
-   * превращает красную проверку через раз в проверку, которой можно верить.
-   * Пусто дважды — это уже ответ, и он называется вслух.
+   * Пустым этот запрос приходил на PGlite за сокетом (db/verify.ts),
+   * и причина была не в базе: лишний `ReadyForQuery` после отбитого
+   * запроса уводил ответы на один вперёд, и сюда приезжал чужой. Причина
+   * снята в db/free-port.ts; отказ остаётся, потому что читается он одинаково
+   * при любой причине, а повтор ту поломку только маскировал.
    */
-  const readTables = () => sql<{ table_name: string }[]>`
+  const liveTables = await sql<{ table_name: string }[]>`
     select table_name from information_schema.tables where table_schema = 'dailynews'
   `;
-  let liveTables = await readTables();
-  if (liveTables.length === 0) liveTables = await readTables();
   if (liveTables.length === 0) {
     throw new Error("живая схема dailynews прочиталась пустой — сверять не с чем");
   }
