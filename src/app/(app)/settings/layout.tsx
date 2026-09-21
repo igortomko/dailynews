@@ -80,8 +80,10 @@ export default async function SettingsLayout({ children }: { children: React.Rea
                 и не найти его там, где он только что был, — это заставить
                 вернуться за ним в ленту. */}
             {/* Язык интерфейса слева от темы: обе — настройки окружения,
-                а не содержимого, и живут одной парой. */}
-            <LocaleToggle className="size-10 sm:size-8" />
+                а не содержимого, и живут одной парой. В ленте этой пары нет:
+                язык выбирают один раз, а место в её шапке занято тем,
+                чем пользуются каждый день. */}
+            <LocaleToggle />
             <ThemeToggle className="size-10 sm:size-8" />
             <form action={logout} className="sm:hidden">
               <Button variant="ghost" size="sm" type="submit" className="h-10 px-3">

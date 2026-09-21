@@ -1,12 +1,11 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import { checkSecret, escapeHtml, SECRET_HEADER } from "@/lib/telegram";
-import { getChannels, getReader, recordCall, spentToday } from "@/lib/readers";
+import { getChannels, getReader, spentToday } from "@/lib/readers";
 import { classifyDrop } from "@/lib/drops";
 import { dropSourceFor, saveDrafts } from "@/lib/posts";
 import { asCard, cardFromVoice } from "../../../../pipeline/voice-card";
 import { writePost } from "../../../../pipeline/post";
 import { tabsOf } from "@/lib/networks";
-import { llmCost } from "../../../../pipeline/cost";
 import { sql } from "@/lib/db";
 
 /**
@@ -61,7 +60,7 @@ type Incoming = { chatId: number; telegramId: number; text: string; forwarded: b
 
 /** Из апдейта берётся только то, на что бот отвечает: текст от человека
  *  в личном чате. Остальное — 200 и тишина. */
-export function parsePost(update: unknown): Incoming | null {
+function parsePost(update: unknown): Incoming | null {
   const message = (update as { message?: Record<string, unknown> })?.message;
   if (!message) return null;
   const chat = message.chat as { id?: unknown; type?: unknown } | undefined;
@@ -156,12 +155,7 @@ async function reply(incoming: Incoming): Promise<void> {
   });
 
   try {
-    const written = await writePost(source, card, networks.map((network) => network.id));
-    await recordCall({
-      readerId, stage: "post", model: written.model,
-      tokensIn: written.usage.input, tokensOut: written.usage.output,
-      costUsd: llmCost(written.usage),
-    });
+    const written = await writePost(source, card, networks.map((network) => network.id), reader.id);
     await saveDrafts(readerId, source.id, written.drafts);
 
     for (const draft of written.drafts) {

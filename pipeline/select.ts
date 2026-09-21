@@ -1,7 +1,9 @@
 import type { Survivor } from "./digest";
 import { composite } from "./score";
 import { flattenDupChains } from "./dedup";
+import { stripHtml } from "./fetch";
 import type { Axes, Weights } from "../src/lib/types";
+import { mentionText, NO_RULES, type ReaderRules } from "../src/lib/rules";
 
 /** Тип соединения берём у самого модуля: подпись обязана совпадать с тем, что передаёт прогон. */
 type Db = typeof import("../src/lib/db")["sql"];
@@ -111,6 +113,7 @@ export async function candidates(
              join dailynews.digests d on d.id = di.digest_id
              join dailynews.items p on p.id = di.item_id
             where d.reader_id = ${readerId}
+              and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
               and coalesce(p.dup_of, p.id) = coalesce(i.dup_of, i.id)
          )
        -- Представитель: оригинал, если он свой, иначе самая ранняя своя
@@ -162,6 +165,20 @@ export async function candidates(
  *
  * Скор считается здесь, а не в базе: веса персональны, и второй экземпляр
  * той же формулы на SQL разъехался бы с composite() молча.
+ *
+ * Личные правила (`src/lib/rules.ts`) вступают здесь же и только здесь.
+ * Исключение снимает материал до всего остального — до порога, до очередей,
+ * до круга: исключённый лучший материал дня не задаёт порог остальным.
+ * Слежение — это порядок внутри очереди темы: упомянутое встаёт перед
+ * остальными, дальше снова скор. Круг по темам от этого не меняется —
+ * номер в очереди по-прежнему делится на цель темы, и «Дизайн» не заберёт
+ * места у «Энергетики» оттого, что в нём три упоминания Figma. Порог
+ * тоже: слабый материал с упоминанием не спасается — он всё ещё слабый.
+ * Скор не трогается вовсе: это порядок отбора, а не новый смысл числа,
+ * по которому потом считается калибровка.
+ *
+ * Исключение побеждает слежение: материал, где есть и то и другое,
+ * исключён.
  */
 export function pickSurvivors(
   rows: Candidate[],
@@ -174,9 +191,19 @@ export function pickSurvivors(
    * пустил бы в выпуск ровно тех, кого ночной отбор отверг.
    */
   bestToday = 0,
+  rules: ReaderRules = NO_RULES,
 ): Survivor[] {
-  const scored = rows
-    .map((row) => ({ row, total: composite(row.axes, weights) }))
+  // Текст собирается только при заданных правилах: без них снимать разметку
+  // с сотен статей каждую ночь незачем, и отбор остаётся ровно прежним.
+  const judged = rows.flatMap((row) => {
+    if (rules.follow.empty && rules.exclude.empty) return [{ row, priority: false }];
+    const text = mentionText(row.title, row.excerpt, row.body ? stripHtml(row.body) : null);
+    if (rules.exclude.test(text)) return [];
+    return [{ row, priority: rules.follow.test(text) }];
+  });
+
+  const scored = judged
+    .map(({ row, priority }) => ({ row, priority, total: composite(row.axes, weights) }))
     .sort((a, b) => b.total - a.total);
 
   // Отрицательный лучший скор бывает: clickbait идёт с весом −30, и день,
@@ -185,21 +212,28 @@ export function pickSurvivors(
   // материал тоже, то есть весь выпуск.
   const best = Math.max(bestToday, scored[0]?.total ?? 0);
   const floor = best > 0 ? best * SCORE_FLOOR : -Infinity;
-  const byScore = scored.filter(({ total }) => total >= floor);
+  const byScore = scored
+    .filter(({ total }) => total >= floor)
+    // Место в очереди темы: сначала упомянутое, внутри него — по скору.
+    // Сортировка устойчива, поэтому без правил порядок остаётся по скору.
+    .sort((a, b) => Number(b.priority) - Number(a.priority) || b.total - a.total);
 
   const seen = new Map<number, number>();
-  const queued = byScore.map(({ row, total }) => {
+  const queued = byScore.map(({ row, total, priority }) => {
     // Материал вне тем — одна общая очередь, как отдельная тема с целью 1.
     const key = row.topic_id ?? 0;
     const place = (seen.get(key) ?? 0) + 1;
     seen.set(key, place);
     // Цель 0 отбор бы уронил делением на ноль; её запрещает ограничение
     // reader_topics_weight_check, а убрать тему — это удалить строку.
-    return { row, total, turn: place / (targets.get(key) || 1) };
+    return { row, total, priority, turn: place / (targets.get(key) || 1) };
   });
 
   return queued
-    .sort((a, b) => a.turn - b.turn || b.total - a.total)
+    // Между темами круг решает `turn`; при равном ходе упомянутое идёт
+    // первым — иначе на границе предела его отрезало бы соседней темой,
+    // при том что в своей очереди оно стояло первым.
+    .sort((a, b) => a.turn - b.turn || Number(b.priority) - Number(a.priority) || b.total - a.total)
     .slice(0, limit)
     .map(({ row, total }) => ({
       id: row.id,
@@ -263,6 +297,8 @@ export async function selectSurvivors(
   limit: number,
   sourceIds: number[],
   bestToday = 0,
+  /** Личные правила читателя. Один и тот же аргумент у прогона, первого выпуска и догрузки. */
+  rules: ReaderRules = NO_RULES,
 ): Promise<Survivor[]> {
   // Ключ сюжета `coalesce(dup_of, id)` верен, только пока повтор указывает
   // прямо на корень. Обеспечивает это выпрямление цепочек, и звать его
@@ -280,7 +316,7 @@ export async function selectSurvivors(
   `;
   if (chained) await flattenDupChains(sql);
   const survivors = pickSurvivors(
-    await candidates(sql, readerId, sourceIds), weights, targets, limit, bestToday,
+    await candidates(sql, readerId, sourceIds), weights, targets, limit, bestToday, rules,
   );
   // Только выбранным, а не всем кандидатам: лишняя строка в scores — это
   // лишний материал в калибровке и в отдаче источника.

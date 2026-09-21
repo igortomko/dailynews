@@ -170,6 +170,13 @@ async function run(kinds: Kind[], refresh: () => void, t: RebuildText = ruFeed.r
       const result = await rewriteDigest();
       if (result && "error" in result) throw new Error(result.error);
       if (result?.rewritten) done.push(t.rewrote(result.rewritten));
+      if (result?.retained) {
+        toast.dismiss(workId);
+        toast.warning(t.partiallyRewritten(result.rewritten, result.retained));
+        queued.add("voice");
+        refresh();
+        return "failed";
+      }
       left.delete("voice");
     }
 

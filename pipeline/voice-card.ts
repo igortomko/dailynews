@@ -1,3 +1,4 @@
+import { budgetedFetch } from "./model-budget";
 /**
  * Карточка автора: чем он пишет и что у него заходит.
  *
@@ -290,6 +291,7 @@ const PROMPT_UNRANKED = `"frame" — оставь пустым массивом:
  */
 export async function buildVoiceCard(
   posts: OwnPost[],
+  readerId?: number,
 ): Promise<{ card: VoiceCard; usage: Usage; model: string }> {
   const { baseUrl, model, apiKey } = resolve();
   const { text, ranked, used } = corpusOf(posts);
@@ -309,7 +311,7 @@ ${text}
 Ответь только валидным JSON, без markdown:
 {"structure": ["..."], "hooks": ["..."], "voice": ["..."], "frame": ["..."], "taboo": ["..."]}`;
 
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const res = await budgetedFetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -327,7 +329,7 @@ ${text}
       messages: [{ role: "user", content: prompt }],
     }),
     signal: AbortSignal.timeout(300_000),
-  });
+  }, readerId, "voice");
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
 
   const payload = await res.json();

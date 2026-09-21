@@ -22,5 +22,4 @@ export const theme: typeof Theme = {
 
 export const locale: typeof Locale = {
   toggle: "Язык интерфейса",
-  pick: (name: string) => `Переключить интерфейс на ${name}`,
 };

@@ -9,14 +9,13 @@
 import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { sql } from "../src/lib/db";
-import { recordCall, spentToday } from "../src/lib/readers";
+import { spentToday } from "../src/lib/readers";
 import type { Reader } from "../src/lib/types";
 import { fetchArticle } from "./article";
 import { translateArticle, splitBlocks } from "./translate";
 import { scoreTranslation } from "./translation-quality";
 import { buildEpub } from "./epub";
 import { articleBlocker, sendArticleToKindle } from "./kindle";
-import { llmCost, jevCost } from "./cost";
 
 /**
  * Сколько ждать зависшую отправку, прежде чем считать её провалившейся.
@@ -80,13 +79,8 @@ export async function runArticleSend(
     if (body) {
       console.log("  перевод взят из кэша");
     } else {
-      const translated = await translateArticle(article.markdown, reader.language);
+      const translated = await translateArticle(article.markdown, reader.language, reader.id);
       body = translated.markdown;
-      await recordCall({
-        readerId: reader.id, stage: "translate", model: translated.model,
-        tokensIn: translated.usage.input, tokensOut: translated.usage.output,
-        costUsd: llmCost(translated.usage),
-      });
       await sql`
         insert into dailynews.item_translations (item_id, language, markdown, model)
         values (${itemId}, ${reader.language}, ${body}, ${translated.model})
@@ -100,13 +94,8 @@ export async function runArticleSend(
       quality = await scoreTranslation(
         splitBlocks(article.markdown),
         splitBlocks(body),
+        reader.id,
       ).catch(() => null);
-      if (quality) {
-        await recordCall({
-          readerId: reader.id, stage: "translation-quality", model: quality.model,
-          tokensIn: quality.inputTokens, costUsd: jevCost(quality.inputTokens),
-        });
-      }
     }
 
     const epub = await buildEpub({
