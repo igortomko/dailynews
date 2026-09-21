@@ -6,15 +6,22 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { FEATURES, type FeatureId, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
+import { useT } from "@/components/i18n-provider";
+import type { Dict } from "@/lib/i18n";
 
-const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
-  { href: "/settings/personalization", label: "Язык и подача" },
-  { href: "/settings/sources", label: "Источники" },
-  { href: "/settings/interests", label: "Интересы" },
-  { href: "/settings/delivery", label: "Доставка", feature: "delivery" },
-  { href: "/settings/channels", label: "Мои площадки", feature: "posts" },
-  { href: "/settings/subscription", label: "Подписка" },
-  { href: "/settings/about", label: "О проекте" },
+/**
+ * Подпись берётся из словаря по ключу, а не лежит строкой: список один
+ * на оба языка, и вторая его копия разъехалась бы с первой на первом же
+ * новом разделе.
+ */
+const SECTIONS: { href: string; label: (t: Dict) => string; feature?: FeatureId }[] = [
+  { href: "/settings/personalization", label: (t) => t.nav.personalization },
+  { href: "/settings/sources", label: (t) => t.nav.sources },
+  { href: "/settings/interests", label: (t) => t.nav.interests },
+  { href: "/settings/delivery", label: (t) => t.nav.delivery, feature: "delivery" },
+  { href: "/settings/channels", label: (t) => t.nav.channels, feature: "posts" },
+  { href: "/settings/subscription", label: (t) => t.nav.subscription },
+  { href: "/settings/about", label: (t) => t.nav.about },
 ];
 
 /**
@@ -43,6 +50,7 @@ function Busy() {
  */
 export function SettingsNav({ plan }: { plan: Plan }) {
   const pathname = usePathname();
+  const t = useT();
 
   return (
     <nav className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
@@ -64,7 +72,7 @@ export function SettingsNav({ plan }: { plan: Plan }) {
                 : "text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground",
             )}
           >
-            {section.label}
+            {section.label(t)}
             {locked && section.feature ? (
               <PaywallCrown feature={section.feature} plan={plan} className="ml-1.5" />
             ) : null}

@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Переключатель светлой и тёмной темы.
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
+  const t = useT();
 
   return (
     <Tooltip>
@@ -31,7 +33,7 @@ export function ThemeToggle({ className }: { className?: string }) {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Переключить тему"
+            aria-label={t.theme.toggle}
             onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
             className={cn(
               "text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground",
@@ -57,8 +59,8 @@ export function ThemeToggle({ className }: { className?: string }) {
       </TooltipTrigger>
       {/* Подпись называет то, что будет после нажатия, — как и иконка. */}
       <TooltipContent>
-        <span className="dark:hidden">Тёмная тема</span>
-        <span className="hidden dark:block">Светлая тема</span>
+        <span className="dark:hidden">{t.theme.dark}</span>
+        <span className="hidden dark:block">{t.theme.light}</span>
       </TooltipContent>
     </Tooltip>
   );

@@ -1,3 +1,5 @@
+import type { Dict } from "@/lib/i18n";
+import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 import { count } from "./plural";
 import type { Source } from "./types";
 
@@ -62,12 +64,14 @@ const timeOf = (value: string | Date | null): number =>
  * Минуты только пока они минуты: «341 минуту позже» — это число, которое
  * читатель пересчитывает в уме, а ответ ему нужен не точный, а по порядку.
  */
-export function laterBy(minutes: number): string {
-  if (minutes < 1) return "тогда же";
-  if (minutes < 60) return `${count(minutes, "минуту", "минуты", "минут")} позже`;
+export type StoryLabels = Dict["feed"]["story"];
+
+export function laterBy(minutes: number, t: StoryLabels = ruFeed.story): string {
+  if (minutes < 1) return t.sameTime;
+  if (minutes < 60) return t.laterMinutes(minutes);
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${count(hours, "час", "часа", "часов")} позже`;
-  return `${count(Math.round(hours / 24), "день", "дня", "дней")} позже`;
+  if (hours < 24) return t.laterHours(hours);
+  return t.laterDays(Math.round(hours / 24));
 }
 
 export type StoryLine = Publication & { note: string };
@@ -86,7 +90,10 @@ export type StoryLine = Publication & { note: string };
  * первоисточником от этого не станет. Нет ни одного издания — нет
  * и первоисточника, и отсчитывать «позже» не от чего.
  */
-export function storyLines(publications: Publication[]): StoryLine[] {
+export function storyLines(
+  publications: Publication[],
+  t: StoryLabels = ruFeed.story,
+): StoryLine[] {
   const ordered = [...publications].sort(
     (a, b) => timeOf(a.published_at) - timeOf(b.published_at) || a.item_id - b.item_id,
   );
@@ -105,16 +112,16 @@ export function storyLines(publications: Publication[]): StoryLine[] {
     if (isDiscussion(row.kind)) {
       return {
         ...row,
-        note: row.points === null ? "обсуждение" : `обсуждение: ${row.points} points`,
+        note: row.points === null ? t.discussion : t.discussionPoints(row.points),
       };
     }
-    if (row === origin) return { ...row, note: "первоисточник" };
+    if (row === origin) return { ...row, note: t.original };
     // База — самое раннее издание, поэтому разрыв не бывает отрицательным.
     // Времени нет вовсе — пометки нет: выдуманное «тогда же» врало бы ровно
     // там, где мы ничего не знаем.
     const at = timeOf(row.published_at);
     if (base === null || !Number.isFinite(at)) return { ...row, note: "" };
-    return { ...row, note: laterBy(Math.round((at - base) / 60_000)) };
+    return { ...row, note: laterBy(Math.round((at - base) / 60_000), t) };
   });
 }
 
@@ -142,9 +149,7 @@ export function otherSources(publications: Publication[], shownSourceId: number)
  * материалом; «твоих» следует из состава — в список идут только источники,
  * которые читатель выбрал сам, и чужих там не бывает.
  */
-export const alsoLine = (n: number) =>
-  `Ещё ${count(n, "источник", "источника", "источников")}`;
+export const alsoLine = (n: number, t: StoryLabels = ruFeed.story) => t.alsoLine(n);
 
 /** Заголовок раскрытия: публикации считаются все, вместе с показанной. */
-export const storyTitle = (n: number) =>
-  `Один сюжет, ${count(n, "публикация", "публикации", "публикаций")}`;
+export const storyTitle = (n: number, t: StoryLabels = ruFeed.story) => t.storyTitle(n);

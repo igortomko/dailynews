@@ -31,7 +31,7 @@ import { SOURCE_LANGUAGE } from "./voice";
 export const TS_CONFIGS: Record<string, string> = {
   русском: "russian",
   английском: "english",
-  "португальском (бразильский вариант)": "portuguese",
+  "португальском (бразильский)": "portuguese",
   испанском: "spanish",
   немецком: "german",
   французском: "french",

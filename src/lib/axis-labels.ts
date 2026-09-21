@@ -1,3 +1,5 @@
+import type { Dict } from "@/lib/i18n";
+
 /**
  * Как ответы скоринга называются для читателя.
  *
@@ -8,22 +10,11 @@
  * целиком и значения сравниваются друг с другом. В ленте их больше нет:
  * там метка стоит у одной карточки рядом с другой, и «факт» у 58% выпуска
  * не отличает ни одну от соседней. Поэтому наружу ходит один `axisValue`,
- * а словари остались внутри файла: экспорт без потребителя — это приглашение
- * завести вторую копию перевода.
+ * а словари остались в области «plans» словаря (`t.plans.calibration.axis`) —
+ * экспорт без второго потребителя здесь же приглашал завести вторую копию
+ * перевода.
  */
-const KIND: Record<string, string> = {
-  fact: "факт",
-  forecast: "прогноз",
-  opinion: "мнение",
-  announcement: "анонс",
-  reprint: "перепечатка",
-};
-
-const HORIZON: Record<string, string> = {
-  years: "годы",
-  months: "месяцы",
-  noise: "шум дня",
-};
+type AxisDict = Dict["plans"]["calibration"]["axis"];
 
 /**
  * Любое значение любой оси. `other` — это «ни одна тема не подошла»,
@@ -32,8 +23,8 @@ const HORIZON: Record<string, string> = {
  * Незнакомый ключ возвращается как есть: выдуманный перевод врал бы тише,
  * чем английское слово, которое хотя бы видно.
  */
-export const axisValue = (value: string): string => {
-  if (Object.hasOwn(KIND, value)) return KIND[value];
-  if (Object.hasOwn(HORIZON, value)) return HORIZON[value];
-  return value === "other" ? "прочее" : value;
+export const axisValue = (value: string, t: AxisDict): string => {
+  if (Object.hasOwn(t.kind, value)) return t.kind[value];
+  if (Object.hasOwn(t.horizon, value)) return t.horizon[value];
+  return value === "other" ? t.other : value;
 };

@@ -12,6 +12,8 @@
  * слов врал бы в разы ровно там, где проверить это некому. Знак считается
  * одинаково у всех шестнадцати языков.
  */
+import { feed as ruFeed } from "@/lib/i18n/ru/feed";
+import type { TimeLabels } from "./relative-time";
 import { DEFAULT_COMPLEXITY, SOURCE_LANGUAGE, type Voice } from "./voice";
 import { plural } from "./plural";
 
@@ -29,7 +31,7 @@ import { plural } from "./plural";
  * знать не надо. Ключи — строки из `LANGUAGES`: язык в базе лежит свободным
  * текстом, и незнакомое значение берёт общее число, а не падает.
  */
-const CHARS_PER_MINUTE: Record<string, number> = {
+export const CHARS_PER_MINUTE: Record<string, number> = {
   // Без перевода выпуск остаётся на языке источника, а это почти всегда
   // английский: считать его по русской мерке значит завышать время у всех,
   // кто перевод не включал.
@@ -37,7 +39,7 @@ const CHARS_PER_MINUTE: Record<string, number> = {
   английском: 1050,
   русском: 960,
   украинском: 960,
-  "португальском (бразильский вариант)": 1000,
+  "португальском (бразильский)": 1000,
   испанском: 1000,
   итальянском: 1000,
   французском: 1000,
@@ -146,14 +148,12 @@ export function itemsForMinutes(minutes: number, perCard: number, maxItems: numb
  * Меньше минуты не показывается нулём: выпуск, о котором написано «~0 мин»,
  * выглядит пустым, хотя в нём есть что читать.
  */
-export const formatMinutes = (minutes: number): string =>
-  `~${Math.max(1, Math.round(minutes))} мин`;
+export const formatMinutes = (minutes: number, t: TimeLabels = ruFeed.time): string =>
+  t.readingMinutes(Math.max(1, Math.round(minutes)));
 
 /** Та же волна, но словом: в Telegram и в подписях «мин» читается обрубком. */
-export const formatMinutesLong = (minutes: number): string => {
-  const n = Math.max(1, Math.round(minutes));
-  return `~${n} ${plural(n, "минута", "минуты", "минут")}`;
-};
+export const formatMinutesLong = (minutes: number, t: TimeLabels = ruFeed.time): string =>
+  t.minutesLong(Math.max(1, Math.round(minutes)));
 
 /**
  * Недобор называется вслух, начиная с целой минуты.
@@ -172,9 +172,12 @@ export const isShort = (minutes: number, target: number): boolean =>
  * розданная по местам, она правится в одном и остаётся прежней в другом —
  * и два экрана обещают разное про один и тот же выпуск.
  */
-export const shortfallNote = (minutes: number, target: number): string =>
+export const shortfallNote = (
+  minutes: number,
+  target: number,
+  t: TimeLabels = ruFeed.time,
+): string =>
   // Цель приходит дробной: она прижимается потолком штук, а он в минутах
   // не круглый. Округляет сама фраза, а не каждый, кто её показывает:
   // «из 19.166666666666668» стоило бы ровно одного забытого вызова.
-  `${formatMinutesLong(minutes)} из ${Math.round(target)} — ` +
-  `сегодня больше действительно важного нет`;
+  t.shortfall(formatMinutesLong(minutes, t), Math.round(target));
