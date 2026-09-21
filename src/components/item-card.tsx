@@ -208,6 +208,30 @@ export function ItemCard({
   // и насколько надолго.
   const tags = [showTopic ? item.topic_label : null, kind, horizon].filter(Boolean);
 
+  if (vote === "down") {
+    return (
+      <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
+        <span className="truncate">Скрыто: {title}</span>
+        <button
+          type="button"
+          onClick={() => {
+            // Отмена снимает событие, а не только прячет плашку. Лента
+            // исключает материал по наличию события down: оставь его
+            // на месте — и «Вернуть» возвращало бы материал ровно
+            // до перезагрузки страницы, после которой он исчезал навсегда.
+            // Кнопка обещала обратимость, которой не было.
+            report({ item_id: item.id, event: "down", undo: true });
+            setVote(null);
+          }}
+          className="flex shrink-0 cursor-pointer items-center gap-1 hover:text-foreground"
+        >
+          <UndoIcon className="size-3.5" />
+          Вернуть
+        </button>
+      </article>
+    );
+  }
+
   /**
    * Строка над заголовком: издание, метка кликбейта, время чтения и теги.
    *
@@ -256,30 +280,6 @@ export function ItemCard({
       : []),
   ];
 
-  if (vote === "down") {
-    return (
-      <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
-        <span className="truncate">Скрыто: {title}</span>
-        <button
-          type="button"
-          onClick={() => {
-            // Отмена снимает событие, а не только прячет плашку. Лента
-            // исключает материал по наличию события down: оставь его
-            // на месте — и «Вернуть» возвращало бы материал ровно
-            // до перезагрузки страницы, после которой он исчезал навсегда.
-            // Кнопка обещала обратимость, которой не было.
-            report({ item_id: item.id, event: "down", undo: true });
-            setVote(null);
-          }}
-          className="flex shrink-0 cursor-pointer items-center gap-1 hover:text-foreground"
-        >
-          <UndoIcon className="size-3.5" />
-          Вернуть
-        </button>
-      </article>
-    );
-  }
-
   return (
     <article
       ref={article}
@@ -293,8 +293,10 @@ export function ItemCard({
           оба про время и оба про разное: одно — давно ли вышло, второе —
           сколько читать. Глаз складывает их в одно число и спотыкается.
           Из двух оставлено то, что отвечает на «открывать ли сейчас».
-          Разделитель — запятая: точки с пробелами по бокам растягивали
-          ряд сильнее, чем несли смысла.
+          Запятая осталась внутри последнего куска — она разделяет тему,
+          тип и горизонт, вещи однородные. Между кусками её не хватило:
+          издание, время и тема однородными не являются, и ряд из четырёх
+          запятых читался одним названием.
 
           Шапка во всю ширину карточки, а не внутри текстовой колонки:
           там её правый край упирался в картинку, и кнопки у карточек
