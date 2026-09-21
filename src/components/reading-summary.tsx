@@ -8,6 +8,10 @@ type Labels = Dict["feed"]["reading"];
 function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
   switch (b.kind) {
     case "paragraph": return <p>{t(b.content.text)}</p>;
+    case "quote": return <figure className="pl-4 border-l-2 border-foreground/20">
+      <blockquote className="text-lg leading-relaxed font-medium">“{t(b.content.text)}”</blockquote>
+      <figcaption className="mt-2 text-sm text-muted-foreground">{t(b.attribution)}</figcaption>
+    </figure>;
     case "list": {
       const Tag = b.numbering === "facts" ? "ol" : "ul";
       return <Tag className={`${b.numbering === "facts" ? "list-decimal" : "list-disc"} space-y-2 pl-5 marker:text-muted-foreground`}>

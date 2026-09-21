@@ -12,7 +12,7 @@ import { styleOf, type Voice } from "../src/lib/voice";
 import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
-  documentText, parseStoredReading, normalizeDocument,
+  documentText, parseStoredReading, normalizeDocument, validateQuotes,
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
@@ -138,12 +138,18 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
     complexityPreference: voice.complexity,
     complexityMeaning: "1 = simple short phrases; 5 = concise technical writing WHERE knowledge is explicitly known. Unknown subtopics need brief explanations at any level.",
     readerContext, topic,
+    quoteCandidates: analysis.sections.flatMap(section => section.claims)
+      .filter(claim => claim.role === "interpretation" || claim.role === "recommendation")
+      .flatMap(claim => claim.quote.split(/(?<=[.!?])\s+/u).filter(sentence => {
+        const words = sentence.trim().split(/\s+/u).length;
+        return words >= 4 && words <= 25;
+      }).map(sentence => ({ text: sentence.trim(), claimIds: [claim.id] }))).slice(-8),
     analysis: { ...analysis, sections: analysis.sections.map(section => ({ ...section,
       claims: section.claims.map(({ quote, ...claim }) => { void quote; return claim; }) })) },
     candidateBaselines: baselines,
   };
   const check = async (doc: ReadingDocument) => {
-    const errors = validateCoverage(doc, analysis, readerContext, baselines.map((b) => b.id));
+    const errors = [...validateCoverage(doc, analysis, readerContext, baselines.map((b) => b.id)), ...validateQuotes(doc, source)];
     if (errors.length) return errors;
     for (const section of splitSource(source)) {
       const result = await ask("verify", VERIFY_RULES, { ...input, sourceSection: section, document: doc }, auditSchema);
