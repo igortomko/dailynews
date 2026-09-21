@@ -46,10 +46,10 @@ export function digestHtml(day: string, intro: string, articles: Article[]): str
   return [
     "<!doctype html>",
     '<html lang="ru"><head><meta charset="utf-8">',
-    `<title>Retorta за ${escapeHtml(day)}</title>`,
+    `<title>Reporta за ${escapeHtml(day)}</title>`,
     "<style>body{font-family:serif}h2{page-break-before:always}.meta{color:#555;font-size:.85em}</style>",
     "</head><body>",
-    `<h1>Retorta за ${escapeHtml(day)}</h1>`,
+    `<h1>Reporta за ${escapeHtml(day)}</h1>`,
     intro ? `<p>${escapeHtml(intro)}</p>` : "",
     body,
     "</body></html>",
@@ -77,13 +77,13 @@ export async function sendToKindle(options: {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      from: `Retorta <${senderAddress(options.sender)}>`,
+      from: `Reporta <${senderAddress(options.sender)}>`,
       to: [options.to],
-      subject: `Retorta за ${options.day}`,
+      subject: `Reporta за ${options.day}`,
       text: `Выпуск за ${options.day} — во вложении.`,
       attachments: [
         {
-          filename: `retorta-${options.day}.html`,
+          filename: `reporta-${options.day}.html`,
           content: Buffer.from(html, "utf8").toString("base64"),
         },
       ],
@@ -183,7 +183,7 @@ export async function sendArticleToKindle(options: {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      from: `Retorta <${senderAddress(options.sender)}>`,
+      from: `Reporta <${senderAddress(options.sender)}>`,
       to: [options.to],
       subject: options.title,
       text: options.title,
