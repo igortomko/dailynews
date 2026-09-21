@@ -535,6 +535,24 @@ async function main() {
         byRussian.hits[0].snippet.endsWith("…"),
         `у обрезанного конца многоточие обязано быть: ${byRussian.hits[0].snippet}`,
       );
+
+      // А короткий текст помещается в отрывок целиком, и тогда многоточия
+      // нет ни с одной стороны. Проверка держит не красоту, а `btrim`:
+      // пустая колонка оставляет в склейке висячий пробел, отрывок приходит
+      // без него — и «дочитано до конца» становится ложным на каждом
+      // отрывке, отчего многоточие перестаёт что-либо означать.
+      await sql`
+        update dailynews.digest_items set summary = 'Модель умеет больше контекста'
+         where item_id = ${ids[0]}
+      `;
+      const whole = (await queries.searchArchive(ru, "контекста")).hits[0]?.snippet ?? "";
+      assert.ok(
+        whole.length > 0 && !whole.startsWith("…") && !whole.endsWith("…"),
+        `у неурезанного отрывка многоточия быть не должно: ${whole}`,
+      );
+      await sql`
+        update dailynews.digest_items set summary = 'S' where item_id = ${ids[0]}
+      `;
       assert.equal(byRussian.hits[0].title, "Владелец: уран", "заголовок берётся из выпуска");
       assert.equal(byRussian.hits[0].day, today, "у находки есть день выпуска, чтобы вернуться");
 
