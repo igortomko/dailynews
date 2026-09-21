@@ -44,7 +44,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   // по нему видно, что именно даёт переход.
   const translates = FEATURES.language.has(plan);
   const languagePaywall = usePaywall("language", plan);
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
   const form = useRef<HTMLFormElement>(null);
   const router = useRouter();
   const first = !profile?.onboarded_at;
@@ -282,7 +282,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
             {first ? (
               <Button
                 type="button"
-                disabled={applying}
+                // Своя занятость, а не `applying`: его зажигает «Сохранить»,
+                // а эта кнопка зовёт запись напрямую — и без признака работы
+                // двойное нажатие уходило дважды.
+                disabled={pending}
                 className="self-start"
                 onClick={async () => {
                   // Уходим только после записи: раньше переход шёл вместе
@@ -295,7 +298,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   router.push(FEATURES.posts.has(plan) ? "/settings/channels?first=1" : "/");
                 }}
               >
-                {applying ? <Spinner data-icon="inline-start" /> : null}
+                {pending ? <Spinner data-icon="inline-start" /> : null}
                 {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
               </Button>
             ) : (
