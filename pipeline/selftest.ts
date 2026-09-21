@@ -38,6 +38,9 @@ import {
 import { appOrigin } from "../src/lib/auth";
 import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { readingTime } from "../src/lib/relative-time";
+import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
+import { en as EN_DICT } from "../src/lib/i18n/en/index";
+import { isDay } from "../src/lib/day";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
@@ -478,12 +481,14 @@ assert.ok(
   "ключи сложности должны совпадать со значением колонки",
 );
 assert.ok(
-  [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
-  "у каждого варианта должны быть и подпись для читателя, и требование для модели",
+  [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0),
+  "у каждого варианта должно быть требование для модели",
 );
-// Названия и подписи не повторяются: две одинаковые строки в ряду означают,
-// что выбирать не из чего, — а деления при этом разные.
-for (const field of ["label", "hint"] as const) {
+// Ключи и требования не повторяются: два одинаковых значения в ряду означают,
+// что выбирать не из чего, — а деления при этом разные. Подпись для читателя
+// сюда не входит: она переехала в словарь интерфейса (i18n/*/settings.ts)
+// и от языка промпта больше не зависит.
+for (const field of ["key", "instruction"] as const) {
   assert.equal(
     new Set([...COMPLEXITY, ...STYLES].map((entry) => entry[field])).size,
     COMPLEXITY.length + STYLES.length,
@@ -2332,7 +2337,7 @@ assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left �
 assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 assert.match(
   headerRow,
-  /formatMinutes\(reading\.minutes\)/,
+  /formatMinutes\(reading\.minutes[^)]*\)/,
   "время выпуска стоит рядом с его датой: это два факта об одном выпуске",
 );
 
@@ -2874,7 +2879,57 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   // по ненайденному.
   assert.equal(tsConfigFor("русском"), "russian");
   assert.equal(tsConfigFor("английском"), "english");
-  assert.equal(tsConfigFor("португальском (бразильский вариант)"), "portuguese");
+  assert.equal(tsConfigFor("португальском (бразильский)"), "portuguese");
+
+// --- два языка интерфейса ---------------------------------------------------
+// Пропущенный ключ ловит типизация: `ru` объявлен как `Dict`, и собраться
+// без него нельзя. Чего она не ловит — русской строки, забытой в английском
+// словаре: тип у неё тот же самый. А видит её ровно тот читатель, ради
+// которого словарь и заводили.
+{
+  const cyrillic = /[а-яА-ЯёЁ]/;
+  const found: string[] = [];
+
+  const walk = (node: unknown, path: string) => {
+    if (typeof node === "string") {
+      if (cyrillic.test(node)) found.push(`${path}: ${node}`);
+      return;
+    }
+    if (typeof node === "function") {
+      // Аргументы подставляем правдоподобные: строки принимают имя тарифа
+      // или причину отказа, числа — количество. Функция, которой они
+      // не подошли, проверку не заваливает: её строки увидит глаз.
+      for (const args of [[1], [2], [5], ["Pro"], ["Pro", 5, 7], [1, "Pro"]]) {
+        try {
+          const out = (node as (...a: unknown[]) => unknown)(...args);
+          if (typeof out === "string" && cyrillic.test(out)) found.push(`${path}(): ${out}`);
+        } catch {
+          // подошли не те аргументы — пробуем следующие
+        }
+      }
+      return;
+    }
+    if (node && typeof node === "object") {
+      for (const [key, value] of Object.entries(node)) walk(value, `${path}.${key}`);
+    }
+  };
+
+  walk(EN_DICT, "en");
+  assert.deepEqual(found, [], "в английском словаре осталась русская строка");
+}
+
+// Языки названы строкой, и эта строка лежит сразу в трёх словарях: скорость
+// чтения, словарь поиска и флажок. Переименуй язык в списке — и остальные
+// молча откатятся к значению по умолчанию: время выпуска посчитается русской
+// меркой, поиск возьмёт русский стеммер, флажок исчезнет. Ни одной ошибки
+// при этом не будет.
+for (const [name, table] of [
+  ["словарь поиска", TS_CONFIGS],
+  ["скорость чтения", CHARS_PER_MINUTE],
+] as const) {
+  const orphans = Object.keys(table).filter((key) => !LANGUAGES.includes(key));
+  assert.deepEqual(orphans, [], `${name}: ключи разъехались со списком языков`);
+}
   assert.equal(
     tsConfigFor(SOURCE_LANGUAGE),
     "russian",
@@ -3130,5 +3185,18 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     `rsync --delete сносит ${made![1]}: нужно --exclude '/${made![1]}' с косой`,
   );
 }
+
+// День из адреса проверяется до запроса: в SQL он уходит кастом к date,
+// и непроверенная строка роняла бы ленту вместо того, чтобы открыть последний
+// выпуск. Строго по форме и по календарю.
+assert.ok(isDay("2026-09-21"), "обычный день проходит");
+assert.ok(isDay("2024-02-29"), "29 февраля високосного года — день");
+assert.equal(isDay("2026-02-31"), false, "31 февраля — не день, хотя Date дотянул бы его до марта");
+assert.equal(isDay("2026-9-1"), false, "без нулей — не та форма, что в базе и в адресе");
+assert.equal(isDay(""), false, "пустой параметр — не день, а «последний выпуск»");
+assert.equal(isDay(["2026-09-21", "2026-09-20"]), false, "повторённый параметр приезжает массивом");
+assert.equal(isDay(undefined), false, "нет параметра — нет дня");
+assert.ok(isDay("0026-01-01"), "год ниже сотни — тоже день: Date.UTC читал бы его как 1926");
+assert.equal(isDay("0000-02-30"), false, "календарь проверяется и у таких лет");
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

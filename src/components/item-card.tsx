@@ -29,6 +29,7 @@ import { typography, summaryTime } from "@/lib/typography";
 import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
+import { useT } from "@/components/i18n-provider";
 import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedCard } from "@/lib/queries";
@@ -111,6 +112,7 @@ export function ItemCard({
   /** Сети, отмеченные в «Моих площадках»: сколько их — столько табов. */
   networks: NetworkId[];
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   // Своё состояние, а не expanded: раскрытие описания считается чтением
   // материала и уезжает в калибровку событием «opened». Список повторов —
@@ -188,16 +190,16 @@ export function ItemCard({
         body: JSON.stringify({ item_id: item.id }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? "Не отправилось на Kindle — попробуй ещё раз");
+      if (!res.ok) throw new Error(body?.error ?? t.feed.item.kindleError);
       setKindle("sent");
       // Честно про время: статья забирается и переводится целиком. Обещать
       // мгновенность — значит получить второй тап через десять секунд.
-      toast.success("Статья ушла на Kindle", {
-        description: "Придёт примерно через минуту",
+      toast.success(t.feed.item.kindleToastTitle, {
+        description: t.feed.item.kindleToastDescription,
       });
     } catch (error) {
       setKindle("idle");
-      toast.error(error instanceof Error ? error.message : "Не отправилось на Kindle — попробуй ещё раз");
+      toast.error(error instanceof Error ? error.message : t.feed.item.kindleError);
     }
   };
 
@@ -210,11 +212,11 @@ export function ItemCard({
   const seconds = reading ? reading.seconds : cardChars(item.title_ru || item.title, item.summary) / DEFAULT_CHARS_PER_MINUTE * 60;
   const minutes = seconds > 0 ? summaryTime(seconds) : null;
   const others = otherSources(item.story, item.source_id);
-  const lines = others > 0 ? storyLines(item.story) : [];
+  const lines = others > 0 ? storyLines(item.story, t.feed.story) : [];
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
-  const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
+  const clickbait = item.clickbait;
   // Тема — одной строкой вместе с источником и временем чтения.
   //
   // Тип материала и горизонт отсюда убраны. «Факт» стоял у 58% карточек
@@ -228,7 +230,7 @@ export function ItemCard({
   if (vote === "down") {
     return (
       <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
-        <span className="truncate">Скрыто: {title}</span>
+        <span className="truncate">{t.feed.item.hidden(title)}</span>
         <button
           type="button"
           onClick={() => {
@@ -243,7 +245,7 @@ export function ItemCard({
           className="flex shrink-0 cursor-pointer items-center gap-1 hover:text-foreground"
         >
           <UndoIcon className="size-3.5" />
-          Вернуть
+          {t.feed.item.undo}
         </button>
       </article>
     );
@@ -285,7 +287,7 @@ export function ItemCard({
     // и «кликбейт» за этим местом висел в пустоте, оторванный от того,
     // к чему относится.
     ...(clickbait
-      ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">кликбейт</span> }]
+      ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">{t.feed.item.clickbait}</span> }]
       : []),
     // min-w-0 обязателен: truncate обрезает только то, чему разрешили
     // сузиться, а гибкий элемент по умолчанию не уже своего содержимого.
@@ -384,7 +386,7 @@ export function ItemCard({
               render={
                 <button
                   type="button"
-                  aria-label="Действия с материалом"
+                  aria-label={t.feed.item.actionsLabel}
                   className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex"
                 />
               }
@@ -414,8 +416,8 @@ export function ItemCard({
                     return;
                   }
                   if (networks.length === 0) {
-                    toast.info("Сначала отметь, где ты публикуешь", {
-                      description: "Настройки → Мои площадки",
+                    toast.info(t.feed.item.pickNetworksFirst, {
+                      description: `${t.nav.settings} → ${t.nav.channels}`,
                     });
                     return;
                   }
@@ -423,7 +425,7 @@ export function ItemCard({
                 }}
               >
                 <PenLineIcon />
-                Своё мнение
+                {t.feed.item.opinion}
                 {canPost ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -438,10 +440,10 @@ export function ItemCard({
                   <BookOpenIcon />
                 )}
                 {kindle === "sending"
-                  ? "Отправляю…"
+                  ? t.feed.item.kindleSending
                   : kindle === "sent"
-                    ? "Уже на читалке"
-                    : "Отправить на читалку"}
+                    ? t.feed.item.kindleSent
+                    : t.feed.item.kindleSend}
               </DropdownMenuItem>
               <DropdownMenuCheckboxItem
                 checked={vote === "up"}
@@ -451,7 +453,7 @@ export function ItemCard({
                 }}
               >
                 <ThumbsUpIcon />
-                Больше такого
+                {t.feed.item.upvoteLabel}
               </DropdownMenuCheckboxItem>
               <DropdownMenuItem
                 variant="destructive"
@@ -461,7 +463,7 @@ export function ItemCard({
                 }}
               >
                 <ThumbsDownIcon />
-                Скрыть и меньше такого
+                {t.feed.item.downvoteLabel}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -486,15 +488,15 @@ export function ItemCard({
               render={
                 <button
                   type="button"
-                  aria-label="Своё мнение: готовый пост твоим голосом"
+                  aria-label={t.feed.item.opinionAria}
                   onClick={() => {
                     if (!canPost) {
                       paywall.open();
                       return;
                     }
                     if (networks.length === 0) {
-                      toast.info("Сначала отметь, где ты публикуешь", {
-                        description: "Настройки → Мои площадки",
+                      toast.info(t.feed.item.pickNetworksFirst, {
+                        description: `${t.nav.settings} → ${t.nav.channels}`,
                       });
                       return;
                     }
@@ -507,7 +509,7 @@ export function ItemCard({
               <PenLineIcon className="size-3.5" />
             </TooltipTrigger>
             <TooltipContent>
-              {canPost ? "Пост твоим голосом для твоих сетей" : "Своё мнение — на тарифе «Pro»"}
+              {canPost ? t.feed.item.opinionTooltipReady : t.feed.item.opinionTooltipLocked}
             </TooltipContent>
           </Tooltip>
 
@@ -516,7 +518,7 @@ export function ItemCard({
               render={
                 <button
                   type="button"
-                  aria-label="Отправить на Kindle"
+                  aria-label={t.feed.item.kindleAria}
                   // aria-disabled, а не disabled: браузер снимает фокус
                   // с выключенной кнопки, и с клавиатуры место в списке
                   // теряется ровно в момент нажатия. Заодно остаётся
@@ -538,7 +540,7 @@ export function ItemCard({
                 <BookOpenIcon className={swap(kindle === "idle")} />
               </span>
             </TooltipTrigger>
-            <TooltipContent>Отправить статью на читалку</TooltipContent>
+            <TooltipContent>{t.feed.item.kindleTooltip}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -546,7 +548,7 @@ export function ItemCard({
               render={
                 <button
                   type="button"
-                  aria-label="Больше такого"
+                  aria-label={t.feed.item.upvoteLabel}
                   aria-pressed={vote === "up"}
                   onClick={() => {
                     setVote(vote === "up" ? null : "up");
@@ -561,7 +563,7 @@ export function ItemCard({
             >
               <ThumbsUpIcon className="size-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Больше такого в следующих выпусках</TooltipContent>
+            <TooltipContent>{t.feed.item.upvoteTooltip}</TooltipContent>
           </Tooltip>
 
           {/* Палец вниз убирает материал из ленты — единственное здесь
@@ -572,7 +574,7 @@ export function ItemCard({
               render={
                 <button
                   type="button"
-                  aria-label="Скрыть и меньше такого"
+                  aria-label={t.feed.item.downvoteLabel}
                   onClick={() => {
                     setVote("down");
                     report({ item_id: item.id, event: "down" });
@@ -583,7 +585,7 @@ export function ItemCard({
             >
               <ThumbsDownIcon className="size-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Скрыть и меньше такого</TooltipContent>
+            <TooltipContent>{t.feed.item.downvoteLabel}</TooltipContent>
           </Tooltip>
         </div>
         </div>
@@ -646,14 +648,14 @@ export function ItemCard({
                 onClick={() => setStoryOpen((value) => !value)}
                 className="flex cursor-pointer items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
               >
-                {alsoLine(others)}
+                {alsoLine(others, t.feed.story)}
                 <ChevronDownIcon
                   className={cn("size-3.5 transition-transform duration-200", storyOpen && "rotate-180")}
                 />
               </button>
               {storyOpen ? (
                 <div className="mt-2 max-w-[68ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
-                  <p className="mb-1.5 font-medium">{storyTitle(lines.length)}</p>
+                  <p className="mb-1.5 font-medium">{storyTitle(lines.length, t.feed.story)}</p>
                   <ul className="space-y-1">
                     {lines.map((line) => (
                       <li key={line.item_id} className="flex flex-wrap items-baseline gap-x-1.5">
@@ -680,7 +682,7 @@ export function ItemCard({
                             как ошибка отбора: «почему первым не тот, кого
                             мне показали». */}
                         {line.item_id === item.id ? (
-                          <span className="text-muted-foreground/70">· эта карточка</span>
+                          <span className="text-muted-foreground/70">· {t.feed.item.thisCard}</span>
                         ) : null}
                       </li>
                     ))}

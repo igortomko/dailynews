@@ -79,6 +79,25 @@ figcaption { display: flex; gap: 12px; align-items: center; justify-content: spa
 figcaption b { display: block; font-size: 15px; font-weight: 500; }
 figcaption small { display: block; font-size: 12px; margin-top: 3px; color: var(--reporta-muted); }
 .art-grid + .caption { margin-top: 24px; }
+.art-toolbar, .art-toolbar-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.art-toolbar { margin-bottom: 24px; }
+.art-library { gap: 32px 24px; }
+.art-preview-button { display: block; width: 100%; aspect-ratio: 1; padding: 16px; background: #fff; border: 0; border-radius: 0; cursor: zoom-in; }
+.art-preview-button > img { width: 100%; height: 100%; object-fit: contain; }
+.art-library[data-gallery-theme="dark"] .art-preview-button, .art-dialog-stage[data-gallery-theme="dark"] { background-color: #171716; }
+.art-library.show-checker .art-preview-button, .art-dialog-stage.show-checker { background-image: repeating-conic-gradient(#d0d0d055 0% 25%, transparent 0% 50%); background-size: 20px 20px; }
+.art-library[data-gallery-theme="dark"].show-checker .art-preview-button { background-image: repeating-conic-gradient(#ffffff14 0% 25%, transparent 0% 50%); }
+.art-library figcaption { align-items: flex-start; min-height: 110px; }
+.art-library figcaption > span:first-child { min-width: 0; }
+.art-library figcaption .meta { color: var(--reporta-muted); }
+.art-downloads { display: inline-flex; flex-shrink: 0; gap: 2px; }
+.art-downloads .icon-button { width: 32px; height: 36px; padding: 7px; }
+#art-dialog { width: min(880px, calc(100% - 32px)); max-width: none; padding: 20px; }
+#art-dialog h2 { font: 500 18px/1.3 var(--reporta-body); }
+.art-dialog-stage { background: #fff; }
+.art-dialog-stage img { width: 100%; height: min(65vh, 700px); object-fit: contain; }
+.art-dialog-footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 16px; font-size: 13px; }
+@media (max-width: 640px) { .art-toolbar { align-items: flex-start; flex-direction: column; } .art-toolbar-actions { width: 100%; gap: 8px; } .art-dialog-footer { flex-wrap: wrap; } }
 .route-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 70px; }
 .route-art { position: relative; background: #fafaf7; }
 .route-art > img { width: 100%; mix-blend-mode: multiply; }
@@ -104,7 +123,7 @@ figcaption small { display: block; font-size: 12px; margin-top: 3px; color: var(
 .color-ratio i:last-child { flex: 4; background: var(--reporta-signal); }
 .semantic-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
 .semantic-preview { background: var(--reporta-ui-bg); color: var(--reporta-ui-text); padding: 0 24px; border-block: 1px solid var(--reporta-ui-line); }
-.semantic-columns, .semantic-row { display: grid; grid-template-columns: minmax(240px, 1.8fr) repeat(3, minmax(120px, 1fr)); gap: 20px; align-items: center; }
+.semantic-columns, .semantic-row { display: grid; grid-template-columns: minmax(220px, 1.8fr) repeat(4, minmax(100px, 1fr)); gap: 16px; align-items: center; }
 .semantic-columns { padding-block: 18px; color: var(--reporta-ui-muted); }
 .semantic-row { padding-block: 20px; border-top: 1px solid var(--reporta-ui-line); }
 .semantic-example { display: flex; align-items: center; gap: 12px; color: var(--tone-fg); background: var(--tone-bg); padding: 14px; border-left: 3px solid var(--tone-border); }
@@ -113,6 +132,7 @@ figcaption small { display: block; font-size: 12px; margin-top: 3px; color: var(
 .semantic-example small { font-size: 11px; display: block; margin-top: 4px; }
 .semantic-token { padding: 10px 0; display: flex; align-items: center; gap: 10px; min-height: 44px; color: inherit; border: 0; background: transparent; }
 .semantic-token i { width: 24px; height: 24px; flex: 0 0 24px; background: var(--token-color); border: 1px solid var(--reporta-ui-muted); border-radius: 3px; }
+.semantic-token[data-role="solid"] i { width: 32px; height: 32px; flex-basis: 32px; border: 0; }
 .semantic-token code { font: 400 12px/1.4 var(--reporta-mono); }
 .semantic-note { margin-top: 20px; overflow-wrap: anywhere; }
 [data-reporta-theme="dark"] .semantic-example img { filter: invert(1); }
@@ -123,7 +143,7 @@ figcaption small { display: block; font-size: 12px; margin-top: 3px; color: var(
 [data-tone="neutral"] { --tone-fg: var(--reporta-neutral-fg); --tone-bg: var(--reporta-neutral-bg); --tone-border: var(--reporta-neutral-border); }
 @media (max-width: 1000px) {
   .semantic-columns { display: none; }
-  .semantic-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .semantic-row { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
   .semantic-example { grid-column: 1 / -1; }
   .semantic-preview { padding-inline: 16px; }
   .semantic-token { flex-wrap: wrap; gap: 6px; }

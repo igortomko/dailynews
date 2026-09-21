@@ -26,7 +26,7 @@ import { cardMinutes } from "./reading-time";
  */
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
-  reader_context, reading_v2_enabled, digest_minutes, weights, language, complexity, style,
+  reader_context, reading_v2_enabled, digest_minutes, weights, language, ui_language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,

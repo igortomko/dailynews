@@ -13,6 +13,8 @@
  */
 import { documentText, type StoredReading } from "../src/lib/reading-document";
 import { typography } from "../src/lib/typography";
+import type { Dict } from "../src/lib/i18n";
+import { ru } from "../src/lib/i18n/ru/index";
 import { FEATURES } from "../src/lib/plans";
 import { effectivePlan } from "../src/lib/lemon";
 /** Домен отправителя. Переменная старше константы: она уже есть
@@ -212,20 +214,24 @@ export function articleBlocker(
     daily_cap_usd: number;
   },
   spent: number,
+  // Словарь необязателен и по умолчанию русский: эту же проверку зовёт
+  // ночной прогон, где спрашивать язык не у кого, — а веб передаёт язык
+  // своего читателя и получает отказ на нём.
+  t: Dict["errors"] = ru.errors,
 ): string {
-  if (!reader.kindle_address) return "Сначала настрой Kindle в «Доставке» — там нужен адрес читалки";
-  if (!reader.kindle_sender) return "Это наша поломка — напиши боту в Telegram";
+  if (!reader.kindle_address) return t.kindleNoAddress;
+  if (!reader.kindle_sender) return t.kindleNoSender;
   // Пока отправитель не одобрен у Amazon, письмо уходит и исчезает: код
   // E014, уведомление владельцу читалки, тишина в нашу сторону. Отказать
   // здесь дешевле, чем потратить минуту и цент на книгу, которую Amazon
   // выбросит, — и честнее, чем показать «отправлено».
-  if (!reader.kindle_approved) return "Amazon ещё не разрешил наш адрес — доделай настройку в «Доставке»";
+  if (!reader.kindle_approved) return t.kindleNotApproved;
   // Потолок проверяется до вызовов, а не после: узнать о перерасходе
   // постфактум можно и из счёта.
   if (spent >= reader.daily_cap_usd) {
     // Сумма наружу не уходит: это наш потолок расходов, а не квота,
     // о которой читатель что-то знает. Ему важно одно — когда снимется.
-    return "Сегодня больше отправить нельзя — завтра лимит обнулится";
+    return t.kindleCapReached;
   }
   return "";
 }

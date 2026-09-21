@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { checkoutUrl, endingAt } from "@/lib/lemon";
 import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
+import { currentLocale, getDict } from "@/lib/i18n/server";
 
 /**
  * Сравнение тарифов.
@@ -24,45 +25,51 @@ const ICONS: Record<PlanId, typeof CrownIcon> = {
   pro: CrownIcon,
 };
 
-/** Порядок строк — от того, что считается глазами, к тому, что включается. */
-const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = [
-  { feature: "sources", value: (plan) => String(plan.maxSources) },
-  { feature: "topics", value: (plan) => String(plan.maxTopics) },
-  { feature: "digest", value: (plan) => `до ${plan.maxMinutes} мин` },
-  { feature: "cadence", value: (plan) => (plan.everyDays <= 1 ? "каждый день" : "через день") },
-  { feature: "delivery", value: (plan) => FEATURES.delivery.has(plan) },
-  { feature: "posts", value: (plan) => FEATURES.posts.has(plan) },
-  { feature: "x", value: (plan) => plan.kinds.includes("x") },
-  { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
-];
-
-function Value({ value }: { value: string | boolean }) {
+function Value({ value, yes, no }: { value: string | boolean; yes: string; no: string }) {
   if (typeof value === "string") return <>{value}</>;
   return value ? (
-    <CheckIcon className="size-4" aria-label="есть" />
+    <CheckIcon className="size-4" aria-label={yes} />
   ) : (
-    <MinusIcon className="size-4 text-muted-foreground/50" aria-label="нет" />
+    <MinusIcon className="size-4 text-muted-foreground/50" aria-label={no} />
   );
 }
 
-export function PlanTable({ reader, current }: { reader: Reader; current: Plan }) {
+export async function PlanTable({ reader, current }: { reader: Reader; current: Plan }) {
+  const t = await getDict();
+  // Дата отмены/продления форматируется под язык интерфейса, а не всегда
+  // по-русски: иначе на английском экране число выглядело бы чужим форматом
+  // рядом со своим текстом.
+  const dateLocale = (await currentLocale()) === "ru" ? "ru-RU" : "en-US";
   const ends = endingAt(reader);
   const paying = Boolean(reader.subscription_id);
+
+  /** Порядок строк — от того, что считается глазами, к тому, что включается. */
+  const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = [
+    { feature: "sources", value: (plan) => String(plan.maxSources) },
+    { feature: "topics", value: (plan) => String(plan.maxTopics) },
+    { feature: "digest", value: (plan) => t.plans.table.upToMinutes(plan.maxMinutes) },
+    {
+      feature: "cadence",
+      value: (plan) => (plan.everyDays <= 1 ? t.plans.table.dailyCadence : t.plans.table.everyOtherCadence),
+    },
+    { feature: "delivery", value: (plan) => FEATURES.delivery.has(plan) },
+    { feature: "posts", value: (plan) => FEATURES.posts.has(plan) },
+    { feature: "x", value: (plan) => plan.kinds.includes("x") },
+    { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
+  ];
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Подписка</CardTitle>
-        <CardDescription>
-          От тарифа зависит, за сколькими источниками следит лента, сколько у тебя
-          интересов и на сколько минут чтения выпуск.
-        </CardDescription>
+        <CardTitle>{t.plans.table.title}</CardTitle>
+        <CardDescription>{t.plans.table.description}</CardDescription>
       </CardHeader>
 
       <CardContent className="grid gap-3 sm:grid-cols-3">
         {PLAN_IDS.map((id) => {
           const plan = PLANS[id];
           const Icon = ICONS[id];
+          const label = t.plans.label[id];
           const mine = plan.id === current.id;
           const buy = plan.price > current.price ? checkoutUrl(id, reader.id) : null;
           // Понижение и смена карты живут у Lemon Squeezy: своего экрана
@@ -96,19 +103,19 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                     className={cn("size-4", id === "pro" ? "text-amber-500" : "text-muted-foreground")}
                     aria-hidden
                   />
-                  {plan.label}
+                  {label}
                 </span>
-                {action === "manage" ? <Badge variant="secondary">Твой тариф</Badge> : null}
+                {action === "manage" ? <Badge variant="secondary">{t.plans.table.yourPlan}</Badge> : null}
               </div>
 
               <div className="flex items-baseline gap-1">
                 <span className="text-2xl font-medium tabular-nums">${plan.price}</span>
-                <span className="text-xs text-muted-foreground">в месяц</span>
+                <span className="text-xs text-muted-foreground">{t.plans.table.perMonth}</span>
               </div>
 
               {/* Зачем брать — над столбиком чисел: числа отвечают «сколько
                   дают», а решают по «зачем». */}
-              <p className="text-sm font-medium">{plan.tagline}</p>
+              <p className="text-sm font-medium">{t.plans.tagline[id]}</p>
 
               <dl className="flex flex-col gap-1.5 text-sm">
                 {ROWS.map(({ feature, value }) => (
@@ -123,15 +130,15 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                             />
                           }
                         >
-                          {FEATURES[feature].title}
+                          {t.plans.feature[feature].title}
                         </TooltipTrigger>
                         <TooltipContent className="max-w-64">
-                          {FEATURES[feature].what}
+                          {t.plans.feature[feature].what}
                         </TooltipContent>
                       </Tooltip>
                     </dt>
                     <dd className="shrink-0 whitespace-nowrap tabular-nums">
-                      <Value value={value(plan)} />
+                      <Value value={value(plan)} yes={t.plans.table.hasFeature} no={t.plans.table.noFeature} />
                     </dd>
                   </div>
                 ))}
@@ -141,15 +148,15 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                   «перейти» без настроенной оплаты — обещание без продукта. */}
               {action === "manage" ? (
                 <Button size="sm" variant="outline" className="mt-auto" render={<a href={portal!} />}>
-                  Управлять тарифом
+                  {t.plans.table.manage}
                 </Button>
               ) : action === "here" ? (
                 <Button size="sm" variant="outline" className="mt-auto" disabled>
-                  Твой тариф
+                  {t.plans.table.yourPlan}
                 </Button>
               ) : action === "buy" ? (
                 <Button size="sm" className="mt-auto" render={<a href={buy!} />}>
-                  Перейти на «{plan.label}»
+                  {t.plans.moveTo(label)}
                 </Button>
               ) : action === "unpaid" ? (
                 // aria-disabled, а не disabled: выключенная кнопка
@@ -165,10 +172,10 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                       />
                     }
                   >
-                    Перейти на «{plan.label}»
+                    {t.plans.moveTo(label)}
                   </TooltipTrigger>
                   <TooltipContent>
-                    Ссылка на оплату пока не настроена. Напиши боту
+                    {t.plans.table.checkoutNotReady}
                   </TooltipContent>
                 </Tooltip>
               ) : action === "down" ? (
@@ -177,15 +184,15 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                 // только, что кнопка не работает, и уйти с Pro было нечем.
                 <div className="mt-auto flex flex-col gap-1.5">
                   <Button size="sm" variant="outline" render={<a href={portal!} />}>
-                    Перейти на «{plan.label}»
+                    {t.plans.moveTo(label)}
                   </Button>
                   <span className="text-center text-[11px] leading-tight text-muted-foreground">
-                    Изменится после оплаченного периода
+                    {t.plans.table.changesAfterPeriod}
                   </span>
                 </div>
               ) : (
                 <Button size="sm" variant="outline" className="mt-auto" disabled>
-                  Ниже твоего
+                  {t.plans.table.belowYours}
                 </Button>
               )}
             </div>
@@ -199,11 +206,7 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
           не выглядело бездонным. Считаются из PLANS, как и всё выше. */}
       <CardContent className="pt-0">
         <p className="text-xs text-muted-foreground">
-          Время считается по длине наших описаний, а не статей за ссылками.
-          Технический предел выпуска —{" "}
-          {PLAN_IDS.map((id) => PLANS[id].maxItems).join(" / ")} новостей
-          соответственно: если важного за день меньше, выпуск будет короче
-          заказанного, и лента скажет об этом прямо.
+          {t.plans.table.techLimit(PLAN_IDS.map((id) => PLANS[id].maxItems).join(" / "))}
         </p>
       </CardContent>
 
@@ -214,12 +217,12 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
         <CardContent className="pt-0">
           <p className="text-xs text-muted-foreground">
             {ends
-              ? `Подписка отменена, тариф «${current.label}» работает до ${ends.toLocaleDateString("ru-RU")}.`
+              ? t.plans.table.cancelledUntil(t.plans.label[current.id], ends.toLocaleDateString(dateLocale))
               : reader.subscription_status === "past_due"
-                ? "Платёж не прошёл. Попробуем списать ещё раз"
+                ? t.plans.table.pastDue
                 : reader.plan_renews_at
-                  ? `Продлим ${new Date(reader.plan_renews_at).toLocaleDateString("ru-RU")}`
-                  : "Смена карты, отмена и счета на странице управления"}
+                  ? t.plans.table.renews(new Date(reader.plan_renews_at).toLocaleDateString(dateLocale))
+                  : t.plans.table.manageElsewhere}
           </p>
         </CardContent>
       ) : null}

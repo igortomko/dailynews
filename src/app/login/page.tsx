@@ -1,3 +1,5 @@
+import { I18nProvider } from "@/components/i18n-provider";
+import { loginLocale } from "@/lib/i18n/server";
 import { LoginForm } from "./form";
 
 export default async function LoginPage({
@@ -13,7 +15,11 @@ export default async function LoginPage({
   // Suspense и всё равно не пережил бы пререндер.
   return (
     <div className="mx-auto flex min-h-svh max-w-sm items-center px-4">
-      <LoginForm next={next ?? "/"} expired={expired === "1"} bot={bot} />
+      {/* Язык здесь не выбирают, а фиксируют: читателя ещё нет, и спросить
+          некого. loginLocale() всегда отдаёт английский. */}
+      <I18nProvider locale={loginLocale()}>
+        <LoginForm next={next ?? "/"} expired={expired === "1"} bot={bot} />
+      </I18nProvider>
     </div>
   );
 }

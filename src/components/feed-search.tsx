@@ -5,6 +5,7 @@ import { SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchForm } from "@/components/search-form";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Поиск начинается прямо в ленте: нажатие раскрывает поле в шапке, а уводит
@@ -24,6 +25,7 @@ export function SearchButton({
   onOpen: () => void;
   ref?: React.Ref<HTMLButtonElement>;
 }) {
+  const t = useT();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -32,7 +34,7 @@ export function SearchButton({
             ref={ref}
             variant="ghost"
             size="icon-sm"
-            aria-label="Поиск по выпускам"
+            aria-label={t.feed.search.label}
             onClick={onOpen}
             className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
           />
@@ -40,7 +42,7 @@ export function SearchButton({
       >
         <SearchIcon />
       </TooltipTrigger>
-      <TooltipContent>Поиск по прошлым выпускам — клавиша /</TooltipContent>
+      <TooltipContent>{t.feed.search.openHint}</TooltipContent>
     </Tooltip>
   );
 }
@@ -55,6 +57,7 @@ export function SearchButton({
  * из разметки на время ухода нельзя.
  */
 export function SearchField({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT();
   const field = useRef<HTMLInputElement>(null);
 
   // Фокус ставится на раскрытие, а не на появление в разметке: поле теперь
@@ -75,7 +78,9 @@ export function SearchField({ open, onClose }: { open: boolean; onClose: () => v
     <>
       <SearchForm
         inputRef={field}
-        placeholder="Найти в прошлых выпусках: uranium дата-центры"
+        placeholder={t.feed.search.fieldPlaceholder}
+        label={t.feed.search.label}
+        submitLabel={t.feed.search.submit}
         className="flex-1"
         // Escape возвращает ленту на место. Без него поле закрывается только
         // мышью, а открывают его с клавиатуры.
@@ -90,7 +95,7 @@ export function SearchField({ open, onClose }: { open: boolean; onClose: () => v
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label="Закрыть поиск"
+        aria-label={t.feed.search.close}
         onClick={onClose}
         className="size-10 shrink-0 text-muted-foreground/50 transition-colors hover:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
       >
