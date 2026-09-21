@@ -376,12 +376,12 @@ assert.ok(
 // --- список времени против ограничения базы ------------------------------------
 // Форма предлагает список, база держит check. Разъедутся — читатель выберет
 // число, которое база отвергнет, и виноватым будет выглядеть он.
-import { READING_MINUTES as MINUTES_LIST, PLANS as PLANS_FOR_MINUTES } from "../src/lib/plans";
+import { MIN_READING_MINUTES, READING_MINUTES as MINUTES_LIST } from "../src/lib/plans";
 const MAX_MINUTES = MINUTES_LIST[MINUTES_LIST.length - 1];
 assert.ok(
   readFileSync("db/migrations/0040_reading_minutes.sql", "utf8")
-    .includes(`between 3 and ${MAX_MINUTES}`),
-  "потолок списка должен совпадать с ограничением колонки",
+    .includes(`between ${MIN_READING_MINUTES} and ${MAX_MINUTES}`),
+  "границы списка должны совпадать с ограничением колонки",
 );
 assert.ok(
   MINUTES_LIST.every((size, index) => index === 0 || size > MINUTES_LIST[index - 1]),
@@ -391,7 +391,7 @@ assert.ok(
 // читатель нажимает, ему предлагают Pro, он покупает Pro — и вариант
 // по-прежнему недоступен.
 assert.equal(
-  MAX_MINUTES, PLANS_FOR_MINUTES.pro.maxMinutes,
+  MAX_MINUTES, PLANS.pro.maxMinutes,
   "верх списка должен совпадать с потолком самого дорогого тарифа",
 );
 
@@ -887,7 +887,7 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // здесь не падает и не видна: выпуск приходит, просто не на то время,
 // которое заказано, — а узнаётся это от читателя через месяц.
 import {
-  CARD_CHARS, cardChars, cardMinutes, charsPerMinute, digestMinutes, formatMinutes,
+  CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
   formatMinutesLong, isShort, itemsForMinutes, minutesOf,
 } from "../src/lib/reading-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
@@ -939,10 +939,11 @@ assert.ok(
   "незнакомый язык берёт общую мерку, а не роняет счёт",
 );
 
-// Незнакомого языка в базе быть не должно, но колонка — свободный текст,
-// и список форм обязан считаться целиком.
+// Время выпуска — сумма его карточек, и складывает их сама база
+// (`digestProgress`): лента прячет скрытое пальцем вниз, и выпуск,
+// померенный по видимому, объявлял бы себя недобранным.
 assert.equal(
-  digestMinutes([{ title: "а", summary: "б" }, { title: "в", summary: "г" }], DEFAULT_VOICE),
+  minutesOfChars(cardChars("а", "б") + cardChars("в", "г")),
   minutesOfChars(4),
   "время выпуска — сумма его карточек",
 );

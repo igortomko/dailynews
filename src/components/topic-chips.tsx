@@ -55,7 +55,10 @@ export function TopicChips({
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
   // и без приведения полоса показывала бы не тот выпуск, который придёт.
   const [chips, setChipsState] = useState<ChipInput[]>(() =>
-    withCounts(initial, normalize(initial.map((chip) => chip.count), itemsForMinutes(initialMinutes, perCard, plan.maxItems))),
+    // `places` на первом проходе и есть места этого заказа: `minutes`
+    // заведено из `initialMinutes`. Вторая запись той же формулы разошлась бы
+    // с первой на первой же правке.
+    withCounts(initial, normalize(initial.map((chip) => chip.count), places)),
   );
 
   // Скрытые поля меняются без события формы, поэтому о правке сообщаем сами:

@@ -179,7 +179,19 @@ export async function perCardOf(reader: Reader): Promise<number> {
  * от того же места, что и ночью: пул кандидатов к вечеру беднеет, и порог,
  * привязанный к нему, пустил бы в выпуск ровно тех, кого ночью отверг.
  */
-export type DigestProgress = { day: string | null; items: number; chars: number; best: number };
+export type DigestProgress = {
+  day: string | null;
+  items: number;
+  chars: number;
+  best: number;
+  /**
+   * Сколько минут заказывали на этот день, или null у выпусков, которые
+   * заказа не сохранили. Заказ лежит при выпуске, а не берётся из настроек:
+   * настройки — это «сколько хочу сейчас», и мерить ими выпуск недельной
+   * давности значит обещать задним числом. Неизвестен — молчим о недоборе.
+   */
+  target: number | null;
+};
 
 export async function digestProgress(
   readerId: number,
@@ -187,6 +199,7 @@ export async function digestProgress(
 ): Promise<DigestProgress> {
   const [row] = await sql<DigestProgress[]>`
     select d.day::text as day,
+           (d.stats->>'reading_target')::float as target,
            count(di.*)::int as items,
            coalesce(sum(
              char_length(coalesce(di.title, '')) + char_length(coalesce(di.summary, ''))
@@ -198,11 +211,11 @@ export async function digestProgress(
      -- тип по колонке и падает на null там, где null означает «любой день».
      where d.reader_id = ${readerId}
        and (${day}::text is null or d.day = ${day}::date)
-     group by d.day
+     group by d.day, d.stats
      order by d.day desc
      limit 1
   `;
-  return row ?? { day: null, items: 0, chars: 0, best: 0 };
+  return row ?? { day: null, items: 0, chars: 0, best: 0, target: null };
 }
 
 /**

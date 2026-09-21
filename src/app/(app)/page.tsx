@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
-import { getDigestDays, getDigestTarget, getFeed } from "@/lib/queries";
-import { getChannels, getReaderTopics } from "@/lib/readers";
+import { getDigestDays, getFeed } from "@/lib/queries";
+import { digestProgress, getChannels, getReaderTopics } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
-import { digestMinutes } from "@/lib/reading-time";
+import { minutesOf } from "@/lib/reading-time";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
@@ -77,17 +77,15 @@ export default async function FeedPage({
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
   const day = requested && days.includes(requested) ? requested : days[0];
-  const [items, target] = await Promise.all([
+  const [items, digest] = await Promise.all([
     getFeed(reader.id, day),
-    // Заказ того дня, а не сегодняшний: лента листается на девяносто дней
-    // назад, и старый выпуск, померенный нынешним заказом, обвинялся бы
-    // в недоборе, которого не было.
-    getDigestTarget(reader.id, day),
+    // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
+    // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
+    // три карточки, объявлял бы себя недобранным. Заказ берётся того дня,
+    // а не сегодняшний: лента листается на девяносто дней назад.
+    digestProgress(reader.id, day),
   ]);
-
-  // Время считается по тому же тексту, который читатель и читает: заголовок
-  // и описание из выпуска, а не статья за ссылкой.
-  const minutes = digestMinutes(items, effectiveVoice(reader));
+  const minutes = minutesOf(digest.chars, effectiveVoice(reader));
 
   return (
     <FeedTabs
@@ -95,7 +93,7 @@ export default async function FeedPage({
       items={items}
       plan={plan}
       networks={networks}
-      reading={{ minutes, target }}
+      reading={{ minutes, target: digest.target }}
       // key на элементах, уезжающих в проп: шапка ленты ставит left и right
       // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
       // теряет пометку «детей ровно столько, сколько написано». React считает

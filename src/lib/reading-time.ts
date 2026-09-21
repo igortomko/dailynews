@@ -102,23 +102,6 @@ export const cardChars = (title: string, summary: string | null | undefined): nu
 const points = (text: string): number => [...text].length;
 
 /**
- * Время выпуска целиком.
- *
- * Заголовок берётся из самого выпуска (`title_ru`), а не из материала:
- * читатель читает наш, написанный его языком и его сложностью, и он же
- * другой длины. Правило живёт здесь одно на всех, кто это время
- * показывает, — лента и настройки иначе считали бы разное об одном выпуске.
- */
-export const digestMinutes = (
-  cards: { title: string; title_ru?: string | null; summary: string | null }[],
-  voice: Voice,
-): number =>
-  minutesOf(
-    cards.reduce((chars, card) => chars + cardChars(card.title_ru || card.title, card.summary), 0),
-    voice,
-  );
-
-/**
  * Длина карточки, когда своих мерить ещё нечего: медиана по двумстам
  * описаниям живых выпусков (заголовок и описание вместе, 21 сентября 2026).
  * Нужна ровно один раз — у нового читателя, у которого выпусков ещё нет;
@@ -190,4 +173,8 @@ export const isShort = (minutes: number, target: number): boolean =>
  * и два экрана обещают разное про один и тот же выпуск.
  */
 export const shortfallNote = (minutes: number, target: number): string =>
-  `${formatMinutesLong(minutes)} из ${target} — сегодня больше действительно важного нет`;
+  // Цель приходит дробной: она прижимается потолком штук, а он в минутах
+  // не круглый. Округляет сама фраза, а не каждый, кто её показывает:
+  // «из 19.166666666666668» стоило бы ровно одного забытого вызова.
+  `${formatMinutesLong(minutes)} из ${Math.round(target)} — ` +
+  `сегодня больше действительно важного нет`;

@@ -457,7 +457,7 @@ async function main() {
     // бы в недоборе, которого не было: «≈5 из 45 — сегодня больше нечего»
     // на выпуске, который был полон.
     assert.equal(
-      await queries.getDigestTarget(owner.id, today), null,
+      (await readers.digestProgress(owner.id, today)).target, null,
       "выпуск без сохранённого заказа не даёт повода считать недобор",
     );
     await sql`
@@ -466,11 +466,11 @@ async function main() {
        where reader_id = ${second.id} and day = ${today}::date
     `;
     assert.equal(
-      await queries.getDigestTarget(second.id, today), 20,
+      (await readers.digestProgress(second.id, today)).target, 20,
       "заказ дня читается из своего выпуска",
     );
     assert.equal(
-      await queries.getDigestTarget(owner.id, today), null,
+      (await readers.digestProgress(owner.id, today)).target, null,
       "заказ соседа в свой выпуск не приезжает",
     );
     // Время материала, а не день выпуска. Карточка показывала d.day, и все
