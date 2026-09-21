@@ -36,6 +36,7 @@ import {
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
 import { numberCollisions } from "../db/schema-gap";
+import { dropStrayReady } from "../db/free-port";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -2234,6 +2235,67 @@ for (const file of UI_FILES) {
   }
 }
 assert.deepEqual(apologyHits, [], `извинения вместо выхода:\n${apologyHits.join("\n")}`);
+
+// --- лишний ReadyForQuery от PGlite -------------------------------------------
+// Отбивая запрос, PGlite отвечает на `Parse`/`Execute` парой `ErrorResponse`
+// + `ReadyForQuery`, а потом ещё раз `ReadyForQuery` — на `Sync`. Настоящий
+// Postgres шлёт его только на `Sync`. Лишний `Z` закрывал в postgres.js
+// следующий запрос до того, как пришли его строки, и дальше ответы ехали
+// на один: `npm run verify:db` падала в 16 прогонах из 60, каждый раз
+// в другом месте и каждый раз правдоподобно.
+{
+  const frame = (tag: string, body = Buffer.alloc(0)) => {
+    const out = Buffer.alloc(5 + body.length);
+    out.write(tag, 0, "latin1");
+    out.writeInt32BE(4 + body.length, 1);
+    body.copy(out, 5);
+    return out;
+  };
+  const request = (tag: string) => new Uint8Array(frame(tag));
+  const ERROR = frame("E", Buffer.from("Snope\0"));
+  const READY = frame("Z", Buffer.from("I"));
+
+  assert.deepEqual(
+    dropStrayReady(request("E"), Buffer.concat([ERROR, READY])),
+    ERROR,
+    "на Execute ReadyForQuery не приходит — лишний снимается",
+  );
+  assert.deepEqual(
+    dropStrayReady(request("P"), Buffer.concat([ERROR, READY])),
+    ERROR,
+    "на Parse — то же самое: ошибка бывает и там",
+  );
+  // Sync и простой Query — единственные, кому `Z` полагается. Сними его
+  // у них, и клиент не дождётся конца запроса вовсе.
+  assert.deepEqual(
+    dropStrayReady(request("S"), READY), READY,
+    "ответ на Sync не трогаем",
+  );
+  assert.deepEqual(
+    dropStrayReady(request("Q"), Buffer.concat([ERROR, READY])),
+    Buffer.concat([ERROR, READY]),
+    "простой Query закрывается своим ReadyForQuery",
+  );
+  const rows = Buffer.concat([frame("D", Buffer.from("x")), frame("C", Buffer.from("SELECT 1\0"))]);
+  assert.deepEqual(
+    dropStrayReady(request("E"), rows), rows,
+    "успешный ответ не меняется ни на байт",
+  );
+  // Стартовое сообщение идёт без тега: первый байт — старший байт длины.
+  // Его `Z` — это «соединение готово», и без него клиент не подключится.
+  const startup = new Uint8Array(Buffer.from([0, 0, 0, 8, 0, 3, 0, 0]));
+  assert.deepEqual(
+    dropStrayReady(startup, READY), READY,
+    "ответ на стартовое сообщение не трогаем",
+  );
+  // Кадры, которые не разобрались, проходят насквозь: испортить протокол
+  // хуже, чем не чинить.
+  const junk = Buffer.from([0x5a, 0x00, 0x00]);
+  assert.deepEqual(
+    dropStrayReady(request("E"), junk), junk,
+    "неразобранный ответ проходит как есть",
+  );
+}
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
 
