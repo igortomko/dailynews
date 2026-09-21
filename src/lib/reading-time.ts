@@ -14,7 +14,6 @@
  */
 import type { TimeLabels } from "./relative-time";
 import { DEFAULT_COMPLEXITY, SOURCE_LANGUAGE, type Voice } from "./voice";
-import { plural } from "./plural";
 
 /**
  * Знаков в минуту при чтении с пониманием.

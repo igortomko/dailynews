@@ -158,7 +158,11 @@ export function planOf(id: string | null | undefined): Plan {
 type DenialText = {
   kindName: Record<Source["kind"], string>;
   label: Record<PlanId, string>;
-  kindOnlyOn: (kind: string, planNames: string) => string;
+  // Список тарифов приходит списком, а склеивает его словарь. Склейка
+  // здесь была русской — `join("», «")`, — и по-английски давала
+  // «is only on the Plus», «Pro plan». Разделитель — такое же слово,
+  // как остальная фраза, и жить ему там же, где она.
+  kindOnlyOn: (kind: string, planNames: string[]) => string;
   kindUnavailable: (kind: string) => string;
 };
 
@@ -181,7 +185,7 @@ export function kindDenial(plan: Plan, kind: Source["kind"], t: DenialText): str
   if (plan.kinds.includes(kind)) return null;
   const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => t.label[id]);
   return where.length
-    ? t.kindOnlyOn(t.kindName[kind], where.join("», «"))
+    ? t.kindOnlyOn(t.kindName[kind], where)
     : t.kindUnavailable(t.kindName[kind]);
 }
 

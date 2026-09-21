@@ -1824,6 +1824,26 @@ assert.equal(kindDenial(PLANS.pro, "x", RU_DICT.plans), null, "на Pro исто
 assert.ok(kindDenial(PLANS.free, "x", RU_DICT.plans), "на бесплатном X закрыт");
 assert.ok(kindDenial(PLANS.plus, "x", RU_DICT.plans), "на Plus X тоже закрыт");
 assert.match(kindDenial(PLANS.free, "x", RU_DICT.plans)!, /Pro/, "отказ называет тариф, который его открывает");
+// Два тарифа в отказе: сегодня такого вида нет — `x` открыт ровно на Pro, —
+// и ветка склейки данными недостижима. Поэтому спрашивается словарь напрямую:
+// разделитель был русским («», «») в языконезависимом plans.ts и по-английски
+// давал «is only on the Plus», «Pro plan». Достаточно открыть любой вид
+// на двух тарифах в PLANS.kinds, чтобы это вылезло читателю.
+assert.equal(
+  RU_DICT.plans.kindOnlyOn("Посты из X", ["Plus", "Pro"]),
+  "Посты из X — только на тарифе «Plus», «Pro»",
+);
+assert.equal(
+  EN_DICT.plans.kindOnlyOn("Posts from X", ["Plus", "Pro"]),
+  "Posts from X is only on the Plus or Pro plan",
+  "разделитель принадлежит языку, а не пределам тарифа",
+);
+assert.equal(
+  EN_DICT.plans.kindOnlyOn("Posts from X", ["Pro"]),
+  "Posts from X is only on the Pro plan",
+  "один тариф — без разделителя",
+);
+
 for (const freeKind of ["rss", "hackernews", "telegram", "email"] as const) {
   assert.equal(kindDenial(PLANS.free, freeKind, RU_DICT.plans), null, `${freeKind} остаётся на бесплатном тарифе`);
 }

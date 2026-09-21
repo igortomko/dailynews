@@ -29,7 +29,8 @@ export const plans = {
   } satisfies Record<Source["kind"], string>,
 
   /** Отказ по виду источника: собирается в `kindDenial` из lib/plans.ts. */
-  kindOnlyOn: (kind: string, planNames: string) => `${kind} is only on the ${planNames} plan`,
+  kindOnlyOn: (kind: string, planNames: string[]) =>
+    `${kind} is only on the ${planNames.join(" or ")} plan`,
   kindUnavailable: (kind: string) => `${kind} isn't available right now`,
 
   feature: {
