@@ -1,0 +1,23 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-09-21",
+  "referenceRole": "User-provided engraving references used for style only; not redistributed.",
+  "prompts": [
+    {
+      "name": "observer",
+      "prompt": "Use case: illustration-story. Create a square fine engraved editorial illustration for the Reporta news reader brand. Reference image is STYLE ONLY: match its masterful tight tapered curved black hatch strokes, confident dark masses, precise etched highlights and barely visible pale paper grain. Original subject: bust portrait of a thoughtful woman with short wavy hair, wearing a simple collared shirt, looking slightly right while holding an open broadsheet newspaper at chest level. Three-quarter view, charismatic curious expression, contemporary person engraved by a skilled 19th century steel engraver. Face and hands anatomically convincing. Engraving centered with generous blank pale near-white #f5f5f2 background and breathing room. Dense black ink, all tone from linework, no gray airbrush, no sepia. No readable typography, no logo, no worm or snake, no frame, no decorative symbols. Entire head visible. Beautiful editorial art, not clip art or generic vector. Square 1536x1536."
+    },
+    {
+      "name": "attention",
+      "prompt": "Use case: illustration-story. Original square editorial engraving for Reporta, a thoughtful news reading brand. Reference image is STYLE ONLY, reproduce its exceptional quality of very dense tapered curved hatching, crosshatching, deep black masses and delicate off-white paper texture. Subject: close-up anatomically precise human right hand holding a vintage circular magnifying glass over a fan of printed newspaper sheets. The lens magnifies a tiny engraved architectural detail. Newspaper texture is abstract small ink rows, absolutely no readable text. Strong sculptural hand, tight parallel hatch marks curved around fingers, enough large clear white spaces so silhouette reads small. Isolated still life on very pale neutral #f5f5f2 paper, centered composition with generous margins, 19th century book plate meets contemporary editorial. Pure black ink only, no color, no airbrush, no vectors, no worms, no logos, no decorative frame. Square 1536x1536."
+    },
+    {
+      "name": "city",
+      "prompt": "Use case: illustration-story. Landscape 3:2 original copperplate editorial engraving for Reporta news brand. Reference image is STYLE ONLY: precise tapered black engraved hatch strokes, close crosshatching, beautiful large black masses, fine contour work. Subject: dense contemporary city with old masonry apartment buildings, one simple modern tower and rooftop radio aerials, small figures walking at street level, seen from an elevated urban rooftop. Intelligent editorial illustration on very pale neutral #f5f5f2 paper, near-white sky with fine subtle paper grain, no sepia. City occupies bottom 65 percent; upper 35 percent mostly empty pale sky for a heading overlay. Detailed intentional architecture, convincing perspective, museum-quality old book engraving, restrained print texture. Black ink only, no gradients, no gray airbrush, no floating symbols, no logos, no lettering, no worm or snake, no border. Landscape 1536x1024."
+    },
+    {
+      "name": "photo",
+      "prompt": "Use case: photorealistic-natural. Original landscape 3:2 editorial photograph used only as a labelled art-direction sample in the Reporta news brand book. A candid adult reader in a plain light cotton shirt, seated at a metal cafe table outdoors, unfolding a broadsheet newspaper; the newspaper, hands and face all sharp and clearly visible. Sidewalk cafe in a contemporary city, masonry facade with an honest real texture. Compose reader on right third, quiet pale wall on left third suitable for a small brand mark overlay. Eye-level 50mm documentary frame, natural soft daylight, subtle film grain. Black and white silver gelatin tonal quality, high clarity, open shadows, no artificial blur, no gritty heavy filter. Relaxed absorbed expression, no posing for camera, no dramatic lighting, no objects in front of face. No readable newspaper headlines, no brands, no logos, no snake or worm, no watermark. Landscape 1536x1024."
+    }
+  ]
+}
