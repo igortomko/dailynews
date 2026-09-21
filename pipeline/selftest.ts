@@ -3015,10 +3015,10 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.equal(laterBy(4000), "3 дня позже");
 
   // «1 материалов» — та же ловушка, только в новой строке.
-  assert.equal(alsoLine(1), "О том же написали ещё 1 твой источник");
-  assert.equal(alsoLine(3), "О том же написали ещё 3 твоих источника");
-  assert.equal(alsoLine(5), "О том же написали ещё 5 твоих источников");
-  assert.equal(alsoLine(11), "О том же написали ещё 11 твоих источников");
+  assert.equal(alsoLine(1), "Ещё 1 источник");
+  assert.equal(alsoLine(3), "Ещё 3 источника");
+  assert.equal(alsoLine(5), "Ещё 5 источников");
+  assert.equal(alsoLine(11), "Ещё 11 источников");
   assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
   assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
   assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
