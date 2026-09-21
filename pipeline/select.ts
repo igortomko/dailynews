@@ -1,5 +1,6 @@
 import type { Survivor } from "./digest";
 import { composite } from "./score";
+import { flattenDupChains } from "./dedup";
 import type { Axes, Weights } from "../src/lib/types";
 
 /** Тип соединения берём у самого модуля: подпись обязана совпадать с тем, что передаёт прогон. */
@@ -14,6 +15,24 @@ type Db = typeof import("../src/lib/db")["sql"];
  * и годовалый.
  */
 export const WINDOW_DAYS = 2;
+
+/**
+ * Порог слабого материала: доля от лучшего скора дня.
+ *
+ * Выпуск заказывается минутами, и без порога отбор добирал бы норму чем
+ * угодно — до заказанного времени всегда можно дотянуть, если брать всё
+ * подряд. Двадцать минут, набранных хвостом потока, — это те же двадцать
+ * минут и совсем другой продукт.
+ *
+ * Доля, а не число: скор персонален (веса у каждого свои), и абсолютный
+ * порог у второго читателя означал бы другое. Отсчёт от лучшего за день
+ * подстраивается сам — в тихий день высоко не забраться никому.
+ *
+ * Шесть десятых выбраны замером на трёх живых выпусках: отрезается 38%,
+ * 58% и 17% состава. Ниже 0,5 уходит только явный мусор, и правило
+ * перестаёт что-либо значить; выше 0,7 выпуск становится короче вдвое.
+ */
+export const SCORE_FLOOR = 0.6;
 
 export type Candidate = {
   id: number;
@@ -148,11 +167,25 @@ export function pickSurvivors(
   rows: Candidate[],
   weights: Weights,
   targets: Map<number, number>,
-  digestSize: number,
+  limit: number,
+  /**
+   * Лучший скор, уже попавший в сегодняшний выпуск. Нужен на догрузке:
+   * к вечеру пул кандидатов беднеет, и порог, отсчитанный от его остатков,
+   * пустил бы в выпуск ровно тех, кого ночной отбор отверг.
+   */
+  bestToday = 0,
 ): Survivor[] {
-  const byScore = rows
+  const scored = rows
     .map((row) => ({ row, total: composite(row.axes, weights) }))
     .sort((a, b) => b.total - a.total);
+
+  // Отрицательный лучший скор бывает: clickbait идёт с весом −30, и день,
+  // в котором нет ничего, кроме заманух, уходит в минус целиком. Доля
+  // от отрицательного числа больше него самого — порог выбросил бы и лучший
+  // материал тоже, то есть весь выпуск.
+  const best = Math.max(bestToday, scored[0]?.total ?? 0);
+  const floor = best > 0 ? best * SCORE_FLOOR : -Infinity;
+  const byScore = scored.filter(({ total }) => total >= floor);
 
   const seen = new Map<number, number>();
   const queued = byScore.map(({ row, total }) => {
@@ -167,7 +200,7 @@ export function pickSurvivors(
 
   return queued
     .sort((a, b) => a.turn - b.turn || b.total - a.total)
-    .slice(0, digestSize)
+    .slice(0, limit)
     .map(({ row, total }) => ({
       id: row.id,
       title: row.title,
@@ -227,11 +260,27 @@ export async function selectSurvivors(
   readerId: number,
   weights: Weights,
   targets: Map<number, number>,
-  digestSize: number,
+  limit: number,
   sourceIds: number[],
+  bestToday = 0,
 ): Promise<Survivor[]> {
+  // Ключ сюжета `coalesce(dup_of, id)` верен, только пока повтор указывает
+  // прямо на корень. Обеспечивает это выпрямление цепочек, и звать его
+  // из одного ночного прогона мало: досюда доходит и догрузка выпуска
+  // (`fillDigest`), а цепочка может лежать в базе с прошлого раза. Тогда
+  // ключом стала бы середина без оценки, и сюжет снова выпал бы молча.
+  //
+  // Сначала вопрос, потом запись: отбор зовётся на каждого читателя, а после
+  // первого раза выпрямлять уже нечего. Читающий путь не должен писать
+  // в таблицу по разу на читателя ради нуля изменённых строк.
+  const [chained] = await sql<{ id: number }[]>`
+    select c.id from dailynews.items c
+      join dailynews.items p on p.id = c.dup_of
+     where p.dup_of is not null limit 1
+  `;
+  if (chained) await flattenDupChains(sql);
   const survivors = pickSurvivors(
-    await candidates(sql, readerId, sourceIds), weights, targets, digestSize,
+    await candidates(sql, readerId, sourceIds), weights, targets, limit, bestToday,
   );
   // Только выбранным, а не всем кандидатам: лишняя строка в scores — это
   // лишний материал в калибровке и в отдаче источника.

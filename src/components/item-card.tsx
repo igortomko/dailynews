@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   ThumbsUpIcon,
   ThumbsDownIcon,
@@ -23,14 +23,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { relativeTime } from "@/lib/relative-time";
+import { readingTime } from "@/lib/relative-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedCard } from "@/lib/queries";
 import { alsoLine, otherSources, storyLines, storyTitle } from "@/lib/story";
-import { HORIZON, KIND } from "@/lib/axis-labels";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
 const SEEN_MS = 1500;
@@ -64,19 +63,6 @@ function report(
     .catch(() => new Promise((resolve) => setTimeout(resolve, 1500)).then(send))
     .catch((error) => console.warn(`событие «${body.event}» не доехало:`, error));
 }
-
-/**
- * Полная дата для подсказки. «4д» отвечает на «давно ли», но не на «какого
- * числа» — а это разные вопросы, и второй возникает ровно тогда, когда
- * материал обсуждают с кем-то ещё.
- */
-const EXACT = new Intl.DateTimeFormat("ru", {
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
 /**
  * Классы для иконки, которая появляется или уходит по состоянию. Обе (все
@@ -207,14 +193,22 @@ export function ItemCard({
 
   // Считаются источники, а не публикации: источник, повторивший сам себя,
   // «ещё одним источником» не становится, и такой сюжет строки не получает.
+  const minutes = readingTime(item.body_chars);
   const others = otherSources(item.story, item.source_id);
   const lines = others > 0 ? storyLines(item.story) : [];
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
-  const kind = item.axes?.kind?.choice ? KIND[item.axes.kind.choice] : undefined;
-  const horizon = item.axes?.horizon?.choice ? HORIZON[item.axes.horizon.choice] : undefined;
   const clickbait = (item.axes?.clickbait?.noul ?? 0) > 0.6;
+  // Тема — одной строкой вместе с источником и временем чтения.
+  //
+  // Тип материала и горизонт отсюда убраны. «Факт» стоял у 58% карточек
+  // выпуска, «месяцы» — у 44%: метка, которая есть почти у всех, не отличает
+  // карточку от соседней, а слова взяты из нашей шкалы, а не из языка
+  // читателя. В отборе и в «Калибровке» обе оси работают по-прежнему —
+  // там значения стоят рядом друг с другом и сравниваются. В строке
+  // остаётся метка, которая сообщает об отклонении, — «кликбейт» выше.
+  const topic = showTopic ? item.topic_label : null;
 
   if (vote === "down") {
     return (
@@ -240,70 +234,96 @@ export function ItemCard({
     );
   }
 
+  /**
+   * Строка над заголовком: издание, метка кликбейта, время чтения и тема.
+   *
+   * Списком, а не четырьмя подряд стоящими условиями в разметке: между
+   * кусками стоит разделитель, а он нужен только между существующими.
+   * Пришитый к самому куску, он вылезал бы первым символом строки у любого
+   * материала без ссылки на издание.
+   */
+  const meta = [
+    {
+      key: "source",
+      node: site ? (
+        <a
+          href={site}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
+        >
+          {item.source_label}
+        </a>
+      ) : (
+        <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
+          {item.source_label}
+        </span>
+      ),
+    },
+    // Метка стоит вплотную к источнику, а не за метаданными: место под время
+    // и тему держится всегда, чтобы строка не дёргалась при наведении, —
+    // и «кликбейт» за этим местом висел в пустоте, оторванный от того,
+    // к чему относится.
+    ...(clickbait
+      ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">кликбейт</span> }]
+      : []),
+    // Время чтения: «открывать ли сейчас» спрашивают раньше и чаще, чем
+    // «про что это». Пусто, когда текста статьи у нас нет: у 124 карточек
+    // из 200 его не бывает, и выдуманное число там было бы неотличимо
+    // от измеренного.
+    ...(minutes ? [{ key: "minutes", node: <span className="shrink-0">{minutes}</span> }] : []),
+    // min-w-0 обязателен: truncate обрезает только то, чему разрешили
+    // сузиться, а гибкий элемент по умолчанию не уже своего содержимого.
+    // Строка в одну линию держала ширину всей карточки, и на телефоне лента
+    // уезжала за край экрана — заголовок и текст обрезались справа,
+    // а докрутить до них было нельзя.
+    ...(topic ? [{ key: "topic", node: <span className="min-w-0 truncate">{topic}</span> }] : []),
+  ];
+
   return (
     <article
       ref={article}
       className="group border-b py-5 transition-opacity duration-150 last:border-0"
     >
-      {/* В покое остаётся только источник. Время, тема и метки нужны,
-          когда уже присматриваешься к материалу, а в списке они тянут
-          строку и спорят с заголовком. Место под них держится всегда,
-          поэтому строка не дёргается при наведении.
-          Разделитель — запятая: точки с пробелами по бокам растягивали
-          ряд сильнее, чем несли смысла.
+      {/* Одна строка, а не две. Пока метаданные проявлялись по наведению,
+          в покое их место занимало время чтения — и получалось два ряда,
+          живущих по разным правилам.
+
+          Времени публикации здесь больше нет. «2д» и «~41 мин» стоят рядом,
+          оба про время и оба про разное: одно — давно ли вышло, второе —
+          сколько читать. Глаз складывает их в одно число и спотыкается.
+          Из двух оставлено то, что отвечает на «открывать ли сейчас».
+          Между кусками — болт: без него «Hacker News ~7 мин AI-инфра»
+          читается одной строкой, в которой издание, время и тема слипаются
+          в чужое название. Точка с пробелами по бокам растягивала бы ряд
+          сильнее, чем несёт смысла, а запятая делала бы его перечислением
+          однородного — чем издание, время и тема не являются.
 
           Шапка во всю ширину карточки, а не внутри текстовой колонки:
           там её правый край упирался в картинку, и кнопки у карточек
           с иллюстрацией и без неё стояли в разных местах. Теперь они
           всегда в правом верхнем углу, а картинка начинается под ними. */}
       <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        {/* Разделитель между кусками, а не пробел: «Hacker News ~7 мин
+            AI-инфра» читается одной строкой, в которой издание, время
+            и тема слипаются в чужое название. Запятая занята внутри
+            последнего куска — темой, типом и горизонтом, — и вторая
+            запятая между кусками сделала бы ряд однородным перечислением
+            того, что однородным не является.
+
+            aria-hidden: диктор и так делает паузу между элементами,
+            а «болт» в речи — мусор. */}
         <span className="flex min-w-0 items-baseline gap-1">
-          {site ? (
-            <a
-              href={site}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="shrink-0 text-[0.75rem] font-medium text-foreground/75 hover:underline"
-            >
-              {item.source_label}
-            </a>
-          ) : (
-            <span className="shrink-0 text-[0.75rem] font-medium text-foreground/75">
-              {item.source_label}
-            </span>
-          )}
-          {/* Метка стоит вплотную к источнику, а не за метаданными:
-              место под время и тему держится всегда, чтобы строка
-              не дёргалась при наведении, — и «кликбейт» за этим местом
-              висел в пустоте, оторванный от того, к чему относится. */}
-          {clickbait ? <span className="shrink-0 text-destructive">кликбейт</span> : null}
-          {/* min-w-0 обязателен: truncate обрезает только то, чему разрешили
-              сузиться, а гибкий элемент по умолчанию не уже своего
-              содержимого. Строка в одну линию держала ширину всей карточки,
-              и на телефоне лента уезжала за край экрана — заголовок и текст
-              обрезались справа, а докрутить до них было нельзя. */}
-          <span className="min-w-0 truncate opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <time
-                    dateTime={new Date(item.published_at).toISOString()}
-                    // Часовой пояс сервера и читателя разные, и точная дата
-                    // на них расходится. Значение читателя верное,
-                    // предупреждение о несовпадении — шум.
-                    suppressHydrationWarning
-                    className="cursor-default"
-                  />
-                }
-              >
-                {relativeTime(item.published_at)}
-              </TooltipTrigger>
-              <TooltipContent>{EXACT.format(new Date(item.published_at))}</TooltipContent>
-            </Tooltip>
-            {[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).length > 0
-              ? `, ${[showTopic ? item.topic_label : null, kind, horizon].filter(Boolean).join(", ")}`
-              : ""}
-          </span>
+{meta.map(({ key, node }, index) => (
+            <Fragment key={key}>
+              {index > 0 ? (
+                <span aria-hidden className="shrink-0 text-muted-foreground/40">
+                  •
+                </span>
+              ) : null}
+              {node}
+            </Fragment>
+          ))}
         </span>
 
         {/* Оценка тоже по наведению: нужна раз на десяток материалов,
@@ -577,7 +597,7 @@ export function ItemCard({
           {/* Работа дедупа, названная вслух. Не «важно» и не «подтверждено»:
               пять изданий, пересказавших один пресс-релиз, ничего
               не подтверждают. Здесь сказано ровно то, что произошло, —
-              Retorta выбрала из них одно и не спрятала остальные. */}
+              Reporta выбрала из них одно и не спрятала остальные. */}
           {others > 0 ? (
             <div className="mt-3">
               <button

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { getDigestDays, getFeed, getStories } from "@/lib/queries";
-import { getChannels, getReaderTopics, readerSources } from "@/lib/readers";
+import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { sourcesForPlan } from "@/lib/plans";
+import { minutesOf } from "@/lib/reading-time";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
@@ -80,7 +81,15 @@ export default async function FeedPage({
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
   const day = requested && days.includes(requested) ? requested : days[0];
-  const feed = await getFeed(reader.id, day);
+  const [feed, digest] = await Promise.all([
+    getFeed(reader.id, day),
+    // Время и заказ — по самому выпуску, а не по тому, что осталось видимым:
+    // лента прячет скрытое пальцем вниз, и выпуск, из которого читатель убрал
+    // три карточки, объявлял бы себя недобранным. Заказ берётся того дня,
+    // а не сегодняшний: лента листается на девяносто дней назад.
+    digestProgress(reader.id, day),
+  ]);
+  const minutes = minutesOf(digest.chars, effectiveVoice(reader));
 
   // Сюжет карточки считается по тем же источникам, по которым собран выпуск:
   // тариф уже учтён, и «твои источники» в раскрытии значит ровно то же, что
@@ -107,6 +116,10 @@ export default async function FeedPage({
       items={items}
       plan={plan}
       networks={networks}
+      // Заказ отдаём только для последнего выпуска: фраза недобора говорит
+      // «сегодня больше действительно важного нет», и на выпуске недельной
+      // давности она рассказывала бы про сегодня, глядя на позавчера.
+      reading={{ minutes, target: day === days[0] ? digest.target : null }}
       // key на элементах, уезжающих в проп: шапка ленты ставит left и right
       // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
       // теряет пометку «детей ровно столько, сколько написано». React считает
