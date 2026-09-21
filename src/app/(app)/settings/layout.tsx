@@ -10,6 +10,7 @@ import { currentReader } from "@/lib/session";
 import { checkoutUrl, effectivePlan } from "@/lib/lemon";
 import { PLAN_IDS } from "@/lib/plans";
 import { PaywallProvider } from "@/components/paywall";
+import { UnsavedGuard } from "@/components/unsaved-guard";
 import { SettingsNav } from "./nav";
 
 /**
@@ -28,6 +29,9 @@ export default async function SettingsLayout({ children }: { children: React.Rea
   ) as Record<string, string>;
   return (
     <PaywallProvider checkout={checkout}>
+      {/* Настройки сохраняются кнопкой, а не сами: уход с несохранённой
+          правкой перехватывается здесь, над всеми разделами сразу. */}
+      <UnsavedGuard />
       <PageHeader
         left={
           <div className="flex items-center gap-2">

@@ -41,13 +41,18 @@ export function ThemeToggle({ className }: { className?: string }) {
         }
       >
         {/* Иконки не подменяются, а перетекают одна в другую: обе лежат
-            в разметке, верхняя поверх нижней. Появляющаяся растёт с 0.25
-            и теряет размытие, уходящая — наоборот. Простое hidden/block
-            даёт скачок, который на переключателе темы особенно заметен:
-            цвет страницы меняется плавно, а иконка щёлкает. */}
+            в разметке, верхняя поверх нижней. Появляющаяся растёт с 0.25,
+            уходящая съёживается. Простое hidden/block даёт скачок, который
+            на переключателе темы особенно заметен: цвет страницы меняется
+            плавно, а иконка щёлкает.
+
+            Размытия в переходе нет. Оно тут стояло и читалось грязью:
+            на значке в шестнадцать пикселей четыре пиксела blur размазывают
+            весь рисунок, и середина перехода выглядит не мягкой, а мыльной.
+            На крупной картинке тот же приём работает, на иконке — нет. */}
         <span className="relative flex size-4 items-center justify-center">
-          <SunIcon className="absolute scale-[0.25] opacity-0 blur-[4px] transition-[opacity,filter,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-100 dark:opacity-100 dark:blur-0" />
-          <MoonIcon className="scale-100 opacity-100 blur-0 transition-[opacity,filter,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-[0.25] dark:opacity-0 dark:blur-[4px]" />
+          <SunIcon className="absolute scale-[0.25] opacity-0 transition-[opacity,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-100 dark:opacity-100" />
+          <MoonIcon className="scale-100 opacity-100 transition-[opacity,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:scale-[0.25] dark:opacity-0" />
         </span>
       </TooltipTrigger>
       {/* Подпись называет то, что будет после нажатия, — как и иконка. */}

@@ -8,8 +8,8 @@ import { PaywallCrown } from "@/components/paywall";
 
 const SECTIONS: { href: string; label: string; feature?: FeatureId }[] = [
   { href: "/settings/personalization", label: "Язык и подача" },
-  { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/sources", label: "Источники" },
+  { href: "/settings/interests", label: "Интересы" },
   { href: "/settings/delivery", label: "Доставка", feature: "delivery" },
   { href: "/settings/channels", label: "Мои площадки", feature: "posts" },
   { href: "/settings/subscription", label: "Подписка" },

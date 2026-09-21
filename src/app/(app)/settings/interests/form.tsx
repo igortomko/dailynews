@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
-import { CheckIcon } from "lucide-react";
 import { saveInterests, type ChipInput } from "@/lib/actions";
 import { TopicChips } from "@/components/topic-chips";
 import { Button } from "@/components/ui/button";
@@ -12,6 +10,7 @@ import type { Plan } from "@/lib/plans";
 import { FieldError, FieldGroup } from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { flushRebuild } from "@/components/rebuild-queue";
+import { useSettingsSave } from "@/components/settings-save";
 
 export function InterestsForm({
   chips,
@@ -29,107 +28,59 @@ export function InterestsForm({
   inToday: number;
   plan: Plan;
 }) {
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [applying, setApplying] = useState(false);
-  // Тронул ли читатель хоть что-то с прошлого нажатия: над нетронутой формой
-  // кнопке нечего делать.
-  const [dirty, setDirty] = useState(false);
-  // Номер последней правки: пересборка идёт минуту-две, и форму за это время
-  // успевают тронуть ещё раз. Кнопку гасим только если с момента нажатия
-  // ничего нового не появилось.
-  const edits = useRef(0);
   const form = useRef<HTMLFormElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
 
-  /** `after` зовётся после записи и только при успехе: пересобирать отвергнутое не за чем. */
-  const save = (after?: () => void) => {
-    const node = form.current;
-    if (!node) return;
-    startTransition(async () => {
-      // Отказ приходит двумя путями: разобранным `{ error }` и исключением
-      // из серверного действия. Оба гасят спиннер здесь — `after` при отказе
-      // не зовётся, и снять его больше некому: кнопка крутилась бы всегда,
-      // а причина не называлась бы вовсе.
-      try {
-        const result = await saveInterests(new FormData(node));
-        if (result?.error) {
-          setError(result.error);
-          setApplying(false);
-          return;
-        }
-      } catch {
-        setError("Не удалось сохранить. Попробуй ещё раз");
-        setApplying(false);
-        return;
-      }
-      setError(null);
-      setSaved(true);
-      after?.();
-    });
-  };
-
-  // Сохраняем сами, с паузой после последней правки: иначе запрос уходил бы
-  // на каждое движение границы. Пауза короткая, но не нулевая — правку,
-  // сделанную и тут же брошенную уходом со страницы, она не спасёт.
-  const schedule = () => {
-    edits.current += 1;
-    setDirty(true);
-    setSaved(false);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(save, 900);
-  };
+  /**
+   * Запись. Промисом, а не колбэком: её ждут двое — кнопка и окно
+   * «сохранить перед уходом», и второму нужен исход, чтобы решить,
+   * уходить ли.
+   */
+  const write = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const node = form.current;
+        if (!node) return resolve(false);
+        startTransition(async () => {
+          // Отказ приходит двумя путями: разобранным `{ error }` и исключением
+          // из серверного действия. Молчать нельзя ни о том, ни о другом.
+          try {
+            const result = await saveInterests(new FormData(node));
+            if (result?.error) {
+              setError(result.error);
+              return resolve(false);
+            }
+          } catch {
+            setError("Не удалось сохранить. Попробуй ещё раз");
+            return resolve(false);
+          }
+          setError(null);
+          resolve(true);
+        });
+      }),
+    [],
+  );
 
   /**
-   * «Сохранить»: дописать недописанное и догрузить сегодняшний выпуск,
-   * если он стал меньше заказанного. Доли тем сегодняшнему выпуску уже
-   * не помогут — он отобран, — и тост об этом честно молчит.
+   * Догрузить сегодняшний выпуск, если он стал короче заказанного. Доли тем
+   * ему уже не помогут — он отобран, — и тост об этом честно молчит.
    */
-  const apply = () => {
-    clearTimeout(timer.current);
-    setApplying(true);
-    const mark = edits.current;
-    save(() => {
-      void flushRebuild(() => router.refresh())
-        .then((outcome) => {
-          const applied = outcome === "done" || outcome === "idle";
-          if (applied && edits.current === mark) setDirty(false);
-        })
-        .catch(() => {})
-        .finally(() => setApplying(false));
-    });
-  };
+  const rebuild = useCallback(() => flushRebuild(() => router.refresh()), [router]);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => {
-    if (!saved) return;
-    const hide = setTimeout(() => setSaved(false), 2000);
-    return () => clearTimeout(hide);
-  }, [saved]);
+  const { dirty, applying, touch, apply } = useSettingsSave(write, rebuild);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Интересы
-          <span
-            aria-live="polite"
-            className={cn(
-              "flex items-center gap-1 text-xs font-normal",
-              saved && !pending ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
-            )}
-          >
-            {pending ? "сохраняю…" : saved ? (<><CheckIcon className="size-3" />сохранено</>) : null}
-          </span>
-        </CardTitle>
+        <CardTitle>Интересы</CardTitle>
         <CardDescription>
           О чём собирать новости. Двигай границы: чем больше доля темы, тем больше новостей по ней.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form ref={form} onChange={schedule} onSubmit={(event) => event.preventDefault()}>
+        <form ref={form} onChange={touch} onSubmit={(event) => event.preventDefault()}>
           <FieldGroup>
             <TopicChips
               initial={chips}
@@ -137,7 +88,7 @@ export function InterestsForm({
               perCard={perCard}
               inToday={inToday}
               plan={plan}
-              onChange={schedule}
+              onChange={touch}
             />
             {error ? <FieldError>{error}</FieldError> : null}
 
