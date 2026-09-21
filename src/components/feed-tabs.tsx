@@ -12,7 +12,10 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { ItemCard } from "@/components/item-card";
 import { SearchButton, SearchField } from "@/components/feed-search";
 import { SearchHints } from "@/components/search-memory";
-import { useT } from "@/components/i18n-provider";
+import { OverviewDialog, SelectionBar } from "@/components/overview";
+import { useLocale, useT } from "@/components/i18n-provider";
+import { blockOf, reconcile, type Overview } from "@/lib/overview";
+import { formatDay } from "@/lib/relative-time";
 import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
@@ -30,7 +33,7 @@ import type { NetworkId } from "@/lib/networks";
  * лишний предмет на экране. Порог в восемь сотен пикселей — примерно
  * две карточки, то есть момент, когда шапка уже ушла.
  */
-function ToTop() {
+function ToTop({ lifted }: { lifted: boolean }) {
   const t = useT();
   const [shown, setShown] = useState(false);
 
@@ -52,14 +55,17 @@ function ToTop() {
             tabIndex={shown ? 0 : -1}
             onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
             className={cn(
-              "fixed right-4 bottom-4 z-20 flex size-10 cursor-pointer items-center justify-center",
+              "fixed right-4 z-20 flex size-10 cursor-pointer items-center justify-center",
+              // Над плашкой выбора, пока она есть: обе живут у нижнего края,
+              // и на узком экране кнопка ложилась бы на её правый край.
+              lifted ? "bottom-20" : "bottom-4",
               // Обратная странице, как тост и подсказка: всё, что лежит
               // поверх ленты, здесь выглядит одинаково. Светлый кружок
               // на светлой странице держался на одной тени и читался как
               // случайное пятно — кнопку было видно, только если знать,
               // что она там.
               "rounded-full bg-foreground text-background shadow-(--shadow-border)",
-              "transition-[opacity,scale] duration-200 active:scale-[0.96] hover:opacity-90",
+              "transition-[opacity,scale,bottom] duration-200 active:scale-[0.96] hover:opacity-90",
               shown ? "scale-100 opacity-100" : "pointer-events-none scale-90 opacity-0",
             )}
           />
@@ -101,7 +107,23 @@ const layerClass = (shown: boolean, from: "above" | "below", extra?: string) =>
     extra,
   );
 
+/**
+ * Выбор карточек и черновик обзора — одно состояние, привязанное к дню.
+ *
+ * `day` лежит внутри, а не снаружи: шапка одна на все даты, и React
+ * сохраняет её состояние при переходе к другому выпуску. Выбор,
+ * сделанный вчера, у сегодняшнего выпуска ничего не значит — карточек
+ * с такими id здесь нет, а черновик говорил бы про другой день. Поэтому
+ * состояние с чужой датой сбрасывается при первом же рендере нового дня.
+ *
+ * `ids` — порядок нажатий, и он ни на что не влияет: список выбранного
+ * собирается фильтром по ленте, то есть порядком выпуска. Черновик
+ * заводится при первом открытии редактора и дальше живёт с правками.
+ */
+type Picked = { day: string; ids: number[]; draft: Overview | null };
+
 export function FeedTabs({
+  day,
   topics,
   items,
   hidden,
@@ -111,6 +133,8 @@ export function FeedTabs({
   left,
   right,
 }: {
+  /** День выпуска: к нему привязаны выбор карточек и черновик обзора. */
+  day: string;
   topics: ReaderTopic[];
   items: FeedCard[];
   /**
@@ -135,6 +159,7 @@ export function FeedTabs({
   right: React.ReactNode;
 }) {
   const t = useT();
+  const locale = useLocale();
   // «Прочее» показывается вкладкой, только если туда что-то попало: пустая
   // вкладка сообщает о системе, а не о новостях.
   const hasOther = items.some((item) => !item.topic_slug);
@@ -158,6 +183,62 @@ export function FeedTabs({
   const trigger = useRef<HTMLButtonElement>(null);
   const wasSearching = useRef(false);
 
+  const blank = (): Picked => ({ day, ids: [], draft: null });
+  const [picked, setPicked] = useState<Picked>(blank);
+  const [editing, setEditing] = useState(false);
+  // Сброс прямо в рендере, а не в эффекте: React перерисует до фиксации,
+  // и ни один кадр с чужим выбором на экран не попадёт. Вернувшийся
+  // на ту же дату начинает с чистого листа — «очищается» значит очищается,
+  // а не «прячется до возвращения». Ниже по коду `picked` уже этого дня:
+  // обработчики про чужую дату не знают и знать не должны.
+  if (picked.day !== day) {
+    setPicked(blank());
+    setEditing(false);
+  }
+  // Только то, что есть в ленте сейчас: карточка, скрытая или ушедшая
+  // с обновлением данных, из выбора выпадает сама — в порядке выпуска.
+  const chosen = items.filter((item) => picked.ids.includes(item.id));
+  const selectedIds = new Set(chosen.map((item) => item.id));
+
+  const pick = (id: number, next: boolean) =>
+    setPicked((prev) => ({
+      ...prev,
+      ids: next
+        ? prev.ids.includes(id)
+          ? prev.ids
+          : [...prev.ids, id]
+        : prev.ids.filter((entry) => entry !== id),
+    }));
+
+  // Очистка снимает выбор, но не стирает заголовок и вступление: набранное
+  // руками дороже трёх галочек, и его нечем вернуть.
+  const clear = () =>
+    setPicked((prev) => ({
+      ...prev,
+      ids: [],
+      draft: prev.draft && { ...prev.draft, blocks: [] },
+    }));
+
+  // Черновик сводится с выбором при открытии: оставшиеся блоки — со своими
+  // правками и в своём порядке, новые — в конец, снятые — вон.
+  const openEditor = () => {
+    setPicked((prev) => {
+      const blocks = reconcile(prev.draft?.blocks ?? [], chosen.map(blockOf));
+      const draft = prev.draft
+        ? { ...prev.draft, blocks }
+        : { title: t.feed.overview.defaultTitle(formatDay(day, locale)), intro: "", blocks };
+      return { ...prev, ids: blocks.map((block) => block.id), draft };
+    });
+    setEditing(true);
+  };
+
+  // Пока редактор открыт, состав блоков — единственная правда о выборе:
+  // убранный блок снимает галочку с карточки.
+  const editDraft = (draft: Overview) =>
+    setPicked((prev) => ({ ...prev, ids: draft.blocks.map((block) => block.id), draft }));
+
+  const selecting = chosen.length > 0;
+
   // Закрытое поле возвращает фокус туда, откуда его открыли. Иначе Escape
   // роняет фокус в начало страницы, и клавиатурный читатель начинает путь
   // заново — при том что закрыть поле он попросил, а не уйти из шапки.
@@ -175,12 +256,19 @@ export function FeedTabs({
    * клавиша отдаёт «о», «л» и «щ», и проверка по букве молча перестаёт
    * работать ровно у того, кто читает ленту по-русски.
    *
+   * x отмечает материал под фокусом для обзора — та же клавиша, что
+   * в почте выбирает письмо. Нажимается сам чекбокс карточки, а не
+   * состояние напрямую: у него уже есть и подпись, и отчёт диктору.
+   *
    * «/» раскрывает поиск — как везде, где он есть. Правило «не перехватывать
    * набор текста» одно на все клавиши и живёт здесь же: вторая его копия
    * рядом с полем разъехалась бы с этой при первой правке любой из них.
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Пока открыт редактор обзора, лента за ним не слушает: j и k
+      // прокручивали бы её под окном, а x отмечал бы карточку мимо черновика.
+      if (editing) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (
@@ -196,7 +284,7 @@ export function FeedTabs({
         setSearching(true);
         return;
       }
-      if (event.code !== "KeyJ" && event.code !== "KeyK" && event.code !== "KeyO") return;
+      if (!["KeyJ", "KeyK", "KeyO", "KeyX"].includes(event.code)) return;
 
       const panel = document.querySelector('[data-slot="tabs-content"]:not([hidden])');
       const links = [...(panel?.querySelectorAll<HTMLAnchorElement>("article h3 a") ?? [])];
@@ -207,6 +295,15 @@ export function FeedTabs({
         if (current === -1) return;
         event.preventDefault();
         links[current].click();
+        return;
+      }
+      if (event.code === "KeyX") {
+        if (current === -1) return;
+        event.preventDefault();
+        links[current]
+          .closest("article")
+          ?.querySelector<HTMLElement>('[data-slot="checkbox"]')
+          ?.click();
         return;
       }
 
@@ -226,7 +323,7 @@ export function FeedTabs({
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [editing]);
 
   const forTab = (slug: string) =>
     slug === "all"
@@ -353,7 +450,14 @@ export function FeedTabs({
         лента шире экрана — заголовок и текст обрезались справа, и добраться
         до обрезанного было нельзя, горизонтальной прокрутки нет.
       */}
-      <div className="mx-auto w-full max-w-page px-4 py-4 sm:py-6">
+      {/* Снизу — место под плашку выбора, пока она есть: иначе последняя
+          карточка выпуска лежала бы под ней, и дочитать её было бы нельзя. */}
+      <div
+        className={cn(
+          "mx-auto w-full max-w-page px-4 pt-4 sm:pt-6",
+          selecting ? "pb-24" : "pb-4 sm:pb-6",
+        )}
+      >
         {/* Недобор объясняется, а не заметается добором слабого материала.
             Короткий выпуск без единого слова читается как поломка отбора —
             и чинить его читатель пойдёт в настройки, где всё исправно.
@@ -387,8 +491,14 @@ export function FeedTabs({
             /* Наведённая карточка остаётся в полную силу, соседние гаснут:
                глазу не нужно удерживать, на какой он строке. Только на мыши —
                на тапе :hover залипает, и лента осталась бы приглушённой вся,
-               кроме последней тронутой карточки. */
-            className="flex flex-col [@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-25"
+               кроме последней тронутой карточки.
+               Пока идёт выбор — не гаснут: отмеченные карточки надо видеть
+               все разом и сравнивать, а не по одной под курсором. */
+            className={cn(
+              "flex flex-col",
+              !selecting &&
+                "[@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-25",
+            )}
           >
             {items.length === 0 && hidden > 0 ? (
               // Выпуск есть, но исключения закрыли его целиком. Спокойно
@@ -427,6 +537,9 @@ export function FeedTabs({
                     showTopic={tab.slug === "all"}
                     plan={plan}
                     networks={networks}
+                    selected={selectedIds.has(item.id)}
+                    selecting={selecting}
+                    onSelectedChange={(next) => pick(item.id, next)}
                   />
                   {/* Граница прошлого захода. Виденное лежит подряд сверху:
                       ленту читают в том же порядке, в каком она нарисована.
@@ -455,6 +568,8 @@ export function FeedTabs({
                 {t.feed.tabs.kbdBetween},{" "}
                 <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">o</kbd> —{" "}
                 {t.feed.tabs.kbdOpen},{" "}
+                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">x</kbd> —{" "}
+                {t.feed.tabs.kbdOverview},{" "}
                 <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">/</kbd> —{" "}
                 {t.feed.tabs.kbdSearch}
               </p>
@@ -464,7 +579,19 @@ export function FeedTabs({
       })}
         </div>
       </div>
-      <ToTop />
+      <SelectionBar count={chosen.length} onClear={clear} onOpen={openEditor} />
+      {/* Монтируется только с черновиком: до первого «Собрать» ему нечего
+          показывать, а состояние копирования не должно жить зря. */}
+      {picked.draft ? (
+        <OverviewDialog
+          day={day}
+          overview={picked.draft}
+          open={editing}
+          onOpenChange={setEditing}
+          onChange={editDraft}
+        />
+      ) : null}
+      <ToTop lifted={selecting} />
     </Tabs>
   );
 }
