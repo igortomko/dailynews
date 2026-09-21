@@ -94,7 +94,7 @@ export function ChannelsForm({
     toast.success(`Голос собран по ${result.built_from} постам`, {
       description: result.ranked
         ? "Просмотры посчитаны: каркас удачных постов взят из них"
-        : "Статистики у постов нет — собран только голос, без каркаса",
+        : "Статистики у постов нет. Собран только голос, без каркаса",
     });
     if (result.failed.length) toast.warning(result.failed.join("; "));
   };
@@ -105,9 +105,9 @@ export function ChannelsForm({
         <CardHeader>
           <CardTitle>{onboarding ? "Последний шаг: твои площадки" : "Мои площадки"}</CardTitle>
           <CardDescription>
-            Где ты публикуешь — столько табов будет в «Своём мнении». Откуда лента может
-            прочитать твои посты — оттуда берётся голос: публичный канал Telegram, блог
-            по RSS и аккаунт X. LinkedIn и Threads наружу не отдают ничего, для них
+            Сколько площадок отметишь, столько табов будет в «Своём мнении». Голос
+            берём оттуда, откуда можем прочитать твои посты: публичный канал Telegram,
+            блог по RSS и аккаунт X. LinkedIn и Threads наружу не отдают ничего, для них
             вставь несколько постов ниже.
           </CardDescription>
         </CardHeader>
@@ -252,7 +252,7 @@ export function ChannelsForm({
               value={text}
               onChange={(event) => setText(event.target.value)}
               rows={8}
-              placeholder={"Вставь три своих поста, разделяя пустой строкой.\n\nНужно для LinkedIn и Threads: оттуда прочитать посты нельзя."}
+              placeholder={"Вставь 3 своих поста, разделяя пустой строкой.\n\nНужно для LinkedIn и Threads: оттуда прочитать посты нельзя."}
             />
             <FieldDescription>
               Посты разделяются пустой строкой. Просмотров у вставленного нет, поэтому

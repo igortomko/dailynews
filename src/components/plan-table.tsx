@@ -168,7 +168,7 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
                     Перейти на «{plan.label}»
                   </TooltipTrigger>
                   <TooltipContent>
-                    Ссылка на оплату этого тарифа ещё не настроена — напиши боту
+                    Ссылка на оплату пока не настроена. Напиши боту
                   </TooltipContent>
                 </Tooltip>
               ) : action === "down" ? (
@@ -202,10 +202,10 @@ export function PlanTable({ reader, current }: { reader: Reader; current: Plan }
             {ends
               ? `Подписка отменена, тариф «${current.label}» работает до ${ends.toLocaleDateString("ru-RU")}.`
               : reader.subscription_status === "past_due"
-                ? "Платёж не прошёл — попробуем списать ещё раз"
+                ? "Платёж не прошёл. Попробуем списать ещё раз"
                 : reader.plan_renews_at
                   ? `Продлим ${new Date(reader.plan_renews_at).toLocaleDateString("ru-RU")}`
-                  : "Смена карты, отмена и счета — на странице управления"}
+                  : "Смена карты, отмена и счета на странице управления"}
           </p>
         </CardContent>
       ) : null}

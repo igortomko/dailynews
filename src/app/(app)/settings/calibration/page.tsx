@@ -54,7 +54,7 @@ export default async function CalibrationPage() {
         </AlertTitle>
         <AlertDescription>
           Важно не само число, а растёт ли оно сверху вниз. Если новости с высокой
-          оценкой открываются не чаще прочих — лента пока угадывает.
+          оценкой открываются не чаще прочих, лента пока угадывает.
         </AlertDescription>
       </Alert>
 
@@ -114,7 +114,7 @@ export default async function CalibrationPage() {
         <CardHeader>
           <CardTitle>Насколько лента была уверена</CardTitle>
           <CardDescription>
-            Если уверенность не совпадает с открытиями — лента смотрит не на то
+            Если уверенность не совпадает с открытиями, лента смотрит не на то
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
