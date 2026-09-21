@@ -31,6 +31,10 @@ export function InterestsForm({
   // Тронул ли читатель хоть что-то с прошлого нажатия: над нетронутой формой
   // кнопке нечего делать.
   const [dirty, setDirty] = useState(false);
+  // Номер последней правки: пересборка идёт минуту-две, и форму за это время
+  // успевают тронуть ещё раз. Кнопку гасим только если с момента нажатия
+  // ничего нового не появилось.
+  const edits = useRef(0);
   const form = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
@@ -66,6 +70,7 @@ export function InterestsForm({
   // на каждое движение границы. Пауза короткая, но не нулевая — правку,
   // сделанную и тут же брошенную уходом со страницы, она не спасёт.
   const schedule = () => {
+    edits.current += 1;
     setDirty(true);
     setSaved(false);
     clearTimeout(timer.current);
@@ -80,10 +85,12 @@ export function InterestsForm({
   const apply = () => {
     clearTimeout(timer.current);
     setApplying(true);
+    const mark = edits.current;
     save(() => {
       void flushRebuild(() => router.refresh())
         .then((outcome) => {
-          if (outcome === "done" || outcome === "idle") setDirty(false);
+          const applied = outcome === "done" || outcome === "idle";
+          if (applied && edits.current === mark) setDirty(false);
         })
         .catch(() => {})
         .finally(() => setApplying(false));

@@ -48,8 +48,6 @@ let running = false;
  */
 const HOLD_MS = 5000;
 
-const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
-
 /** Чем кончился заход: по этому форма решает, гасить ли кнопку. */
 export type Outcome = "done" | "cancelled" | "idle" | "busy" | "failed";
 
@@ -85,6 +83,11 @@ export async function flushRebuild(refresh: () => void): Promise<Outcome> {
 }
 
 async function run(kinds: Kind[], refresh: () => void): Promise<Outcome> {
+  // Окно отмены стоит здесь, а не в `flushRebuild`, и достаётся обоим входам
+  // намеренно. Уход из настроек запускает платную работу, которую читатель
+  // не просил вслух: кнопку он нажал, а тут просто закрыл раздел. Окно даёт
+  // ему те же 5 секунд, чтобы сказать «не надо».
+  //
   // Сторож выхода зовёт `run` мимо кнопки, и звать его во время работы
   // нельзя: правки подождут следующего запуска, а не поедут вторым вызовом.
   if (running) {
@@ -174,7 +177,7 @@ async function run(kinds: Kind[], refresh: () => void): Promise<Outcome> {
     refresh();
     return "done";
   } catch (error) {
-    toast.dismiss(holdId);
+    // Тост окна к этому моменту уже закрыт: сюда попадают только из работы.
     if (workId !== undefined) toast.dismiss(workId);
     toast.error(error instanceof Error ? error.message : "Не удалось обновить выпуск");
     // Недоделанное возвращаем в очередь: списанная работа, которая

@@ -163,14 +163,14 @@ export default async function AboutPage() {
                   <span className="tabular-nums text-muted-foreground">
                     {String(from)} → <b className="font-medium text-foreground">{String(to)}</b>
                   </span>
-                  <span className="text-muted-foreground">— {why}</span>
+                  <span className="text-muted-foreground">{why}</span>
                 </div>
               ))}
               {!plan.kinds.includes("x") && next.kinds.includes("x") ? (
                 <div className="flex flex-wrap items-baseline gap-x-3">
                   <span className="font-medium">Посты из X</span>
                   <span className="text-muted-foreground">
-                    X берёт деньги за доступ, поэтому они только здесь
+                    доступ к ним платный, поэтому они только здесь
                   </span>
                 </div>
               ) : null}

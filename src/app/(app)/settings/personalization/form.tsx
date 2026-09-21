@@ -49,6 +49,11 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   // формой отвечала бы «настройки сохранены» на форму, которую не меняли:
   // ответ на действие, которого не было.
   const [dirty, setDirty] = useState(false);
+  // Номер последней правки. Пересборка идёт минуту-две, и тост зовёт читать
+  // дальше: за это время форму успевают тронуть ещё раз. Гасить кнопку
+  // по итогу прошлого захода нельзя — новая правка осталась бы без способа
+  // доехать до выпуска, а кнопка сказала бы, что всё сделано.
+  const edits = useRef(0);
   const form = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
@@ -113,6 +118,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         // оплачивать переписывание того же текста тем же голосом.
         written.current = now;
         queueRebuild("voice");
+      } else {
+        // Покрутил и вернул как было — это не правка. Кнопка над формой,
+        // равной сохранённому, обещала бы работу, которой нет.
+        setDirty(false);
       }
       after?.(true);
     });
@@ -124,6 +133,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   // рядом отвечает не за запись, а за то, чтобы сегодняшний выпуск
   // переписался прямо сейчас, не дожидаясь полуночи.
   const schedule = () => {
+    edits.current += 1;
     setDirty(true);
     setSaved(false);
     clearTimeout(timer.current);
@@ -134,6 +144,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   const apply = () => {
     clearTimeout(timer.current);
     setApplying(true);
+    const mark = edits.current;
     save((ok) => {
       if (!ok) {
         setApplying(false);
@@ -143,7 +154,9 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         .then((outcome) => {
           // Отменил или не дождался прошлого захода — кнопка остаётся живой:
           // нажать ещё раз тут единственный способ довести дело до конца.
-          if (outcome === "done" || outcome === "idle") setDirty(false);
+          // Правка, сделанная пока шла работа, тоже держит её живой.
+          const applied = outcome === "done" || outcome === "idle";
+          if (applied && edits.current === mark) setDirty(false);
         })
         .catch(() => {})
         .finally(() => setApplying(false));
