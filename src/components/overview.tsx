@@ -98,16 +98,14 @@ function Bar({
         role="toolbar"
         aria-label={t.toolbarLabel}
         className={cn(
-          "pointer-events-auto flex max-w-page flex-wrap items-center justify-end gap-1 rounded-2xl py-1.5 pr-1.5 pl-4",
+          "pointer-events-auto flex max-w-page flex-wrap items-center justify-end gap-1 rounded-2xl p-1.5",
           "bg-foreground text-background shadow-lg shadow-black/20",
           "animate-in fade-in-0 slide-in-from-bottom-2 duration-200 motion-reduce:animate-none",
         )}
       >
-        {/* Живая область: число меняется от каждого нажатия, и диктору
-            об этом надо сказать без перевода фокуса на плашку. */}
-        <span aria-live="polite" className="mr-1 text-sm font-medium tabular-nums">
-          {t.selected(selected)}
-        </span>
+        {/* Крестик с краю, а не между числом и главной кнопкой: рядом
+            с «Собрать» промах пальцем снимал бы весь выбор, а с противоположного
+            конца плашки он читается как «отмена» — там, где её ищут. */}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -123,6 +121,11 @@ function Bar({
           </TooltipTrigger>
           <TooltipContent>{t.clearTooltip}</TooltipContent>
         </Tooltip>
+        {/* Живая область: число меняется от каждого нажатия, и диктору
+            об этом надо сказать без перевода фокуса на плашку. */}
+        <span aria-live="polite" className="mx-1.5 text-sm font-medium tabular-nums">
+          {t.selected(selected)}
+        </span>
         {/* «Собрать», а не «написать»: текст уже готов, модель здесь
             не зовётся, и обещать её работу было бы неправдой. */}
         <button
