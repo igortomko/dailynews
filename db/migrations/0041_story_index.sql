@@ -16,5 +16,5 @@
 create index if not exists items_story_idx
   on dailynews.items ((coalesce(dup_of, id)));
 
-insert into dailynews.migrations (name) values ('0040_story_index')
+insert into dailynews.migrations (name) values ('0041_story_index')
   on conflict (name) do nothing;
