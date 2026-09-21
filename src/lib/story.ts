@@ -91,7 +91,14 @@ export function storyLines(publications: Publication[]): StoryLine[] {
     (a, b) => timeOf(a.published_at) - timeOf(b.published_at) || a.item_id - b.item_id,
   );
 
-  const origin = ordered.find((row) => !isDiscussion(row.kind));
+  // Первоисточник — самое раннее издание с известным временем. Без этого
+  // условия им становился бы первый попавшийся: timeOf отдаёт бесконечность
+  // на пустую дату, сортировка сваливает такие строки в конец в порядке id,
+  // и у сюжета, где даты нет ни у кого (не разобранная дата в RSS, письмо),
+  // кто-то произвольный объявлялся бы написавшим раньше всех.
+  const origin = ordered.find(
+    (row) => !isDiscussion(row.kind) && Number.isFinite(timeOf(row.published_at)),
+  );
   const base = origin ? timeOf(origin.published_at) : null;
 
   return ordered.map((row) => {
@@ -103,8 +110,8 @@ export function storyLines(publications: Publication[]): StoryLine[] {
     }
     if (row === origin) return { ...row, note: "первоисточник" };
     // База — самое раннее издание, поэтому разрыв не бывает отрицательным.
-    // Времени нет вовсе (брошенное вручную) — пометки нет: выдуманное
-    // «тогда же» врало бы ровно там, где мы ничего не знаем.
+    // Времени нет вовсе — пометки нет: выдуманное «тогда же» врало бы ровно
+    // там, где мы ничего не знаем.
     const at = timeOf(row.published_at);
     if (base === null || !Number.isFinite(at)) return { ...row, note: "" };
     return { ...row, note: laterBy(Math.round((at - base) / 60_000)) };

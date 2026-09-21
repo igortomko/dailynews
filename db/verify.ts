@@ -97,7 +97,7 @@ async function main() {
   await assertOwn(local, async (text) => (await sql.unsafe(text))[0] as { token?: string });
   const queries = await import("../src/lib/queries");
   const readers = await import("../src/lib/readers");
-  const { markDuplicates, shortlist } = await import("../pipeline/dedup");
+  const { flattenDupChains, markDuplicates, shortlist } = await import("../pipeline/dedup");
   const { candidates, selectSurvivors, targetsOf } = await import("../pipeline/select");
   const { normalizeTitle, canonUrl } = await import("../pipeline/normalize");
   const { DEFAULT_WEIGHTS } = await import("../src/lib/types");
@@ -1339,15 +1339,43 @@ async function main() {
     );
 
     // Самоповтор: два материала одного источника — это не «ещё один источник».
-    const selfStory = await queries.getStories([source.id], [Number(ids[0])]);
-    assert.equal(selfStory.get(Number(ids[0]))?.length, 2, "повтор того же источника лежит в сюжете");
-    // Number обязателен: sources.id приезжает из bigint строкой, а сюжет
-    // отдаёт source_id числом — «"1" !== 1», и счётчик молча считает свой
-    // же источник чужим. Карточка от этого соврала бы ровно на тех
-    // двенадцати кластерах из шестнадцати, что и есть самоповторы.
+    // Своей парой, а не фикстурами из начала прогона: те собраны для дедупа
+    // и живут своей жизнью, и однажды «длина 2» сломалась бы по причине,
+    // к счётчику источников отношения не имеющей.
+    const selfFirst = await mkItem(mineSource, "same-a", "Same outlet reports the story", 90);
+    const selfSecond = await mkItem(mineSource, "same-b", "Same Outlet Reports The Story!", 45);
+    assert.equal(await markDuplicates(sql, [selfFirst, selfSecond]), 1, "самоповтор должен пометиться");
+    const selfStory = await queries.getStories([mineSource], [selfFirst]);
+    assert.equal(selfStory.get(selfFirst)?.length, 2, "повтор того же источника лежит в сюжете");
     assert.equal(
-      otherSources(selfStory.get(Number(ids[0]))!, Number(source.id)), 0,
+      otherSources(selfStory.get(selfFirst)!, mineSource), 0,
       "источник, повторивший сам себя, строки не даёт",
+    );
+
+    // Цепочка dup_of. Рождается сама: шортлист серой зоны строится до пометок,
+    // и пока отвечает вопрос про дальнее звено, его кандидат успевает стать
+    // повтором. Ключом сюжета тогда становится середина — у неё может
+    // не быть оценки, и материал уходит из отбора молча.
+    const chainRoot = await mkItem(mineSource, "chain-root", "Chain root story", 200);
+    const chainMid = await mkItem(mineSource, "chain-mid", "Chain Root Story!", 150);
+    const chainTail = await mkItem(mineSource, "chain-tail", "Chain root story?", 100);
+    await sql`update dailynews.items set dup_of = ${chainMid} where id = ${chainTail}`;
+    await sql`update dailynews.items set dup_of = ${chainRoot} where id = ${chainMid}`;
+    const [beforeFlatten] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(beforeFlatten.n, 1, "цепочка должна быть заведена — иначе проверка ничего не ловит");
+    assert.equal(await flattenDupChains(sql), 1, "выпрямляется ровно одно звено");
+    const [afterFlatten] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.items c
+        join dailynews.items p on p.id = c.dup_of where p.dup_of is not null
+    `;
+    assert.equal(afterFlatten.n, 0, "после выпрямления повтор указывает только на корень");
+    const chainStory = await queries.getStories([mineSource], [chainRoot]);
+    assert.equal(
+      chainStory.get(chainRoot)?.length, 3,
+      "выпрямленный сюжет собирается целиком, а не делится надвое",
     );
     console.log("  сюжет: чужой оригинал не прячет новость, самоповтор не считается источником");
 
