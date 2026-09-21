@@ -39,7 +39,15 @@ async function main() {
       const written = result.items[0];
       if (!written?.reading) throw new Error('Expected reading document');
       writeFileSync(`${dir}/${item.id}.json`, JSON.stringify(result, null, 2), { mode: 0o600 });
-      if (written.reading.status !== 'verified') { failed++; console.log(JSON.stringify({ item: item.id, status: 'retained-previous' })); return; }
+      if (written.reading.status !== 'verified') {
+        failed++;
+        const updated = await sql`update dailynews.digest_items di set summary=${written.summary},summary_document=${sql.json(written.reading)}
+          from dailynews.digests d where d.id=di.digest_id and d.reader_id=${readerId} and d.id=${digest.id} and di.item_id=${item.id}
+          and btrim(coalesce(di.summary,''))='' and coalesce(di.summary_document->>'status','')<>'verified'
+          returning di.item_id`;
+        console.log(JSON.stringify({ item: item.id, status: updated.length ? 'unavailable' : 'retained-previous' }));
+        return;
+      }
       await sql`update dailynews.digest_items di set title=${written.title_ru},summary=${written.summary},summary_document=${sql.json(written.reading)}
         from dailynews.digests d where d.id=di.digest_id and d.reader_id=${readerId} and d.id=${digest.id} and di.item_id=${item.id}`;
       rewritten++;
