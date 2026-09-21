@@ -275,12 +275,15 @@ export function OverviewDialog({
         initialFocus={(type) => (type === "touch" ? popup.current : true)}
         className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 p-0 sm:max-w-2xl"
       >
-        <DialogHeader className="px-4 pt-4 pb-3">
+        <DialogHeader className="px-4 pt-4 pb-2">
           <DialogTitle>{t.dialogTitle}</DialogTitle>
           <DialogDescription>{t.issueOf(formatDay(day, locale), blocks.length)}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
+        {/* Отступ сверху не декоративный: прокручиваемая область режет всё,
+            что выходит за её край, а кольцо фокуса выходит на три пикселя.
+            Без него у первого поля обводка стояла срезанной сверху. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-1 pb-4">
           <Input
             aria-label={t.titleLabel}
             value={overview.title}
