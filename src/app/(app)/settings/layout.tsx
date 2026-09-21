@@ -52,7 +52,11 @@ export default async function SettingsLayout({ children }: { children: React.Rea
                     // это иконка, а не цель. Так же сделаны шестерёнка
                     // в ленте и переключатель темы рядом.
                     className="size-10 text-muted-foreground hover:text-foreground sm:size-8"
-                    render={<Link href="/" />}
+                    // Лента подгружается заранее, пока правят настройки:
+                    // возвращение — самый частый переход отсюда, и ждать
+                    // ему нечего. Сохранение настроек сбрасывает подгруженное
+                    // само (`revalidatePath`), устаревшая лента не покажется.
+                    render={<Link href="/" prefetch={true} />}
                   />
                 }
               >

@@ -65,8 +65,13 @@ export type FeedItem = {
  * Карточка ленты вместе со своим сюжетом: материал и его повторы
  * в источниках этого читателя. Пустой сюжет — обычный случай: повтор
  * есть у единиц.
+ *
+ * Без осей: карточка читает из восьми одну — кликбейт, — а полный объект
+ * ехал в браузер с каждой из пятидесяти карточек и весил треть полезной
+ * нагрузки ленты (33 КБ из 91). Решение принимает сервер, в браузер уходит
+ * ответ.
  */
-export type FeedCard = FeedItem & { story: Publication[] };
+export type FeedCard = Omit<FeedItem, "axes"> & { story: Publication[]; clickbait: boolean };
 
 export async function getSources(): Promise<Source[]> {
   return sql<Source[]>`
@@ -166,8 +171,13 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
  *
  * Заголовок и описание берутся из digest_items, а не из items: они написаны
  * языком, сложностью и манерой этого читателя.
+ *
+ * День — как он пришёл из адреса, или null вместо «последний». Проверять
+ * день по списку дней до запроса значило бы ждать список, а потом ленту:
+ * два круга до базы вместо одного на каждом показе. Страница сверяет день
+ * с тем же списком уже после и за день, которого нет, спрашивает ещё раз.
  */
-export async function getFeed(readerId: number, day: string): Promise<FeedItem[]> {
+export async function getFeed(readerId: number, day: string | null): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
     select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
            s.label as source_label, s.id as source_id,
@@ -200,12 +210,17 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
       join dailynews.scores sc on sc.item_id = i.id
       join dailynews.sources s on s.id = i.source_id
  left join dailynews.topics t on t.id = sc.topic_id
-     -- Каст обязателен: у нетипизированного параметра Postgres выбирает
-     -- date - date -> integer вместо date - integer -> date.
      -- Один день, а не окно: лента листается датами, и смешивать выпуски
      -- значит показывать вчерашнее как сегодняшнее.
+     --
+     -- Сравнение текстом, а не приведение к date: день приходит из адреса
+     -- непроверенным, и «2026-02-31» из чужой ссылки ронял бы запрос
+     -- вместо пустого ответа. Null — последний выпуск этого читателя.
      where d.reader_id = ${readerId}
-       and d.day = ${day}::date
+       and d.day::text = coalesce(
+         ${day}::text,
+         (select max(x.day)::text from dailynews.digests x where x.reader_id = ${readerId})
+       )
        -- Скрытое рукой не возвращается: иначе палец вниз означал бы
        -- «скрыть до перезагрузки страницы».
        and not exists (
