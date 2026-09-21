@@ -50,8 +50,8 @@ export function queueRebuild(kind: Kind) {
  */
 export async function flushRebuild(refresh: () => void) {
   if (running) {
-    toast.info("Сохранено, но пересборка ещё идёт", {
-      description: "Нажми «Сохранить» снова, когда она закончится",
+    toast.info("Сохранили. Выпуск ещё обновляется", {
+      description: "Нажми «Сохранить» ещё раз, когда закончим",
     });
     return;
   }
@@ -78,7 +78,7 @@ async function run(kinds: Kind[], refresh: () => void) {
   }
   running = true;
 
-  const running_toast = toast.loading("Пересобираю сегодняшний выпуск…", {
+  const running_toast = toast.loading("Обновляю сегодняшний выпуск…", {
     description: "Это минута-две, можно читать дальше",
     duration: Infinity,
   });
@@ -96,31 +96,31 @@ async function run(kinds: Kind[], refresh: () => void) {
     if (kinds.includes("size")) {
       const result = await topUpDigest();
       if (result && "error" in result) throw new Error(result.error);
-      if (result?.added) done.push(`добавлено ${result.added}`);
+      if (result?.added) done.push(`добавили ${result.added}`);
       left.delete("size");
     }
 
     if (kinds.includes("voice")) {
       const result = await rewriteDigest();
       if (result && "error" in result) throw new Error(result.error);
-      if (result?.rewritten) done.push(`переписано ${result.rewritten}`);
+      if (result?.rewritten) done.push(`переписали ${result.rewritten}`);
       left.delete("voice");
     }
 
     toast.dismiss(running_toast);
     if (done.length === 0) {
-      toast.info("Выпуск и так соответствует настройкам", {
-        description: "Следующие придут с новыми",
+      toast.info("Сегодняшний выпуск уже такой", {
+        description: "Следующие придут с новыми настройками",
       });
       return;
     }
-    toast.success(`Сегодняшний выпуск пересобран: ${done.join(", ")}`, {
+    toast.success(`Сегодняшний выпуск обновили: ${done.join(", ")}`, {
       description: "Следующие соберутся по новым настройкам",
     });
     refresh();
   } catch (error) {
     toast.dismiss(running_toast);
-    toast.error(error instanceof Error ? error.message : "Пересобрать не вышло");
+    toast.error(error instanceof Error ? error.message : "Не удалось обновить выпуск");
     // Недоделанное возвращаем в очередь: списанная работа, которая
     // не сделалась, — это отказ, похожий на успех. Второе «Сохранить»
     // отвечало бы «настройки сохранены», а выпуск остался бы прежним.

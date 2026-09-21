@@ -49,7 +49,7 @@ export function InterestsForm({
           return;
         }
       } catch {
-        setError("Сохранить не вышло — попробуй ещё раз");
+        setError("Не удалось сохранить. Попробуй ещё раз");
         setApplying(false);
         return;
       }
@@ -106,7 +106,7 @@ export function InterestsForm({
           </span>
         </CardTitle>
         <CardDescription>
-          О чём собирать новости. Чем больше доля темы — тем больше новостей по ней в выпуске.
+          О чём собирать новости. Чем больше доля темы, тем больше новостей по ней.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -122,12 +122,21 @@ export function InterestsForm({
             {error ? <FieldError>{error}</FieldError> : null}
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" disabled={applying} className="self-start" onClick={apply}>
+              <Button
+                type="button"
+                size="lg"
+                disabled={applying}
+                // Заметно крупнее остальных кнопок экрана: это единственное
+                // действие, ради которого сюда пришли, а в ряду одинаковых
+                // оно читалось как ещё одна настройка.
+                className="h-11 self-start px-6 text-base"
+                onClick={apply}
+              >
                 {applying ? <Spinner data-icon="inline-start" /> : null}
                 Сохранить
               </Button>
               <span className="text-xs text-muted-foreground">
-                Новые доли работают со следующего выпуска, увеличенный размер догрузим сегодня
+                Доли начнут работать со следующего выпуска. Если добавил новостей, догрузим сегодня.
               </span>
             </div>
           </FieldGroup>

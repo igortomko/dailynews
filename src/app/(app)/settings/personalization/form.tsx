@@ -21,7 +21,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   COMPLEXITY, LANGUAGES, DEFAULT_COMPLEXITY, DEFAULT_STYLE, STYLES,
-  complexityAt, SOURCE_LANGUAGE,
+  complexityAt, flagOf, SOURCE_LANGUAGE,
 } from "@/lib/voice";
 import type { Reader } from "@/lib/types";
 import { FEATURES, type Plan } from "@/lib/plans";
@@ -74,7 +74,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
       try {
         await savePersonalization(data);
       } catch {
-        toast.error("Сохранить не вышло — попробуй ещё раз");
+        toast.error("Не удалось сохранить. Попробуй ещё раз");
         after?.(false);
         return;
       }
@@ -160,10 +160,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         <CardDescription>
           {first
             ? "Скажи, на каком языке и как писать новости. Интересы выберешь следующим шагом."
-            : // Не «как мы подбираем»: отбор здесь ни при чём — он идёт
+            : // Не «как мы подбираем»: отбор здесь ни при чём, он идёт
               // по интересам и оценкам, общим для всех. Обещать на этом
               // экране влияние на подбор значит обещать то, чего нет.
-              "Настрой, на каком языке и как написан твой выпуск. О чём он — в «Интересах»."}
+              "На каком языке и как написан твой выпуск. О чём он, выбираешь в «Интересах»."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -200,12 +200,24 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     показывает, за что именно платить. Значение при этом
                     не меняется: окно открывается вместо него. */}
                 <SelectTrigger id="language" className="w-full">
-                  <SelectValue>{language}</SelectValue>
+                  <SelectValue>
+                    <span className="flex items-center gap-2">
+                      <span aria-hidden>{flagOf(language)}</span>
+                      {language}
+                    </span>
+                  </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
+                {/* Обычный выпадающий список, а не список, подтянутый выбранным
+                    пунктом к полю: на шестнадцати языках он растягивался
+                    на весь экран и закрывал карточку целиком. Высота ограничена,
+                    остальное прокручивается. */}
+                <SelectContent alignItemWithTrigger={false} className="max-h-72">
                   {(LANGUAGES.includes(language) ? LANGUAGES : [language, ...LANGUAGES]).map((entry) => (
                     <SelectItem key={entry} value={entry}>
-                      {entry}
+                      <span className="flex items-center gap-2">
+                        <span aria-hidden>{flagOf(entry)}</span>
+                        {entry}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -219,7 +231,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
               <FieldDescription>
                 {translates
                   ? "Источники остаются на своих языках, мы переводим и адаптируем."
-                  : "Выпуск приходит на языке источника — перевод есть на «Plus» и «Pro»."}
+                  : "Выпуск приходит на языке источника. Перевод есть на «Plus» и «Pro»."}
               </FieldDescription>
             </Field>
 
@@ -256,10 +268,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
 
             <Field>
               <FieldLabel>Манера подачи</FieldLabel>
-              {/* Четыре варианта видны сразу, и каждый — с первой фразой
-                  описания: «нейтрально и без оценок» обещает, а «Компания
-                  выпустила новую модель…» показывает. За списком они прячутся
-                  по одному, и сравнить манеры нельзя, не открыв его дважды. */}
+              {/* Четыре варианта видны сразу и выделяются так же, как деления
+                  сложности над ними: разная заливка у двух соседних групп
+                  читается как два разных элемента, и выбранное в одной
+                  перестаёт быть похоже на выбранное в другой. */}
               <ToggleGroup
                 aria-label="Манера подачи"
                 value={[style]}
@@ -275,29 +287,12 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   <ToggleGroupItem
                     key={entry.key}
                     value={entry.key}
-                    // Выбранная карточка остаётся светлой и берёт границу:
-                    // залить её фоном нельзя — тем же фоном набран пример
-                    // внутри, и он бы исчез ровно у выбранной манеры.
-                    //
-                    // Выбор ловится по `aria-pressed`: `data-state=on` базовый
-                    // компонент не пишет вовсе, и правило по нему не сработало
-                    // бы никогда — карточка выглядела бы невыбранной, а форма
-                    // при этом сохраняла бы выбранное.
-                    className={cn(
-                      "h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal",
-                      "aria-pressed:border-foreground/50 aria-pressed:shadow-sm",
-                      "aria-pressed:bg-card hover:aria-pressed:bg-card",
-                    )}
+                    className="h-auto flex-col items-start justify-start gap-1 p-3 text-left whitespace-normal"
                   >
                     <span className="font-medium">{entry.label}</span>
                     <span className="text-xs leading-snug font-normal text-muted-foreground">
                       {entry.hint}
                     </span>
-                    {entry.example ? (
-                      <span className="mt-1 w-full rounded-md bg-foreground/5 px-2 py-1.5 text-[11px] leading-snug font-normal text-muted-foreground">
-                        Например: «{entry.example}»
-                      </span>
-                    ) : null}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
@@ -314,11 +309,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 placeholder="Чем занимаешься, что за продукт, где живёшь и какие новости тебе особенно интересны"
               />
               {/* Про отбор здесь не обещаем: эта строка уходит только в промпт
-                  описаний. Зато от неё зависит связь с читателем — самая
-                  слабая ось в измерении качества. */}
+                  описаний. Зато от неё зависит связь с читателем, самая слабая
+                  ось в измерении качества. */}
               <FieldDescription>
-                Отсюда берётся связь с тобой: чем конкретнее, тем точнее описания
-                объясняют, что тебе с этой новостью делать.
+                Чем подробнее напишешь, тем точнее объясним, чем новость важна тебе.
               </FieldDescription>
             </Field>
 
@@ -342,12 +336,21 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
               </Button>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="button" disabled={applying} className="self-start" onClick={apply}>
+                <Button
+                  type="button"
+                  size="lg"
+                  disabled={applying}
+                  // Заметно крупнее остальных кнопок экрана: это единственное
+                  // действие, ради которого сюда пришли, а в ряду одинаковых
+                  // оно читалось как ещё одна настройка.
+                  className="h-11 self-start px-6 text-base"
+                  onClick={apply}
+                >
                   {applying ? <Spinner data-icon="inline-start" /> : null}
                   Сохранить
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Изменённый голос применим к сегодняшнему выпуску, следующие придут таким же
+                  Что поменял, применим к сегодняшнему выпуску. Следующие придут уже такими.
                 </span>
               </div>
             )}
