@@ -25,6 +25,7 @@ import {
 } from "../src/lib/reading-time";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
+import { rulesOf } from "../src/lib/rules";
 
 const log = (msg: string) => console.log(msg);
 
@@ -283,6 +284,10 @@ async function runForReader(
     // лучшего среди оставшихся: второй прогон за сутки иначе пустил бы в
     // выпуск ровно тех, кого отверг первый.
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, today.best,
+    // За чем следить и что исключать — тем же правилом, что у первого
+    // выпуска и догрузки: правило, которое работает ночью и не работает
+    // по кнопке, читается как настройка, которая иногда не сохраняется.
+    rulesOf(reader),
   );
   if (survivors.length === 0) {
     log(`  ${name}: свежих материалов нет — пропуск`);

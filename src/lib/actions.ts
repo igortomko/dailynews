@@ -16,9 +16,10 @@ import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
   addReaderSource, deleteChannel, digestProgress, freezeKindleSender, getChannels,
-  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveVoiceCard,
-  saveVoiceSample, spentToday,
+  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules,
+  saveVoiceCard, saveVoiceSample, spentToday,
 } from "./readers";
+import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { asCard, buildVoiceCard, cardFromVoice, readOwnPosts } from "../../pipeline/voice-card";
 import { writePost } from "../../pipeline/post";
@@ -184,10 +185,36 @@ export async function saveInterests(formData: FormData) {
     places,
   );
 
-  await writeTopics(readerId, chips, slugs, counts, minutes, true);
+  // За чем следить и что исключать живут в той же форме: это одно решение
+  // об отборе, и сохраняется оно одной кнопкой. Пределы проверяет сервер —
+  // форму рисует браузер.
+  const rules = readRules(formData);
+  if ("error" in rules) return { error: rules.error };
+
+  await writeTopics(readerId, chips, slugs, counts, minutes, true, rules);
 
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/**
+ * Личные правила из формы. Поля обязаны присутствовать: их рисует та же
+ * форма, что и темы, и пустой список означает «правил нет», а не «поле
+ * забыли» — иначе форма, где поля нет, молча стирала бы список.
+ */
+function readRules(formData: FormData): Rules | { error: string } {
+  const parse = (field: string): unknown => {
+    try {
+      return JSON.parse(String(formData.get(field) ?? "[]"));
+    } catch {
+      return null;
+    }
+  };
+  const follow = cleanRules("follow", parse("follow"));
+  if ("error" in follow) return follow;
+  const exclude = cleanRules("exclude", parse("exclude"));
+  if ("error" in exclude) return exclude;
+  return { follow: follow.rules, exclude: exclude.rules };
 }
 
 
@@ -210,6 +237,8 @@ async function writeTopics(
   counts: number[],
   minutes: number,
   finish: boolean,
+  /** За чем следить и что исключать — в той же транзакции, что и темы. */
+  rules: Rules,
 ): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`
@@ -219,6 +248,7 @@ async function writeTopics(
              updated_at = now()
        where id = ${readerId}
     `;
+    await saveRules(tx, readerId, rules);
 
     const ids: number[] = [];
     for (const [index, chip] of chips.entries()) {
@@ -612,6 +642,9 @@ async function fillDigest(reader: Reader) {
     // среди оставшихся: иначе кнопка «добрать» приносила бы ровно тех,
     // кого ночной отбор отверг, и тем громче, чем чаще на неё нажимать.
     sql, reader.id, reader.weights, targetsOf(topics), missing, mySources, existing.best,
+    // Те же личные правила, что и ночью: первый выпуск и догрузка идут
+    // через эту функцию, и кнопка не должна приносить исключённое.
+    rulesOf(reader),
   );
   if (survivors.length === 0) {
     // Первому выпуску и догрузке нужны разные слова: «больше нет» в ответ
@@ -961,9 +994,21 @@ export async function takeOpinion(postId: number, text: string) {
  * Размер выпуска здесь не спрашивается: на первом экране это третье решение
  * подряд, а тариф и так знает свой. Поменять его можно в «Интересах».
  */
-export async function saveOnboardingInterests(slugs: string[], custom: string[]) {
+export async function saveOnboardingInterests(
+  slugs: string[],
+  custom: string[],
+  // Необязательные блоки первого экрана. Сохраняются здесь же, до сборки
+  // первого выпуска: он собирается на последнем шаге и обязан их учесть.
+  follow: unknown = [],
+  exclude: unknown = [],
+) {
   const reader = await currentReader();
   const plan = effectivePlan(reader);
+
+  const followRules = cleanRules("follow", follow);
+  if ("error" in followRules) return { error: followRules.error };
+  const excludeRules = cleanRules("exclude", exclude);
+  if ("error" in excludeRules) return { error: excludeRules.error };
 
   const picked = slugs
     .map((slug) => starterBySlug.get(slug))
@@ -999,6 +1044,7 @@ export async function saveOnboardingInterests(slugs: string[], custom: string[])
     normalize(chips.map(() => MIN_PER_TOPIC), places),
     minutes,
     false,
+    { follow: followRules.rules, exclude: excludeRules.rules },
   );
   revalidatePath("/", "layout");
   return { ok: true as const };

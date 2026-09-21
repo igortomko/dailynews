@@ -12,6 +12,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { flushRebuild } from "@/components/rebuild-queue";
 import { useSettingsSave } from "@/components/settings-save";
 import { useT } from "@/components/i18n-provider";
+import { NameRules } from "@/components/name-rules";
+import type { Names } from "@/lib/rules";
 
 export function InterestsForm({
   chips,
@@ -19,6 +21,8 @@ export function InterestsForm({
   perCard,
   inToday,
   plan,
+  follow,
+  exclude,
 }: {
   chips: ChipInput[];
   /** Заказ: сколько минут чтения просит читатель. */
@@ -28,6 +32,9 @@ export function InterestsForm({
   /** Сколько минут в последнем выпуске. */
   inToday: number;
   plan: Plan;
+  /** Личные правила отбора: в той же форме, потому что это то же решение. */
+  follow: Names[];
+  exclude: Names[];
 }) {
   const t = useT();
   const [, startTransition] = useTransition();
@@ -45,6 +52,13 @@ export function InterestsForm({
       new Promise<boolean>((resolve) => {
         const node = form.current;
         if (!node) return resolve(false);
+        // Набранное в поле списка добавляется при уходе из поля. Уход
+        // делается здесь, а не нажатием на кнопку: с ней чипы появлялись бы
+        // между mousedown и mouseup, кнопка уезжала бы вниз, и первый клик
+        // пропадал. Блюр — отдельное событие, React дописывает скрытые поля
+        // до того, как форма прочитана.
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && node.contains(active)) active.blur();
         startTransition(async () => {
           // Отказ приходит двумя путями: разобранным `{ error }` и исключением
           // из серверного действия. Молчать нельзя ни о том, ни о другом.
@@ -90,6 +104,28 @@ export function InterestsForm({
               plan={plan}
               onChange={touch}
             />
+            {/* После тем и их долей: сначала о чём, потом что именно.
+                Пересборку выпуска ни то ни другое не заводит — исключение
+                прячет карточки из готового само, слежение решается
+                при следующем отборе. */}
+            <NameRules
+              kind="follow"
+              name="follow"
+              initial={follow}
+              label="За чем следить"
+              description="Компании, продукты, люди. Упомянутое встанет в своей теме первым — в пределах выпуска, не сверх него. Ищется по написанию: «Figma» не найдёт «Фигму», добавь оба."
+              placeholder="Figma, Framer, Webflow"
+              onChange={touch}
+            />
+            <NameRules
+              kind="exclude"
+              name="exclude"
+              initial={exclude}
+              label="Что исключать"
+              description="Имена, продукты, фразы. Упомянутое в выпуск не попадёт, а из готового спрячется. Тоже по написанию, без перевода."
+              placeholder="Название компании, имя, фраза"
+              onChange={touch}
+            />
             {error ? <FieldError>{error}</FieldError> : null}
 
             <Button
@@ -99,6 +135,8 @@ export function InterestsForm({
               // действие, ради которого сюда пришли, а в ряду одинаковых
               // оно читалось как ещё одна настройка.
               className="h-11 self-start px-6 text-base"
+              // Фокус остаётся в поле до самого клика: см. `write`.
+              onMouseDown={(event) => event.preventDefault()}
               onClick={apply}
             >
               {applying ? <Spinner data-icon="inline-start" /> : null}

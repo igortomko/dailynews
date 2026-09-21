@@ -1,7 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { ArrowUpIcon } from "lucide-react";
+import { count } from "@/lib/plural";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -102,6 +104,7 @@ const layerClass = (shown: boolean, from: "above" | "below", extra?: string) =>
 export function FeedTabs({
   topics,
   items,
+  hidden,
   plan,
   networks,
   reading,
@@ -110,6 +113,12 @@ export function FeedTabs({
 }: {
   topics: ReaderTopic[];
   items: FeedCard[];
+  /**
+   * Сколько карточек выпуска спрятано личными исключениями. Число, а не
+   * молчание: карточки на вкладках считаются по видимому, и «8» при
+   * выпуске на двенадцать без единого слова читалось бы как недобор.
+   */
+  hidden: number;
   /** Действующий тариф: от него зависят корона и кнопка «Своё мнение». */
   plan: Plan;
   networks: NetworkId[];
@@ -355,6 +364,19 @@ export function FeedTabs({
             {shortfallNote(reading.minutes, reading.target, t.feed.time)}.
           </p>
         ) : null}
+        {/* Скрытое исключениями названо, а не заметено: правило работает
+            молча, и без строки читатель видел бы выпуск короче заказанного
+            и шёл бы чинить отбор, где всё исправно. Только когда есть что
+            называть — строка на каждом выпуске перестала бы что-либо значить. */}
+        {hidden > 0 && items.length > 0 ? (
+          <p className="mb-3 text-sm text-muted-foreground">
+            {count(hidden, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим{" "}
+            <Link href="/settings/interests" className="underline underline-offset-4">
+              исключениям
+            </Link>
+            .
+          </p>
+        ) : null}
         <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
       {tabs.map((tab) => {
         const list = forTab(tab.slug);
@@ -368,7 +390,24 @@ export function FeedTabs({
                кроме последней тронутой карточки. */
             className="flex flex-col [@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-25"
           >
-            {list.length === 0 ? (
+            {items.length === 0 && hidden > 0 ? (
+              // Выпуск есть, но исключения закрыли его целиком. Спокойно
+              // и с выходом: пустая лента без причины и без ссылки — тупик,
+              // и чинить её пошли бы в источники.
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>Всё скрыто исключениями</EmptyTitle>
+                  <EmptyDescription>
+                    В выпуске {count(hidden, "карточка", "карточки", "карточек")}, и в каждой есть
+                    что-то из твоего списка. Выпуск не пересобирается — освободившиеся места
+                    не добираются.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/settings/interests" />}>
+                  Поправить исключения
+                </Button>
+              </Empty>
+            ) : list.length === 0 ? (
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>{t.feed.tabs.emptyTitle}</EmptyTitle>

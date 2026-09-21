@@ -11,6 +11,7 @@ import {
   PenLineIcon,
   CrownIcon,
   ChevronDownIcon,
+  EyeIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
@@ -288,6 +289,25 @@ export function ItemCard({
     // к чему относится.
     ...(clickbait
       ? [{ key: "clickbait", node: <span className="shrink-0 text-destructive">{t.feed.item.clickbait}</span> }]
+      : []),
+    // Написание из «За чем следить», найденное в материале. Правило
+    // работает при отборе и молча; пометка — единственное, по чему видно,
+    // что оно сработало. Только упоминание, как и обещано в настройках:
+    // без слов «про Figma» — про что материал, решает читатель.
+    ...(item.followed
+      ? [{
+          key: "followed",
+          node: (
+            <span
+              className="inline-flex shrink-0 items-center gap-1"
+              title="Из твоего списка «За чем следить»"
+            >
+              <EyeIcon className="size-3" aria-hidden />
+              {item.followed}
+            </span>
+          ),
+          quiet: true as const,
+        }]
       : []),
     // min-w-0 обязателен: truncate обрезает только то, чему разрешили
     // сузиться, а гибкий элемент по умолчанию не уже своего содержимого.

@@ -3,6 +3,7 @@ import { currentReader } from "@/lib/session";
 
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { minutesOf } from "@/lib/reading-time";
+import { asNames } from "@/lib/rules";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,10 @@ export default async function InterestsPage() {
       perCard={await perCardOf(reader)}
       inToday={inToday}
       plan={effectivePlan(reader)}
+      // Из колонки как есть: строку вместо массива (урок 0005) разбирает
+      // asNames, чтобы форма не упала на битой записи.
+      follow={asNames(reader.follow_rules)}
+      exclude={asNames(reader.exclude_rules)}
       chips={topics.map((topic) => ({
         slug: topic.slug,
         label: topic.label,
