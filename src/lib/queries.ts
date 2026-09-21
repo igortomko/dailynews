@@ -147,12 +147,8 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
  */
 export async function getFeed(readerId: number, day: string): Promise<FeedItem[]> {
   const rows = await sql<FeedItem[]>`
-    -- Каст обязателен, хотя тип и обещает число: items.id — bigint, драйвер
-    -- отдаёт его строкой, и сюжет карточки, разложенный по числовым ключам,
-    -- не находился ни разу. Ни ошибки, ни пустого места — строка «о том же
-    -- написали» просто не появлялась.
-    select i.id::int as id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
-           s.label as source_label, s.id::int as source_id,
+    select i.id, i.url, i.title, di.title as title_ru, di.summary, i.image_url,
+           s.label as source_label, s.id as source_id,
            t.slug as topic_slug, t.label as topic_label,
            di.total, sc.confidence, sc.axes,
            d.day::text as day,
@@ -192,8 +188,18 @@ export async function getFeed(readerId: number, day: string): Promise<FeedItem[]
   // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт
   // ожидаемый OID колонки. Если axes придёт строкой, карточка молча
   // покажет прочерк вместо каждого бейджа — отказ, который не заметен.
+  //
+  // Number обязателен, хотя тип и обещает число: id и source_id — bigint,
+  // и драйвер отдаёт их строкой. Сюжет карточки, разложенный по числовым
+  // ключам, не находился ни разу — ни ошибки, ни пустого места, строка
+  // «о том же написали» просто не появлялась. Приводим здесь, а не ::int
+  // в запросе: каст сузил бы bigint до int4 и однажды уронил бы всю ленту
+  // целиком, а глобальная подмена типа в драйвере уже ломала запись
+  // («to: 20 шлёт int8 в колонки int»).
   return rows.map((row) => ({
     ...row,
+    id: Number(row.id),
+    source_id: Number(row.source_id),
     axes: typeof row.axes === "string" ? JSON.parse(row.axes) : row.axes,
   }));
 }
@@ -230,9 +236,9 @@ export async function getStories(
         from dailynews.items
        where id = any(${itemIds}::bigint[])
     )
-    select c.id::int as card_id,
-           p.id::int as item_id, p.url,
-           p.source_id::int as source_id, s.label as source_label, s.kind,
+    select c.id as card_id,
+           p.id as item_id, p.url,
+           p.source_id as source_id, s.label as source_label, s.kind,
            p.published_at, p.points
       from cards c
       join dailynews.items p on coalesce(p.dup_of, p.id) = c.story_id
@@ -241,10 +247,17 @@ export async function getStories(
      order by c.id, p.id
   `;
 
+  // Number на границе, как и в ленте: bigint приезжает строкой, а ключом
+  // Map и слагаемым счётчика источников обязано быть число.
   for (const { card_id, ...publication } of rows) {
-    const story = stories.get(card_id) ?? [];
-    story.push(publication);
-    stories.set(card_id, story);
+    const key = Number(card_id);
+    const story = stories.get(key) ?? [];
+    story.push({
+      ...publication,
+      item_id: Number(publication.item_id),
+      source_id: Number(publication.source_id),
+    });
+    stories.set(key, story);
   }
   return stories;
 }

@@ -553,6 +553,9 @@ const candidate = (id: number, topicId: number | null, clickbait: number): Candi
   body: null,
   url: `https://example.com/${id}`,
   source_label: "тест",
+  // Каталожный скор: порядок кандидатов из базы. Отбор пересчитывает
+  // свой из axes весами читателя, поэтому здесь он ни на что не влияет.
+  total: 0,
   topic_id: topicId,
   topic_label: `тема ${topicId ?? "нет"}`,
   axes: axes({ clickbait: { noul: clickbait } }),

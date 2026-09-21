@@ -1279,12 +1279,44 @@ async function main() {
     assert.equal(both.length, 1, `на сюжет отобрано ${both.length} материалов, должен быть один`);
     assert.equal(Number(both[0].id), theirItem, "при своём оригинале предпочитается он");
 
+    // Публикация из своих источников, поехавшая в выпуск вместо чужого
+    // оригинала, обязана получить его оценку. На строке в scores держатся
+    // лента, событие чтения, отметка с читалки и догрузка выпуска — все
+    // внутренним join, и без неё материал исчезает из ленты молча: выпуск
+    // собран, письмо ушло, карточки нет.
+    const storyTargets = targetsOf(await readers.getReaderTopics(owner.id));
+    const storyPicked = await selectSurvivors(
+      sql, owner.id, owner.weights, storyTargets, 5, [mineSource],
+    );
+    assert.deepEqual(
+      storyPicked.map((row) => Number(row.id)), [myItem],
+      "отбор по своим источникам обязан отдать свою публикацию сюжета",
+    );
+    const [shared] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.scores where item_id = ${myItem}
+    `;
+    assert.equal(shared.n, 1, "повтор, поехавший в выпуск, получает оценку своего сюжета");
+
+    const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+    await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
+    const storyFeed = await queries.getFeed(owner.id, storyDay);
+    assert.deepEqual(
+      storyFeed.map((row) => Number(row.id)), [myItem],
+      "материал сюжета виден в ленте, а не теряется на join со scores",
+    );
+    assert.equal(storyFeed[0].source_id, mineSource, "источник карточки — свой, а не оригинала");
+
     // Сюжет, уже ушедший в выпуск, не возвращается под другим изданием.
     const otherDay = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, otherDay, [{ id: theirItem, total: 130, title: "Владелец: GPU" }]);
     assert.ok(
       !(await candidates(sql, owner.id, [mineSource])).some((row) => Number(row.id) === myItem),
       "вчерашний сюжет не приходит второй раз от другого издания",
+    );
+    assert.ok(
+      !(await candidates(sql, owner.id, [mineSource, theirSource]))
+        .some((row) => [myItem, theirItem].includes(Number(row.id))),
+      "и не приходит второй раз оригиналом",
     );
 
     // Витрина: список публикаций считается по источникам читателя.

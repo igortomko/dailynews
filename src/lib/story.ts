@@ -32,7 +32,26 @@ export type Publication = {
  * Поэтому у обсуждения не бывает «позже», а бывают очки — единственное,
  * что площадка добавляет к самой новости.
  */
-const DISCUSSION: ReadonlySet<Source["kind"]> = new Set(["hackernews", "x", "reddit"]);
+const DISCUSSION: Record<Source["kind"], boolean> = {
+  rss: false,
+  telegram: false,
+  email: false,
+  hackernews: true,
+  reddit: true,
+  x: true,
+};
+
+/**
+ * Картой по всему объединению, а не списком обсуждений: новая площадка
+ * заставит компилятор дописать сюда строку. Списком она молча уехала бы
+ * в ветку издания и получила бы «первоисточник» вместо «обсуждение» —
+ * а став самой ранней, сдвинула бы «позже» у всех остальных.
+ *
+ * Вид `manual` («Свои входы», 0038) в типе Source пока не перечислен,
+ * и брошенная ссылка читается здесь как издание. Это верно по смыслу:
+ * её прислал человек, а не площадка с очками.
+ */
+const isDiscussion = (kind: Source["kind"]) => DISCUSSION[kind] === true;
 
 const timeOf = (value: string | Date | null): number =>
   value === null ? Number.POSITIVE_INFINITY : new Date(value).getTime();
@@ -72,11 +91,11 @@ export function storyLines(publications: Publication[]): StoryLine[] {
     (a, b) => timeOf(a.published_at) - timeOf(b.published_at) || a.item_id - b.item_id,
   );
 
-  const origin = ordered.find((row) => !DISCUSSION.has(row.kind));
+  const origin = ordered.find((row) => !isDiscussion(row.kind));
   const base = origin ? timeOf(origin.published_at) : null;
 
   return ordered.map((row) => {
-    if (DISCUSSION.has(row.kind)) {
+    if (isDiscussion(row.kind)) {
       return {
         ...row,
         note: row.points === null ? "обсуждение" : `обсуждение: ${row.points} points`,

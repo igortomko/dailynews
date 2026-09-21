@@ -27,11 +27,14 @@ export default async function FeedPage({
   // Первый заход идёт своим путём: интересы, источники, первый выпуск.
   if (!reader.onboarded_at) redirect("/welcome");
 
-  const [{ day: requested }, days, topics, channels] = await Promise.all([
+  const [{ day: requested }, days, topics, channels, sources] = await Promise.all([
     searchParams,
     getDigestDays(reader.id),
     getReaderTopics(reader.id),
     getChannels(reader.id),
+    // Ни от чего здесь не зависит: ждать его после ленты значит добавить
+    // лишний круг к каждому показу.
+    readerSources(reader.id),
   ]);
   // Действующий, а не купленный: у отменённой подписки оплаченный месяц
   // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
@@ -84,8 +87,18 @@ export default async function FeedPage({
   // в отборе. Список приезжает отдельным запросом и приклеивается здесь —
   // Map через границу сервера не уходит, а сорок карточек не должны
   // спрашивать базу по одной.
-  const mine = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
-  const stories = await getStories(mine, feed.map((item) => item.id));
+  //
+  // Плюс источники самих показанных карточек. Выпуск написан раньше, а набор
+  // источников с тех пор мог измениться — читатель убрал один или понизил
+  // тариф, и `digest_items` от этого не чистится. Без объединения карточка
+  // осталась бы в ленте, но выпала бы из собственного сюжета: раскрытие
+  // показало бы только чужих и пометило бы чужой повтор первоисточником.
+  // Ничего лишнего это не открывает — сама карточка уже на странице.
+  //
+  // Number: sources.id приезжает из bigint строкой, а сюжет считает числами.
+  const mine = sourcesForPlan(sources, plan).map((source) => Number(source.id));
+  const shown = feed.map((item) => item.source_id);
+  const stories = await getStories([...new Set([...mine, ...shown])], feed.map((item) => item.id));
   const items = feed.map((item) => ({ ...item, story: stories.get(item.id) ?? [] }));
 
   return (

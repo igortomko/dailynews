@@ -26,6 +26,8 @@ export type Candidate = {
   topic_id: number | null;
   topic_label: string;
   axes: Axes;
+  /** Каталожный скор сюжета. Порядок кандидатов; персональный считает composite(). */
+  total: number;
 };
 
 /**
@@ -92,7 +94,12 @@ export async function candidates(
             where d.reader_id = ${readerId}
               and coalesce(p.dup_of, p.id) = coalesce(i.dup_of, i.id)
          )
-       order by coalesce(i.dup_of, i.id), (i.dup_of is null) desc, i.id
+       -- Представитель: оригинал, если он свой, иначе самая ранняя своя
+       -- публикация. По времени публикации, а не по id: id — это порядок
+       -- опроса источников, и раскрытие сюжета считает «первоисточник»
+       -- тем же правилом. Расходиться этим двум нельзя.
+       order by coalesce(i.dup_of, i.id), (i.dup_of is null) desc,
+                coalesce(i.published_at, i.collected_at), i.id
     ) story
      order by total desc
   `;
@@ -167,6 +174,35 @@ export function pickSurvivors(
     }));
 }
 
+/**
+ * Оценка сюжета — и той публикации из него, что поехала в выпуск.
+ *
+ * Весь остальной код держится на одном негласном условии: у материала,
+ * попавшего в выпуск, есть строка в `scores`. На нём стоят лента, событие
+ * чтения, отметка «дочитал» с читалки, отправка статьи и догрузка выпуска —
+ * семь мест, и каждое соединяется со `scores` внутренним join. Отбор
+ * научился брать публикацию из своих источников вместо чужого оригинала,
+ * а Jev оценивает только оригиналы, — и без этой строки такой материал
+ * исчезал бы из ленты, а его чтения не записывались бы вовсе. Ни одной
+ * ошибки: выпуск собран, письмо ушло, карточки просто нет.
+ *
+ * Поэтому условие чинится там, где оно нарушено, а не в семи следствиях,
+ * про которые в следующий раз вспомнят не все. Копия, а не новый вопрос
+ * к модели: оценка сюжета общая, и повтор — это тот же сюжет, слово
+ * в слово тот же `model` и те же оси.
+ */
+async function shareScore(sql: Db, ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  await sql`
+    insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+    select i.id, sc.topic_id, sc.total, sc.confidence, sc.axes, sc.model
+      from dailynews.items i
+      join dailynews.scores sc on sc.item_id = i.dup_of
+     where i.id = any(${ids}::bigint[]) and i.dup_of is not null
+    on conflict (item_id) do nothing
+  `;
+}
+
 export async function selectSurvivors(
   sql: Db,
   readerId: number,
@@ -175,7 +211,13 @@ export async function selectSurvivors(
   digestSize: number,
   sourceIds: number[],
 ): Promise<Survivor[]> {
-  return pickSurvivors(await candidates(sql, readerId, sourceIds), weights, targets, digestSize);
+  const survivors = pickSurvivors(
+    await candidates(sql, readerId, sourceIds), weights, targets, digestSize,
+  );
+  // Только выбранным, а не всем кандидатам: лишняя строка в scores — это
+  // лишний материал в калибровке и в отдаче источника.
+  await shareScore(sql, survivors.map((survivor) => survivor.id));
+  return survivors;
 }
 
 /** Цели по темам в виде, который нужен отбору. */
