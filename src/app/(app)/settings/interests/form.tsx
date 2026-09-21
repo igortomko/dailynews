@@ -28,6 +28,9 @@ export function InterestsForm({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [applying, setApplying] = useState(false);
+  // Тронул ли читатель хоть что-то с прошлого нажатия: над нетронутой формой
+  // кнопке нечего делать.
+  const [dirty, setDirty] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
@@ -63,6 +66,7 @@ export function InterestsForm({
   // на каждое движение границы. Пауза короткая, но не нулевая — правку,
   // сделанную и тут же брошенную уходом со страницы, она не спасёт.
   const schedule = () => {
+    setDirty(true);
     setSaved(false);
     clearTimeout(timer.current);
     timer.current = setTimeout(save, 900);
@@ -78,6 +82,9 @@ export function InterestsForm({
     setApplying(true);
     save(() => {
       void flushRebuild(() => router.refresh())
+        .then((outcome) => {
+          if (outcome === "done" || outcome === "idle") setDirty(false);
+        })
         .catch(() => {})
         .finally(() => setApplying(false));
     });
@@ -106,7 +113,7 @@ export function InterestsForm({
           </span>
         </CardTitle>
         <CardDescription>
-          О чём собирать новости. Чем больше доля темы, тем больше новостей по ней.
+          О чём собирать новости. Двигай границы: чем больше доля темы, тем больше новостей по ней.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -121,24 +128,18 @@ export function InterestsForm({
             />
             {error ? <FieldError>{error}</FieldError> : null}
 
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                type="button"
-                size="lg"
-                disabled={applying}
-                // Заметно крупнее остальных кнопок экрана: это единственное
-                // действие, ради которого сюда пришли, а в ряду одинаковых
-                // оно читалось как ещё одна настройка.
-                className="h-11 self-start px-6 text-base"
-                onClick={apply}
-              >
-                {applying ? <Spinner data-icon="inline-start" /> : null}
-                Сохранить
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Доли начнут работать со следующего выпуска. Если добавил новостей, догрузим сегодня.
-              </span>
-            </div>
+            <Button
+              type="button"
+              disabled={applying || !dirty}
+              // Заметно крупнее остальных кнопок экрана: это единственное
+              // действие, ради которого сюда пришли, а в ряду одинаковых
+              // оно читалось как ещё одна настройка.
+              className="h-11 self-start px-6 text-base"
+              onClick={apply}
+            >
+              {applying ? <Spinner data-icon="inline-start" /> : null}
+              Сохранить
+            </Button>
           </FieldGroup>
         </form>
       </CardContent>

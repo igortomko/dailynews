@@ -64,7 +64,7 @@ import {
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -468,12 +468,22 @@ assert.ok(
   [...COMPLEXITY, ...STYLES].every((entry) => entry.instruction.trim().length > 0 && entry.hint.trim().length > 0),
   "у каждого варианта должны быть и подпись для читателя, и требование для модели",
 );
-// Подписи у делений и манер не повторяются: две одинаковые строки в ряду
-// означают, что выбирать не из чего, — а деления при этом разные.
-assert.equal(
-  new Set([...COMPLEXITY, ...STYLES].map((entry) => entry.hint)).size,
-  COMPLEXITY.length + STYLES.length,
-  "у каждого варианта своя подпись: повтор означает неразличимые соседи",
+// Названия и подписи не повторяются: две одинаковые строки в ряду означают,
+// что выбирать не из чего, — а деления при этом разные.
+for (const field of ["label", "hint"] as const) {
+  assert.equal(
+    new Set([...COMPLEXITY, ...STYLES].map((entry) => entry[field])).size,
+    COMPLEXITY.length + STYLES.length,
+    `${field}: повтор означает два неразличимых варианта в одном ряду`,
+  );
+}
+
+// У каждого языка есть флажок. Словарь повторяет список строками, и язык,
+// добавленный только в список, остался бы в строю без значка — молча
+// и ровно у одного пункта.
+assert.ok(
+  LANGUAGES.every((entry) => flagOf(entry).length > 0),
+  "язык без флажка: словарь разъехался со списком",
 );
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");

@@ -28,6 +28,14 @@ import { FEATURES, type Plan } from "@/lib/plans";
 import { PaywallCrown, usePaywall } from "@/components/paywall";
 import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
 
+/** Флажок и название одной строкой: в поле и в списке это одно и то же. */
+const languageOption = (entry: string) => (
+  <span className="flex items-center gap-2">
+    <span aria-hidden="true">{flagOf(entry)}</span>
+    {entry}
+  </span>
+);
+
 export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
   // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
   // источника. Селект показывается целиком и погашенным, а не прячется:
@@ -37,6 +45,10 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [applying, setApplying] = useState(false);
+  // Тронул ли читатель хоть что-то с прошлого нажатия. Кнопка над нетронутой
+  // формой отвечала бы «настройки сохранены» на форму, которую не меняли:
+  // ответ на действие, которого не было.
+  const [dirty, setDirty] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const router = useRouter();
@@ -112,6 +124,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
   // рядом отвечает не за запись, а за то, чтобы сегодняшний выпуск
   // переписался прямо сейчас, не дожидаясь полуночи.
   const schedule = () => {
+    setDirty(true);
     setSaved(false);
     clearTimeout(timer.current);
     timer.current = setTimeout(save, 900);
@@ -127,6 +140,11 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
         return;
       }
       void flushRebuild(() => router.refresh())
+        .then((outcome) => {
+          // Отменил или не дождался прошлого захода — кнопка остаётся живой:
+          // нажать ещё раз тут единственный способ довести дело до конца.
+          if (outcome === "done" || outcome === "idle") setDirty(false);
+        })
         .catch(() => {})
         .finally(() => setApplying(false));
     });
@@ -200,12 +218,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                     показывает, за что именно платить. Значение при этом
                     не меняется: окно открывается вместо него. */}
                 <SelectTrigger id="language" className="w-full">
-                  <SelectValue>
-                    <span className="flex items-center gap-2">
-                      <span aria-hidden>{flagOf(language)}</span>
-                      {language}
-                    </span>
-                  </SelectValue>
+                  <SelectValue>{languageOption(language)}</SelectValue>
                 </SelectTrigger>
                 {/* Обычный выпадающий список, а не список, подтянутый выбранным
                     пунктом к полю: на шестнадцати языках он растягивался
@@ -214,10 +227,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 <SelectContent alignItemWithTrigger={false} className="max-h-72">
                   {(LANGUAGES.includes(language) ? LANGUAGES : [language, ...LANGUAGES]).map((entry) => (
                     <SelectItem key={entry} value={entry}>
-                      <span className="flex items-center gap-2">
-                        <span aria-hidden>{flagOf(entry)}</span>
-                        {entry}
-                      </span>
+                      {languageOption(entry)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -335,24 +345,18 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                 {FEATURES.posts.has(plan) ? "Дальше: мои площадки" : "Готово"}
               </Button>
             ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  size="lg"
-                  disabled={applying}
-                  // Заметно крупнее остальных кнопок экрана: это единственное
-                  // действие, ради которого сюда пришли, а в ряду одинаковых
-                  // оно читалось как ещё одна настройка.
-                  className="h-11 self-start px-6 text-base"
-                  onClick={apply}
-                >
-                  {applying ? <Spinner data-icon="inline-start" /> : null}
-                  Сохранить
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  Что поменял, применим к сегодняшнему выпуску. Следующие придут уже такими.
-                </span>
-              </div>
+              <Button
+                type="button"
+                disabled={applying || !dirty}
+                // Заметно крупнее остальных кнопок экрана: это единственное
+                // действие, ради которого сюда пришли, а в ряду одинаковых
+                // оно читалось как ещё одна настройка.
+                className="h-11 self-start px-6 text-base"
+                onClick={apply}
+              >
+                {applying ? <Spinner data-icon="inline-start" /> : null}
+                Сохранить
+              </Button>
             )}
           </FieldGroup>
         </form>

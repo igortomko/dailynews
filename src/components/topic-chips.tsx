@@ -227,15 +227,19 @@ export function TopicChips({
             counts={chips.map((chip) => chip.count)}
             onChange={setCounts}
           />
-          <FieldDescription>
-            Настраиваешь одну тему, остальные меняются сами
-          </FieldDescription>
         </Field>
       ) : null}
 
       {chips.length > 0 ? (
         <Field>
-          <FieldLabel>Твои темы</FieldLabel>
+          <FieldLabel className="flex items-center gap-2">
+            Твои темы
+            {/* Счётчик у подписи, а не строкой под полем ввода: там он читался
+                как отказ, хотя отказом становится только на пределе. */}
+            <span className="text-xs font-normal text-muted-foreground tabular-nums">
+              {chips.length} из {plan.maxTopics}
+            </span>
+          </FieldLabel>
           <div className="flex flex-wrap gap-2">
           {chips.map((chip, index) => (
             <Fragment key={`${chip.label}-${index}`}>
@@ -412,11 +416,11 @@ export function TopicChips({
           </Button>
         </div>
         {topicsPaywall.dialog}
-        <FieldDescription>
-          {full
-            ? `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}. Убери один, чтобы добавить новый`
-            : `${chips.length} из ${plan.maxTopics} на тарифе «${plan.label}»`}
-        </FieldDescription>
+        {full ? (
+          <FieldDescription>
+            {`На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}. Убери один, чтобы добавить новый`}
+          </FieldDescription>
+        ) : null}
       </Field>
     </FieldGroup>
   );

@@ -252,7 +252,7 @@ export function ChannelsForm({
               value={text}
               onChange={(event) => setText(event.target.value)}
               rows={8}
-              placeholder={"Вставь три своих поста, разделяя пустой строкой.\n\nНужно для LinkedIn и Threads: оттуда прочитать посты нельзя."}
+              placeholder={"Вставь 3 своих поста, разделяя пустой строкой.\n\nНужно для LinkedIn и Threads: оттуда прочитать посты нельзя."}
             />
             <FieldDescription>
               Посты разделяются пустой строкой. Просмотров у вставленного нет, поэтому
