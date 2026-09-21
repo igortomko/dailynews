@@ -350,7 +350,11 @@ export function ItemCard({
                   •
                 </span>
               ) : null}
-              {quiet ? <span className={cn("min-w-0 truncate", QUIET)}>{node}</span> : node}
+              {/* Обёртка — тоже флекс: иначе флекс-элементом становится она,
+                  а `shrink-0` у времени и `truncate` у темы оказываются
+                  на строчном потомке, где не значат ничего. Время сжималось
+                  бы многоточием на узком экране, а тема — перестала бы. */}
+              {quiet ? <span className={cn("flex min-w-0", QUIET)}>{node}</span> : node}
             </Fragment>
           ))}
         </span>
