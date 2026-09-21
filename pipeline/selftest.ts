@@ -1835,12 +1835,12 @@ assert.equal(
 );
 assert.equal(
   EN_DICT.plans.kindOnlyOn("Posts from X", ["Plus", "Pro"]),
-  "Posts from X is only on the Plus or Pro plan",
+  "Posts from X: only on the Plus or Pro plan",
   "разделитель принадлежит языку, а не пределам тарифа",
 );
 assert.equal(
   EN_DICT.plans.kindOnlyOn("Posts from X", ["Pro"]),
-  "Posts from X is only on the Pro plan",
+  "Posts from X: only on the Pro plan",
   "один тариф — без разделителя",
 );
 

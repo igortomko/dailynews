@@ -29,9 +29,15 @@ export const plans = {
   } satisfies Record<Source["kind"], string>,
 
   /** Отказ по виду источника: собирается в `kindDenial` из lib/plans.ts. */
+  // Двоеточие, а не глагол: четыре имени вида из шести — множественного
+  // числа («Sites and blogs», «Posts from X»), а два — имена собственные
+  // («Hacker News»). Любая связка верна ровно для половины: «Posts from X
+  // is only on the Pro plan» читатель видел на проде. Двоеточие числа
+  // не спрашивает, поэтому имя вида остаётся в строке — читатель мог
+  // вставить ссылку, не зная, чем она окажется.
   kindOnlyOn: (kind: string, planNames: string[]) =>
-    `${kind} is only on the ${planNames.join(" or ")} plan`,
-  kindUnavailable: (kind: string) => `${kind} isn't available right now`,
+    `${kind}: only on the ${planNames.join(" or ")} plan`,
+  kindUnavailable: (kind: string) => `${kind}: not available right now`,
 
   feature: {
     personalization: {

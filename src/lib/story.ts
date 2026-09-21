@@ -1,5 +1,4 @@
 import type { Dict } from "@/lib/i18n";
-import { count } from "./plural";
 import type { Source } from "./types";
 
 /**
