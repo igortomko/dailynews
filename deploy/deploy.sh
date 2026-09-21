@@ -111,6 +111,12 @@ if ! ssh "$HOST" "grep -qs '^LLM_REASONING_EFFORT=.' $DIR/.env.production"; then
   echo "    и каждый вызов из веба стоит вчетверо дороже" >&2
 fi
 
+# Замок лежит внутри $DIR, а rsync --delete сносит всё, чего нет в источнике.
+# Без этого исключения развёртывание отпускало свой же замок на первом
+# шаге отправки: соседняя сессия входила сразу за ним, её rsync сносил
+# $DIR/docker-compose.yml у нас из-под ног, и следующие шаги падали
+# на «no such file or directory» — 21 сентября 2026 именно так. Замок, который
+# сам себя удаляет, выглядит работающей защитой ровно до второй сессии.
 echo "→ отправка файлов"
 rsync -az --delete \
   --exclude '.git' \
@@ -119,6 +125,7 @@ rsync -az --delete \
   --exclude '.env' \
   --exclude '.env.local' \
   --exclude '.env.production' \
+  --exclude '.deploy.lock.d' \
   --exclude 'magazines' \
   --exclude 'legacy' \
   --exclude 'supabase' \
@@ -132,14 +139,6 @@ ssh "$HOST" "cd $DIR && GIT_COMMIT=$COMMIT docker compose -f $DIR/docker-compose
 echo "→ страница сайта в Caddy"
 ssh "$HOST" "cp $DIR/deploy/$DOMAIN.caddy /etc/caddy/sites/$DOMAIN.caddy && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null && systemctl reload caddy"
 
-# Секреты на хосте лежат рядом с кодом, поэтому исключаются и из rsync,
-# и из контекста сборки (.dockerignore). Проверяем, что в образе их нет.
-echo "→ проверка: нет ли секретов в образе"
-if ssh "$HOST" "docker run --rm --entrypoint sh \$(docker compose -f $DIR/docker-compose.yml images -q web) -c 'ls -a /app | grep -c \"^\\.env\"' 2>/dev/null" | grep -qv '^0$'; then
-  echo "! в образе остались файлы .env — сборка прошла с секретами" >&2
-  exit 1
-fi
-
 echo "→ проверка: обслуживает ли запущенный контейнер отправленный код"
 for attempt in $(seq 1 20); do
   SERVED=$(ssh "$HOST" "curl -fsS --max-time 5 http://127.0.0.1:8085/api/version 2>/dev/null" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' || true)
@@ -150,6 +149,32 @@ done
 if [ "${SERVED:-}" != "$COMMIT" ]; then
   echo "! запущен код $SERVED, отправлен $COMMIT — переключение не состоялось" >&2
   ssh "$HOST" "docker compose -f $DIR/docker-compose.yml logs --tail 40 web" >&2
+  exit 1
+fi
+
+# Секреты на хосте лежат рядом с кодом, поэтому исключаются и из rsync,
+# и из контекста сборки (.dockerignore). Проверяем, что в образе их нет.
+#
+# Спрашивается запущенный контейнер, а не compose-файл: имя образа через
+# `compose images` требует файла на хосте, а тот живёт между rsync --delete
+# и cp. 21 сентября 2026 соседнее развёртывание застало эту щель: compose
+# ответил «no such file or directory» в stderr, на stdout не пришло ничего,
+# а `grep -qv '^0$'` на пустом входе возвращает 1 — шаг засчитался
+# пройденным, не проверив ничего. Контейнер к этому моменту уже отдаёт
+# отправленный коммит — его /app и есть то, что собралось в образ.
+#
+# «Не смогли посмотреть» и «посмотрели, там пусто» — разные ответы,
+# и первый останавливает развёртывание так же, как найденный секрет.
+echo "→ проверка: нет ли секретов в образе"
+if ! APP_FILES=$(ssh "$HOST" "docker exec dailynews ls -a /app") || [ -z "$APP_FILES" ]; then
+  echo "! проверку выполнить не вышло: /app у контейнера не прочитан" >&2
+  echo "  Пока список файлов не получен, о секретах в образе ничего не известно." >&2
+  exit 1
+fi
+LEFTOVER=$(printf '%s\n' "$APP_FILES" | grep '^\.env' || true)
+if [ -n "$LEFTOVER" ]; then
+  echo "! в образе остались файлы .env — сборка прошла с секретами:" >&2
+  printf '%s\n' "$LEFTOVER" | sed 's/^/  /' >&2
   exit 1
 fi
 
