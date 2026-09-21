@@ -20,7 +20,7 @@ Reporta собирает поток, оценивает каждый матер�
 - `public/brand/logo-reporta.png` — утверждённый primary logo для светлых поверхностей
 - `public/brand/logo-reporta-approved-transparent.png` — прозрачная PNG-версия для макетов
 - `public/brand/logo-reporta-on-dark.png` — утверждённый знак на тёмном поле
-- `public/brand/mark-reporta.svg` — самостоятельный знак
+- `public/brand/mark-reporta.svg` / `public/brand/mark-reporta.png` — самостоятельный знак-змейка
 - `public/brand/favicon.svg` — favicon и аватар
 - `public/brand/index.html` — палитра, типографика и правила использования
 
