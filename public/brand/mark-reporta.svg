@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" role="img" aria-labelledby="title">
+  <title id="title">Reporta worm mark</title>
+  <path d="M32 132 C24 50 114 18 170 77 C221 130 216 203 266 166"
+        fill="none" stroke="#F04A32" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse cx="257" cy="117" rx="38" ry="30" fill="#F04A32"/>
+  <circle cx="245" cy="112" r="8" fill="#FAF9F6"/>
+  <circle cx="270" cy="112" r="8" fill="#FAF9F6"/>
+  <circle cx="245" cy="112" r="3.5" fill="#4CC9F0"/>
+  <circle cx="270" cy="112" r="3.5" fill="#4CC9F0"/>
+</svg>
