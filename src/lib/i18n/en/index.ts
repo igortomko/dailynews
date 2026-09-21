@@ -10,11 +10,23 @@
  * Поэтому число всегда приходит в функцию, а форму выбирает сам словарь.
  */
 import * as shell from "./shell";
+import { errors } from "./errors";
+import { feed } from "./feed";
+import { settings } from "./settings";
+import { sources } from "./sources";
+import { plans } from "./plans";
+import { onboarding } from "./onboarding";
 
 export const en = {
   nav: shell.nav,
   theme: shell.theme,
   locale: shell.locale,
+  errors,
+  feed,
+  settings,
+  sources,
+  plans,
+  onboarding,
 };
 
 /**

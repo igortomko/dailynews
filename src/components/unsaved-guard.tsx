@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useT } from "@/components/i18n-provider";
 
 /**
  * Несохранённая правка не уходит со страницы молча.
@@ -42,6 +43,7 @@ export function markSaved() {
 }
 
 export function UnsavedGuard() {
+  const t = useT();
   const router = useRouter();
   const [going, setGoing] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -100,16 +102,16 @@ export function UnsavedGuard() {
     <Dialog open={going !== null} onOpenChange={(open) => !open && setGoing(null)}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Сохранить изменения?</DialogTitle>
+          <DialogTitle>{t.settings.unsavedGuard.title}</DialogTitle>
           <DialogDescription>
-            Настройки на этой странице сохраняются кнопкой. Если уйти сейчас, правки пропадут.
+            {t.settings.unsavedGuard.description}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           {/* Кнопки называют оба исхода словами: «Да» и «Нет» здесь читаются
               только вместе с вопросом, а читают обычно одни кнопки. */}
           <DialogClose render={<Button variant="ghost" />} onClick={() => going && leave(going)}>
-            Не сохранять
+            {t.settings.unsavedGuard.discard}
           </DialogClose>
           <Button
             disabled={saving}
@@ -125,7 +127,7 @@ export function UnsavedGuard() {
             }}
           >
             {saving ? <Spinner data-icon="inline-start" /> : null}
-            Сохранить
+            {t.settings.common.save}
           </Button>
         </DialogFooter>
       </DialogContent>

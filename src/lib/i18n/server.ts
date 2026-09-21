@@ -1,6 +1,6 @@
 import "server-only";
 import { currentReader } from "@/lib/session";
-import { dictOf, localeOf, type Dict, type Locale } from "./index";
+import { dictOf, localeOf, DEFAULT_LOCALE, type Dict, type Locale } from "./index";
 
 /**
  * Язык и словарь для серверных компонентов.
@@ -19,4 +19,15 @@ export async function currentLocale(): Promise<Locale> {
 
 export async function getDict(): Promise<Dict> {
   return dictOf((await currentReader()).ui_language);
+}
+
+/**
+ * Язык для экрана входа — единственного, где currentLocale()/getDict()
+ * не работают: оба спрашивают currentReader(), а тот на этом экране сам
+ * уводит на /login — вход не может спросить у входа. Читателя ещё нет,
+ * и спросить некого, поэтому язык не читается, а фиксирован: английский,
+ * тот же DEFAULT_LOCALE, что и всюду, где выбор неизвестен.
+ */
+export function loginLocale(): Locale {
+  return DEFAULT_LOCALE;
 }

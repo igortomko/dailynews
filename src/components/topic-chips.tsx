@@ -10,16 +10,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
-import {
-  MIN_READING_MINUTES, READING_MINUTES, topicsWord, PLAN_IDS, PLANS, type Plan,
-} from "@/lib/plans";
+import { MIN_READING_MINUTES, READING_MINUTES, PLAN_IDS, PLANS, type Plan } from "@/lib/plans";
 import { formatMinutes, itemsForMinutes } from "@/lib/reading-time";
-import { count, plural } from "@/lib/plural";
 import { usePaywall } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
 import { queueRebuild } from "@/components/rebuild-queue";
+import { useT } from "@/components/i18n-provider";
 
 export function TopicChips({
   initial,
@@ -45,6 +43,9 @@ export function TopicChips({
   inToday: number;
   onChange?: () => void;
 }) {
+  const t = useT();
+  const tc = t.settings.topicChips;
+  const planLabel = t.plans.label[plan.id];
   const [minutes, setMinutesState] = useState(initialMinutes);
   // Места считаются из времени, а не хранятся: число карточек — следствие
   // заказа, и вторая правда о нём разъехалась бы с первой на первой же смене
@@ -113,7 +114,7 @@ export function TopicChips({
   /** Тарифы, где выпуск бывает длиннее: их имена стоят в подписи под кнопками. */
   const bigger = PLAN_IDS
     .filter((id) => PLANS[id].maxMinutes > plan.maxMinutes)
-    .map((id) => PLANS[id].label);
+    .map((id) => t.plans.label[id]);
 
   const add = (label: string) => {
     const trimmed = label.trim();
@@ -175,7 +176,7 @@ export function TopicChips({
       <input type="hidden" name="chips" value={JSON.stringify(chips)} />
 
       <Field>
-        <FieldLabel id="digest-minutes-label">Время чтения в выпуске</FieldLabel>
+        <FieldLabel id="digest-minutes-label">{tc.minutesLabel}</FieldLabel>
         {/* Заказывается время, а не штуки: «сорок новостей» не отвечает
             на вопрос, который задают перед чтением. Все пять значений видны
             сразу — за списком они прячутся по одному, и «сколько читать»
@@ -201,7 +202,6 @@ export function TopicChips({
           >
             {sizes.map((size) => {
               const beyond = size > plan.maxMinutes;
-              const word = plural(size, "минута", "минуты", "минут");
               return (
                 // Не disabled: выключенная кнопка не ловит нажатие, и объяснить
                 // читателю, почему она погасла, становится нечем. Корона стоит
@@ -211,10 +211,10 @@ export function TopicChips({
                   key={size}
                   value={String(size)}
                   aria-disabled={beyond || undefined}
-                  aria-label={beyond ? `${size} ${word}, на платном тарифе` : `${size} ${word}`}
+                  aria-label={beyond ? `${tc.minutes(size)}, ${tc.onPaidPlan}` : tc.minutes(size)}
                   className={beyond ? "text-muted-foreground/60" : undefined}
                 >
-                  {size} мин
+                  {tc.minutesShort(size)}
                   {beyond ? (
                     <CrownIcon className="size-3.5 text-amber-500/80" aria-hidden />
                   ) : null}
@@ -230,7 +230,7 @@ export function TopicChips({
                 в карточке: два написания одной и той же оговорки в одном
                 продукте читаются как две разные. */}
             <span className="font-medium text-foreground tabular-nums">~{places}</span>{" "}
-            {plural(places, "новость", "новости", "новостей")}
+            {tc.storiesWord(places)}
           </span>
         </div>
         {digestPaywall.dialog}
@@ -238,9 +238,7 @@ export function TopicChips({
           // Потолок штук упёрся раньше времени — значит, заказанных минут
           // не будет, и сказать об этом должны мы, а не пустое место в ленте.
           <FieldDescription>
-            На тарифе «{plan.label}» в выпуск попадает не больше{" "}
-            {count(plan.maxItems, "новости", "новостей", "новостей")}: это{" "}
-            {formatMinutes(places * perCard)}.
+            {tc.capReached(planLabel, plan.maxItems, formatMinutes(places * perCard))}
           </FieldDescription>
         ) : bigger.length > 0 ? (
           // Тарифы названы, а не спрятаны за «в других»: предел без имени
@@ -248,9 +246,9 @@ export function TopicChips({
           // Список считается из PLANS: написанный руками, он разъедется
           // с настоящими пределами молча.
           <FieldDescription>
-            На тарифе «{plan.label}» до {plan.maxMinutes} минут. Дольше читать{" "}
+            {tc.upToMinutes(planLabel, plan.maxMinutes)}{" "}
             <Link href="/settings/subscription" className="underline underline-offset-4">
-              на «{bigger.join("» и «")}»
+              {tc.onPlans(bigger)}
             </Link>
           </FieldDescription>
         ) : null}
@@ -262,7 +260,7 @@ export function TopicChips({
           {/* Единица названа в подписи: под полосой стоят новости, а выпуск
               заказан минутами, и без слова числа читаются той единицей,
               которой набран весь экран выше. */}
-          <FieldLabel>Распределение по темам, новостей</FieldLabel>
+          <FieldLabel>{tc.distributionLabel}</FieldLabel>
           <TopicBudgetBar
             labels={chips.map((chip) => chip.label)}
             counts={chips.map((chip) => chip.count)}
@@ -274,11 +272,11 @@ export function TopicChips({
       {chips.length > 0 ? (
         <Field>
           <FieldLabel className="flex items-center gap-2">
-            Твои темы
+            {tc.yourTopics}
             {/* Счётчик у подписи, а не строкой под полем ввода: там он читался
                 как отказ, хотя отказом становится только на пределе. */}
             <span className="text-xs font-normal text-muted-foreground tabular-nums">
-              {chips.length} из {plan.maxTopics}
+              {tc.ofTotal(chips.length, plan.maxTopics)}
             </span>
           </FieldLabel>
           <div className="flex flex-wrap gap-2">
@@ -302,7 +300,7 @@ export function TopicChips({
                 }}
                 tabIndex={0}
                 role="button"
-                aria-label={`${chip.label}, ${chip.count} из ${places}. Стрелками влево и вправо можно переставить`}
+                aria-label={tc.chipAria(chip.label, chip.count, places)}
                 className={cn(
                   "group flex h-10 items-center gap-1.5 rounded-lg border bg-card pr-1 pl-2 text-sm transition-colors select-none",
                   "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -328,7 +326,7 @@ export function TopicChips({
                 {selected === index ? (
                   <input
                     value={chip.label}
-                    aria-label="Название темы"
+                    aria-label={tc.topicNameAria}
                     onChange={(event) => patch(index, { label: event.target.value })}
                     onClick={(event) => event.stopPropagation()}
                     size={Math.max(chip.label.length, 4)}
@@ -350,7 +348,7 @@ export function TopicChips({
                       <button
                         type="button"
                         data-chip-remove
-                        aria-label={`Убрать ${chip.label}`}
+                        aria-label={tc.removeAria(chip.label)}
                         onClick={(event) => {
                           event.stopPropagation();
                           remove(index);
@@ -361,7 +359,7 @@ export function TopicChips({
                   >
                     <XIcon className="size-3.5" />
                   </TooltipTrigger>
-                  <TooltipContent>Убрать интерес</TooltipContent>
+                  <TooltipContent>{tc.removeTooltip}</TooltipContent>
                 </Tooltip>
               </div>
 
@@ -374,12 +372,12 @@ export function TopicChips({
                     id={`hint-${index}`}
                     rows={2}
                     value={chip.hint}
-                    aria-label={`Что относится к теме «${chip.label}»`}
-                    placeholder="через запятую: что сюда относится"
+                    aria-label={tc.hintAria(chip.label)}
+                    placeholder={tc.hintPlaceholder}
                     onChange={(event) => patch(index, { hint: event.target.value })}
                   />
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Чем точнее, тем меньше лишнего в выпуске
+                    {tc.hintHelp}
                   </p>
 
                   {/* То же, что и полоса, но пальцем и с клавиатуры: на узком
@@ -392,7 +390,7 @@ export function TopicChips({
                             type="button"
                             variant="outline"
                             size="icon-sm"
-                            aria-label="На одну новость меньше"
+                            aria-label={tc.lessAria}
                             onClick={() => nudge(index, -1)}
                             disabled={chip.count <= MIN_PER_TOPIC}
                           />
@@ -400,10 +398,10 @@ export function TopicChips({
                       >
                         <MinusIcon />
                       </TooltipTrigger>
-                      <TooltipContent>Меньше новостей по этой теме</TooltipContent>
+                      <TooltipContent>{tc.lessTooltip}</TooltipContent>
                     </Tooltip>
                     <span className="w-16 text-center text-sm tabular-nums">
-                      {chip.count} из {places}
+                      {tc.ofTotal(chip.count, places)}
                     </span>
                     <Tooltip>
                       <TooltipTrigger
@@ -412,14 +410,14 @@ export function TopicChips({
                             type="button"
                             variant="outline"
                             size="icon-sm"
-                            aria-label="На одну новость больше"
+                            aria-label={tc.moreAria}
                             onClick={() => nudge(index, 1)}
                           />
                         }
                       >
                         <PlusIcon />
                       </TooltipTrigger>
-                      <TooltipContent>Больше новостей по этой теме. Место возьмётся у самой крупной</TooltipContent>
+                      <TooltipContent>{tc.moreTooltip}</TooltipContent>
                     </Tooltip>
                   </div>
                 </div>
@@ -437,8 +435,8 @@ export function TopicChips({
             id="chip-draft"
             ref={draftInput}
             value={draft}
-            aria-label="Новый интерес"
-            placeholder="Энергетика и уран"
+            aria-label={tc.newTopicAria}
+            placeholder={tc.newTopicPlaceholder}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -453,13 +451,13 @@ export function TopicChips({
             onClick={() => (full ? topicsPaywall.open() : add(draft))}
           >
             <PlusIcon data-icon="inline-start" />
-            Добавить
+            {tc.add}
           </Button>
         </div>
         {topicsPaywall.dialog}
         {full ? (
           <FieldDescription>
-            {`На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}. Убери один, чтобы добавить новый`}
+            {tc.topicLimitReached(planLabel, plan.maxTopics, t.plans.topicsWord(plan.maxTopics))}
           </FieldDescription>
         ) : null}
       </Field>

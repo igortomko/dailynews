@@ -30,15 +30,17 @@ export type Gated = (typeof GATED)[number];
 
 export type Plan = {
   id: PlanId;
+  /**
+   * Имя тарифа. Живёт здесь, а не только в словаре: половина продукта
+   * (форма источников, мастер интересов, серверные действия) ещё не читает
+   * язык читателя и подписывает отказы этим именем напрямую. Экраны,
+   * подключённые к словарю, берут перевод из `t.plans.label[id]` — он
+   * совпадает с этим значением по-русски и расходится только на «free»
+   * («Бесплатный» → «Free»), см. `src/lib/i18n/en|ru/plans.ts`.
+   */
   label: string;
   /** $ в месяц. Ноль — бесплатный тариф. */
   price: number;
-  /**
-   * За чем сюда приходят, в три слова. Стоит под ценой в сравнении тарифов:
-   * столбик из чисел отвечает «сколько дают», но не «зачем брать», а решают
-   * по второму. Формулируется глаголом читателя, а не свойством продукта.
-   */
-  tagline: string;
   /** Сколько источников опрашивается. Остальные включённые просто ждут. */
   maxSources: number;
   /**
@@ -87,7 +89,6 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "free",
     label: "Бесплатный",
     price: 0,
-    tagline: "Попробовать ленту",
     maxSources: 5,
     maxTopics: 5,
     maxMinutes: 5,
@@ -103,7 +104,6 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "plus",
     label: "Plus",
     price: 3.99,
-    tagline: "Читать каждый день",
     maxSources: 40,
     maxTopics: 15,
     maxMinutes: 20,
@@ -121,7 +121,6 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "pro",
     label: "Pro",
     price: 9.99,
-    tagline: "Читать и писать",
     maxSources: 100,
     maxTopics: 30,
     // Сорок пять, а не шестьдесят: при карточке в 460 знаков потолок в сто
@@ -167,19 +166,51 @@ const KIND_NAME: Record<Source["kind"], string> = {
 };
 
 /**
+ * Слова отказа: чем заменить `KIND_NAME`/`.label` и как собрать фразу.
+ * Форма — ровно то, что несёт `plans` из словаря (`src/lib/i18n/en|ru/plans.ts`),
+ * но описана здесь своим типом, а не импортом словаря: `lib/plans.ts` считает
+ * пределы и правила, а от какого языка ждать текст — решает вызывающий,
+ * а не эта зависимость.
+ */
+type DenialText = {
+  kindName: Record<Source["kind"], string>;
+  label: Record<PlanId, string>;
+  kindOnlyOn: (kind: string, planNames: string) => string;
+  kindUnavailable: (kind: string) => string;
+};
+
+/**
  * Почему этот вид источника тарифу не положен, или null, если положен.
  *
  * Отдельной функцией, потому что спросить надо дважды и в разных местах:
  * при сохранении и до разбора ссылки. X — платный, у него счёт
  * за прочитанные посты, и разбор сам по себе уже стоит денег.
+ *
+ * Третий параметр — необязательный словарь. Принимает готовые слова,
+ * а не отдаёт ключ отказа: вызывающему (`sources.ts`, `actions.ts`) нужна
+ * готовая строка для тоста, а ключ переложил бы сборку фразы на каждый
+ * вызов — там, где сейчас достаточно прочитать результат. По умолчанию —
+ * русские слова, как было раньше: старые вызовы этой функции ещё не читают
+ * язык читателя и продолжают получать тот же текст без единой правки на
+ * своей стороне.
  */
-export function kindDenial(plan: Plan, kind: Source["kind"]): string | null {
+export function kindDenial(plan: Plan, kind: Source["kind"], t: DenialText = RU_DENIAL_TEXT): string | null {
   if (plan.kinds.includes(kind)) return null;
-  const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => PLANS[id].label);
+  const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => t.label[id]);
   return where.length
-    ? `${KIND_NAME[kind]} — только на тарифе «${where.join("», «")}»`
-    : `${KIND_NAME[kind]} сейчас недоступны`;
+    ? t.kindOnlyOn(t.kindName[kind], where.join("», «"))
+    : t.kindUnavailable(t.kindName[kind]);
 }
+
+const RU_DENIAL_TEXT: DenialText = {
+  kindName: KIND_NAME,
+  // Из PLANS, а не отдельным литералом: другого источника русских имён
+  // тарифов в этом файле нет, и второй набор строк расходился бы с первым
+  // молча при следующей правке label.
+  label: Object.fromEntries(PLAN_IDS.map((id) => [id, PLANS[id].label])) as Record<PlanId, string>,
+  kindOnlyOn: (kindName, planNames) => `${kindName} — только на тарифе «${planNames}»`,
+  kindUnavailable: (kindName) => `${kindName} сейчас недоступны`,
+};
 
 /**
  * Что можно заказать. Список один на все тарифы, за чужими значениями —
@@ -227,8 +258,19 @@ export const targetMinutes = (minutes: number, plan: Plan, perCard: number) =>
 
 export const allows = (plan: Plan, section: Gated) => plan.sections.includes(section);
 
-/** «2 интереса», «5 интересов» — форма нужна и в отказе, и в заглушке. */
-export const topicsWord = (n: number) => plural(n, "интерес", "интереса", "интересов");
+/**
+ * «2 интереса», «5 интересов» — форма нужна и в отказе, и в заглушке.
+ *
+ * Второй параметр — необязательная функция словаря (`t.plans.topicsWord`
+ * из `src/lib/i18n/en|ru/plans.ts`), а не сам словарь: этой функции нужна ровно
+ * одна форма множественного числа, и передавать ради неё весь объект —
+ * лишний уровень распаковки на каждый вызов. По умолчанию — русская форма,
+ * как и раньше: экраны, которые ещё не подключены к словарю (мастер
+ * интересов, серверные действия), продолжают звать `topicsWord(n)` без
+ * правок и получают тот же текст, что и до словаря.
+ */
+export const topicsWord = (n: number, wordOf: (n: number) => string = RU_TOPICS_WORD) => wordOf(n);
+const RU_TOPICS_WORD = (n: number) => plural(n, "интерес", "интереса", "интересов");
 
 /** Самый дешёвый тариф, который открывает раздел. Для подписи в заглушке. */
 export const cheapestWith = (section: Gated): Plan =>
@@ -247,57 +289,40 @@ export type FeatureId =
   | "topics" | "digest" | "sources" | "cadence";
 
 export type Feature = {
-  title: string;
-  /** Одна фраза: что читатель получит. Без «улучшенный» и «расширенный». */
-  what: string;
   has: (plan: Plan) => boolean;
 };
 
 export const FEATURES: Record<FeatureId, Feature> = {
+  // Название и описание каждой возможности живут в словаре
+  // (`t.plans.feature[id]` из `src/lib/i18n/en|ru/plans.ts`), а не здесь: это
+  // подпись для читателя, а не правило. Здесь остаётся только `has` —
+  // проверка, по которой корона и настоящий предел обязаны совпадать.
   personalization: {
-    title: "Язык и подача",
-    what: "На каком языке приходит выпуск и как он написан: попроще или как специалисту, суховато или живее. Есть на любом тарифе.",
     // Доступна всем: промпт от неё не дорожает ни на токен.
     has: () => true,
   },
   language: {
-    title: "Перевод на свой язык",
-    what: "Выпуск приходит на выбранном языке. На бесплатном заголовки и описания остаются на языке источника.",
     has: (plan) => allows(plan, "language"),
   },
   delivery: {
-    title: "Выпуск на читалку",
-    what: "Выпуск приходит книгой на Kindle — читать с электронных чернил, без телефона.",
     has: (plan) => allows(plan, "delivery"),
   },
   posts: {
-    title: "Своё мнение",
-    what: "Из любой новости выпуска — готовый пост твоим голосом: лента читает твои каналы, запоминает, как ты пишешь, и даёт черновик под каждую твою сеть.",
     has: (plan) => allows(plan, "posts"),
   },
   x: {
-    title: "Посты из X",
-    what: "Твиты попадают в выпуск наравне с новостями сайтов. X берёт за доступ отдельно, поэтому только на Pro.",
     has: (plan) => plan.kinds.includes("x"),
   },
   topics: {
-    title: "Темы",
-    what: "О чём тебе интересно читать — например, ИИ или дизайн. Выпуск делится между темами, чтобы одна не заняла всё.",
     has: (plan) => plan.maxTopics > PLANS.free.maxTopics,
   },
   cadence: {
-    title: "Как часто приходит",
-    what: "На платных тарифах выпуск приходит каждую ночь, на бесплатном — через день.",
     has: (plan) => plan.everyDays <= 1,
   },
   digest: {
-    title: "Время чтения в выпуске",
-    what: "Сколько времени займёт выпуск: считаем по длине наших же описаний, не по статьям за ссылками. Пять минут — за кофе, сорок пять — вместо ленты соцсети.",
     has: (plan) => plan.maxMinutes > PLANS.free.maxMinutes,
   },
   sources: {
-    title: "Источников",
-    what: "Сайты, блоги и каналы, за которыми лента следит каждый день. Чем их больше, тем шире выбор для выпуска.",
     has: (plan) => plan.maxSources > PLANS.free.maxSources,
   },
 };

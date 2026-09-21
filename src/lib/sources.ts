@@ -2,6 +2,7 @@ import "server-only";
 import { sql } from "./db";
 import { kindDenial } from "./plans";
 import { effectivePlan } from "./lemon";
+import { dictOf, localeOf } from "./i18n";
 import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
 import { addReaderSource } from "./readers";
 import type { Reader, Source } from "./types";
@@ -50,9 +51,9 @@ export async function denyForKind(
       join dailynews.sources s on s.id = rs.source_id
      where rs.reader_id = ${reader.id} and s.deleted_at is null and s.kind = any(${plan.kinds})
   `;
-  return n >= plan.maxSources
-    ? `Тариф «${plan.label}» опрашивает ${plan.maxSources} источников — убери лишний`
-    : null;
+  if (n < plan.maxSources) return null;
+  const t = dictOf(localeOf(reader.ui_language)).sources;
+  return t.tooManySources(plan.label, plan.maxSources);
 }
 
 /**
@@ -98,7 +99,7 @@ export type AddOutcome =
  */
 export async function addByLink(reader: Reader, input: string): Promise<AddOutcome> {
   const raw = input.trim().slice(0, 500);
-  if (!raw) return { ok: false, error: "Пустая строка" };
+  if (!raw) return { ok: false, error: dictOf(localeOf(reader.ui_language)).sources.emptyLink };
 
   // Тариф спрашивается до сети: какой это будет вид, planFor знает без
   // единого запроса, а разбор ссылки X — уже платный запрос.

@@ -4,6 +4,11 @@ import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { rewriteDigest, topUpDigest } from "@/lib/actions";
+import { useT } from "@/components/i18n-provider";
+import type { Dict } from "@/lib/i18n";
+import { feed as ruFeed } from "@/lib/i18n/ru/feed";
+
+type RebuildText = Dict["feed"]["rebuild"];
 
 /**
  * Пересборка сегодняшнего выпуска после настроек.
@@ -60,11 +65,15 @@ export function queueRebuild(kind: Kind) {
  * Применить отложенное прямо сейчас — это и есть работа кнопки «Сохранить».
  * Промис возвращается, чтобы кнопка держала спиннер ровно столько, сколько
  * идёт пересборка, а не гасила его до срока.
+ *
+ * `t` по умолчанию — русские подписи: формы настроек, которые сегодня зовут
+ * `flushRebuild`, ещё не подключены к словарю, и без умолчания их типизация
+ * сломалась бы правкой чужого файла.
  */
-export async function flushRebuild(refresh: () => void): Promise<Outcome> {
+export async function flushRebuild(refresh: () => void, t: RebuildText = ruFeed.rebuild): Promise<Outcome> {
   if (running) {
-    toast.info("Сохранили. Выпуск ещё обновляется", {
-      description: "Нажми «Сохранить» ещё раз, когда закончим",
+    toast.info(t.stillUpdatingTitle, {
+      description: t.stillUpdatingDescription,
     });
     return "busy";
   }
@@ -72,17 +81,17 @@ export async function flushRebuild(refresh: () => void): Promise<Outcome> {
   // (доли тем) или не тронули ничего. Молчать тут нельзя — нажали кнопку
   // и не получили ответа, — но и обещать обновление не за что.
   if (queued.size === 0) {
-    toast.success("Настройки сохранены", {
-      description: "Следующие выпуски придут уже с ними",
+    toast.success(t.savedNoChangeTitle, {
+      description: t.savedNoChangeDescription,
     });
     return "idle";
   }
   const kinds = [...queued];
   queued.clear();
-  return run(kinds, refresh);
+  return run(kinds, refresh, t);
 }
 
-async function run(kinds: Kind[], refresh: () => void): Promise<Outcome> {
+async function run(kinds: Kind[], refresh: () => void, t: RebuildText = ruFeed.rebuild): Promise<Outcome> {
   // Окно отмены стоит здесь, а не в `flushRebuild`, и достаётся обоим входам
   // намеренно. Уход из настроек запускает платную работу, которую читатель
   // не просил вслух: кнопку он нажал, а тут просто закрыл раздел. Окно даёт
@@ -113,10 +122,10 @@ async function run(kinds: Kind[], refresh: () => void): Promise<Outcome> {
   // Пока идёт окно отмены, заголовок стоит в будущем времени: «обновляю»
   // над работой, которая ещё не началась, — это стадия, которая врёт,
   // а такая хуже, чем никакой.
-  const holdId = toast.loading("Обновлю сегодняшний выпуск", {
-    description: `Начну через ${HOLD_MS / 1000} с, пока можно отменить`,
+  const holdId = toast.loading(t.countdownTitle, {
+    description: t.countdownDescription(HOLD_MS / 1000),
     action: {
-      label: "Отменить",
+      label: t.cancelAction,
       onClick: () => {
         cancelled = true;
         clearTimeout(holdTimer);
@@ -137,12 +146,12 @@ async function run(kinds: Kind[], refresh: () => void): Promise<Outcome> {
     if (cancelled) {
       // В очередь не возвращаем: отмена значит «не сейчас», и сторож выхода
       // не должен запустить то же самое через минуту сам.
-      toast("Отменили. Сегодняшний выпуск остался прежним");
+      toast(t.cancelledToast);
       return "cancelled";
     }
 
-    workId = toast.loading("Обновляю сегодняшний выпуск…", {
-      description: "Это 1–2 минуты, можно читать дальше",
+    workId = toast.loading(t.workingTitle, {
+      description: t.workingDescription,
       duration: Infinity,
     });
 
@@ -153,33 +162,33 @@ async function run(kinds: Kind[], refresh: () => void): Promise<Outcome> {
     if (kinds.includes("size")) {
       const result = await topUpDigest();
       if (result && "error" in result) throw new Error(result.error);
-      if (result?.added) done.push(`добавили ${result.added}`);
+      if (result?.added) done.push(t.added(result.added));
       left.delete("size");
     }
 
     if (kinds.includes("voice")) {
       const result = await rewriteDigest();
       if (result && "error" in result) throw new Error(result.error);
-      if (result?.rewritten) done.push(`переписали ${result.rewritten}`);
+      if (result?.rewritten) done.push(t.rewrote(result.rewritten));
       left.delete("voice");
     }
 
     toast.dismiss(workId);
     if (done.length === 0) {
-      toast.info("Сегодняшний выпуск уже такой", {
-        description: "Следующие придут с новыми настройками",
+      toast.info(t.noChangeTodayTitle, {
+        description: t.noChangeTodayDescription,
       });
       return "done";
     }
-    toast.success(`Сегодняшний выпуск обновили: ${done.join(", ")}`, {
-      description: "Следующие соберутся по новым настройкам",
+    toast.success(t.updated(done.join(", ")), {
+      description: t.updatedDescription,
     });
     refresh();
     return "done";
   } catch (error) {
     // Тост окна к этому моменту уже закрыт: сюда попадают только из работы.
     if (workId !== undefined) toast.dismiss(workId);
-    toast.error(error instanceof Error ? error.message : "Не удалось обновить выпуск");
+    toast.error(error instanceof Error ? error.message : t.failed);
     // Недоделанное возвращаем в очередь: списанная работа, которая
     // не сделалась, — это отказ, похожий на успех. Второе «Сохранить»
     // отвечало бы «настройки сохранены», а выпуск остался бы прежним.
@@ -196,6 +205,7 @@ async function run(kinds: Kind[], refresh: () => void): Promise<Outcome> {
  * и может обновить её, когда работа закончится.
  */
 export function RebuildOnLeave() {
+  const t = useT();
   const pathname = usePathname();
   const router = useRouter();
   const wasInSettings = useRef(false);
@@ -205,10 +215,10 @@ export function RebuildOnLeave() {
     if (wasInSettings.current && !inSettings && queued.size > 0) {
       const kinds = [...queued];
       queued.clear();
-      void run(kinds, () => router.refresh());
+      void run(kinds, () => router.refresh(), t.feed.rebuild);
     }
     wasInSettings.current = inSettings;
-  }, [pathname, router]);
+  }, [pathname, router, t]);
 
   return null;
 }

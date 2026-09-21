@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { getDict } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export default async function FeedPage({
   // Первый заход идёт своим путём: интересы, источники, первый выпуск.
   if (!reader.onboarded_at) redirect("/welcome");
 
-  const [{ day: requested }, days, topics, channels, sources] = await Promise.all([
+  const [{ day: requested }, days, topics, channels, sources, t] = await Promise.all([
     searchParams,
     getDigestDays(reader.id),
     getReaderTopics(reader.id),
@@ -37,6 +38,7 @@ export default async function FeedPage({
     // Ни от чего здесь не зависит: ждать его после ленты значит добавить
     // лишний круг к каждому показу.
     readerSources(reader.id),
+    getDict(),
   ]);
   // Действующий, а не купленный: у отменённой подписки оплаченный месяц
   // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
@@ -47,24 +49,24 @@ export default async function FeedPage({
     return (
       <Empty className="mx-auto max-w-page">
         <EmptyHeader>
-          <EmptyTitle>Первый выпуск придёт ночью</EmptyTitle>
+          <EmptyTitle>{t.feed.page.empty.title}</EmptyTitle>
           <EmptyDescription>
             {/* Читателю — когда ждать и чем занять это время. Команда
                 в терминал — инструкция разработчику, и показывать её всем
                 значит отвечать на вопрос «что делать» тем, чего человек
                 сделать не может. Владельцу она остаётся: он-то может. */}
-            Лента собирается раз в сутки, ночью. Пока можно{" "}
+            {t.feed.page.empty.body}{" "}
             <Link href="/settings/interests" className="underline underline-offset-4">
-              поправить интересы
+              {t.feed.page.empty.fixInterests}
             </Link>{" "}
-            или{" "}
+            {t.feed.page.empty.or}{" "}
             <Link href="/settings/sources" className="underline underline-offset-4">
-              добавить источники
+              {t.feed.page.empty.addSources}
             </Link>
             .
             {reader.owner ? (
               <span className="mt-2 block">
-                Собрать прямо сейчас:
+                {t.feed.page.empty.collectNow}
                 <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">npm run pipeline</code>
               </span>
             ) : null}
@@ -142,7 +144,7 @@ export default async function FeedPage({
                 nativeButton={false}
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Настройки"
+                aria-label={t.nav.settings}
                 className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
                 render={<Link href="/settings/personalization" />}
               />
@@ -150,7 +152,7 @@ export default async function FeedPage({
           >
             <SettingsIcon />
           </TooltipTrigger>
-          <TooltipContent>Настройки: интересы, источники, доставка</TooltipContent>
+          <TooltipContent>{t.feed.page.settingsHint}</TooltipContent>
         </Tooltip>
         </div>
       }

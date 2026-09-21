@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
 import { currentReader, currentReaderId } from "./session";
-import { localeOf } from "./i18n";
+import { dictOf, localeOf } from "./i18n";
+import { getDict } from "./i18n/server";
 import { discover, planFor, type Found } from "../../pipeline/discover";
 import { denyForKind, isKnownKind, probeOne, saveSource } from "./sources";
 import { selectSurvivors, targetsOf } from "../../pipeline/select";
@@ -27,7 +28,7 @@ import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestWith, kindDenial, MIN_READING_MINUTES, minutesCap, READING_MINUTES,
-  sourcesForPlan, targetMinutes, topicsWord, type Gated,
+  sourcesForPlan, targetMinutes, type Gated,
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
@@ -42,13 +43,16 @@ import { resolveSuggestions } from "./onboarding";
  */
 export async function login(_prev: unknown, formData: FormData) {
   const password = String(formData.get("password") ?? "");
+  // Словарь по умолчанию: на этом экране читатель ещё не опознан,
+  // и спросить, на каком языке с ним говорить, некого.
+  const t = dictOf(undefined);
   if (!(await checkPassword(password))) {
-    return { error: "Пароль не подходит" };
+    return { error: t.errors.wrongPassword };
   }
   const [owner] = await sql<{ id: number }[]>`
     select id::int as id from dailynews.readers where owner
   `;
-  if (!owner) return { error: "Такого входа сейчас нет — войди через бота" };
+  if (!owner) return { error: t.errors.noSuchEntrance };
 
   const session = await issueSession(owner.id);
   (await cookies()).set(session.name, session.value, session.options);
@@ -74,7 +78,8 @@ export type ChipInput = { slug: string; label: string; hint: string; count: numb
 async function denyBySection(section: Gated): Promise<{ error: string } | null> {
   const plan = effectivePlan(await currentReader());
   if (allows(plan, section)) return null;
-  return { error: `Раздел доступен на тарифе «${cheapestWith(section).label}»` };
+  const t = await getDict();
+  return { error: t.errors.sectionLocked(cheapestWith(section).label) };
 }
 
 /**
@@ -139,7 +144,7 @@ export async function savePersonalization(formData: FormData) {
 export async function saveInterests(formData: FormData) {
   const readerId = await currentReaderId();
   const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
-  if (chips.length === 0) return { error: "Добавь хотя бы один интерес" };
+  if (chips.length === 0) return { error: (await getDict()).errors.pickOneTopic };
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
@@ -147,9 +152,7 @@ export async function saveInterests(formData: FormData) {
   const plan = effectivePlan(reader);
   if (chips.length > plan.maxTopics) {
     return {
-      error:
-        `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
-        `а выбрано ${chips.length}`,
+      error: (await getDict()).errors.tooManyTopics(plan.label, plan.maxTopics, chips.length),
     };
   }
 
@@ -159,7 +162,7 @@ export async function saveInterests(formData: FormData) {
   // и цель первой темы теряется. Сумма целей молча перестаёт равняться
   // размеру дайджеста — полоса показывает одно, приходит другое.
   if (new Set(slugs).size !== slugs.length) {
-    return { error: "Такой интерес уже есть — назови иначе" };
+    return { error: (await getDict()).errors.duplicateTopic };
   }
   // Предел минут — тоже серверная проверка, а не только корона в форме:
   // форму рисует браузер, а платит за лишние описания владелец ключа.
@@ -297,9 +300,9 @@ export async function saveKindleAddress(formData: FormData) {
 
   const readerId = await currentReaderId();
   const address = String(formData.get("kindle_address") ?? "").trim().toLowerCase().slice(0, 120);
-  if (!address) return { error: "Впиши адрес читалки" };
+  if (!address) return { error: (await getDict()).errors.kindleAddressEmpty };
   if (!/^[^@\s]+@kindle\.com$/.test(address)) {
-    return { error: "Адрес должен заканчиваться на @kindle.com" };
+    return { error: (await getDict()).errors.kindleAddressSuffix };
   }
 
   await sql`
@@ -369,7 +372,7 @@ export async function discoverSource(input: string): Promise<
   { ok: true; found: Found } | { ok: false; error: string }
 > {
   const raw = input.trim().slice(0, 500);
-  if (!raw) return { ok: false, error: "Пустая строка" };
+  if (!raw) return { ok: false, error: (await getDict()).errors.emptyLine };
 
   // Тариф спрашивается до сети. Какой это будет вид, planFor знает без
   // единого запроса, а разбор ссылки X — уже платный запрос к twitterapi.io:
@@ -403,8 +406,8 @@ export async function addSource(formData: FormData) {
   const kind = String(formData.get("kind") ?? "").trim() as Source["kind"];
   const url = String(formData.get("url") ?? "").trim();
   const inputUrl = String(formData.get("input_url") ?? "").trim() || url;
-  if (!isKnownKind(kind)) return { error: "Сначала проверь ссылку" };
-  if (!url) return { error: "Вставь ссылку" };
+  if (!isKnownKind(kind)) return { error: (await getDict()).errors.checkLinkFirst };
+  if (!url) return { error: (await getDict()).errors.pasteLink };
 
   // Предел тарифа проверяется до сети: отказать бесплатно дешевле,
   // чем сходить за фидом и отказать после.
@@ -412,7 +415,7 @@ export async function addSource(formData: FormData) {
   if (denied) return { error: denied };
 
   const probe = await probeOne(kind, url, inputUrl);
-  if (!probe.ok) return { error: `Источник больше не отвечает: ${probe.error}` };
+  if (!probe.ok) return { error: (await getDict()).errors.sourceGone(probe.error) };
 
   const label = String(formData.get("label") ?? "").trim().slice(0, 200) || probe.found.label;
 
@@ -445,7 +448,7 @@ export async function deleteSource(id: number) {
      returning s.label
   `;
   revalidatePath("/settings/sources");
-  return row ? { ok: true as const, label: row.label } : { error: "Источник уже убран" };
+  return row ? { ok: true as const, label: row.label } : { error: (await getDict()).errors.sourceAlreadyGone };
 }
 
 /** Отмена: возвращает источник в ленту. Каталог его и не терял. */
@@ -500,7 +503,7 @@ async function rewriteFor(reader: Reader) {
      where d.reader_id = ${reader.id}
      order by d.day desc limit 1
   `;
-  if (!digest) return { error: "Выпуска ещё нет — переписывать нечего" };
+  if (!digest) return { error: (await getDict()).errors.noDigestYet };
 
   const survivors = await sql<Survivor[]>`
     select i.id::int as id, i.title, coalesce(i.excerpt, '') as excerpt, i.url,
@@ -514,13 +517,13 @@ async function rewriteFor(reader: Reader) {
      where di.digest_id = ${digest.id}
      order by di.total desc
   `;
-  if (survivors.length === 0) return { error: "В выпуске нет материалов" };
+  if (survivors.length === 0) return { error: (await getDict()).errors.digestEmpty };
 
   // Тот же потолок, что у догрузки и у ночного прогона: переписывание
   // стоит ровно столько же, сколько письмо описаний с нуля.
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: "Сегодня больше нельзя — завтра лимит обнулится" };
+    return { error: (await getDict()).errors.capReachedRewrite };
   }
 
   const written = await writeDigest(
@@ -591,7 +594,7 @@ async function fillDigest(reader: Reader) {
   // те же деньги, и обходить его ей незачем.
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: "Сегодня больше добавить нельзя — завтра лимит обнулится" };
+    return { error: (await getDict()).errors.capReachedTopUp };
   }
 
   // selectSurvivors сам исключает всё, что уже попало в выпуски этого
@@ -783,7 +786,7 @@ export async function addChannel(input: string): Promise<{ ok: true; network: Ne
 
   const network = NETWORK_BY_KIND[found.found.kind];
   if (!network) {
-    return { error: "Это похоже на рассылку, а не на твой канал: нужен канал Telegram, аккаунт X или блог" };
+    return { error: (await getDict()).errors.notANewsletter };
   }
 
   await saveChannel(readerId, network, {
@@ -800,7 +803,7 @@ export async function toggleChannel(network: string, on: boolean) {
   const denied = await denyBySection("posts");
   if (denied) return denied;
   const readerId = await currentReaderId();
-  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: "Неизвестная сеть" };
+  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: (await getDict()).errors.unknownNetwork };
 
   if (on) await saveChannel(readerId, network);
   else await deleteChannel(readerId, network);
@@ -838,7 +841,7 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
 
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd) };
   }
 
   const channels = await getChannels(reader.id);
@@ -891,16 +894,16 @@ export async function writeOpinion(itemId: number): Promise<
 
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: `Дневной потолок $${reader.daily_cap_usd} исчерпан — завтра` };
+    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd) };
   }
 
   const item = await postSourceFor(reader.id, itemId);
-  if (!item) return { error: "Этого материала в твоих выпусках нет" };
+  if (!item) return { error: (await getDict()).errors.itemNotYours };
 
   const channels = await getChannels(reader.id);
   const networks = tabsOf(channels.map((channel) => channel.network));
   if (networks.length === 0) {
-    return { error: "Сначала отметь в настройках, где ты публикуешь" };
+    return { error: (await getDict()).errors.noChannelsYet };
   }
 
   // Карточка есть — пишем его голосом. Нет — настройками подачи, и мотатка
@@ -942,7 +945,7 @@ export async function writeOpinion(itemId: number): Promise<
 export async function takeOpinion(postId: number, text: string) {
   const readerId = await currentReaderId();
   const ok = await takeDraft(readerId, postId, text.slice(0, 10_000));
-  return ok ? { ok: true as const } : { error: "Черновик не найден" };
+  return ok ? { ok: true as const } : { error: (await getDict()).errors.draftNotFound };
 }
 
 /**
@@ -976,12 +979,10 @@ export async function saveOnboardingInterests(slugs: string[], custom: string[])
     (chip, index, all) => chip.slug && all.findIndex((other) => other.slug === chip.slug) === index,
   );
 
-  if (chips.length === 0) return { error: "Выбери хотя бы один интерес" };
+  if (chips.length === 0) return { error: (await getDict()).errors.pickAnyTopic };
   if (chips.length > plan.maxTopics) {
     return {
-      error:
-        `На тарифе «${plan.label}» можно ${plan.maxTopics} ${topicsWord(plan.maxTopics)}, ` +
-        `а выбрано ${chips.length}`,
+      error: (await getDict()).errors.tooManyTopics(plan.label, plan.maxTopics, chips.length),
     };
   }
 
@@ -1025,7 +1026,7 @@ export async function saveOnboardingSources(keys: string[]) {
     plan,
     keys.slice(0, 100),
   );
-  if (chosen.length === 0) return { error: "Выбери хотя бы один источник" };
+  if (chosen.length === 0) return { error: (await getDict()).errors.pickOneSource };
 
   let added = 0;
   for (const feed of chosen) {
@@ -1076,6 +1077,6 @@ export async function finishOnboarding() {
     // и на упавшем обещании он остался бы крутить спиннер до закрытия
     // вкладки. Настройка при этом уже сохранена — терять её не за что.
     console.error(`первый выпуск: ${(error as Error).message}`);
-    return { error: "Не получилось собрать первый выпуск — соберу ночью" };
+    return { error: (await getDict()).errors.firstIssueFailed };
   }
 }
