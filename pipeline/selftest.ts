@@ -38,6 +38,7 @@ import {
 import { appOrigin } from "../src/lib/auth";
 import { numberCollisions } from "../db/schema-gap";
 import { dropStrayReady } from "../db/free-port";
+import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
@@ -2356,7 +2357,6 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   );
 }
 
-console.log(`Самопроверка пройдена: ${checks} утверждений`);
 
 // --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
 // Подмена колонки при сохранении была необратимой: тариф открывается обратно,
@@ -2487,6 +2487,85 @@ console.log(`Самопроверка пройдена: ${checks} утвержд
     false,
     "и не отменяется тем, что запасной уровень дошёл до разбора",
   );
+}
+
+// Сюжет: дедуп сделан видимым.
+//
+// Проверяется то, что на живых данных уже разъехалось: «первоисточник»
+// по dup_of неверен в трёх случаях из четырёх, потому что оригиналом
+// дедуп назначает меньший id — порядок опроса источников, а не публикации.
+{
+  const pub = (
+    item_id: number,
+    source_id: number,
+    source_label: string,
+    kind: "rss" | "hackernews",
+    minutes: number,
+    points: number | null = null,
+  ) => ({
+    item_id,
+    source_id,
+    source_label,
+    kind,
+    url: `https://example.com/${item_id}`,
+    published_at: new Date(Date.UTC(2026, 8, 20, 10, 0) + minutes * 60_000),
+    points,
+  });
+
+  // Живой случай: Hacker News собран первым и стал оригиналом, а написан
+  // пост был на 103 минуты раньше.
+  const willison = pub(68, 2, "Simon Willison", "rss", 0);
+  const hn = pub(12, 1, "Hacker News", "hackernews", 103, 418);
+  assert.deepEqual(
+    storyLines([hn, willison]).map((row) => [row.source_label, row.note]),
+    [["Simon Willison", "первоисточник"], ["Hacker News", "обсуждение: 418 points"]],
+    "первоисточник — самое раннее издание, а не меньший id",
+  );
+
+  // Обсуждение раньше статьи первоисточником не становится, и отсчёт
+  // «позже» идёт от издания: иначе вторая статья получила бы «раньше».
+  const early = pub(5, 1, "Hacker News", "hackernews", 0, 91);
+  const verge = pub(9, 3, "The Verge", "rss", 60);
+  const ars = pub(11, 4, "Ars Technica", "rss", 78);
+  assert.deepEqual(
+    storyLines([ars, early, verge]).map((row) => row.note),
+    ["обсуждение: 91 points", "первоисточник", "18 минут позже"],
+    "отсчёт идёт от первого издания, обсуждение в нём не участвует",
+  );
+
+  // Кластер без единого издания: отсчитывать не от чего, и выдумывать
+  // первоисточник нельзя.
+  assert.deepEqual(
+    storyLines([pub(1, 1, "Hacker News", "hackernews", 0, null)]).map((row) => row.note),
+    ["обсуждение"],
+    "обсуждение без очков остаётся обсуждением, а не первоисточником",
+  );
+
+  // Двенадцать кластеров из шестнадцати на живом потоке — это источник,
+  // повторивший сам себя. Строка о них соврала бы.
+  assert.equal(
+    otherSources([pub(1, 7, "Cointelegraph", "rss", 0), pub(2, 7, "Cointelegraph", "rss", 30)], 7),
+    0,
+    "источник, повторивший сам себя, не «ещё один источник»",
+  );
+  assert.equal(otherSources([willison, hn], 2), 1, "чужой источник в сюжете считается");
+
+  assert.equal(laterBy(0), "тогда же");
+  assert.equal(laterBy(1), "1 минуту позже");
+  assert.equal(laterBy(18), "18 минут позже");
+  assert.equal(laterBy(103), "2 часа позже", "минуты перестают быть минутами после часа");
+  assert.equal(laterBy(341), "6 часов позже");
+  assert.equal(laterBy(1500), "1 день позже");
+  assert.equal(laterBy(4000), "3 дня позже");
+
+  // «1 материалов» — та же ловушка, только в новой строке.
+  assert.equal(alsoLine(1), "О том же написали ещё 1 твой источник");
+  assert.equal(alsoLine(3), "О том же написали ещё 3 твоих источника");
+  assert.equal(alsoLine(5), "О том же написали ещё 5 твоих источников");
+  assert.equal(alsoLine(11), "О том же написали ещё 11 твоих источников");
+  assert.equal(storyTitle(1), "Один сюжет, 1 публикация");
+  assert.equal(storyTitle(4), "Один сюжет, 4 публикации");
+  assert.equal(storyTitle(12), "Один сюжет, 12 публикаций");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

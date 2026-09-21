@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
-import { getDigestDays, getFeed } from "@/lib/queries";
-import { getChannels, getReaderTopics } from "@/lib/readers";
+import { getDigestDays, getFeed, getStories } from "@/lib/queries";
+import { getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan } from "@/lib/lemon";
+import { sourcesForPlan } from "@/lib/plans";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
@@ -76,7 +77,16 @@ export default async function FeedPage({
   // Запрошенный день принимается, только если выпуск за него есть:
   // иначе адрес из чужой ссылки открывает пустую страницу без объяснения.
   const day = requested && days.includes(requested) ? requested : days[0];
-  const items = await getFeed(reader.id, day);
+  const feed = await getFeed(reader.id, day);
+
+  // Сюжет карточки считается по тем же источникам, по которым собран выпуск:
+  // тариф уже учтён, и «твои источники» в раскрытии значит ровно то же, что
+  // в отборе. Список приезжает отдельным запросом и приклеивается здесь —
+  // Map через границу сервера не уходит, а сорок карточек не должны
+  // спрашивать базу по одной.
+  const mine = sourcesForPlan(await readerSources(reader.id), plan).map((source) => source.id);
+  const stories = await getStories(mine, feed.map((item) => item.id));
+  const items = feed.map((item) => ({ ...item, story: stories.get(item.id) ?? [] }));
 
   return (
     <FeedTabs

@@ -10,6 +10,7 @@ import {
   EllipsisIcon,
   PenLineIcon,
   CrownIcon,
+  ChevronDownIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
@@ -27,7 +28,8 @@ import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
-import type { FeedItem } from "@/lib/queries";
+import type { FeedCard } from "@/lib/queries";
+import { alsoLine, otherSources, storyLines, storyTitle } from "@/lib/story";
 import { HORIZON, KIND } from "@/lib/axis-labels";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
@@ -104,13 +106,18 @@ export function ItemCard({
   plan,
   networks,
 }: {
-  item: FeedItem;
+  item: FeedCard;
   showTopic: boolean;
   plan: Plan;
   /** Сети, отмеченные в «Моих площадках»: сколько их — столько табов. */
   networks: NetworkId[];
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Своё состояние, а не expanded: раскрытие описания считается чтением
+  // материала и уезжает в калибровку событием «opened». Список повторов —
+  // не чтение, и засчитать его за чтение значило бы подмешать в петлю
+  // измерения интерес, которого не было.
+  const [storyOpen, setStoryOpen] = useState(false);
   const [opinion, setOpinion] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [vote, setVote] = useState<"up" | "down" | null>(null);
@@ -197,6 +204,11 @@ export function ItemCard({
 
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
+
+  // Считаются источники, а не публикации: источник, повторивший сам себя,
+  // «ещё одним источником» не становится, и такой сюжет строки не получает.
+  const others = otherSources(item.story, item.source_id);
+  const lines = others > 0 ? storyLines(item.story) : [];
 
   const title = item.title_ru || item.title;
   const site = siteOf(item.url);
@@ -560,6 +572,53 @@ export function ItemCard({
             >
               {item.summary}
             </p>
+          ) : null}
+
+          {/* Работа дедупа, названная вслух. Не «важно» и не «подтверждено»:
+              пять изданий, пересказавших один пресс-релиз, ничего
+              не подтверждают. Здесь сказано ровно то, что произошло, —
+              Retorta выбрала из них одно и не спрятала остальные. */}
+          {others > 0 ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                aria-expanded={storyOpen}
+                onClick={() => setStoryOpen((value) => !value)}
+                className="flex cursor-pointer items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {alsoLine(others)}
+                <ChevronDownIcon
+                  className={cn("size-3.5 transition-transform duration-200", storyOpen && "rotate-180")}
+                />
+              </button>
+              {storyOpen ? (
+                <div className="mt-2 max-w-[68ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
+                  <p className="mb-1.5 font-medium">{storyTitle(lines.length)}</p>
+                  <ul className="space-y-1">
+                    {lines.map((line) => (
+                      <li key={line.item_id} className="flex flex-wrap items-baseline gap-x-1.5">
+                        <a
+                          href={line.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          // Переход к любой публикации сюжета — это уход
+                          // читать эту новость, и калибровке он нужен весь:
+                          // событие ставится на карточку, а не на ту строку,
+                          // по которой щёлкнули, — в выпуске была она.
+                          onClick={() => report({ item_id: item.id, event: "outbound" })}
+                          className="text-foreground/80 underline-offset-4 hover:underline"
+                        >
+                          {line.source_label}
+                        </a>
+                        {line.note ? (
+                          <span className="text-muted-foreground">— {line.note}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
 

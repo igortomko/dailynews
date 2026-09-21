@@ -29,12 +29,28 @@ export type Candidate = {
 };
 
 /**
- * Кандидаты этого читателя: свежий оценённый поток без дублей и без того,
- * что уже уходило ему раньше.
+ * Кандидаты этого читателя: свежий оценённый поток по одному материалу
+ * на сюжет и без того, что уже уходило ему раньше.
  *
  * «Ему», а не «кому-нибудь»: выпуски других читателей на этот отбор влиять
  * не должны. Иначе первый прогнавшийся читатель вычерпывал бы поток,
  * а остальные получали бы остатки — выпуск при этом приходил бы вовремя.
+ *
+ * Кандидат — сюжет, а не материал. Раньше отбор брал `dup_of is null`, то
+ * есть глобальный оригинал, а оригиналом дедуп назначает самый ранний
+ * по времени сбора материал — из любого источника каталога, в том числе
+ * такого, которого у этого читателя нет. Тогда его собственная публикация
+ * помечена повтором и отброшена, а оригинал ему недоступен: сюжет пропадал
+ * из выпуска целиком. Один читатель со всем каталогом этого не видел;
+ * у второго и у всякого, кому тариф режет список, это сработало бы сразу —
+ * выпуск пришёл бы вовремя, без ошибок и без новости, которую его источник
+ * написал.
+ *
+ * Оценка берётся у оригинала (`scores` пишется только ему — повторы
+ * в Jev не уезжают), а текст и ссылка — у публикации из своих источников.
+ * Это тот же принцип, на котором стоит весь второй каскад: что случилось,
+ * не зависит от того, чьими глазами читать, а читать надо то, на что
+ * читатель подписан.
  */
 export async function candidates(
   sql: Db,
@@ -42,28 +58,43 @@ export async function candidates(
   sourceIds: number[],
 ): Promise<Candidate[]> {
   const rows = await sql<Candidate[]>`
-    select i.id, i.title, i.excerpt, i.body, i.url, s.label as source_label,
-           sc.topic_id::int as topic_id,
-           coalesce(t.label, 'Прочее') as topic_label,
-           sc.axes
-      from dailynews.scores sc
-      join dailynews.items i on i.id = sc.item_id
-      join dailynews.sources s on s.id = i.source_id
- left join dailynews.topics t on t.id = sc.topic_id
-     where i.dup_of is null
+    select * from (
+      -- Один материал на сюжет. Внутри сюжета предпочитается оригинал —
+      -- тот, кого выбрал дедуп: пока он среди своих источников, выпуск
+      -- собирается ровно как раньше. Своего оригинала нет — берётся самая
+      -- ранняя своя публикация, и сюжет остаётся в выпуске вместо того,
+      -- чтобы исчезнуть.
+      select distinct on (coalesce(i.dup_of, i.id))
+             i.id, i.title, i.excerpt, i.body, i.url, s.label as source_label,
+             sc.topic_id::int as topic_id,
+             coalesce(t.label, 'Прочее') as topic_label,
+             sc.axes, sc.total
+        from dailynews.items i
+        join dailynews.sources s on s.id = i.source_id
+        -- Оценка сюжета, а не строки: повторы Jev не оценивает.
+        join dailynews.scores sc on sc.item_id = coalesce(i.dup_of, i.id)
+   left join dailynews.topics t on t.id = sc.topic_id
        -- Источники тарифа: сбор общий на всех, а в выпуск попадает только
        -- то, что тариф этого читателя разрешает. Иначе бесплатный читал бы
        -- платный источник, за который платит не он.
        -- Каст обязателен: нетипизированный массив уходит в int, а id — bigint.
-       and i.source_id = any(${sourceIds}::bigint[])
-       and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
-       and not exists (
-         select 1
-           from dailynews.digest_items di
-           join dailynews.digests d on d.id = di.digest_id
-          where di.item_id = i.id and d.reader_id = ${readerId}
-       )
-     order by sc.total desc
+       where i.source_id = any(${sourceIds}::bigint[])
+         and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
+         -- «Уже уходило» считается по сюжету, а не по строке: вчера выпуск
+         -- взял одно издание, сегодня та же новость пришла от другого —
+         -- и без этого условия она вернулась бы к читателю второй раз
+         -- под другим заголовком.
+         and not exists (
+           select 1
+             from dailynews.digest_items di
+             join dailynews.digests d on d.id = di.digest_id
+             join dailynews.items p on p.id = di.item_id
+            where d.reader_id = ${readerId}
+              and coalesce(p.dup_of, p.id) = coalesce(i.dup_of, i.id)
+         )
+       order by coalesce(i.dup_of, i.id), (i.dup_of is null) desc, i.id
+    ) story
+     order by total desc
   `;
 
   // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт

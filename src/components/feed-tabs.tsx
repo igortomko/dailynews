@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ItemCard } from "@/components/item-card";
-import type { FeedItem } from "@/lib/queries";
+import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { NetworkId } from "@/lib/networks";
@@ -74,7 +74,7 @@ export function FeedTabs({
   right,
 }: {
   topics: ReaderTopic[];
-  items: FeedItem[];
+  items: FeedCard[];
   /** Действующий тариф: от него зависят корона и кнопка «Своё мнение». */
   plan: Plan;
   networks: NetworkId[];
