@@ -179,6 +179,50 @@
   --sidebar-ring: oklch(0.56 0.008 80);
 }
 
+/* Brand color v2 is scoped to the server-selected rollout wrapper. */
+[data-brand-colors="v2"] {
+  --accent: #e5f3f5;
+  --accent-foreground: #2d6874;
+  --secondary: #e5f3f5;
+  --secondary-foreground: #2d6874;
+  --ring: #69b8c6;
+  --sidebar-accent: #e5f3f5;
+  --sidebar-accent-foreground: #2d6874;
+  --sidebar-ring: #69b8c6;
+}
+
+.dark [data-brand-colors="v2"] {
+  --accent: #263c3f;
+  --accent-foreground: #e5f3f5;
+  --secondary: #263c3f;
+  --secondary-foreground: #e5f3f5;
+  --ring: #69b8c6;
+  --sidebar-accent: #263c3f;
+  --sidebar-accent-foreground: #e5f3f5;
+  --sidebar-ring: #69b8c6;
+}
+
+[data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active] {
+  color: #c94736;
+}
+
+[data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active]::after {
+  background: #e6533f;
+}
+
+[data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active] > span {
+  color: currentColor;
+  opacity: 0.72;
+}
+
+.dark [data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active] {
+  color: #ff8a78;
+}
+
+.dark [data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active]::after {
+  background: #e6533f;
+}
+
 @layer base {
   /*
     «Поменьше движения» — не вкус, а настройка здоровья: у части людей
