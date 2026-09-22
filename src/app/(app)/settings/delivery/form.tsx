@@ -9,7 +9,7 @@ import {
   saveKindleAddress,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import { PaywallCrown, usePaywall } from "@/components/paywall";
+import { PaywallCrown } from "@/components/paywall";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -102,7 +102,6 @@ export function DeliveryForm({
   // объясняют, что именно даёт переход, — заглушка вместо экрана не
   // объясняет ничего. Нажатие на любое из них открывает окно.
   const locked = !FEATURES.delivery.has(plan);
-  const kindlePaywall = usePaywall("delivery", plan);
   const [error, setError] = useState<string | null>(null);
 
   /**

@@ -92,7 +92,9 @@ async function main() {
   // заглушку из самого пакета вместо того, чтобы снимать защиту из кода.
   const { createRequire } = await import("node:module");
   const require_ = createRequire(import.meta.url);
-  const Module = require_("node:module") as any;
+  const Module = require_("node:module") as {
+    _resolveFilename(request: string, ...rest: unknown[]): string;
+  };
   // Путь берём до установки патча: иначе resolve внутри патча зовёт сам себя.
   const emptyStub = require_.resolve("server-only").replace(/index\.js$/, "empty.js");
   const resolve = Module._resolveFilename;

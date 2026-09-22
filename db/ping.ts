@@ -8,7 +8,9 @@ import { createRequire } from "node:module";
 
 async function main() {
   const require_ = createRequire(import.meta.url);
-  const Module = require_("node:module") as any;
+  const Module = require_("node:module") as {
+    _resolveFilename(request: string, ...rest: unknown[]): string;
+  };
   const emptyStub = require_.resolve("server-only").replace(/index\.js$/, "empty.js");
   const resolve = Module._resolveFilename;
   Module._resolveFilename = function (request: string, ...rest: unknown[]) {
