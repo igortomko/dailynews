@@ -56,6 +56,23 @@ assert.equal(reasoningEffortFor('extract'), 'none');
 assert.equal(reasoningEffortFor('extract-repair'), 'none');
 assert.equal(reasoningEffortFor('compose'), 'low');
 assert.equal(reasoningEffortFor('verify'), 'low');
+// Короткое слово не висит в конце строки ни в одной письменности: мера —
+// длина, а не словарь предлогов. Список отвечал только за кириллицу,
+// и латинские «a», «is», «of» не совпадают с ней даже там, где выглядят
+// одинаково, — на двухстах живых выпусках так пропускалось 811 слов из 2896.
+assert.equal(typography('a new model'), 'a\u00a0new model');
+assert.equal(typography('The cat is on a mat'), 'The cat is\u00a0on\u00a0a\u00a0mat');
+assert.equal(typography('их он ли'), 'их\u00a0он\u00a0ли');
+// Три буквы общим правилом задели бы «дом», «код» и «год», поэтому
+// трёхбуквенные предлоги остались перечнем.
+assert.equal(typography('дом код год'), 'дом код год');
+assert.equal(typography('для дома'), 'для\u00a0дома');
+// Притяжательное «s» — не короткое слово, а хвост предыдущего: склеив его
+// со следующим, мы запретили бы разрыв ровно там, где он и уместен.
+assert.equal(typography("Anthropic's model"), "Anthropic's model");
+assert.equal(typography('Anthropic\u2019s model'), 'Anthropic\u2019s model');
+// Дефисное слово целиком, а не «по» из его начала.
+assert.equal(typography('по-прежнему дом'), 'по-прежнему дом');
 assert.ok(documentText(valid).includes('No effect on accuracy'));
 const quotation: ReadingDocument = { ...valid, blocks: [{ kind: 'quote', attribution: 'Author', content: evidence('No effect on accuracy', 's1-b') }] };
 assert.deepEqual(validateQuotes(quotation, 'The study found No effect on accuracy in participants.'), []);

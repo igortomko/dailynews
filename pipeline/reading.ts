@@ -12,7 +12,7 @@ import { styleOf, type Voice } from "../src/lib/voice";
 import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
-  documentText, parseStoredReading, normalizeDocument, validateQuotes,
+  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes,
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
@@ -266,7 +266,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       const key = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion, readerContext, voice, baselines]));
       const cached = options.force ? null : parseStoredReading(await getDocument(sql, options.readerId, key));
       if (cached?.document && cached.status === "verified") {
-        return { id: item.id, title_ru: cached.document.title.text, summary: [cached.notice, documentText(cached.document)].filter(Boolean).join("\n\n"), reading: cached };
+        return { id: item.id, title_ru: cached.document.title.text, summary: readingText(cached), reading: cached };
       }
       analysisKey = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion]));
       const shared = await acquireAnalysis(sql, item.id, analysisKey, sourceVersion);
@@ -278,7 +278,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       const reading: StoredReading = { version: 2, sourceVersion, availability, status: "verified", document, notice,
         seconds: Math.ceil(minutesOf(cardChars(document.title.text, documentText(document) + (notice ?? "")), voice) * 60) };
       await saveDocument(sql, options.readerId, item.id, key, reading);
-      return { id: item.id, title_ru: document.title.text, summary: [notice, documentText(document)].filter(Boolean).join("\n\n"), reading };
+      return { id: item.id, title_ru: document.title.text, summary: readingText(reading), reading };
     } catch (error) {
       if (error instanceof ReadingBusyError) throw error;
       if (lease && analysisKey) await finishAnalysis(sql, analysisKey, lease, null);
@@ -293,7 +293,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
         retainedIds.push(item.id);
         console.warn(`reading ${item.id}: retained verified summary of unchanged source`);
         return { id: item.id, title_ru: retained.document.title.text,
-          summary: [retained.notice, documentText(retained.document)].filter(Boolean).join("\n\n"), reading: retained };
+          summary: readingText(retained), reading: retained };
       }
       const budget = error instanceof ReadingBudgetError;
       console.warn(`reading ${item.id}: ${error instanceof Error ? error.message.slice(0,180) : 'failed'}`);

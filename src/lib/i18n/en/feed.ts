@@ -70,7 +70,6 @@ export const feed = {
     clearTooltip: "Clear selection",
     build: "Build overview",
     dialogTitle: "Overview for your team",
-    issueOf: (date: string, n: number) => `Digest of ${date} · ${story(n)}`,
     defaultTitle: (date: string) => `Overview for ${date}`,
     titleLabel: "Title",
     introLabel: "Introduction",
@@ -115,6 +114,8 @@ export const feed = {
     audioPlay: "Play",
     audioPause: "Pause",
     audioPlayError: "Playback failed — the audio is in Telegram",
+    audioRateTooltip: "Speed: tap to change",
+    audioRateAria: "Playback speed",
     audioAria: "Read this article aloud",
     audioTooltipReady: "Listen to the article in Telegram",
     audioTooltipLocked: "Audio is on the Pro plan",
@@ -227,6 +228,10 @@ export const feed = {
     // словом, и «сент.» рядом с английским текстом читается как опечатка,
     // а не как перевод, которого не хватило.
     minutesLong: (n: number): string => `~${n} ${n === 1 ? "minute" : "minutes"}`,
+    hoursLong: (h: number, m: number): string =>
+      m > 0
+        ? `~${h} ${h === 1 ? "hour" : "hours"} ${m} ${m === 1 ? "minute" : "minutes"}`
+        : `~${h} ${h === 1 ? "hour" : "hours"}`,
     shortfall: (have: string, target: number): string =>
       `${have} of ${target}: there is nothing more that really matters today`,
     monthDay: (date: Date): string => MONTH.format(date),

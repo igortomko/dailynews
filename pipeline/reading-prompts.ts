@@ -30,6 +30,7 @@ For a technical, research or policy article, explain the central mechanism in on
 When a release, study or argument contains 3–5 distinct contributions, findings or options, use a concise list with one idea per item instead of burying that list in a paragraph. Lists are plain typography, not visual accent boxes.
 Use bullets for parallel points; numbering for explicit counted facts or a compact sequence. Preserve an author's actual sequence, including up to six steps. Do not cram six original steps into four or turn a procedure into unordered facts. Use the richer steps format only when each step needs explanation; a compact numbered list is often enough.
 Keep causal explanations and stories in connected prose. A short narrative should not become a list simply for variety.
+Keep each paragraph to 2–4 sentences; split longer prose into further paragraphs rather than one dense block.
 If an author's exact wording carries a memorable idea, use ONE short quote from quoteCandidates (original language, at most 25 words, exact text and correct attribution). A quote replaces its paraphrase; surrounding prose supplies necessary context. Never invent a quote, translate it inside quotation marks or quote incidental words just to decorate a card.
 Use at most ONE visual accent (flow/comparison/metric/steps/takeaway/quote), and only if it explains faster than prose.
 Use NO accent when ordinary text is clearer. Lists may be numbered facts (not ranked or procedural).

@@ -7,9 +7,10 @@ import {
   resetKindleSetup,
   saveKindleDigest,
   saveKindleAddress,
+  savePodcast,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import { PaywallCrown, usePaywall } from "@/components/paywall";
+import { PaywallCrown } from "@/components/paywall";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -83,6 +84,7 @@ export function DeliveryForm({
   kindleAddress,
   kindleDigest,
   kindleApproved,
+  podcast,
   sender,
   plan,
 }: {
@@ -93,6 +95,8 @@ export function DeliveryForm({
   kindleAddress: string;
   kindleDigest: boolean;
   kindleApproved: boolean;
+  /** Присылать ли выпуск голосом вместе с сообщением. Только Pro. */
+  podcast: boolean;
   sender: string | null;
 }) {
   const t = useT();
@@ -102,8 +106,17 @@ export function DeliveryForm({
   // объясняют, что именно даёт переход, — заглушка вместо экрана не
   // объясняет ничего. Нажатие на любое из них открывает окно.
   const locked = !FEATURES.delivery.has(plan);
-  const kindlePaywall = usePaywall("delivery", plan);
+  // Подкаст закрыт своим пределом, а не разделом: «Доставка» открыта
+  // с Plus, а озвучка — только на Pro. Проверка та же, по которой рисуется
+  // корона и по которой прогон решает, собирать ли запись. Окно с
+  // предложением носит с собой сама корона, поэтому хука пейвола здесь нет.
+  const noAudio = !FEATURES.audio.has(plan);
   const [error, setError] = useState<string | null>(null);
+  // Управляемый, а не `defaultChecked`: сохранение перерисовывает страницу
+  // (`revalidatePath`), и неуправляемый тумблер получает новое начальное
+  // значение уже после того, как родился, — Base UI говорит об этом
+  // в консоль, а стоит за этим настоящая возможность разойтись с базой.
+  const [podcastOn, setPodcastOn] = useState(podcast);
 
   /**
    * На каком шаге настройка Kindle. Начальное значение приходит из базы:
@@ -115,15 +128,24 @@ export function DeliveryForm({
     kindleSetupStep({ kindle_address: kindleAddress || null, kindle_approved: kindleApproved }),
   );
 
-  /** Одно и то же у всех трёх действий: ошибку показать, успех подтвердить. */
+  /**
+   * Одно и то же у всех действий: ошибку показать, успех подтвердить.
+   *
+   * `fail` нужен тумблеру: он перекидывается сразу, до ответа, — иначе
+   * щелчок выглядит потерянным полсекунды. Не сохранилось — надо вернуть
+   * его обратно, иначе на экране стоит одно, а в базе другое, и узнать
+   * об этом читатель сможет только по тому, что подкаст не придёт.
+   */
   const run = (
     call: Promise<{ error?: string; ok?: boolean } | undefined>,
     ok: string,
     then?: () => void,
+    fail?: () => void,
   ) =>
     startTransition(async () => {
       const result = await call;
       if (result?.error) {
+        fail?.();
         setError(result.error);
         return;
       }
@@ -139,10 +161,37 @@ export function DeliveryForm({
           <CardTitle>Telegram</CardTitle>
           <CardDescription>{t.settings.delivery.telegram.description}</CardDescription>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
+        <CardContent className="flex flex-col gap-4 text-sm text-muted-foreground">
           {connected
             ? t.settings.delivery.telegram.connected(username)
             : t.settings.delivery.telegram.notConnected}
+
+          {/* Выпуск голосом — тумблер, а не правило тарифа: это час звука
+              каждую ночь, и такое включают сами. Корона стоит по той же
+              проверке, по которой работает предел. */}
+          <Field orientation="horizontal">
+            <Switch
+              id="podcast"
+              checked={podcastOn}
+              disabled={pending || noAudio}
+              onCheckedChange={(next: boolean) => {
+                setPodcastOn(next);
+                run(
+                  savePodcast(next),
+                  t.settings.delivery.telegram.podcastSaved,
+                  undefined,
+                  () => setPodcastOn(!next),
+                );
+              }}
+            />
+            <FieldLabel htmlFor="podcast" className="font-normal">
+              <span className="flex items-center gap-1.5">
+                {t.settings.delivery.telegram.podcast}
+                {noAudio ? <PaywallCrown feature="audio" plan={plan} /> : null}
+              </span>
+              <FieldDescription>{t.settings.delivery.telegram.podcastHint}</FieldDescription>
+            </FieldLabel>
+          </Field>
         </CardContent>
       </Card>
 

@@ -36,9 +36,11 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
+import * as bus from "../src/lib/audio-bus";
 import {
   applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
-  spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
+  localeOfVoice, podcastIntro, spelledOut, spokenMap, unabbreviate, unknownRuns,
+  voiceFor, voiceForText,
 } from "../src/lib/speech";
 import { catalogCollisions, fileCoverage, numberCollisions } from "../db/schema-gap";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
@@ -57,9 +59,10 @@ import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
-import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
-  channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
+  channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
+  splitClassic, stamp, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import {
@@ -83,7 +86,7 @@ import {
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, langTagFor, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -93,6 +96,7 @@ import {
 } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
+import { tweetLink } from "./fetch";
 import { countOf, explain, parseTelegram } from "./fetch";
 import {
   NETWORK_IDS, NETWORKS, overLimit, postLength, readableOf, tabsOf,
@@ -483,17 +487,37 @@ assert.ok(normalize([5, 5, 5, 5], 3).every((count) => count === MIN_PER_TOPIC), 
 
 const moved = moveBoundary([10, 6, 4], 0, 7);
 assert.equal(sum(moved), 20, "перетаскивание границы не меняет размер дайджеста");
-assert.deepEqual(moved, [7, 9, 4], "сколько ушло слева, столько пришло справа");
+assert.deepEqual(moved, [7, 7, 6], "отданное место уходит самой тощей теме справа");
 assert.deepEqual(
   moveBoundary([10, 6, 4], 0, 99),
-  [15, 1, 4],
-  "граница не должна съедать соседа целиком",
+  [18, 1, 1],
+  "граница не должна съедать темы целиком",
 );
 assert.deepEqual(
   moveBoundary([10, 6, 4], 1, 0),
   [10, 1, 9],
   "граница не уходит за левого соседа",
 );
+
+// Ради чего всё: сосед с одной новостью больше не запирает границу, пока
+// рядом лежат темы по шесть. Платит самый крупный справа, сосед не трогается.
+const fat = [2, 2, 2, 6, 6];
+assert.deepEqual(moveBoundary(fat, 0, 5), [5, 2, 2, 4, 5], "граница ест самую жирную, а не соседнюю");
+assert.equal(sum(moveBoundary(fat, 0, 5)), sum(fat), "жирная платит, а сумма не меняется");
+assert.deepEqual(
+  moveBoundary(fat, 0, 7),
+  [7, 2, 2, 3, 4],
+  "соседняя тема с минимумом больше не запирает границу",
+);
+// Перетаскивание считается от снимка, поэтому гребок туда и обратно обязан
+// вернуть полосу как была: иначе она ползёт сама от дрожания руки.
+assert.deepEqual(moveBoundary(fat, 0, 2), fat, "возврат в исходное положение возвращает полосу как была");
+// Кнопки «+»/«−» на чипе — та же полоса пальцем, и правило обязано совпадать.
+assert.deepEqual(nudgeTopic(fat, 0, 1), [3, 2, 2, 5, 6], "«+» отнимает у самой жирной");
+assert.deepEqual(nudgeTopic(fat, 3, -1), [3, 2, 2, 5, 6], "«−» отдаёт место самой тощей");
+assert.deepEqual(nudgeTopic([1, 2, 2], 0, -1), [1, 2, 2], "ниже минимума не опускаемся, и полоса не меняется вовсе");
+assert.deepEqual(nudgeTopic([1, 1, 1], 0, 1), [1, 1, 1], "отнять не у кого — ничего не меняется");
+assert.deepEqual(nudgeTopic([5], 0, 1), [5], "у единственной темы счётчик не уезжает от суммы");
 
 // --- голос --------------------------------------------------------------------
 // Колонка complexity ограничена в базе значениями 1..5: разъедется список —
@@ -526,6 +550,21 @@ assert.ok(
   LANGUAGES.every((entry) => flagOf(entry).length > 0),
   "язык без флажка: словарь разъехался со списком",
 );
+// Тот же разъезд, что и с флажком, но цена выше: язык без тега уходит
+// в разметку без `lang`, а без него скринридер читает его фонемами соседа
+// и переносы идут чужими правилами. Язык источника — единственное
+// исключение, и оно названо: на чём написан материал, заранее не знает никто.
+for (const language of LANGUAGES) {
+  if (language === SOURCE_LANGUAGE) continue;
+  assert.ok(langTagFor(language), `язык без тега разметки: ${language}`);
+}
+assert.equal(
+  langTagFor(SOURCE_LANGUAGE), null,
+  "непереведённому выпуску тег не выдумывается: языка его материалов мы не знаем",
+);
+assert.equal(langTagFor("клингонском"), null, "незнакомый язык — без тега, а не с чужим");
+assert.equal(langTagFor("португальском (бразильский)"), "pt-BR", "язык с регионом сохраняет регион");
+
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
 assert.equal(styleOf("выдуманная").key, "нейтральный", "незнакомая манера читается как нейтральная");
@@ -1242,7 +1281,8 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // которое заказано, — а узнаётся это от читателя через месяц.
 import {
   CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
-  formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+  flowSplit, formatDuration, formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+  savedMinutes, streamMinutes,
 } from "../src/lib/reading-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
 
@@ -1327,6 +1367,53 @@ assert.equal(
   cardMinutes(0, DEFAULT_VOICE), perCard,
   "у нового читателя мерки нет, и берётся общая",
 );
+
+// Картинка потока на «О проекте» обещает выпуск, а не заказ. В тихий день
+// мест больше, чем новостей, и «вышло 5, оставит ~18» — то же враньё,
+// что норма, добитая хвостом потока: выпуска из того, чего нет, не будет.
+assert.deepEqual(
+  flowSplit(89, 18), { kept: 18, dropped: 71 },
+  "обычный день: дошедшее и отброшенное считаются от потока",
+);
+assert.deepEqual(
+  flowSplit(5, 18), { kept: 5, dropped: 0 },
+  "тихий день: выпуск не больше потока, отбрасывать нечего",
+);
+assert.deepEqual(
+  flowSplit(0, 18), { kept: 0, dropped: 0 },
+  "пустые сутки: до читателя не дошло ничего, и отброшено тоже ничего",
+);
+
+// «Лента сэкономила тебе час» — это разница между просмотром всего потока
+// и заказанным выпуском. Замер на живом потоке: 89 новостей за сутки —
+// 90 590 знаков, то есть около полутора часов у читалки.
+assert.equal(
+  Math.round(streamMinutes(90_590)), 86,
+  "сутки потока меряются скоростью исходного языка: поток лежит на нём",
+);
+assert.equal(
+  Math.round(savedMinutes(90_590, 10)), 76,
+  "сэкономлено — это просмотр всего потока минус заказанный выпуск",
+);
+// Тихий день: вышло меньше, чем заказано. Отрицательная экономия — это
+// не «лента отняла время», а число, которое нельзя показывать.
+assert.equal(
+  savedMinutes(3_000, 20), 0,
+  "поток короче заказа — экономии нет, и она не уходит в минус",
+);
+assert.equal(
+  savedMinutes(0, 10), 0,
+  "пустые сутки не экономят ничего",
+);
+
+// Час называется часом: экономия переваливает за шестьдесят почти каждый
+// день, и «~86 минут» читатель делит в уме ровно в той строке, ради которой
+// всё считалось.
+const timeRu = RU_DICT.feed.time;
+assert.equal(formatDuration(45, timeRu), "~45 минут", "до часа — минутами");
+assert.equal(formatDuration(86, timeRu), "~1 час 26 минут", "за часом — часами и минутами");
+assert.equal(formatDuration(120, timeRu), "~2 часа", "ровный час не тянет за собой «0 минут»");
+assert.equal(formatDuration(0.4, timeRu), "~1 минута", "меньше минуты не показывается нулём");
 
 // --- тарифы -----------------------------------------------------------------
 // Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись
@@ -1689,6 +1776,12 @@ assert.equal(first("@eugene_rid")?.url, "eugene_rid", "собачка в имя 
 assert.ok(refusal("LocalLLaMA"), "слово без ссылки и операторов — отказ, а не платный запрос");
 assert.ok(refusal("@ab"), "слишком короткое имя каналом быть не может");
 assert.ok(refusal("https://x.com/home"), "служебный путь X не аккаунт");
+// Список X — готовая лента выбранных авторов. Это самый дешёвый фильтр шлака:
+// отобраны люди, а не реакции, и оператор `list:` берёт её тем же
+// advanced_search, что и `from:`.
+assert.equal(first("https://x.com/i/lists/1234567890")?.url, "list:1234567890", "ссылка на список X даёт оператор list:");
+assert.equal(first("https://twitter.com/i/lists/42")?.kind, "x", "старый домен тоже");
+assert.ok(refusal("https://x.com/i/lists/notanid"), "список без номера — отказ, а не платный запрос");
 assert.equal(first("https://t.me/durov")?.url, "durov", "канал Telegram — имя, а не адрес");
 assert.equal(first("https://t.me/s/durov")?.url, "durov", "ссылка на веб-просмотр даёт тот же канал");
 assert.equal(first("https://t.me/durov/123")?.url, "durov", "ссылка на пост даёт канал целиком");
@@ -3630,6 +3723,65 @@ for (const [name, table] of [
   assert.equal(audioBlocker(reader, { audioSecondsPerDay: 2700 }, 0, 600, t, "Pro"), "");
 }
 
+// --- сокращения и вступление подкаста -------------------------------------------
+{
+  // Точка сокращения обрывает фразу на 1,3 секунды: движок читает её
+  // как конец предложения. Замер стоит в `CLIPPED`.
+  assert.equal(
+    unabbreviate("Раунд закрыт на 50 тыс. долларов и это рекорд.", "русском"),
+    "Раунд закрыт на 50 тыс долларов и это рекорд.",
+  );
+  // А `г.` движок читает правильно, и снятие точки его ломает: список
+  // перечисляет только измеренное, а не всё похожее.
+  assert.equal(
+    unabbreviate("Отчёт за 2025 г. показал спад.", "русском"),
+    "Отчёт за 2025 г. показал спад.",
+    "работающее сокращение не трогается",
+  );
+  // Настоящий конец предложения остаётся концом: на живом потоке
+  // «чат. llm-keys-ui» и «судьи-модели. jevals» — это две фразы,
+  // и склей их правило, пауза между ними исчезла бы незаметно.
+  assert.equal(
+    unabbreviate("ключи на машину без вставки в чат. llm-keys-ui поднимает веб", "русском"),
+    "ключи на машину без вставки в чат. llm-keys-ui поднимает веб",
+    "точка в конце фразы не снимается",
+  );
+  // Конец текста — это конец: пауза там по делу.
+  assert.equal(unabbreviate("Осталось 20 тыс.", "русском"), "Осталось 20 тыс.");
+  // Ряд на язык: немецкому голосу русское сокращение подставлять нечего.
+  assert.equal(
+    unabbreviate("Runde bei 50 тыс. Dollar", "немецком"),
+    "Runde bei 50 тыс. Dollar",
+    "чужому языку ряд не применяется",
+  );
+
+  // Локаль вступления — из голоса, а не из второго списка: разъедься они,
+  // немецкий выпуск назвал бы число по-русски.
+  assert.equal(localeOfVoice("de-DE-KatjaNeural"), "de-DE");
+  assert.equal(podcastIntro("2026-09-21", "ru-RU-SvetlanaNeural"), "Reporta, 21 сентября.");
+  assert.equal(podcastIntro("2026-09-21", "de-DE-KatjaNeural"), "Reporta, 21. September.");
+  assert.equal(podcastIntro("2026-09-21", "ja-JP-NanamiNeural"), "Reporta, 9月21日.");
+
+  // Каждый язык выпуска называет число своим языком. Незнакомая `Intl`
+  // локаль молча откатывается на язык среды — и выпуск, прочитанный
+  // корейским голосом, назвал бы дату по-английски.
+  const ruDate = podcastIntro("2026-09-21", voiceFor("русском")!);
+  for (const language of LANGUAGES) {
+    if (language === SOURCE_LANGUAGE) continue;
+    const voice = voiceFor(language)!;
+    const said = podcastIntro("2026-09-21", voice);
+    assert.ok(said.startsWith("Reporta, "), `вступление без имени продукта: ${language}`);
+    assert.ok(said.length > "Reporta, ".length + 3, `вступление без даты: ${language}`);
+    if (language !== "русском") {
+      assert.notEqual(said, ruDate, `${language} назвал число по-русски`);
+    }
+  }
+
+  // День приходит строкой «ГГГГ-ММ-ДД», и пояс разбора не должен её сдвигать.
+  assert.equal(podcastIntro("2026-01-01", "ru-RU-SvetlanaNeural"), "Reporta, 1 января.");
+  assert.equal(podcastIntro("2026-12-31", "ru-RU-SvetlanaNeural"), "Reporta, 31 декабря.");
+}
+
 // --- какие миграции сверка формы схемы вообще может проверить ------------------
 // Молчание сверки о файле, который ей ничего не обещал, — не ответ. Пока
 // эти две причины были одной, миграция из одних индексов уходила в журнал
@@ -3773,6 +3925,64 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   assert.equal(blockOf({ ...card(4, "Orig", null), title_ru: "Перевод" }).title, "Перевод");
   assert.equal(blockOf(card(4, "Orig", null)).summary, "");
 
+  // Текст берётся из документа чтения, когда его разобрали: лента снимает
+  // `summary` с таких карточек, и обзор без этой ветки собирался бы
+  // из одних заголовков со ссылками — окно открывается, текста нет.
+  // Берётся лид, а не весь конспект: десять конспектов не влезают
+  // и в одно сообщение Telegram, ради которого обзор и собирают.
+  const readingBlock = blockOf({
+    ...card(5, "С документом", null),
+    summary_document: {
+      version: 2, sourceVersion: "v1", availability: "article_text", status: "verified",
+      notice: null, seconds: 42,
+      document: {
+        schemaVersion: 2, genre: "news",
+        title: { text: "Заголовок документа", claimIds: ["c1"] },
+        lead: { text: "Лид документа.", claimIds: ["c1"] },
+        blocks: [{ kind: "paragraph", content: { text: "Абзац документа.", claimIds: ["c1"] } }],
+        evidence: null, application: null, omitted: [], baselineId: null,
+      },
+    },
+  });
+  assert.equal(readingBlock.summary, "Лид документа.");
+  // Заголовок — по-прежнему тот, что в ленте: заголовок документа приезжает
+  // в карточку как `title_ru`, и читать его отсюда второй раз незачем.
+  assert.equal(readingBlock.title, "С документом");
+  // Оговорка о нехватке источника — часть текста, как в письме и на читалке.
+  assert.equal(
+    blockOf({
+      ...card(6, "Без выжимки", null),
+      summary_document: {
+        version: 2, sourceVersion: "v1", availability: "excerpt_only", status: "unavailable",
+        notice: "Выжимку подготовить не удалось.", seconds: 0, document: null,
+      },
+    }).summary,
+    "Выжимку подготовить не удалось.",
+  );
+  // Без лида берётся первый обычный абзац, а не акцент из одного числа.
+  assert.equal(
+    blockOf({
+      ...card(8, "Без лида", null),
+      summary_document: {
+        version: 2, sourceVersion: "v1", availability: "article_text", status: "verified",
+        notice: null, seconds: 42,
+        document: {
+          schemaVersion: 2, genre: "news",
+          title: { text: "Заголовок", claimIds: ["c1"] }, lead: null,
+          blocks: [
+            { kind: "metric", value: "18–0", label: "побед", context: { text: "У лидера.", claimIds: ["c1"] } },
+            { kind: "paragraph", content: { text: "Обычный абзац.", claimIds: ["c1"] } },
+          ],
+          evidence: null, application: null, omitted: [], baselineId: null,
+        },
+      },
+    }).summary,
+    "Обычный абзац.",
+  );
+
+  // Мусор в колонке читается как «документа нет», а не роняет обзор.
+  assert.equal(blockOf({ ...card(7, "Мусор", null), summary_document: { version: 9 } }).summary, "");
+
   // Дата выпуска на языке читателя, одна на шапку и на обзор.
   assert.equal(formatDay("2026-09-21", "ru"), "21 сентября 2026 г.");
   assert.equal(formatDay("2026-09-21", "en"), "September 21, 2026");
@@ -3804,5 +4014,224 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
       .endsWith("[A\\]B\\[C](https://s1.test/a%20b)"),
   );
 }
+
+// --- один звук на страницу и одна скорость на все карточки ------------------
+{
+  // Шина трогает только переданные ей элементы, поэтому проверяется
+  // подделкой: настоящий <audio> в node недоступен, а решение — чьё.
+  const made: { paused: boolean; rate: number; plays: number }[] = [];
+  const fake = () => {
+    const el = {
+      paused: true,
+      playbackRate: 1,
+      plays: 0,
+      play() {
+        this.paused = false;
+        this.plays++;
+        return Promise.resolve();
+      },
+      pause() {
+        this.paused = true;
+      },
+    };
+    made.push(el as never);
+    return el as unknown as HTMLAudioElement;
+  };
+
+  const first = fake();
+  const second = fake();
+  bus.playOnly(first);
+  assert.equal((first as unknown as { paused: boolean }).paused, false, "первый играет");
+
+  // Запуск второго останавливает первый: слух у читателя один.
+  bus.playOnly(second);
+  assert.equal((first as unknown as { paused: boolean }).paused, true, "первый остановлен");
+  assert.equal((second as unknown as { paused: boolean }).paused, false, "второй играет");
+
+  // Пауза, а не сброс: вернувшись, читатель продолжает с того же места,
+  // и перемотка в начало наказывала бы за нажатие на соседнюю карточку.
+  bus.playOnly(first);
+  bus.playOnly(second);
+  assert.equal(
+    (first as unknown as { plays: number }).plays, 2,
+    "возврат к карточке — это новый play, а не перезапуск с нуля",
+  );
+
+  // Умолчание — быстрее единицы. Шага ускорения в синтезе нет, и звук
+  // из базы приходит медленнее живой речи; выравнивает это плеер.
+  assert.ok(bus.RATES[0] > 1, "первая скорость круга быстрее исходной записи");
+  assert.equal(
+    bus.currentRate(), bus.RATES[0],
+    "до первого нажатия играет первая скорость круга, а не единица",
+  );
+  assert.ok(
+    !(bus.RATES as readonly number[]).includes(1),
+    "единицы в круге нет: сохранённая от прежнего круга читается как «не задано»",
+  );
+
+  // Скорость общая и применяется к тому, что уже играет.
+  const started = bus.currentRate();
+  const next = bus.nextRate();
+  assert.notEqual(next, started, "по кругу — это другая скорость");
+  assert.equal(
+    (second as unknown as { playbackRate: number }).playbackRate, next,
+    "играющий звук ускоряется сразу, а не со следующего запуска",
+  );
+
+  // Круг замыкается: с последней возвращаемся к единице.
+  const seen = [bus.currentRate()];
+  for (let i = 0; i < bus.RATES.length; i++) seen.push(bus.nextRate());
+  assert.equal(seen[0], seen[seen.length - 1], "круг возвращается туда, откуда начали");
+  assert.ok(bus.RATES.every((r) => seen.includes(r)), "по кругу проходятся все скорости");
+
+  // Подписчик узнаёт о смене: иначе карточка, уже стоящая на экране,
+  // показывала бы старую скорость до перезагрузки.
+  let told = 0;
+  const off = bus.onRate(() => told++);
+  bus.nextRate();
+  assert.equal(told, 1, "соседняя карточка узнаёт о смене скорости");
+  off();
+  bus.nextRate();
+  assert.equal(told, 1, "отписавшаяся — уже нет");
+}
+
+// --- Сообщение о выпуске: rich и запасной классический ---------------------
+//
+// Собирается одной функцией в двух видах сразу. Проверяется здесь, потому
+// что разметку нельзя проверить ни на чём, кроме настоящего чата: Telegram
+// отвечает «chat not found» и на верную, и на неверную. Что можно проверить
+// без сети — что мы отдаём: якорь у каждой статьи, ссылка тегом, а не голым
+// адресом, и метка времени только у того, что в записи есть.
+{
+  const APP = "https://news.tomko.io";
+  const heads = [
+    { id: 11, title: "Первая <новость> & прочее", topic: "Энергетика", at: 0 },
+    { id: 12, title: "Вторая", topic: "Энергетика", at: 754 },
+    { id: 13, title: "Третья", topic: "ИИ", at: null },
+  ];
+
+  assert.equal(stamp(0), "0:00", "начало записи");
+  assert.equal(stamp(754), "12:34", "минуты и секунды");
+  assert.equal(stamp(3754), "1:02:34", "за часом появляется час");
+  assert.equal(stamp(-5), "0:00", "отрицательной секунды не бывает");
+
+  assert.equal(dayUrl(`${APP}/`, "2026-09-21"), `${APP}/?day=2026-09-21`,
+    "лишний слеш в APP_URL не удваивается");
+  assert.equal(itemUrl(APP, "2026-09-21", 11), `${APP}/?day=2026-09-21#item-11`,
+    "ссылка ведёт на карточку в своём дне, а не на корень");
+  assert.match(itemUrl(APP, "2026-09-21", 11, true), /\?day=2026-09-21&play=11#item-11$/,
+    "«слушать» просит ленту нажать кнопку этой карточки");
+
+  const withAudio = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
+    size: "19 мин", podcast: 1080,
+  });
+
+  assert.match(withAudio.html, /^<h2>Выпуск за 21 сентября — 19 мин<\/h2>/,
+    "заголовок первый: сгиб решает порядок");
+  assert.ok(withAudio.html.includes("<audio src=\"tg://audio?id=podcast\">"),
+    "подкаст едет блоком в том же сообщении");
+  assert.ok(withAudio.html.indexOf("<audio") < withAudio.html.indexOf("<h3>"),
+    "запись стоит до тем, то есть до сгиба");
+  assert.equal(withAudio.html.match(/<h3>/g)?.length, 2, "тема — раздел, и их две");
+  assert.equal(withAudio.html.match(/<hr>/g)?.length, 2, "перед каждым разделом разделитель");
+
+  for (const head of heads) {
+    assert.ok(withAudio.html.includes(`href="${APP}/?day=2026-09-21#item-${head.id}"`),
+      `у статьи ${head.id} своя ссылка`);
+    assert.ok(withAudio.classic.includes(`#item-${head.id}`),
+      `запасной путь несёт ту же ссылку на ${head.id}`);
+  }
+
+  // Экранирование: заголовок приходит из чужого фида через модель, и угловая
+  // скобка в нём валит разбор сущностей — Telegram не шлёт тогда ничего.
+  assert.ok(withAudio.html.includes("Первая &lt;новость&gt; &amp; прочее"),
+    "три знака экранированы");
+  assert.ok(!/<новость>/.test(withAudio.html), "сырой угловой скобки в разметке нет");
+
+  // Метка времени и «слушать» — только у того, что в записи есть.
+  assert.ok(withAudio.html.includes("12:34"), "у второй статьи её место в записи");
+  assert.equal(withAudio.html.match(/слушать/g)?.length, 2,
+    "две статьи в записи — две ссылки «слушать»");
+  const third = withAudio.html.slice(withAudio.html.indexOf("Третья"));
+  assert.ok(!third.includes("слушать"),
+    "у статьи вне записи ссылки на озвучку нет: она вела бы к кнопке «озвучить»");
+
+  const noAudio = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
+    size: "19 мин", podcast: null,
+  });
+  assert.ok(!noAudio.html.includes("<audio"), "без подкаста блока аудио нет");
+  assert.ok(!noAudio.html.includes("слушать"),
+    "без подкаста не обещаем послушать даже то, у чего есть метка");
+  assert.ok(noAudio.html.includes("#item-13"), "ссылки на статьи остаются и без записи");
+
+  // Ничего не обрезается: старое сообщение упиралось в 4000 знаков
+  // и обрывалось на полуслове у двух выпусков из трёх.
+  const many = Array.from({ length: 100 }, (_, i) => ({
+    id: i + 1, title: `Заголовок номер ${i + 1} про энергетику и модели`, topic: `Тема ${i % 6}`,
+    at: i * 60,
+  }));
+  const big = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: many, appUrl: APP,
+    size: "45 мин", podcast: 6000,
+  });
+  for (const head of many) {
+    assert.ok(big.html.includes(`#item-${head.id}"`), `сотая статья не отрезана: ${head.id}`);
+  }
+  assert.ok(big.html.length < 32768, "сотня статей помещается в предел rich");
+
+  // Классический путь режется по строкам, а не по знакам: срез посреди
+  // `<a href>` Telegram отвергает целиком, и выпуск не приходит вовсе.
+  const parts = splitClassic(big.classic);
+  assert.ok(parts.length > 1, "сотня статей не влезает в одно классическое сообщение");
+  for (const part of parts) {
+    assert.ok(part.length <= 4096, "ни один кусок не длиннее предела");
+    assert.equal(part.match(/<a /g)?.length ?? 0, part.match(/<\/a>/g)?.length ?? 0,
+      "ссылка не разрезана пополам");
+  }
+  assert.equal(parts.join("\n"), big.classic, "склейка кусков — исходный текст, без потерь");
+
+  const long = splitClassic("к".repeat(5000));
+  assert.equal(long.length, 1, "одна строка длиннее предела режется, а не теряется");
+  assert.equal(long[0].length, 4096, "и режется ровно по пределу");
+}
+// ---------------------------------------------------------------------------
+// Твит с внешней ссылкой — это анонс статьи, и материалом должна стать статья.
+// По адресу твита `enrich` не получит ничего, и оценка встала бы по 280 знакам;
+// а адрес статьи заодно сводит твит с той же публикацией из RSS первым слоем
+// дедупа — бесплатно и без вопроса к Jev, чьи заголовки тут не сходятся.
+// ---------------------------------------------------------------------------
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://example.com/story" }] } }),
+  "https://example.com/story",
+  "внешняя ссылка из твита становится адресом материала",
+);
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://x.com/b/status/2" }] } }),
+  null,
+  "цитата другого твита материалом не является",
+);
+// t.co — сокращатель, за которым неизвестно что. Разворачивать его в сборе
+// значит платить отдельным запросом за каждую ссылку в каждом твите.
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://t.co/abc" }] } }),
+  null,
+  "сокращатель t.co за материал не считается",
+);
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://twitter.com/c" }, { expanded_url: "https://news.site/a" }] } }),
+  "https://news.site/a",
+  "своя ссылка пропускается, внешняя берётся",
+);
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "мнение без ссылки", createdAt: "" }),
+  null,
+  "твит без ссылок остаётся твитом",
+);
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

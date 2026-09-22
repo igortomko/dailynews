@@ -28,8 +28,8 @@ import { llmCost, jevCost } from "../../pipeline/cost";
 import type { Reader, Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
-  allows, cheapestWith, kindDenial, MIN_READING_MINUTES, minutesCap, READING_MINUTES,
-  sourcesForPlan, targetMinutes, type Gated,
+  allows, cheapestFor, cheapestWith, FEATURES, kindDenial, MIN_READING_MINUTES, minutesCap,
+  READING_MINUTES, sourcesForPlan, targetMinutes, type FeatureId, type Gated,
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
@@ -86,6 +86,23 @@ async function denyBySection(section: Gated): Promise<{ error: string } | null> 
   if (allows(plan, section)) return null;
   const t = await getDict();
   return { error: t.errors.sectionLocked(cheapestWith(section).label) };
+}
+
+/**
+ * Закрыта ли возможность тарифом.
+ *
+ * Отдельно от `denyBySection`, потому что раздел и возможность — разные
+ * пределы: «Доставка» открыта с Plus, а озвучка только на Pro, и тумблер
+ * подкаста живёт в разделе, который читателю виден. Проверка — та же
+ * `FEATURES[id].has`, по которой рисуется корона: правило одно, иначе
+ * корона над работающим тумблером и работающий тумблер без короны
+ * одинаково незаметны на глаз и одинаково врут.
+ */
+async function denyByFeature(id: FeatureId): Promise<{ error: string } | null> {
+  const plan = effectivePlan(await currentReader());
+  if (FEATURES[id].has(plan)) return null;
+  const t = await getDict();
+  return { error: t.errors.sectionLocked(cheapestFor(id).label) };
 }
 
 /**
@@ -365,6 +382,35 @@ export async function saveKindleDigest(formData: FormData) {
      where id = ${readerId}
   `;
   revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Присылать ли выпуск голосом.
+ *
+ * Своим действием, а не полем формы Kindle: та форма живёт внутри мастера,
+ * и на первых его шагах переключателя на экране нет вовсе — общее действие
+ * прочитало бы отсутствие флажка как «выключен» и погасило бы подкаст тому,
+ * кто заново настраивает читалку.
+ *
+ * Сохраняется щелчком, без кнопки: у тумблера одно значение и два
+ * положения, и «Сохранить» рядом с ним спрашивает второй раз то же самое.
+ */
+export async function savePodcast(podcast: boolean) {
+  const denied = await denyByFeature("audio");
+  if (denied) return denied;
+
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set podcast = ${podcast}, updated_at = now()
+     where id = ${readerId}
+  `;
+  // Без `revalidatePath` намеренно. Страница динамическая, и обновлять
+  // на ней нечего: тумблер управляемый и уже стоит в новом положении.
+  // Перерисовка же заново рождала бы соседний, неуправляемый тумблер
+  // читалки с новым начальным значением — Base UI пишет об этом в консоль,
+  // и за жалобой стоит настоящая возможность разойтись с базой.
   return { ok: true as const };
 }
 

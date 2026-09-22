@@ -147,6 +147,12 @@ export function planFor(input: string): Plan {
   }
 
   if (host === "x.com" || host === "twitter.com") {
+    // Список X — готовая лента выбранных авторов, и это самый дешёвый фильтр
+    // шлака из всех: отобраны люди, а не реакции. Своей ветки в сборе он
+    // не требует — `list:` такой же оператор advanced_search, как `from:`.
+    if (segments[0] === "i" && segments[1] === "lists" && /^\d+$/.test(segments[2] ?? "")) {
+      return only("x", `list:${segments[2]}`, `список X ${segments[2]}`);
+    }
     const handle = segments[0];
     if (handle && !X_RESERVED.has(handle.toLowerCase()) && /^[A-Za-z0-9_]{1,15}$/.test(handle)) {
       return only("x", `from:${handle}`, `посты @${handle}`);

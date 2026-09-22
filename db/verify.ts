@@ -92,7 +92,9 @@ async function main() {
   // заглушку из самого пакета вместо того, чтобы снимать защиту из кода.
   const { createRequire } = await import("node:module");
   const require_ = createRequire(import.meta.url);
-  const Module = require_("node:module") as any;
+  const Module = require_("node:module") as {
+    _resolveFilename(request: string, ...rest: unknown[]): string;
+  };
   // Путь берём до установки патча: иначе resolve внутри патча зовёт сам себя.
   const emptyStub = require_.resolve("server-only").replace(/index\.js$/, "empty.js");
   const resolve = Module._resolveFilename;
@@ -534,6 +536,44 @@ async function main() {
     assert.equal(
       (await readers.digestProgress(-1, null)).day, null,
       "у читателя без выпусков день пуст: это и значит «первого выпуска ещё не было»",
+    );
+
+    // --- сутки потока: штуки и знаки одним запросом ----------------------------
+    // Из знаков считается, сколько заняло бы просмотреть весь поток, а из этого —
+    // «лента сэкономила тебе час». Сумма обязана совпасть с `cardChars`: две
+    // формулы одного числа расходятся молча, и экономия поехала бы вместе
+    // с ними — числом, которое нечем проверить, в строке, которую читают первой.
+    const [flowSource] = await sql<{ id: number }[]>`
+      insert into dailynews.sources (kind, label, url)
+      values ('rss', 'Поток', 'https://flow.example/feed')
+      returning id::int as id
+    `;
+    for (const [url, title, excerpt, age] of [
+      ["https://flow.example/1", "Реактор запущен", "Мощность вышла на проектную.", "1 hour"],
+      ["https://flow.example/2", "Ставка снижена", "Второй раз за год.", "5 hours"],
+      // Вчерашнее в сутки не входит: окно у картинки то же, что у подписи.
+      ["https://flow.example/3", "Позавчерашнее", "Мимо окна.", "30 hours"],
+    ] as const) {
+      await sql`
+        insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt, collected_at)
+        values (
+          ${flowSource.id}, ${url}, ${url}, ${title}, ${title},
+          ${excerpt}, now() - ${age}::interval
+        )
+      `;
+    }
+    const flow = await queries.getCollectedLast24h([flowSource.id]);
+    assert.equal(flow.count, 2, "в сутки потока входит только свежее");
+    assert.equal(
+      flow.chars,
+      cardChars("Реактор запущен", "Мощность вышла на проектную.")
+        + cardChars("Ставка снижена", "Второй раз за год."),
+      "знаки потока считаются в базе и в коде одинаково",
+    );
+    assert.deepEqual(
+      await queries.getCollectedLast24h([]),
+      { count: 0, chars: 0 },
+      "читатель без источников не получает чужой поток вместо своего",
     );
 
     // Заказ дня лежит при самом выпуске. Лента листается на девяносто дней

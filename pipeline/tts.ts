@@ -14,15 +14,17 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { sql } from "../src/lib/db";
 import {
   applySpoken, audioBlocker, chunks, estimateSeconds, latinRuns, NON_LATIN,
-  spokenMap, unknownRuns, voiceFor, voiceForText, type AudioErrors,
+  podcastIntro, spokenMap, unabbreviate, unknownRuns, voiceFor, voiceForText,
+  type AudioErrors,
 } from "../src/lib/speech";
-import { audioUrl, sendAudio } from "../src/lib/telegram";
+import { audioUrl, deleteMessage, sendAudio } from "../src/lib/telegram";
 import { cardForReader, recordCall } from "../src/lib/readers";
 import { appOrigin } from "../src/lib/auth";
 import { SOURCE_LANGUAGE } from "../src/lib/voice";
 import type { Plan } from "../src/lib/plans";
 import type { Reader } from "../src/lib/types";
 import { llmCost } from "./cost";
+import { GAP_MP3, GAP_SECONDS } from "./gap";
 import { resolve, type Usage } from "./digest";
 
 /**
@@ -131,20 +133,25 @@ ${terms.join("\n")}`;
 }
 
 /**
- * Текст, готовый к озвучке: латиница заменена произношением.
+ * Текст, готовый к озвучке: сокращения без точки, латиница —
+ * произношением.
  *
- * Для языков на латинице возвращается как есть — там менять нечего
- * и нельзя.
+ * Произношение подставляется только там, где латиница чужая письменность:
+ * английской статье оно противопоказано. Сокращения снимаются всем.
  */
 export async function spokenText(
   text: string,
   language: string,
   usage: Usage,
 ): Promise<string> {
-  if (!NON_LATIN.has(language)) return text;
+  // Сокращения снимаются раньше и независимо от письменности: точка
+  // в «50 тыс.» обрывает фразу на любом языке, а произношение латиницы
+  // нужно только тем, кому латиница чужая.
+  const plain = unabbreviate(text, language);
+  if (!NON_LATIN.has(language)) return plain;
 
-  const known = spokenMap(text, language, await learnedTerms(latinRuns(text), language));
-  const unknown = unknownRuns(text, known);
+  const known = spokenMap(plain, language, await learnedTerms(latinRuns(plain), language));
+  const unknown = unknownRuns(plain, known);
   if (unknown.length > 0) {
     const asked = await askSpoken(unknown, language, usage);
     const rows = Object.entries(asked);
@@ -164,7 +171,7 @@ export async function spokenText(
       console.log(`  ~ без произношения остались: ${left.join(", ")}`);
     }
   }
-  return applySpoken(text, known);
+  return applySpoken(plain, known);
 }
 
 /**
@@ -415,12 +422,18 @@ async function cardAudio(
   reader: Reader,
   itemId: number,
   usage: Usage,
-): Promise<{ audio: Buffer; seconds: number; title: string } | null> {
+): Promise<
+  { audio: Buffer; seconds: number; title: string; voice: string; day: string } | null
+> {
   const card = await cardForReader(reader.id, itemId);
   if (!card) return null;
 
-  const [ready] = await sql<{ file_id: string; seconds: number }[]>`
-    select file_id, seconds from dailynews.card_audio
+  // Голос лежит в строке готовой озвучки, и берётся он оттуда, а не
+  // вычисляется заново: вступление обязано звучать тем же голосом, что
+  // первая карточка, а у языка оригинала он выбирается по её тексту —
+  // которого при готовой озвучке мы не синтезируем вовсе.
+  const [ready] = await sql<{ file_id: string; seconds: number; voice: string }[]>`
+    select file_id, seconds, voice from dailynews.card_audio
      where digest_id = ${card.digestId} and item_id = ${itemId}
   `;
   if (ready) {
@@ -430,6 +443,8 @@ async function cardAudio(
         audio: Buffer.from(await res.arrayBuffer()),
         seconds: ready.seconds,
         title: card.title,
+        voice: ready.voice,
+        day: card.day,
       };
     }
     // Ссылка Telegram живёт около часа, а строка у нас вечно. Не скачалось —
@@ -446,17 +461,130 @@ async function cardAudio(
   const audio = await synthesize(spoken, voice);
   const seconds = secondsOf(audio);
 
+  // Заливка ради `file_id`, а не ради доставки: слушать читатель будет
+  // подкаст целиком и карточку на странице, а шестьдесят аудиосообщений
+  // в чате — это чат, засыпанный до самого подкаста. Поэтому сообщение
+  // удаляется сразу: `file_id` его переживает (замер 22 сентября 2026).
+  //
+  // Удаление не обязано получиться. Не вышло — в чате останется лишнее
+  // аудио, и это хуже тишины, но лучше потерянного подкаста.
   const sent = await sendAudio(Number(reader.telegram_id), audio, {
     title: card.title,
     url: card.url,
     duration: seconds,
+  });
+  await deleteMessage(Number(reader.telegram_id), sent.messageId).catch((error) => {
+    console.log(`  ~ служебное аудио ${itemId} не удалилось: ${(error as Error).message}`);
   });
   await sql`
     insert into dailynews.card_audio (digest_id, item_id, file_id, seconds, voice)
     values (${card.digestId}, ${itemId}, ${sent.fileId}, ${seconds}, ${voice})
     on conflict (digest_id, item_id) do nothing
   `;
-  return { audio, seconds, title: card.title };
+  return { audio, seconds, title: card.title, voice, day: card.day };
+}
+
+/**
+ * Вступление перед первой новостью: имя продукта и число.
+ *
+ * Синтезируется последним, а встаёт первым: голос и день берутся
+ * у первой карточки — при языке оригинала голос выбирается по её тексту,
+ * и до синтеза карточки его попросту нет.
+ *
+ * Не получилось — подкаст уходит без вступления, а причина идёт в лог.
+ * Вступление это подпись на файле; ронять из-за неё три минуты работы
+ * и потраченную квоту нельзя, а молчать о пропаже — тем более: без строки
+ * «вступление не вышло» отличить это от «так и задумано» нечем.
+ */
+async function introAudio(
+  reader: Reader,
+  first: { voice: string; day: string },
+  usage: Usage,
+): Promise<Buffer | null> {
+  try {
+    const text = await spokenText(podcastIntro(first.day, first.voice), reader.language, usage);
+    return await synthesize(text, first.voice);
+  } catch (error) {
+    console.log(
+      `  ~ вступление не вышло: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Склеить подкаст: байты, длина и место каждой карточки внутри записи.
+ *
+ * Отдельно от отправки, потому что отправок две и они разные. Ночной выпуск
+ * везёт подкаст блоком внутри самого сообщения — ему нужны байты и метки
+ * времени, а расход квоты не нужен вовсе. Кнопка в вебе везёт его отдельным
+ * файлом и списывает квоту построчно. Одна функция на обе — и запись,
+ * которую слушает читатель, собрана одним кодом.
+ *
+ * Порядок — тот, в котором карточки идут в выпуске, а не в котором их
+ * отмечали: подкаст слушают как выпуск, а отмечают сверху вниз и вразнобой.
+ */
+export async function buildPodcast(
+  reader: Reader,
+  itemIds: number[],
+  usage: Usage,
+): Promise<{ audio: Buffer; seconds: number; titles: string[]; at: Map<number, number> }> {
+  const parts: Buffer[] = [];
+  const titles: string[] = [];
+  // Секунда, с которой карточка начинается в готовом файле. Считается
+  // здесь, а не суммой `card_audio.seconds` запросом: пропущенная карточка
+  // сдвигает всё, что за ней, и сумма по таблице назвала бы чужое место.
+  const at = new Map<number, number>();
+  let first: { voice: string; day: string } | null = null;
+  let seconds = 0;
+  let lost = 0;
+  for (const itemId of itemIds) {
+    // Карточка, которая не далась, стоит записи одной новости, а не всей
+    // записи. Без этого один оборванный запрос из шестидесяти выбрасывал
+    // десять минут синтеза: замер 22 сентября 2026 — ECONNRESET на 31-й
+    // заливке, и подкаста не стало вовсе.
+    //
+    // Повтора здесь нет намеренно: пропущенная карточка не попадёт
+    // ни в «слушать», ни в метки времени — про неё просто не сказано,
+    // что её можно послушать, и это честно. Повтор понадобится, когда
+    // окажется, что рвётся не одна из шестидесяти, а каждая пятая.
+    const piece = await cardAudio(reader, itemId, usage).catch((error) => {
+      console.log(`  ~ карточка ${itemId} без озвучки: ${(error as Error).message}`);
+      lost++;
+      return null;
+    });
+    if (!piece) continue;
+    // Пауза между новостями, но не перед первой и не после последней:
+    // тишина в начале файла читается как «не загрузилось».
+    if (parts.length > 0) {
+      parts.push(GAP_MP3);
+      seconds += GAP_SECONDS;
+    }
+    at.set(itemId, Math.round(seconds));
+    parts.push(piece.audio);
+    titles.push(piece.title);
+    seconds += piece.seconds;
+    first ??= { voice: piece.voice, day: piece.day };
+  }
+  if (parts.length === 0 || !first) throw new Error("ни одной карточки озвучить не вышло");
+  // Недобор называется вслух и здесь: запись короче выпуска — это не сбой
+  // синтеза вообще, но и не то, о чём стоит молчать.
+  if (lost > 0) console.log(`  ~ в записи нет ${lost} из ${itemIds.length} карточек`);
+
+  // Вступление впереди и через ту же паузу, что между новостями: тишина
+  // в начале файла читается как «не загрузилось», а её отсутствие делает
+  // из «Reporta, двадцать первое сентября» первую фразу первой новости.
+  const intro = await introAudio(reader, first, usage);
+  if (intro) {
+    const lead = secondsOf(intro) + GAP_SECONDS;
+    parts.unshift(intro, GAP_MP3);
+    seconds += lead;
+    // Метки времени сдвигаются вместе с новостями. Оставь их на месте —
+    // и «слушать · 12:34» в сообщении указывало бы на соседнюю новость,
+    // причём тем вернее, чем длиннее вступление.
+    for (const [itemId, at0] of at) at.set(itemId, Math.round(at0 + lead));
+  }
+  return { audio: Buffer.concat(parts), seconds: Math.round(seconds), titles, at };
 }
 
 /**
@@ -482,17 +610,7 @@ export async function runPodcast(
   let delivered = false;
   try {
     await mark("speaking");
-    const parts: Buffer[] = [];
-    const titles: string[] = [];
-    let seconds = 0;
-    for (const itemId of itemIds) {
-      const piece = await cardAudio(reader, itemId, usage);
-      if (!piece) continue;
-      parts.push(piece.audio);
-      titles.push(piece.title);
-      seconds += piece.seconds;
-    }
-    if (parts.length === 0) throw new Error("ни одной карточки озвучить не вышло");
+    const { audio, seconds, titles } = await buildPodcast(reader, itemIds, usage);
 
     if (usage.requests > 0) {
       await recordCall({
@@ -504,7 +622,7 @@ export async function runPodcast(
     await mark("sending");
     // Заголовок — сколько внутри и чем начинается: «Подкаст» без этого
     // неотличим от вчерашнего в списке файлов Telegram.
-    await sendAudio(Number(reader.telegram_id), Buffer.concat(parts), {
+    await sendAudio(Number(reader.telegram_id), audio, {
       title: `${titles.length} · ${titles[0]}`,
       url: appOrigin("https://news.tomko.io"),
       duration: seconds,
@@ -517,7 +635,7 @@ export async function runPodcast(
       update dailynews.audio_sends set status = 'sent', seconds = ${each}
        where id = any(${sendIds})
     `;
-    console.log(`  подкаст: ${parts.length} карточек, ${seconds} с`);
+    console.log(`  подкаст: ${titles.length} карточек, ${seconds} с`);
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     if (delivered) {

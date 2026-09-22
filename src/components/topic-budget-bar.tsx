@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { colorAt, handleLeft, moveBoundary } from "@/lib/topic-budget";
+import { MIN_PER_TOPIC, colorAt, handleLeft, moveBoundary } from "@/lib/topic-budget";
 import { cn } from "@/lib/utils";
 import { useT } from "@/components/i18n-provider";
 
@@ -15,7 +15,9 @@ import { useT } from "@/components/i18n-provider";
  *
  * Что тянется — граница, а не сегмент: сколько ушло слева, столько пришло
  * справа. Тогда сумма не меняется, и размер дайджеста не уезжает сам собой,
- * пока подбираешь доли.
+ * пока подбираешь доли. Платит при этом самая крупная тема справа, а не
+ * соседняя (`moveBoundary`): соседняя упирается в минимум первой, и граница
+ * вставала у темы с одной новостью, пока рядом лежали темы по шесть.
  *
  * Имя и число каждой темы подписаны под её куском и видны всегда. Раньше
  * их показывала одна строка над полосой — та, на которую наведён курсор,
@@ -68,6 +70,10 @@ export function TopicBudgetBar({
   const nudge = (boundary: number, by: number) =>
     onChange(moveBoundary(counts, boundary, upTo(boundary) + by));
 
+  /** Докуда доедет граница: правее неё каждая тема ужимается до минимума. */
+  const maxAt = (boundary: number) =>
+    upTo(counts.length - 1) - upTo(boundary - 1) - MIN_PER_TOPIC * (counts.length - boundary - 1);
+
   return (
     <div className="flex flex-col gap-2">
       {/* Полоса сплошная и скруглена только по торцам: зазор между цветными
@@ -106,7 +112,7 @@ export function TopicBudgetBar({
             aria-label={t.settings.topicBudgetBar.boundaryAria(labels[boundary], labels[boundary + 1])}
             aria-valuenow={counts[boundary]}
             aria-valuemin={1}
-            aria-valuemax={counts[boundary] + counts[boundary + 1] - 1}
+            aria-valuemax={maxAt(boundary)}
             aria-orientation="vertical"
             onPointerDown={startDrag(boundary)}
             onKeyDown={(event) => {

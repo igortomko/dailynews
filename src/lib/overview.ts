@@ -1,3 +1,5 @@
+import { parseStoredReading, readingLead } from "./reading-document";
+
 /**
  * Обзор для коллег: несколько новостей выпуска, собранных в один текст.
  *
@@ -27,21 +29,32 @@ export type Overview = {
 /**
  * Блок из карточки. Берётся персональный заголовок выпуска, а не исходный:
  * читатель видит в ленте его и коллегам перешлёт то, что видел.
+ *
+ * Описание — лид документа чтения, а не весь конспект. У карточки
+ * с разобранным документом лента не отдаёт `summary` вовсе (его 19 КБ
+ * на выпуск не нужны никому, кроме этого места), и без ветки на документ
+ * обзор собирался бы из одних заголовков со ссылками: окно открывается,
+ * кнопки работают, текста нет ни в одном блоке. Почему лид, а не всё
+ * подряд, — в `readingLead`.
  */
 export const blockOf = (item: {
   id: number;
   title: string;
   title_ru: string | null;
   summary: string | null;
+  summary_document?: unknown;
   source_label: string;
   url: string;
-}): OverviewBlock => ({
-  id: item.id,
-  title: item.title_ru || item.title,
-  summary: item.summary ?? "",
-  source: item.source_label,
-  url: item.url,
-});
+}): OverviewBlock => {
+  const reading = parseStoredReading(item.summary_document);
+  return {
+    id: item.id,
+    title: item.title_ru || item.title,
+    summary: item.summary ?? (reading ? readingLead(reading) : ""),
+    source: item.source_label,
+    url: item.url,
+  };
+};
 
 /**
  * Сводит черновик с выбором в ленте.

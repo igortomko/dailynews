@@ -139,15 +139,28 @@ export const plans = {
   },
 
   about: {
-    heroTitle: "Every morning, only what's worth reading",
-    heroDescription:
-      "The feed reads everything from your sources and keeps exactly as much as you asked to read.",
-    // Разбито на слова и связки, а не одна строка: числа выделены полужирным
-    // в разметке (`<b>`), и цельная строка потеряла бы это выделение.
+    // Порядок слов свой: по-русски число идёт первым, по-английски
+    // так звучит объявлением, а не строкой о читателе.
+    heroSaved: (saved: string): string => `You saved ${saved} today`,
+    heroTitle: "Only what's worth reading",
     newsWord: (n: number): string => (n === 1 ? "story" : "stories"),
     minutesWord: (n: number): string => (n === 1 ? "minute" : "minutes"),
-    flowIntro: "came in over the last day from your sources. You ordered",
-    flowMiddle: "of reading. That's about ~",
+    // Фраза целиком, а не куски под полужирные числа: подпись из трёх
+    // выделенных вставок читается набором акцентов, а не утверждением.
+    // Акценты стоят ниже, в легенде, где числа и так голые.
+    //
+    // Число приходит уже со своим словом («89 stories»): по-русски оно
+    // стоит после глагола, по-английски — в начале, и склейка на стороне
+    // страницы держала бы один порядок на оба языка.
+    flowBasis: (collected: string, stream: string, minutes: string): string =>
+      `${collected} came in from your sources — skimming it all is ${stream}. Your digest is ${minutes}.`,
+    // Пустые сутки — не ноль в той же фразе: «came in 0 stories, keeps ~18»
+    // обещает выпуск из того, чего нет.
+    flowLeadEmpty: (kept: string, minutes: string): string =>
+      `Nothing came in from your sources over the last day. When it does, we keep ~${kept} — your ${minutes}.`,
+    flowKept: "kept for you",
+    flowDropped: "dropped",
+    flowTune: "Change reading time",
     stepsTitle: "How it lands on exactly that much",
     steps: [
       {

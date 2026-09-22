@@ -138,6 +138,8 @@ export function FeedTabs({
   plan,
   networks,
   reading,
+  textLang,
+  asked,
   left,
   right,
 }: {
@@ -163,6 +165,13 @@ export function FeedTabs({
    * по сегодняшней настройке.
    */
   reading: { minutes: number; target: number | null };
+  /** Тег языка текста выпуска, null — если выпуск не переводится. */
+  textLang: string | null;
+  /**
+   * Номер карточки, за которой пришли: `?play=<id>` из «слушать» в Telegram.
+   * Ссылка ведёт на `#item-<id>` и просит эту карточку зазвучать.
+   */
+  asked: number | null;
   left: React.ReactNode;
   right: React.ReactNode;
 }) {
@@ -199,6 +208,39 @@ export function FeedTabs({
   const [searching, setSearching] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const wasSearching = useRef(false);
+
+  /**
+   * Прокрутка к карточке из ссылки бота (`#item-<id>`).
+   *
+   * Браузер прокручивает по якорю и сам, но мимо: карточки за краем экрана
+   * разложены оценкой в 220 пикселей (`content-visibility: auto`), а настоящий
+   * размер получают, только когда до них докрутили. На сороковой карточке
+   * разница набегает в экраны. Поэтому прокрутка повторяется, когда размеры
+   * уже настоящие; промах стоит один вызов, а не попадание — «ссылка
+   * открывает не ту новость».
+   *
+   * Отступ читается у самой шапки, а не записан числом. Число пришлось бы
+   * держать в двух видах — шапка на телефоне 141 пиксель, на широком
+   * экране 85, — и замер показал, чем это кончается: при отступе в 96
+   * карточка приезжала ровно под шапку. Высота спрашивается у элемента,
+   * и тогда правка шапки не может разойтись с прокруткой.
+   */
+  const head = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!/^item-\d+$/.test(id)) return;
+    const go = () => {
+      const card = document.getElementById(id);
+      if (!card) return;
+      const under = head.current?.getBoundingClientRect().height ?? 0;
+      // Восемь пикселей воздуха: заголовок, прижатый к шапке вплотную,
+      // читается её продолжением.
+      window.scrollTo({ top: card.getBoundingClientRect().top + window.scrollY - under - 8 });
+    };
+    go();
+    const timers = [0, 150].map((delay) => window.setTimeout(go, delay));
+    return () => timers.forEach(clearTimeout);
+  }, [day]);
 
   const blank = (): Picked => ({ day, ids: [], draft: null });
   const [picked, setPicked] = useState<Picked>(blank);
@@ -454,7 +496,7 @@ export function FeedTabs({
           управление лентой относится ко всей странице. Вкладки под ними
           по центру; когда не помещаются, начинают прокручиваться —
           семь тем по-русски не влезают ни в какую ширину. */}
-      <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur touch:bg-background touch:backdrop-blur-none">
+      <header ref={head} className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur touch:bg-background touch:backdrop-blur-none">
         {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
             это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
         {/* Строка и поле лежат в одной клетке сетки и меняются местами
@@ -661,6 +703,7 @@ export function FeedTabs({
               list.map((item, index) => (
                 <Fragment key={`${item.day}-${item.id}`}>
                   <ItemCard
+                    textLang={textLang}
                     item={item}
                     showTopic={tab.slug === "all"}
                     plan={plan}
@@ -668,6 +711,7 @@ export function FeedTabs({
                     selected={selectedIds.has(item.id)}
                     voicing={voicing.get(item.id)}
                     selecting={selecting}
+                    asked={asked === item.id}
                     onSelectedChange={(next) => pick(item.id, next)}
                   />
                   {/* Граница прошлого захода. Виденное лежит подряд сверху:
@@ -719,7 +763,6 @@ export function FeedTabs({
           показывать, а состояние копирования не должно жить зря. */}
       {picked.draft ? (
         <OverviewDialog
-          day={day}
           overview={picked.draft}
           open={editing}
           onOpenChange={setEditing}

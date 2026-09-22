@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { currentRate, forget, nextRate, onRate, pauseIfPlaying, playOnly } from "@/lib/audio-bus";
 import { QUIET } from "@/lib/quiet";
 import { parseStoredReading } from "@/lib/reading-document";
 import { ReadingSummary } from "@/components/reading-summary";
@@ -39,7 +40,7 @@ import { typography, summaryTime } from "@/lib/typography";
 import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
-import { useT } from "@/components/i18n-provider";
+import { useLocale, useT } from "@/components/i18n-provider";
 import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedCard } from "@/lib/queries";
@@ -200,7 +201,9 @@ export function ItemCard({
   networks,
   selected,
   selecting,
+  asked,
   onSelectedChange,
+  textLang,
 }: {
   item: FeedCard;
   showTopic: boolean;
@@ -217,9 +220,25 @@ export function ItemCard({
   selected: boolean;
   /** Идёт ли выбор: пока в выпуске есть хоть одна отметка, чекбоксы видны у всех. */
   selecting: boolean;
+  /**
+   * Пришли именно за этой карточкой: `?play=<id>` из «слушать» в Telegram.
+   *
+   * Воспроизведение пробуется, но не обещается: браузер имеет право
+   * отказать звуку без жеста, и отказ здесь молчит — карточка всё равно
+   * под курсором, а её кнопка на месте. Обещать в сообщении то, что
+   * решает политика автозапуска, нельзя.
+   */
+  asked?: boolean;
   onSelectedChange: (next: boolean) => void;
+  /**
+   * Язык текста выпуска — заголовка и описания, а не подписей вокруг них.
+   * Переносы берутся по нему же: правила переноса у каждого языка свои,
+   * и чужими словами они рвутся не там. Неизвестен — не переносим.
+   */
+  textLang?: string | null;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [expanded, setExpanded] = useState(false);
   // Своё состояние, а не expanded: раскрытие описания считается чтением
   // материала и уезжает в калибровку событием «opened». Список повторов —
@@ -240,6 +259,14 @@ export function ItemCard({
   // синтезировало заново то, что уже лежит в Telegram.
   const [audio, setAudio] = useState<AudioState>(item.voiced ? "sent" : "idle");
   const [step, setStep] = useState<string | null>(null);
+  // Читается сразу, а не эффектом: эффект с `setState` даёт каскадную
+  // перерисовку на каждой карточке выпуска. Расхождения с сервером тут
+  // быть не может — кнопка скорости появляется только на играющем звуке,
+  // а на первой отрисовке ничего не играет.
+  const [rate, setRate] = useState<number>(() => currentRate());
+  // Скорость общая: сменил на одной карточке — соседние узнают сразу,
+  // а не после перезагрузки.
+  useEffect(() => onRate(setRate), []);
   // Живость карточки — ref, а не состояние: цикл опроса читает её между
   // запросами, и перерисовка ему для этого не нужна.
   const aliveRef = useRef(true);
@@ -247,7 +274,10 @@ export function ItemCard({
   // пятьдесят <audio> в разметке качают метаданные и ничего не играют.
   const player = useRef<HTMLAudioElement | null>(null);
   useEffect(() => () => {
-    player.current?.pause();
+    if (player.current) {
+      player.current.pause();
+      forget(player.current);
+    }
     player.current = null;
   }, []);
   useEffect(() => {
@@ -461,9 +491,30 @@ export function ItemCard({
       });
       player.current = audioEl;
     }
-    if (player.current.paused) void player.current.play().catch(() => {});
-    else player.current.pause();
+    // Запуск останавливает всё остальное: слух у читателя один, а плееров
+    // на странице пятьдесят, и второй запускают не нарочно — нажимают
+    // на соседнюю карточку, думая, что первая остановится сама.
+    if (player.current.paused) playOnly(player.current);
+    else pauseIfPlaying(player.current);
   };
+
+  /**
+   * Пришли по «слушать» из сообщения бота (`?play=<id>`).
+   *
+   * Один раз за жизнь карточки и только если озвучка уже лежит: синтез
+   * по переходу означал бы минуту ожидания там, где обещано готовое.
+   * Отказ браузера в звуке без жеста здесь молчит (`playOnly` его гасит) —
+   * карточка всё равно прокручена к себе, и кнопка под рукой.
+   */
+  const autoplayed = useRef(false);
+  useEffect(() => {
+    if (!asked || autoplayed.current || !item.voiced) return;
+    autoplayed.current = true;
+    play();
+    // play пересобирается каждым рендером, а запуск нужен ровно один:
+    // в зависимости он превратил бы эффект в цикл.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked, item.voiced]);
 
   const speak = async () => {
     if (!canListen) {
@@ -607,11 +658,14 @@ export function ItemCard({
   const menuIcon =
     vote === "up" ? <ThumbsUpIcon className="size-4 text-foreground" /> : <EllipsisIcon className="size-4" />;
   const menuButton =
-    "flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
+    "flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
 
   if (vote === "down") {
     return (
-      <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
+      <article
+        id={`item-${item.id}`}
+        className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0"
+      >
         <span className="truncate">{t.feed.item.hidden(title)}</span>
         <button
           type="button"
@@ -719,6 +773,12 @@ export function ItemCard({
   return (
     <article
       ref={article}
+      // Якорь для ссылки из Telegram: сообщение ведёт на `#item-<id>`,
+      // а не на день целиком — в выпуске бывает сто карточек, и «открой
+      // выпуск и найди третью в энергетике» это не ссылка на статью.
+      // Отступ под липкую шапку считает лента: он равен её высоте,
+      // а высота у шапки на телефоне и на широком экране разная.
+      id={`item-${item.id}`}
       // Только курсор: на тапе ряд с подсказками скрыт, и собирать их
       // значило бы платить за то, чего на экране не бывает.
       onPointerEnter={(event) => {
@@ -757,7 +817,11 @@ export function ItemCard({
         // собирает, но стиль и раскладка полусотни карточек — заметная доля
         // времени переключения дня. Размер-заготовка — под обычную карточку;
         // после первого показа браузер помнит настоящий.
-        "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0 [content-visibility:auto] [contain-intrinsic-size:auto_220px]",
+        // py-7, а не py-5: между абзацами внутри карточки 16 пикселей, и при
+        // py-5 соседнюю карточку отделяло 41 — всего вдвое с небольшим больше,
+        // хотя внутри лежит текст на двести слов. Теперь 57, и граница
+        // читается как граница, а не как ещё один абзац.
+        "group border-b py-7 transition-[opacity,background-color] duration-150 last:border-0 [content-visibility:auto] [contain-intrinsic-size:auto_220px]",
         // Долгое нажатие на телефоне не выделяет текст и не зовёт системное
         // меню: у карточки свои действия по тапу.
         "[@media(hover:none)]:select-none [@media(hover:none)]:[-webkit-touch-callout:none]",
@@ -972,6 +1036,26 @@ export function ItemCard({
               отделена чертой: она не про этот материал, а про следующие
               выпуски, и стоять с ними в одном ряду ей не по чину. */}
 
+          {/* Слева от плеера и только пока играет: до нажатия скорость
+              нечему менять, а кнопка, которая ничего не делает, занимает
+              место в ряду из шести. */}
+          {busy === "playing" ? (
+            <Hint
+              live={hot}
+              tip={t.feed.item.audioRateTooltip}
+              button={
+                <button
+                  type="button"
+                  aria-label={t.feed.item.audioRateAria}
+                  onClick={() => nextRate()}
+                  className="flex h-7 cursor-pointer items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-muted-foreground/70 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground"
+                />
+              }
+            >
+              {`×${rate.toLocaleString(locale === "ru" ? "ru-RU" : "en-US")}`}
+            </Hint>
+          ) : null}
+
           <Hint
             live={hot}
             tip={
@@ -990,9 +1074,11 @@ export function ItemCard({
                 onClick={busy === "working" ? undefined : speak}
                 className={cn(
                   "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
-                  audio === "idle"
-                    ? "cursor-pointer text-muted-foreground/50"
-                    : "text-foreground",
+                  // Тёмной кнопка становится только пока идёт работа.
+                  // Готовность — это не занятость: чёрный треугольник
+                  // рядом с серыми соседями читался приоритетом,
+                  // которого у озвучки нет.
+                  busy === "working" ? "text-foreground" : "cursor-pointer text-muted-foreground/70",
                 )}
               />
             }
@@ -1018,7 +1104,7 @@ export function ItemCard({
                 className={cn(
                   "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
                   kindle === "idle"
-                    ? "cursor-pointer text-muted-foreground/50"
+                    ? "cursor-pointer text-muted-foreground/70"
                     : "text-foreground",
                 )}
               />
@@ -1051,7 +1137,7 @@ export function ItemCard({
                   }
                   setOpinion(true);
                 }}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
               />
             }
           >
@@ -1077,7 +1163,7 @@ export function ItemCard({
                 }}
                 className={cn(
                   "flex size-7 cursor-pointer items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
-                  vote === "up" ? "text-foreground" : "text-muted-foreground/50",
+                  vote === "up" ? "text-foreground" : "text-muted-foreground/70",
                 )}
               />
             }
@@ -1096,7 +1182,7 @@ export function ItemCard({
                 type="button"
                 aria-label={t.feed.item.downvoteLabel}
                 onClick={hide}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
               />
             }
           >
@@ -1116,15 +1202,14 @@ export function ItemCard({
               Отрицательный трекинг — на крупном кегле: Inter рисован
               под текстовые размеры, и на двадцати пикселях межбуквенное
               по умолчанию разваливает слово на буквы. */}
-          <h3
-            className={cn(
-              "mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]",
-              // Прочитанный заголовок приглушается, но остаётся читаемым:
-              // на 55% он давал около 3,5:1 — формально хватает для крупного
-              // кегля, на солнце и на плохом экране уже нет.
-              item.read_count > 0 && "text-foreground/70",
-            )}
-          >
+          {/* Прочитанный заголовок не приглушается: под ним стоит документ
+              в полный цвет, и заголовок на 70 % уступал собственному
+              акценту — карточка начиналась с числа. Сигнал «уже открывал»
+              этим снят; возвращать его — не цветом заголовка. */}
+          {/* Заголовок не переносится: перенос на крупном кегле читается
+              как опечатка, а строк тут две-три — рвать нечего. Язык всё
+              равно объявлен: по нему говорит скринридер. */}
+          <h3 lang={textLang ?? undefined} className="mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
             <a
               href={item.url}
               target="_blank"
@@ -1136,20 +1221,29 @@ export function ItemCard({
             </a>
           </h3>
 
-          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : hasSummary ? (
+          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} lang={textLang} /></div> : hasSummary ? (
             <p
+              lang={textLang ?? undefined}
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст
-              // в карточке, и на нём экономить кегль незачем. Строка держится
-              // в 68 знаков — дальше глаз промахивается мимо начала следующей.
+              // в карточке, и на нём экономить кегль незачем. Колонка — 60ch:
+              // ch — это ширина нуля, и кириллицей в такую строку ложится
+              // около 67 знаков; на 68ch выходило 76, и глаз промахивался
+              // мимо начала следующей строки.
               // Цвет текста — полный, а не 80%: описание здесь и есть
               // материал, всё остальное в карточке к нему подпись.
               // Приглушённый основной текст читается как черновик.
-              className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
+              // Переносы только при известном языке: правила у каждого свои,
+              // и русскими словами немецкий рвётся не там. Рваность правого
+              // края на колонке в 60 знаков доходила до 20% ширины.
+              className={cn(
+                "mt-2 max-w-[60ch] cursor-text text-pretty text-base leading-[1.6] text-foreground",
+                textLang && "hyphens-auto",
+              )}
             >
               {typography(item.summary ?? "")}
             </p>
-          ) : <p className="mt-3 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">{t.feed.item.summaryUnavailable}</p>}
+          ) : <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">{t.feed.item.summaryUnavailable}</p>}
 
           {/* Работа дедупа, названная вслух. Не «важно» и не «подтверждено»:
               пять изданий, пересказавших один пресс-релиз, ничего
@@ -1169,7 +1263,7 @@ export function ItemCard({
                 />
               </button>
               {storyOpen ? (
-                <div className="mt-2 max-w-[68ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
+                <div className="mt-2 max-w-[60ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
                   <p className="mb-1.5 font-medium">{storyTitle(lines.length, t.feed.story)}</p>
                   <ul className="space-y-1">
                     {lines.map((line) => (
