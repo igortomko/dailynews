@@ -1154,15 +1154,11 @@ export function ItemCard({
               Отрицательный трекинг — на крупном кегле: Inter рисован
               под текстовые размеры, и на двадцати пикселях межбуквенное
               по умолчанию разваливает слово на буквы. */}
-          <h3
-            className={cn(
-              "mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]",
-              // Прочитанный заголовок приглушается, но остаётся читаемым:
-              // на 55% он давал около 3,5:1 — формально хватает для крупного
-              // кегля, на солнце и на плохом экране уже нет.
-              item.read_count > 0 && "text-foreground/70",
-            )}
-          >
+          {/* Прочитанный заголовок не приглушается: под ним стоит документ
+              в полный цвет, и заголовок на 70 % уступал собственному
+              акценту — карточка начиналась с числа. Сигнал «уже открывал»
+              этим снят; возвращать его — не цветом заголовка. */}
+          <h3 className="mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
             <a
               href={item.url}
               target="_blank"
@@ -1178,16 +1174,18 @@ export function ItemCard({
             <p
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст
-              // в карточке, и на нём экономить кегль незачем. Строка держится
-              // в 68 знаков — дальше глаз промахивается мимо начала следующей.
+              // в карточке, и на нём экономить кегль незачем. Колонка — 60ch:
+              // ch — это ширина нуля, и кириллицей в такую строку ложится
+              // около 67 знаков; на 68ch выходило 76, и глаз промахивался
+              // мимо начала следующей строки.
               // Цвет текста — полный, а не 80%: описание здесь и есть
               // материал, всё остальное в карточке к нему подпись.
               // Приглушённый основной текст читается как черновик.
-              className="mt-2 max-w-[68ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
+              className="mt-2 max-w-[60ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
             >
               {typography(item.summary ?? "")}
             </p>
-          ) : <p className="mt-3 max-w-[68ch] text-sm leading-relaxed text-muted-foreground">{t.feed.item.summaryUnavailable}</p>}
+          ) : <p className="mt-3 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">{t.feed.item.summaryUnavailable}</p>}
 
           {/* Работа дедупа, названная вслух. Не «важно» и не «подтверждено»:
               пять изданий, пересказавших один пресс-релиз, ничего
@@ -1207,7 +1205,7 @@ export function ItemCard({
                 />
               </button>
               {storyOpen ? (
-                <div className="mt-2 max-w-[68ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
+                <div className="mt-2 max-w-[60ch] rounded-lg bg-muted/40 px-3 py-2.5 text-[0.8125rem]">
                   <p className="mb-1.5 font-medium">{storyTitle(lines.length, t.feed.story)}</p>
                   <ul className="space-y-1">
                     {lines.map((line) => (
