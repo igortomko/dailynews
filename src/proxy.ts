@@ -3,8 +3,12 @@ import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 
 /**
  * Файл обязан лежать в src/, а не в корне: проект использует srcDirectory,
- * и Next ищет middleware рядом с app/. В корне он молча не подключается —
+ * и Next ищет proxy рядом с app/. В корне он молча не подключается —
  * страницы отдаются кому угодно, и заметить это по коду нельзя.
+ *
+ * proxy.ts, а не middleware.ts: в Next 16 конвенция переименована, старое
+ * имя предупреждает на каждой сборке и идёт по edge-песочнице; proxy
+ * исполняется в обычном Node — на запрос это на пару миллисекунд дешевле.
  *
  * Приложение висит в открытом интернете. Чтение дайджеста само по себе
  * не тайна, а вот запись интересов и событий чтения — да: посторонние
@@ -20,7 +24,7 @@ const PUBLIC = [
   "/login", "/auth", "/api/version", "/api/telegram", "/api/lemon", "/_next", "/favicon.ico", "/brand",
 ];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (PUBLIC.some((prefix) => pathname.startsWith(prefix))) return NextResponse.next();
 

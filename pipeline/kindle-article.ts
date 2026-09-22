@@ -9,7 +9,7 @@
 import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { sql } from "../src/lib/db";
-import { spentToday } from "../src/lib/readers";
+import { itemForReader, spentToday } from "../src/lib/readers";
 import type { Reader } from "../src/lib/types";
 import { fetchArticle } from "./article";
 import { translateArticle, splitBlocks } from "./translate";
@@ -55,9 +55,9 @@ export async function runArticleSend(
   itemId: number,
 ): Promise<void> {
   try {
-    const [item] = await sql<
-      { url: string; title: string; title_ru: string | null; body: string | null }[]
-    >`select url, title, title_ru, body from dailynews.items where id = ${itemId}`;
+    // Заголовок — общий запрос с озвучкой: он знает про то, что
+    // `items.title_ru` нет с 0020, и скоуплен по читателю.
+    const item = await itemForReader(reader.id, itemId);
     if (!item) throw new Error(`материала ${itemId} нет`);
 
     // body — полный текст из фида, если он был. Тогда никуда идти не надо.
@@ -101,7 +101,7 @@ export async function runArticleSend(
     const epub = await buildEpub({
       // Заголовок берётся из выпуска: он уже переведён прогоном, платить
       // за перевод одной строки второй раз незачем.
-      title: item.title_ru || article.title,
+      title: item.title || article.title,
       author: article.author,
       site: article.site,
       url: item.url,
@@ -112,7 +112,7 @@ export async function runArticleSend(
     await sendArticleToKindle({
       to: reader.kindle_address!,
       sender: reader.kindle_sender!,
-      title: item.title_ru || article.title,
+      title: item.title || article.title,
       epub,
     });
 
@@ -142,7 +142,7 @@ export async function runArticleSend(
     `;
 
     console.log(
-      `  на Kindle: ${item.title_ru || article.title} ` +
+      `  на Kindle: ${item.title || article.title} ` +
       `(${(epub.length / 1024).toFixed(0)} КБ, качество ${quality?.total?.toFixed(0) ?? "—"})`,
     );
   } catch (error) {

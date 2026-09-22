@@ -1,11 +1,10 @@
 import "server-only";
 import { sql } from "./db";
-import { effectiveVoice } from "./lemon";
-import { anyOf, HL_END, HL_OPTIONS, HL_START, tsConfigFor } from "./search";
+import { anyOf, HL_END, HL_OPTIONS, HL_START, SEARCH_CONFIG } from "./search";
 import { isDay } from "./day";
 import { stripHtml } from "../../pipeline/fetch";
 import type { SourceYield } from "./source-health";
-import type { Axes, Reader, Source } from "./types";
+import type { Axes, Source } from "./types";
 import type { Publication } from "./story";
 
 /**
@@ -532,18 +531,23 @@ export type ArchiveHit = {
  * «uranium» стоит в заголовке источника, а «уран» — в описании выпуска,
  * и человек ищет тем словом, которое запомнил.
  *
- * Индекса нет намеренно: на тысячах строк это доли секунды, а выражение
- * пришлось бы считать по двум таблицам сразу — один GIN на digest_items
- * покрыл бы только половину запроса. Понадобится — материализованный
- * tsvector на digest_items плюс отдельный на items, и объединение.
+ * Векторы хранимые: `digest_items.tsv` по заголовку и описанию выпуска
+ * (словарём этого выпуска, `digest_items.ts_config`, миграция 0050)
+ * и `items.tsv` по заголовку и анонсу источника (общим словарём, 0048);
+ * оба считает Postgres при записи. Пока вектор считался на каждый запрос,
+ * поиск стоил 50 мс на двухстах строках и рос линейно с архивом. Индекса
+ * по-прежнему нет: запрос сужен читателем до его выпусков, это тысячи
+ * строк, и сопоставление готовых векторов на них стоит микросекунды.
  *
- * Словарь один на весь запрос и выбран по языку выпуска: и текст, и запрос,
- * и отрывок обязаны разбираться одинаково, иначе запрос ищет слова, которых
- * в разобранном тексте нет по построению.
+ * Запрос разбирается дважды и каждый вектор сравнивается с запросом своего
+ * словаря: описание — словарём выпуска, источник — общим. Разойдись словарь
+ * вектора и запроса, запрос искал бы слова, которых в разобранном тексте
+ * нет по построению. Отрывок режется словарём выпуска: описание в нём
+ * главное, а совпадение в английском заголовке источника видно и так.
  */
-async function found(readerId: number, query: string, config: string): Promise<ArchiveHit[]> {
+async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
   return sql<ArchiveHit[]>`
-    with q as (select websearch_to_tsquery(${config}::regconfig, ${query}) as tsq),
+    with q as (select websearch_to_tsquery(${SEARCH_CONFIG}::regconfig, ${query}) as shared),
     hits as (
       select i.id::int as item_id, i.url,
              coalesce(nullif(di.title, ''), i.title) as title,
@@ -551,7 +555,8 @@ async function found(readerId: number, query: string, config: string): Promise<A
              s.label as source_label,
              t.label as topic_label,
              d.day::text as day,
-             ts_rank_cd(v.tsv, q.tsq) as rank
+             di.ts_config, own.tsq,
+             ts_rank_cd(di.tsv, own.tsq) + ts_rank_cd(i.tsv, q.shared) as rank
         from q
         join dailynews.digests d on d.reader_id = ${readerId}
         join dailynews.digest_items di on di.digest_id = d.id
@@ -566,18 +571,16 @@ async function found(readerId: number, query: string, config: string): Promise<A
   -- в описании. Резать отрывок из заголовка выпуска незачем: он и так
   -- стоит строкой выше, и совпадение в нём видно там — а в отрывке
   -- он выходил повторением самого себя, на каждой карточке.
+  -- Запрос словарём этого выпуска: у каждой строки он свой.
+  cross join lateral (select websearch_to_tsquery(di.ts_config, ${query}) as tsq) own
   cross join lateral (
                -- btrim обязателен: пустая колонка оставляет в склейке
                -- висячий пробел, а отрывок приходит без него — и проверка
                -- «до конца ли дочитано» становится всегда ложной. Многоточие
                -- при этом стоит на каждом отрывке и означает уже ничего.
-               select btrim(concat_ws(' ', di.summary, i.title, i.excerpt)) as doc,
-                      btrim(concat_ws(' ', di.title, di.summary, i.title, i.excerpt)) as searched
-             ) d0
-  cross join lateral (
-               select d0.doc, to_tsvector(${config}::regconfig, d0.searched) as tsv
+               select btrim(concat_ws(' ', di.summary, i.title, i.excerpt)) as doc
              ) v
-       where v.tsv @@ q.tsq
+       where (di.tsv @@ own.tsq or i.tsv @@ q.shared)
          -- Скрытое пальцем вниз не возвращается и здесь: иначе «убрать
          -- из ленты» означало бы «убрать с одной страницы из двух».
          and not exists (
@@ -602,7 +605,7 @@ async function found(readerId: number, query: string, config: string): Promise<A
              as snippet
       from hits e,
            lateral (
-             select ts_headline(${config}::regconfig, e.body, (select tsq from q), ${HL_OPTIONS})
+             select ts_headline(e.ts_config, e.body, e.tsq, ${HL_OPTIONS})
                       as snippet
            ) h,
            -- Тот же отрывок без меток: сравнивать с описанием надо текст,
@@ -622,27 +625,16 @@ async function found(readerId: number, query: string, config: string): Promise<A
  * в материалах, где сошлось одно слово из четырёх.
  */
 export async function searchArchive(
-  reader: Reader,
+  readerId: number,
   query: string,
 ): Promise<{ hits: ArchiveHit[]; loose: boolean }> {
-  // Читатель целиком, а не его номер: словарь решает не колонка, а тариф,
-  // и с номером язык добывался бы на стороне вызова — первый же вызов
-  // взял бы reader.language вместо действующего.
-  //
-  // Словарь берётся по тому, как читателю пишут сейчас, а не по тому, как
-  // был написан каждый выпуск: своего языка выпуск не хранит. Сменившему
-  // язык старые выпуски ищутся точной формой — «цены» уже не найдут «цена».
-  // Колонка на выпуск это чинит, и заводить её стоит тогда, когда язык
-  // начнут менять, а не заранее: пока меняют тариф, а он язык не трогает.
-  const config = tsConfigFor(effectiveVoice(reader).language);
-
-  const strict = await found(reader.id, query, config);
+  const strict = await found(readerId, query);
   if (strict.length > 0) return { hits: strict, loose: false };
 
   const loose = anyOf(query);
   if (!loose) return { hits: strict, loose: false };
 
-  const hits = await found(reader.id, loose, config);
+  const hits = await found(readerId, loose);
   return { hits, loose: hits.length > 0 };
 }
 
@@ -667,3 +659,4 @@ export async function archiveSize(readerId: number): Promise<{ items: number; da
   `;
   return row ?? { items: 0, days: 0 };
 }
+

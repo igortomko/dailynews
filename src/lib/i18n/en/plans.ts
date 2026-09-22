@@ -56,6 +56,11 @@ export const plans = {
       title: "Your own take",
       what: "A ready post in your voice from any story in the digest: the feed reads your channels, learns how you write, and drafts one for each of your networks.",
     },
+    audio: {
+      title: "Article audio",
+      what: (minutes: number) =>
+        `Any article from your issue is read aloud and arrives in Telegram — listen while driving or walking. ${minutes} ${minutes === 1 ? "minute" : "minutes"} a day.`,
+    },
     x: {
       title: "Posts from X",
       what: "Tweets show up alongside site stories. X charges for access, so this is Pro only.",
@@ -76,7 +81,13 @@ export const plans = {
       title: "Sources",
       what: "Sites, blogs, and channels the feed checks every day. More sources means a wider pick for the digest.",
     },
-  } satisfies Record<FeatureId, { title: string; what: string }>,
+  } satisfies Record<
+    FeatureId,
+    // `what` бывает функцией: у озвучки в описании стоит квота, а она
+    // живёт в plans.ts — числом в словаре она разъехалась бы с настоящим
+    // пределом молча. Разворачивает это `featureWhat`.
+    { title: string; what: string | ((minutes: number) => string) }
+  >,
 
   /** «1 interest», «5 interests» — нужна и в отказе, и в заглушке. */
   topicsWord: (n: number): string => (n === 1 ? "interest" : "interests"),
@@ -94,6 +105,7 @@ export const plans = {
     checkoutNotReady: "Checkout isn't set up yet. Message the bot",
     changesAfterPeriod: "Takes effect after the paid period ends",
     belowYours: "Below yours",
+    audioPerDay: (minutes: number) => `${minutes} min a day`,
     dailyCadence: "every day",
     everyOtherCadence: "every other day",
     upToMinutes: (n: number) => `up to ${n} min`,

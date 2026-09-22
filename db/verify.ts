@@ -18,6 +18,7 @@
  */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { TS_CONFIGS } from "../src/lib/search";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
@@ -30,6 +31,7 @@ import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { cleanupOf } from "../src/lib/source-health";
 import { applyRules, rulesOf } from "../src/lib/rules";
 import { toSlug } from "../src/lib/slug";
+import { starterBySlug } from "../src/lib/starter-topics";
 
 
 
@@ -643,11 +645,34 @@ async function main() {
          where item_id = ${ids[2]}
       `;
 
-      // Словарь поиска выбирается по языку выпуска, а его решает тариф:
-      // у платного перевод есть, у бесплатного текст остаётся языком
-      // источника. Читатели ниже заявлены явно — иначе проверка меряла бы
-      // тариф из фикстуры, а не поиск.
-      const ru = { ...owner, plan: "pro", language: "русском" };
+      // Словарь выпуска пишется при письме; у посеянных строк — общий
+      // по умолчанию, и вектор описания считается им.
+      const [dictionary] = await sql<{ ts_config: string; ready: boolean }[]>`
+        select ts_config::text as ts_config, length(tsv) > 0 as ready
+          from dailynews.digest_items where item_id = ${ids[2]} limit 1
+      `;
+      assert.equal(dictionary.ts_config, "russian", "словарь выпуска по умолчанию — общий");
+      assert.ok(dictionary.ready, "вектор описания не пустой: текст разобран при записи");
+
+      // Каждое имя из TS_CONFIGS обязано быть словарём этого Postgres: писатели
+      // выпуска приводят его к regconfig, и незнакомое имя роняло бы вставку
+      // уже оплаченного выпуска. PGlite несёт тот же набор, что сервер.
+      const known = new Set(
+        (await sql<{ cfgname: string }[]>`select cfgname from pg_ts_config`).map((row) => row.cfgname),
+      );
+      assert.deepEqual(
+        Object.values(TS_CONFIGS).filter((name) => !known.has(name)),
+        [],
+        "словарь из TS_CONFIGS, которого нет у Postgres",
+      );
+      // А на случай чужого имени у писателей стоит откат на общий словарь.
+      const [{ fallback }] = await sql<{ fallback: string }[]>`
+        select coalesce(
+                 (select oid from pg_ts_config where cfgname = ${"нет-такого"}),
+                 ${"russian"}::regconfig::oid
+               )::regconfig::text as fallback
+      `;
+      assert.equal(fallback, "russian", "неизвестное имя словаря уходит в общий, а не в ошибку");
 
       const archive = await queries.archiveSize(owner.id);
       assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
@@ -657,7 +682,7 @@ async function main() {
         "в чужой архив соседние выпуски не попадают",
       );
 
-      const byRussian = await queries.searchArchive(ru, "уран");
+      const byRussian = await queries.searchArchive(owner.id, "уран");
       assert.equal(byRussian.hits.length, 1, "слово из описания выпуска обязано находиться");
       assert.equal(String(byRussian.hits[0].item_id), String(ids[2]));
       assert.equal(byRussian.loose, false, "по одному слову ослаблять нечего");
@@ -690,7 +715,7 @@ async function main() {
         update dailynews.digest_items set summary = 'Модель умеет больше контекста'
          where item_id = ${ids[0]}
       `;
-      const [shortHit] = (await queries.searchArchive(ru, "контекста")).hits;
+      const [shortHit] = (await queries.searchArchive(owner.id, "контекста")).hits;
       // Именно изменённое описание, а не первая попавшаяся находка: иначе
       // следующая строка фикстуры однажды превратит проверку в пустую.
       assert.equal(String(shortHit?.item_id), String(ids[0]), "мерим отрывок своего материала");
@@ -708,13 +733,13 @@ async function main() {
 
       // Ищут тем словом, которое запомнили: «уран» стоит в описании выпуска,
       // «uranium» — в заголовке источника. Одно без другого — половина поиска.
-      const byEnglish = await queries.searchArchive(ru, "uranium");
+      const byEnglish = await queries.searchArchive(owner.id, "uranium");
       assert.equal(byEnglish.hits.length, 1, "исходный заголовок обязан искаться наравне");
       assert.equal(String(byEnglish.hits[0].item_id), String(ids[2]));
 
       // Словоформа, а не подстрока: «цены» и «цена» — одно слово.
       assert.equal(
-        (await queries.searchArchive(ru, "цены")).hits.length,
+        (await queries.searchArchive(owner.id, "цены")).hits.length,
         1,
         "поиск обязан сводить словоформы, иначе он работает только точным попаданием",
       );
@@ -723,26 +748,60 @@ async function main() {
       // «цены» находит «цена» в описании выпуска, «prices» — «price»
       // в заголовке источника, и это один и тот же поиск.
       assert.equal(
-        (await queries.searchArchive(ru, "prices")).hits.length,
+        (await queries.searchArchive(owner.id, "prices")).hits.length,
         1,
         "словоформа английского заголовка обязана сводиться тем же словарём",
       );
 
+      // Словарь выпуска — свой у каждой строки, и запрос к описанию
+      // разбирается им же. Выпуск, помеченный английским словарём, теряет
+      // русские склонения: «шахта» из описания «…строятся шахты» не сводится,
+      // а точная форма «шахты» находится по-прежнему — своим вектором
+      // и своим запросом. Заголовок источника при этом ищется общим словарём
+      // независимо от словаря выпуска. Сравни вектор выпуска с общим запросом
+      // (или наоборот) — и точная форма перестанет находиться.
+      await sql`
+        update dailynews.digest_items set ts_config = 'english'::regconfig where item_id = ${ids[2]}
+      `;
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахта")).hits.length,
+        0,
+        "английский словарь выпуска русских склонений не сводит",
+      );
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахты")).hits.length,
+        1,
+        "точная форма находится своим словарём выпуска",
+      );
+      assert.equal(
+        (await queries.searchArchive(owner.id, "price")).hits.length,
+        1,
+        "заголовок источника ищется общим словарём при любом словаре выпуска",
+      );
+      await sql`
+        update dailynews.digest_items set ts_config = 'russian'::regconfig where item_id = ${ids[2]}
+      `;
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахта")).hits.length,
+        1,
+        "вектор пересчитывается вместе со словарём: склонение снова сводится",
+      );
+
       // Самое дорогое здесь — чужой архив: он приходит вовремя и не твой.
-      const stranger = await queries.searchArchive(second, "уран");
+      const stranger = await queries.searchArchive(second.id, "уран");
       assert.equal(stranger.hits.length, 0, "выпуск соседа в своём поиске не находится");
       assert.equal(
-        (await queries.searchArchive(ru, "CBT")).hits.length,
+        (await queries.searchArchive(owner.id, "CBT")).hits.length,
         0,
         "и в обратную сторону тоже: владелец не ищет по выпуску второго",
       );
 
       // Ищут вопросом: все слова разом дают ноль, хотя ответ лежит в архиве.
-      const asked = await queries.searchArchive(ru, "где я видел про uranium");
+      const asked = await queries.searchArchive(owner.id, "где я видел про uranium");
       assert.equal(asked.loose, true, "ослабление обязано называться вслух");
       assert.equal(String(asked.hits[0].item_id), String(ids[2]));
       assert.equal(
-        (await queries.searchArchive(ru, "кварки бозоны")).loose,
+        (await queries.searchArchive(owner.id, "кварки бозоны")).loose,
         false,
         "ослабление, не нашедшее ничего, ослаблением не объявляется",
       );
@@ -754,7 +813,7 @@ async function main() {
         values (${owner.id}, ${ids[2]}, 'down', 95, 0.8)
       `;
       assert.equal(
-        (await queries.searchArchive(ru, "уран")).hits.length,
+        (await queries.searchArchive(owner.id, "уран")).hits.length,
         0,
         "скрытое пальцем вниз в поиске не всплывает",
       );
@@ -1395,6 +1454,148 @@ async function main() {
     `;
     await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
 
+    // Индекс из 0051 смотрится в pg_indexes, а не по ответу migrate:
+    // миграцию из одного индекса сверка формы схемы не видит (урок 0041).
+    const [{ topicIdx }] = await sql<{ topicIdx: number }[]>`
+      select count(*)::int as "topicIdx" from pg_indexes
+       where schemaname = 'dailynews' and indexname = 'reader_topics_topic_idx'
+         -- По определению, а не по имени: индекс с тем же именем по другой
+         -- колонке прошёл бы проверку, как проходило бы переопределённое
+         -- ограничение под тем же именем. strpos, а не like: в like «_» —
+         -- любой знак, и «(topicXid)» прошёл бы.
+         and strpos(indexdef, '(topic_id)') > 0
+    `;
+    assert.equal(topicIdx, 1, "индекс reader_topics(topic_id) из 0051 должен стоять");
+
+    // --- своя тема правится, каталожная и общая — нет ----------------------
+    // Подсказка темы — критерий классификации Jev, один на всех, кто тему
+    // взял. Правка каталожной темы молча терялась: форма показывала новое
+    // до перезагрузки, база хранила прежнее. Решает сервер, а не форма.
+    //
+    // Каталожную ветку держит `blockchain`: его к этому месту держит только
+    // владелец. «Дизайн» не годится — он взят и вторым читателем, и запись
+    // отбило бы условие про соседа, а не про каталог.
+    const [{ holders }] = await sql<{ holders: number }[]>`
+      select count(*)::int as holders from dailynews.reader_topics rt
+        join dailynews.topics t on t.id = rt.topic_id where t.slug = 'blockchain'
+    `;
+    assert.equal(holders, 1, "проверка каталожной ветки держится на теме, взятой только одним читателем");
+    assert.ok(
+      (await readers.getReaderTopics(owner.id)).some((topic) => topic.slug === "blockchain"),
+      "и держит её именно владелец, а не сосед",
+    );
+    /** Имя и подсказка темы — то, о чём здесь каждое утверждение. */
+    const textOf = async (topic: { slug: string } | { id: number }) => {
+      const rows = "slug" in topic
+        ? await sql<{ label: string; hint: string }[]>`select label, hint from dailynews.topics where slug = ${topic.slug}`
+        : await sql<{ label: string; hint: string }[]>`select label, hint from dailynews.topics where id = ${topic.id}`;
+      return rows[0];
+    };
+    const chainBefore = await textOf({ slug: "blockchain" });
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
+    );
+    const chainAfter = await textOf({ slug: "blockchain" });
+    assert.deepEqual(chainAfter, chainBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
+    // Каталожная строка, разошедшаяся с набором (набрана руками до каталога
+    // или переименована в базе), сходится к нему при следующей записи: иначе
+    // она висела бы в третьем состоянии — ни своя, ни каталожная, и править
+    // её было бы нечем. На живой базе такая была одна: «Психотерапия»
+    // при «Психотерапия и mental health» в наборе.
+    await sql`update dailynews.topics set label = 'Крипта' where slug = 'blockchain'`;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
+    );
+    const chainRestored = await textOf({ slug: "blockchain" });
+    assert.deepEqual(chainRestored, chainBefore, "каталожная тема, разошедшаяся с набором, возвращается к нему при записи");
+
+    // Каталожная тема, которой в сиде ещё нет, заводится из стартового
+    // набора, а не из присланного: иначе первый взявший определял бы критерий
+    // классификации для всех своим именем и пустой подсказкой.
+    const music = starterBySlug.get("music");
+    assert.ok(music, "в стартовом наборе есть «music» — на нём держится проверка");
+    const [{ musicRows }] = await sql<{ musicRows: number }[]>`
+      select count(*)::int as "musicRows" from dailynews.topics where slug = 'music'
+    `;
+    assert.equal(musicRows, 0, "«music» в сиде нет — проверяется именно заведение");
+    const musicId = await readers.upsertTopic(
+      sql, owner.id, { slug: "music", label: "Мой музон", hint: "только винил", position: 1 },
+    );
+    const musicRow = await textOf({ id: musicId });
+    assert.deepEqual(musicRow, { label: music.label, hint: music.hint }, "заведённая каталожная тема — из набора, а не от вызвавшего");
+    await sql`delete from dailynews.topics where id = ${musicId}`;
+
+    const ownId = await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 },
+    );
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${owner.id}, ${ownId}, 1, 9) on conflict do nothing
+    `;
+    assert.equal(
+      await readers.upsertTopic(
+        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 },
+      ),
+      ownId,
+      "повторная запись отдаёт ту же тему",
+    );
+    const ownTopic = await textOf({ id: ownId });
+    assert.deepEqual(ownTopic, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "своя тема правится");
+    assert.equal(
+      (await readers.getReaderTopics(owner.id)).find((topic) => topic.id === ownId)?.shared, false,
+      "тема, которую взял только я, не общая",
+    );
+    // Держащий тему читатель стирает подсказку осознанно: пустая — это стёртая.
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 },
+    );
+    const [cleared] = await sql<{ hint: string }[]>`select hint from dailynews.topics where id = ${ownId}`;
+    assert.equal(cleared.hint, "", "у своей темы пустая подсказка — стёртая, а не пропущенная");
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 },
+    );
+
+    // Убрал тему, сохранил, взял снова: новый чип приходит с пустой
+    // подсказкой, и присоединение к ничьей теме не должно стирать сохранённую;
+    // а набранное при присоединении — применяется.
+    await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 },
+    );
+    const rejoined = await textOf({ id: ownId });
+    assert.deepEqual(rejoined, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "повторное взятие не стирает подсказку");
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "Nubank, Pix, Inter", position: 9 },
+    );
+    const rejoinedTyped = await textOf({ id: ownId });
+    assert.deepEqual(rejoinedTyped, { label: "Финтех", hint: "Nubank, Pix, Inter" }, "набранное при повторном взятии применяется");
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${owner.id}, ${ownId}, 1, 9) on conflict do nothing
+    `;
+
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${second.id}, ${ownId}, 1, 1)
+    `;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 },
+    );
+    const sharedTopic = await textOf({ id: ownId });
+    assert.deepEqual(
+      sharedTopic, { label: "Финтех", hint: "Nubank, Pix, Inter" },
+      "тема, взятая соседом, больше не правится никем",
+    );
+    assert.equal(
+      (await readers.getReaderTopics(owner.id)).find((topic) => topic.id === ownId)?.shared, true,
+      "и помечена общей",
+    );
+    // Уборка целиком: оценок на эту тему нет, а лишняя тема в справочнике
+    // сдвинула бы счёт тем в проверках ниже.
+    await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
+    await sql`delete from dailynews.topics where id = ${ownId}`;
+    console.log("  темы: каталожная не переписывается и заводится из набора, своя правится, взятая соседом — уже нет");
+
     // --- потолок расходов -------------------------------------------------------
     assert.equal(await readers.spentToday(second.id), 0, "новый читатель ничего не потратил");
     await readers.recordCall({
@@ -1540,12 +1741,127 @@ async function main() {
 
     // Оплаченные этапы обязаны проходить ограничение: этап, которого нет
     // в check, уронил бы запись расхода — а с ней и ответ, уже оплаченный.
-    for (const stage of ["voice", "post", "post-quality"] as const) {
+    for (const stage of ["voice", "post", "post-quality", "spoken-terms"] as const) {
       await readers.recordCall({
         readerId: owner.id, stage, model: "deepseek-flash", tokensIn: 10, tokensOut: 5, costUsd: 0,
       });
     }
-    console.log("  расход: этапы voice, post и post-quality принимаются");
+    console.log("  расход: этапы voice, post, post-quality и spoken-terms принимаются");
+
+    // Озвучка: аудио общее по языку, квота — личная.
+    //
+    // Ключ `item_audio` — материал и язык, а не материал и читатель:
+    // озвучивается перевод, а он уже общий по той же паре. Добавь сюда
+    // читателя — и второй платил бы синтезом за то, что уже синтезировано.
+    // А `audio_sends` наоборот: без `reader_id` в счёте квота считалась бы
+    // по всей ленте, и сосед закрывал бы день тому, кто не слушал ничего.
+    const [firstItem] = await sql<{ id: number }[]>`
+      select id from dailynews.items order by id limit 1
+    `;
+    await sql`
+      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+      values (${firstItem.id}, 'русском', 'AgADfake', 600, 'ru-RU-SvetlanaNeural')
+    `;
+    // Доказывается ключом, а не счётом строк: «строка одна» верно и тогда,
+    // когда ключ включает читателя, — просто вставляли один раз.
+    await rejects(
+      `insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+       values (${firstItem.id}, 'русском', 'AgADother', 700, 'ru-RU-SvetlanaNeural')`,
+      /item_audio_pkey/,
+      "вторая озвучка на тот же язык отвергается ключом: она общая, а не на читателя",
+    );
+    // А другой язык — это другая озвучка, и он проходит.
+    await sql`
+      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+      values (${firstItem.id}, 'английском', 'AgADen', 500, 'en-US-AriaNeural')
+    `;
+
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 600, 'sent')
+    `;
+    // Считает тот же код, что и прод: переписанный здесь предикат
+    // разъедется с рабочим при первом же новом статусе, и проверка
+    // будет доказывать свойство запроса, которого никто не выполняет.
+    const { secondsToday: listened } = await import("../pipeline/tts");
+    assert.equal(await listened(owner.id), 600, "наслушанное считается по читателю");
+    assert.equal(await listened(second.id), 0, "сосед не тратит чужую квоту");
+
+    // Отказ снимает секунды: неудавшаяся озвучка не имеет права съесть
+    // день читателю, который так ничего и не услышал.
+    //
+    // В фикстуре секунды ненулевые нарочно. С нулём сумма оставалась бы
+    // прежней и при подсчёте отказов, и утверждение проходило бы, даже
+    // если `failed` добавить в список статусов, — то есть не доказывало
+    // бы ничего. Прод их зануляет в catch, но строка до этого живёт
+    // с оценкой, и именно такую строку надо уметь не считать.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status, error)
+      values (${owner.id}, ${firstItem.id}, 600, 'failed', 'движок молчит')
+    `;
+    assert.equal(await listened(owner.id), 600, "провалившаяся озвучка квоту не тратит");
+
+    // 0046: произношение принадлежит языку. Один термин живёт на двух
+    // языках, а пара «термин + язык» повторно не вставляется. Без этого
+    // первый ответивший язык занимал бы строку для всех остальных,
+    // и японский читатель получал бы кириллицу.
+    await sql`
+      insert into dailynews.spoken_terms (term, spoken, language)
+      values ('gemini', 'джемини', 'русском'), ('gemini', 'ジェミニ', 'японском')
+    `;
+    const [twoTongues] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.spoken_terms where term = 'gemini'
+    `;
+    assert.equal(twoTongues.n, 2, "один термин звучит по-разному на разных языках");
+    await rejects(
+      `insert into dailynews.spoken_terms (term, spoken, language)
+       values ('gemini', 'другое', 'русском')`,
+      /spoken_terms_pkey/,
+      "пара «термин и язык» повторно не заводится",
+    );
+    // 0047: язык не подставляется молча. С `default 'русском'` вставка
+    // без языка заводила бы русскую строку — тот самый отказ, который
+    // 0046 и чинила.
+    await rejects(
+      `insert into dailynews.spoken_terms (term, spoken) values ('qwen', 'квен')`,
+      /language/,
+      "язык обязателен: молча русским он больше не становится",
+    );
+
+    // 0047: одна незавершённая озвучка на статью, и это ограничение базы.
+    // `where not exists` перед вставкой две одновременные транзакции
+    // проходят обе — ровно тот случай, от которого оно ставилось.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 100, 'speaking')
+    `;
+    await rejects(
+      `insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+       values (${owner.id}, ${firstItem.id}, 100, 'queued')`,
+      /audio_sends_one_in_flight/,
+      "вторая озвучка той же статьи в работе отбивается ключом",
+    );
+    // А законченные копятся: по ним считается квота дня.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 100, 'sent')
+    `;
+    // Идущая озвучка тратит квоту наравне с законченной, и это не мелочь:
+    // иначе читатель ставит в очередь десять статей подряд, пока ни одна
+    // не досчиталась, и выходит за предел на порядок.
+    assert.equal(
+      await listened(owner.id), 800,
+      "незавершённая озвучка считается тоже: 600 + 100 в работе + 100 законченных",
+    );
+
+    // Шаг — состояние той же строки, и выдуманного шага не бывает.
+    await rejects(
+      `insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+       values (${owner.id}, ${firstItem.id}, 1, 'напеваю')`,
+      /audio_sends_status_check/,
+      "выдуманный шаг озвучки отвергается",
+    );
+    console.log("  озвучка: аудио общее по языку, квота и шаги — по читателю");
 
     // --- список колонок читателя не должен отставать от таблицы ------------
     //

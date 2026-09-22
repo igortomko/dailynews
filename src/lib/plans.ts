@@ -70,6 +70,19 @@ export type Plan = {
   /** Разделы настроек, открытые тарифом. */
   sections: Gated[];
   /**
+   * Сколько секунд озвучки в день. Ноль — озвучки на тарифе нет.
+   *
+   * В секундах, а не в статьях: счёт приходит за время звучания, и час
+   * английского стоит вдвое дороже часа русского только потому, что
+   * в него влезает вдвое больше знаков. Квота в статьях дотировала бы
+   * один язык за счёт другого и молча.
+   *
+   * 2700 — это 45 минут. При $0.60 за час официального Azure выходит
+   * $13.50 в месяц на читателя, если выбирать квоту каждый день; на Edge
+   * TTS — ноль. Замеры и цены движков: docs/economics.md.
+   */
+  audioSecondsPerDay: number;
+  /**
    * Через сколько дней приходит выпуск. Единица — каждую ночь.
    *
    * Это честнее, чем урезать размер выпуска: на бесплатном лента остаётся
@@ -98,6 +111,7 @@ export const PLANS: Record<PlanId, Plan> = {
     // и источники. Манера письма и разбор статистики — уже выбор,
     // за который платят.
     sections: [],
+    audioSecondsPerDay: 0,
   },
   plus: {
     id: "plus",
@@ -115,6 +129,10 @@ export const PLANS: Record<PlanId, Plan> = {
     // в месяц и 100 в день, то есть до сотни ежедневных выпусков это $0,
     // а дальше $20 в месяц на всех.
     sections: ["language", "delivery"],
+    // Озвучка — самая дорогая возможность продукта на порядок: $13–42
+    // в месяц на читателя против $0.30 за весь остальной выпуск. Plus
+    // за $3.99 её не унесёт, и дело не в позиционировании, а в счёте.
+    audioSecondsPerDay: 0,
   },
   pro: {
     id: "pro",
@@ -136,6 +154,7 @@ export const PLANS: Record<PlanId, Plan> = {
     // за нажатие (замер 19 сентября 2026), то есть 6% себестоимости тарифа:
     // цена здесь за пользу, а не за расход.
     sections: ["delivery", "language", "posts"],
+    audioSecondsPerDay: 45 * 60,
   },
 };
 
@@ -249,7 +268,7 @@ export const cheapestWith = (section: Gated): Plan =>
  */
 export type FeatureId =
   | "personalization" | "delivery" | "language" | "x" | "posts"
-  | "topics" | "digest" | "sources" | "cadence";
+  | "topics" | "digest" | "sources" | "cadence" | "audio";
 
 export type Feature = {
   has: (plan: Plan) => boolean;
@@ -284,6 +303,12 @@ export const FEATURES: Record<FeatureId, Feature> = {
   },
   digest: {
     has: (plan) => plan.maxMinutes > PLANS.free.maxMinutes,
+  },
+  audio: {
+    // Та же проверка, по которой работает предел: корона над работающей
+    // кнопкой и работающая кнопка без короны одинаково незаметны на глаз
+    // и одинаково врут.
+    has: (plan) => plan.audioSecondsPerDay > 0,
   },
   sources: {
     has: (plan) => plan.maxSources > PLANS.free.maxSources,

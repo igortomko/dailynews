@@ -5,6 +5,7 @@ import { DEFAULT_LOCALE, type Locale } from "./i18n/locale";
 import { effectiveVoice } from "./lemon";
 import { cardMinutes } from "./reading-time";
 import type { Rules } from "./rules";
+import { catalogTopic } from "./starter-topics";
 import type { Sql, TransactionSql } from "postgres";
 
 /**
@@ -53,13 +54,96 @@ export async function allReaders(): Promise<Reader[]> {
 }
 
 export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> {
+  // «Взял ли ещё кто-то» — exists по индексу reader_topics(topic_id) (0051):
+  // одна проба на тему, выход на первом соседе. Соединение с bool_or собирало
+  // бы строку на каждого держателя каждой моей темы — тем дольше, чем тема
+  // популярнее, — а эта функция зовётся на каждого читателя каждым прогоном.
   return sql<ReaderTopic[]>`
-    select t.id::int as id, t.slug, t.label, t.hint, rt.weight, rt.position
+    select t.id::int as id, t.slug, t.label, t.hint, rt.weight, rt.position,
+           exists (
+             select 1 from dailynews.reader_topics o
+              where o.topic_id = rt.topic_id and o.reader_id <> rt.reader_id
+           ) as shared
       from dailynews.reader_topics rt
       join dailynews.topics t on t.id = rt.topic_id
      where rt.reader_id = ${readerId}
      order by rt.position, t.id
   `;
+}
+
+/**
+ * Тема в общем справочнике: своя правится, каталожная и общая — нет.
+ *
+ * Справочник один на всех: по нему Jev классифицирует поток один раз,
+ * и название с подсказкой — критерий этой классификации. Переписав их
+ * у темы из каталога или у темы, которую взял ещё кто-то, читатель менял бы
+ * ленту соседям, и заметить это можно было бы только по съехавшим темам
+ * чужих выпусков. До сих пор такая правка молча терялась: форма показывала
+ * новую подсказку до перезагрузки, база хранила прежнюю — отказ, похожий
+ * на успех. Теперь своя тема (заведена руками и никем больше не взята)
+ * правится, у остальных форма поля не показывает, а сервер решает сам,
+ * не веря форме.
+ *
+ * Каталожная тема берёт имя и подсказку из стартового набора, а не
+ * от вызвавшего: в сиде лежат шесть тем из двадцати семи, остальные заводит
+ * первый, кто их взял, — и без этого первый же читатель, набравший «Music»
+ * руками, определял бы критерий классификации для всех своим именем
+ * и пустой подсказкой, а поправить это потом было бы нечем.
+ *
+ * Правка от присоединения отличается связкой в базе. Тему, которую читатель
+ * уже держит, он видел в форме вместе с подсказкой, и пустая подсказка —
+ * стёртая им самим. К ничьей теме он присоединяется вслепую: новый чип
+ * приходит без подсказки, и пустая сохранённую не стирает, а набранная
+ * применяется. Убрал и добавил снова в одном заходе — связка ещё стоит,
+ * и тема начинает с того, что в форме: чистого листа.
+ *
+ * Отдаёт id темы в любом случае: связка читателя с темой заводится по нему.
+ */
+export async function upsertTopic(
+  db: Sql | TransactionSql,
+  readerId: number,
+  topic: { slug: string; label: string; hint: string; position: number },
+): Promise<number> {
+  const starter = catalogTopic(topic.slug);
+  // Каталожная тема — из стартового набора, и уже заведённая тоже: строка,
+  // набранная руками до каталога, держала бы чужой критерий вечно, а править
+  // её нечем — у каталожной форма поля не показывает. У своей темы конфликт
+  // ничего не меняет: её правит условие ниже.
+  const catalog = starter !== undefined;
+  const [row] = await db<{ id: number }[]>`
+    insert into dailynews.topics as t (slug, label, hint, position)
+    values (
+      ${topic.slug}, ${starter?.label ?? topic.label}, ${starter?.hint ?? topic.hint},
+      ${topic.position}
+    )
+    on conflict (slug) do update
+       set label = case when ${catalog} then excluded.label else t.label end,
+           hint = case when ${catalog} then excluded.hint else t.hint end
+    returning id::int as id
+  `;
+  if (starter) return row.id;
+
+  // Пустая подсказка — стёртая, если тему держу я, и не присланная, если
+  // присоединяюсь к ничьей: новый чип приходит без неё. Решается в самом
+  // запросе: отдельная проба «держу ли» стоила третий круг до базы на каждую
+  // свою тему при записи формы.
+  await db`
+    update dailynews.topics t
+       set label = ${topic.label},
+           hint = case
+             when ${topic.hint} = '' and not exists (
+               select 1 from dailynews.reader_topics mine
+                where mine.topic_id = t.id and mine.reader_id = ${readerId}
+             ) then t.hint
+             else ${topic.hint}
+           end
+     where t.id = ${row.id}
+       and not exists (
+         select 1 from dailynews.reader_topics o
+          where o.topic_id = t.id and o.reader_id <> ${readerId}
+       )
+  `;
+  return row.id;
 }
 
 /**
@@ -280,7 +364,7 @@ export type CallRecord = {
     | "dedup"
     // Карточка автора и пост — такие же оплаченные вызовы, и потолок
     // читателя считается по той же таблице.
-    | "voice" | "post" | "post-quality";
+    | "voice" | "post" | "post-quality" | "spoken-terms";
   model: string;
   tokensIn: number;
   tokensOut?: number;
@@ -302,15 +386,7 @@ export async function pendingKindleAsks(readerId: number) {
   // остаётся исходный.
   const pending = await sql<{ item_id: number; title: string }[]>`
     select ks.item_id,
-           coalesce(
-             (select di.title
-                from dailynews.digest_items di
-                join dailynews.digests d on d.id = di.digest_id
-               where d.reader_id = ks.reader_id and di.item_id = ks.item_id
-               order by d.day desc
-               limit 1),
-             i.title
-           ) as title
+           coalesce(${readerTitle(sql`ks.reader_id`, sql`ks.item_id`)}, i.title) as title
       from dailynews.kindle_sends ks
       join dailynews.items i on i.id = ks.item_id
      where ks.reader_id = ${readerId}
@@ -597,4 +673,50 @@ export async function removeReaderSource(readerId: number, sourceId: number): Pr
     delete from dailynews.reader_sources
      where reader_id = ${readerId} and source_id = ${sourceId}
   `;
+}
+
+/**
+ * Подзапрос «заголовок из выпуска этого читателя».
+ *
+ * Один на два места: он же нужен вопросу «дочитал?» и озвучке, а две
+ * копии правила «свежий перевод этого читателя, иначе исходный» молча
+ * разъезжаются — у одной появляется условие по читателю, у другой нет,
+ * и заметно это только чужим заголовком в чужом ухе.
+ *
+ * Аргументы — куски запроса, а не значения: в одном месте номера
+ * приходят колонками соседней таблицы, в другом — числами.
+ */
+const readerTitle = (readerId: unknown, itemId: unknown) => sql`
+  (select di.title
+     from dailynews.digest_items di
+     join dailynews.digests d on d.id = di.digest_id
+    where d.reader_id = ${readerId as never} and di.item_id = ${itemId as never}
+    order by d.day desc
+    limit 1)
+`;
+
+/**
+ * Заголовок материала так, как его видит этот читатель.
+ *
+ * Перевод заголовка живёт в `digest_items.title` и персонален: в `items`
+ * колонки `title_ru` нет с 0020, и запрос к ней падает целиком — так
+ * отправка на читалку и не работала вовсе.
+ *
+ * Условие по читателю стоит на самой подзапросной выборке, а не только
+ * на `digests`: с внешним соединением строки `digest_items` приходят
+ * от всех читателей сразу, и порядок по дате лишь делает чужой перевод
+ * маловероятным. Материал, попавший в чужой выпуск и не попавший в свой,
+ * озвучивался бы чужим заголовком — вовремя и не тем.
+ */
+export async function itemForReader(
+  readerId: number,
+  itemId: number,
+): Promise<{ url: string; title: string; body: string | null } | null> {
+  const [row] = await sql<{ url: string; title: string; body: string | null }[]>`
+    select i.url, i.body,
+           coalesce(${readerTitle(readerId, sql`i.id`)}, i.title) as title
+      from dailynews.items i
+     where i.id = ${itemId}
+  `;
+  return row ?? null;
 }

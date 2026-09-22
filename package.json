@@ -9,7 +9,7 @@
     "lint": "eslint",
     "pipeline": "tsx --env-file-if-exists=.env pipeline/run.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx pipeline/selftest.ts && tsx pipeline/reading-selftest.ts",
+    "test": "tsx pipeline/selftest.ts && tsx pipeline/reading-selftest.ts && tsx pipeline/reading-evaluation-selftest.ts",
     "verify:db": "tsx db/verify.ts",
     "migrate": "tsx --env-file=.env db/migrate.ts",
     "dry-run": "tsx --env-file=.env pipeline/dry-run.ts",
@@ -17,7 +17,8 @@
     "bot:webhook": "tsx --env-file=.env scripts/set-webhook.ts",
     "postbot:webhook": "tsx --env-file=.env scripts/set-webhook.ts postbot",
     "env:set": "tsx scripts/env-set.ts",
-    "replay": "tsx --env-file=.env pipeline/prompt-replay.ts"
+    "replay": "tsx --env-file=.env pipeline/prompt-replay.ts",
+    "reading:evaluate": "tsx --env-file-if-exists=.env scripts/reading-evaluate.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
@@ -32,6 +33,7 @@
     "linkedom": "^0.18.13",
     "lucide-react": "^1.47.0",
     "marked": "^18.0.13",
+    "msedge-tts": "^2.0.7",
     "next": "16.3.5",
     "next-themes": "^0.4.6",
     "postgres": "^3.4.9",

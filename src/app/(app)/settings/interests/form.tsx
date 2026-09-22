@@ -2,8 +2,8 @@
 
 import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveInterests, type ChipInput } from "@/lib/actions";
-import { TopicChips } from "@/components/topic-chips";
+import { saveInterests } from "@/lib/actions";
+import { TopicChips, type FormChip } from "@/components/topic-chips";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import type { Plan } from "@/lib/plans";
@@ -24,7 +24,7 @@ export function InterestsForm({
   follow,
   exclude,
 }: {
-  chips: ChipInput[];
+  chips: FormChip[];
   /** Заказ: сколько минут чтения просит читатель. */
   minutes: number;
   /** Сколько минут занимает одна его карточка — мерка для деления на места. */
@@ -41,6 +41,14 @@ export function InterestsForm({
   const [error, setError] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
   const router = useRouter();
+  /**
+   * Чем засеяны чипы. После удачной записи — тем, что сервер записал
+   * на самом деле, а не тем, что прислала форма: каталожная тема и тема,
+   * взятая соседом, остаются прежними, и без пересева форма показывала бы
+   * «сохранённое», которого нет. `version` перемонтирует чипы: их состояние
+   * живёт внутри и на новые props само не откликается.
+   */
+  const [seed, setSeed] = useState({ chips, minutes, version: 0 });
 
   /**
    * Запись. Промисом, а не колбэком: её ждут двое — кнопка и окно
@@ -48,7 +56,7 @@ export function InterestsForm({
    * уходить ли.
    */
   const write = useCallback(
-    () =>
+    (stale: () => boolean) =>
       new Promise<boolean>((resolve) => {
         const node = form.current;
         if (!node) return resolve(false);
@@ -57,9 +65,16 @@ export function InterestsForm({
           // из серверного действия. Молчать нельзя ни о том, ни о другом.
           try {
             const result = await saveInterests(new FormData(node));
-            if (result?.error) {
+            if ("error" in result) {
               setError(result.error);
               return resolve(false);
+            }
+            // Правка, сделанная пока шла запись, в ответ сервера не попала:
+            // пересев стёр бы её молча, кнопка осталась бы зажжённой,
+            // и следующая запись вернула бы серверное. Тронуто — чипы
+            // остаются как есть, их запишет следующее нажатие.
+            if (!stale()) {
+              setSeed((prev) => ({ chips: result.chips, minutes: result.minutes, version: prev.version + 1 }));
             }
           } catch {
             setError(t.settings.common.saveError);
@@ -105,8 +120,9 @@ export function InterestsForm({
         <form ref={form} onChange={touch} onSubmit={(event) => event.preventDefault()}>
           <FieldGroup>
             <TopicChips
-              initial={chips}
-              initialMinutes={minutes}
+              key={seed.version}
+              initial={seed.chips}
+              initialMinutes={seed.minutes}
               perCard={perCard}
               inToday={inToday}
               plan={plan}

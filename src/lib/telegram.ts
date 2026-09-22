@@ -201,11 +201,14 @@ export function looksLikeSource(text: string): boolean {
   return value.includes("://") || value.startsWith("@") || /[^\s@]+\.[^\s@]{2,}/.test(value);
 }
 
+/** Адрес API. Литерал живёт в одном месте: заливка аудио ходит мимо `call`. */
+const apiBase = (token: string) => `https://api.telegram.org/bot${token}`;
+
 async function call<T = unknown>(method: string, body: object): Promise<T> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
 
-  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const res = await fetch(`${apiBase(token)}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -242,6 +245,103 @@ export async function sendMessage(
     ...(button ? { reply_markup: { inline_keyboard: [[button]] } } : {}),
   });
 }
+
+/**
+ * Отправить озвучку.
+ *
+ * Telegram здесь и хранилище, и плеер: своего хранилища у продукта нет,
+ * а заводить его ради mp3 дороже, чем не заводить. Первая отправка льёт
+ * файл и возвращает `file_id`; по нему та же статья уходит второму
+ * читателю мгновенно и не весит ни байта трафика.
+ *
+ * Заливка идёт multipart, а пересылка по `file_id` — обычным JSON: это
+ * два разных запроса к одному методу, и различает их тип аргумента,
+ * а не флаг.
+ */
+export async function sendAudio(
+  chatId: number,
+  audio: Buffer | string,
+  meta: { title: string; url: string; duration?: number },
+): Promise<{ fileId: string; messageId: number }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
+
+  const fields: Record<string, string> = {
+    chat_id: String(chatId),
+    // Telegram режет заголовок сам, но молча: длинное имя приедет
+    // обрезанным без следа в ответе.
+    title: meta.title.slice(0, 120),
+    // Имя продукта — «Reporta»: так он подписан в metadata, в письмах
+    // на читалку и на обложке. Плеер Telegram показывает исполнителя
+    // рядом с заголовком, и второе написание там выглядело бы чужим.
+    performer: "Reporta",
+    // Подпись собирается здесь, а не приезжает готовой разметкой.
+    // Адрес приходит из чужого фида, и кавычка внутри него выбивается
+    // из атрибута: Telegram отвечает «can't parse entities» и не шлёт
+    // ничего — озвучка пропадает целиком из-за одного знака в ссылке.
+    // Обрезка идёт до экранирования: `&` превращается в `&amp;`, и срез
+    // по готовой строке рубит сущность пополам — Telegram отвечает
+    // «can't parse entities» и не шлёт ничего. То есть защита от длинного
+    // заголовка сама роняла бы озвучку, ровно тем способом, от которого
+    // экранирование здесь и стоит.
+    caption: `<a href="${escapeAttr(meta.url)}">${escapeHtml(meta.title.slice(0, 700))}</a>`,
+    parse_mode: "HTML",
+  };
+  if (meta.duration) fields.duration = String(Math.round(meta.duration));
+
+  if (typeof audio === "string") {
+    // Пересылка готового — обычный вызов, и делает его общий `call`:
+    // токен, адрес и разбор отказа живут там в одном экземпляре.
+    const result = await call<{ message_id: number; audio?: { file_id: string } }>(
+      "sendAudio",
+      { ...fields, audio },
+    );
+    if (!result?.audio?.file_id) throw new Error("Telegram не вернул file_id");
+    return { fileId: result.audio.file_id, messageId: result.message_id };
+  }
+
+  // Заливка идёт multipart — единственное, чего `call` не умеет.
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+  form.append(
+    "audio",
+    new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }),
+    `${slugOf(meta.title)}.mp3`,
+  );
+  const res = await fetch(`${apiBase(token)}/sendAudio`, {
+    method: "POST",
+    body: form,
+    // Заливка пяти мегабайт с общей машины бывает и минутой.
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!res.ok) {
+    throw new Error(`Telegram HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+  const body = (await res.json()) as {
+    ok: boolean;
+    description?: string;
+    result?: { message_id: number; audio?: { file_id: string } };
+  };
+  // `ok: false` приезжает с кодом 200, и без этой проверки отказ Telegram
+  // выглядел бы как успешная отправка с пустым file_id.
+  if (!body.ok || !body.result?.audio?.file_id) {
+    throw new Error(`Telegram отказал: ${body.description ?? "нет file_id в ответе"}`);
+  }
+  return { fileId: body.result.audio.file_id, messageId: body.result.message_id };
+}
+
+/**
+ * Значение атрибута: к `& < >` добавляется кавычка.
+ *
+ * `escapeHtml` её не трогает намеренно — в тексте она безобидна. В атрибуте
+ * она закрывает его досрочно, и дальше Telegram читает остаток ссылки как
+ * разметку.
+ */
+const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
+
+/** Имя файла для Telegram: кириллицу он принимает, а служебные знаки — нет. */
+const slugOf = (title: string) =>
+  title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 60) || "audio";
 
 /**
  * Спросить, дочитал ли он то, что уехало на читалку.

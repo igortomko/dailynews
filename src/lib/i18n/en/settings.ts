@@ -102,6 +102,12 @@ export const settings = {
     hintAria: (label: string) => `What belongs in ${label}`,
     hintPlaceholder: "comma-separated: what belongs here",
     hintHelp: "The more precise, the less clutter in the digest",
+    // У общей темы вместо поля подсказки: ссылка на слежение стоит после.
+    sharedNote:
+      "A shared topic: its description is the same for everyone who picked it. Specific names and products go",
+    // Заголовок раздела приходит из словаря `rules`: написанный здесь руками,
+    // он разошёлся бы с настоящим при первом переименовании.
+    sharedLink: (section: string) => `to “${section}”`,
     lessAria: "One less story",
     lessTooltip: "Fewer stories for this topic",
     moreAria: "One more story",

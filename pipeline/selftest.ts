@@ -36,6 +36,10 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
+import {
+  applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
+  spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
+} from "../src/lib/speech";
 import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
 import { en as EN_DICT } from "../src/lib/i18n/en/index";
@@ -67,7 +71,9 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
-import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
+import {
+  anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG, TS_CONFIGS, tsConfigFor,
+} from "../src/lib/search";
 import { recentFrom, remember } from "../src/lib/search-history";
 import { blockOf, move, overviewMarkdown, overviewText, reconcile } from "../src/lib/overview";
 import { formatDay } from "../src/lib/relative-time";
@@ -81,7 +87,10 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, s
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
-import { STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
+import {
+  catalogSlug, clampTopicText, formChipOf, ownLabel, STARTER_TOPICS, starterBySlug, suggestOrder,
+  TOPIC_LIMITS,
+} from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { countOf, explain, parseTelegram } from "./fetch";
@@ -756,6 +765,30 @@ assert.equal(
   "день целиком в минусе не должен оставлять читателя без выпуска",
 );
 
+// --- каталожная тема: одно правило на сервер и форму ---------------------------
+// Имя и подсказка каталожной темы — критерий классификации для всех, и три
+// копии условия (сервер, страница, форма) разошлись бы молча: форма показывала
+// бы поле, чью правку сервер отбросит.
+assert.equal(catalogSlug("design"), true, "тема из стартового набора — каталожная");
+assert.equal(catalogSlug(toSlug("AI-инфра")), true, "имя, сводящееся к каталожному слагу, — тоже каталожная");
+assert.equal(catalogSlug(toSlug("Финтех Бразилии")), false, "своя тема — не каталожная");
+assert.equal(catalogSlug(""), false, "пустой слаг — не каталожная");
+assert.equal(ownLabel("AI-инфра"), false, "имя каталожной темы, набранное руками, — не своя тема");
+assert.equal(ownLabel("Финтех Бразилии"), true, "своё имя — своя тема");
+// Флаг формы — оба слагаемых: без `!shared` взятая соседом тема снова стала бы
+// правимой в форме, а сервер молча отбрасывал бы правку.
+const fintech = { id: 1, slug: "fintech-brazil", label: "Финтех", hint: "", weight: 1, position: 1 };
+assert.equal(formChipOf({ ...fintech, shared: false }).own, true, "свою тему форма показывает с полем правки");
+assert.equal(formChipOf({ ...fintech, shared: true }).own, false, "взятую соседом — уже нет");
+assert.equal(formChipOf({ ...fintech, slug: "design", shared: false }).own, false, "каталожную — тоже нет, даже ничью");
+// Предел имени и подсказки — один на поле и оба пути записи: длиннее приходит
+// только мимо формы, и режется, а не отвергается.
+assert.equal(clampTopicText("  Финтех Бразилии  ", TOPIC_LIMITS.label), "Финтех Бразилии", "имя обрезается по краям");
+assert.equal(clampTopicText("x".repeat(TOPIC_LIMITS.label), TOPIC_LIMITS.label).length, TOPIC_LIMITS.label, "ровно в предел — целиком");
+assert.equal(clampTopicText("x".repeat(TOPIC_LIMITS.label + 1), TOPIC_LIMITS.label).length, TOPIC_LIMITS.label, "длиннее предела — по предел");
+assert.equal(clampTopicText("y".repeat(500), TOPIC_LIMITS.hint).length, TOPIC_LIMITS.hint, "подсказка режется своим пределом");
+assert.equal(clampTopicText(null, TOPIC_LIMITS.hint), "", "нестроковое — пустая строка, а не «null»");
+
 // --- личные правила: за чем следить и что исключать ----------------------------
 // Правило — список написаний одного и того же. Ищется буквально, с границей
 // слова для любого алфавита; текст читателя не исполняется как regex.
@@ -1177,19 +1210,19 @@ assert.ok(
   );
 }
 
-// --- расположение middleware ------------------------------------------------
-// Проект использует srcDirectory, и Next подключает middleware только из src/.
+// --- расположение proxy (бывшего middleware) ------------------------------------------------
+// Проект использует srcDirectory, и Next подключает proxy только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
 // просто отдаются всем. Один раз так и было.
 import { existsSync } from "node:fs";
-assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
+assert.ok(existsSync("src/proxy.ts"), "proxy должен лежать в src/");
 
 // Вебхук за проверкой сессии отвечает редиректом на логин, а отправитель
 // читает 307 как успех и не повторяет доставку. Платёж при этом проходит,
 // а тариф не выдаётся — отказ, который виден только по жалобе.
-const middleware = readFileSync("src/middleware.ts", "utf8");
+const proxy = readFileSync("src/proxy.ts", "utf8");
 for (const hook of ["/api/telegram", "/api/lemon"]) {
-  assert.ok(middleware.includes(`"${hook}"`), `${hook} должен быть открыт в middleware`);
+  assert.ok(proxy.includes(`"${hook}"`), `${hook} должен быть открыт в proxy`);
   assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
 }
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
@@ -3190,11 +3223,45 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
   assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
 
-  // Словарь решает, сводятся ли словоформы, и заметно это только
-  // по ненайденному.
+  // Словарь выпуска пишется при письме и живёт в строке выпуска (0050):
+  // вектор описания и запрос к нему разбираются им же. Общий словарь —
+  // у источника (0048) и по умолчанию; совпадение проверяется по самим
+  // файлам миграций, а не по памяти: две копии одного решения расходятся молча.
   assert.equal(tsConfigFor("русском"), "russian");
   assert.equal(tsConfigFor("английском"), "english");
   assert.equal(tsConfigFor("португальском (бразильский)"), "portuguese");
+  assert.equal(
+    tsConfigFor(SOURCE_LANGUAGE),
+    SEARCH_CONFIG,
+    "язык источника заранее неизвестен: общий словарь разбирает и латиницу",
+  );
+  assert.equal(
+    tsConfigFor("японском"),
+    SEARCH_CONFIG,
+    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
+  );
+  assert.equal(tsConfigFor(""), SEARCH_CONFIG, "пустое значение колонки не роняет поиск");
+  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
+  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
+  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
+  // в списке обязан получить словарь или попасть сюда осознанно, иначе
+  // он молча уедет на общий.
+  assert.deepEqual(
+    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
+    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
+    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
+  );
+  assert.equal(SEARCH_CONFIG, "russian", "латиницу разбирает тем же стеммером, кириллицу сводит только он");
+  const shared = readFileSync("db/migrations/0048_search_vectors.sql", "utf8");
+  assert.ok(
+    shared.includes(`to_tsvector('${SEARCH_CONFIG}'::regconfig`),
+    "вектор источника считается общим словарём",
+  );
+  const perDigest = readFileSync("db/migrations/0050_search_config_per_digest.sql", "utf8");
+  assert.ok(
+    perDigest.includes(`default '${SEARCH_CONFIG}'::regconfig`),
+    "словарь выпуска по умолчанию — тот же общий",
+  );
 
 // --- два языка интерфейса ---------------------------------------------------
 // Пропущенный ключ ловит типизация: `ru` объявлен как `Dict`, и собраться
@@ -3245,27 +3312,6 @@ for (const [name, table] of [
   const orphans = Object.keys(table).filter((key) => !LANGUAGES.includes(key));
   assert.deepEqual(orphans, [], `${name}: ключи разъехались со списком языков`);
 }
-  assert.equal(
-    tsConfigFor(SOURCE_LANGUAGE),
-    "russian",
-    "язык источника заранее неизвестен: русская конфигурация разбирает и латиницу",
-  );
-  assert.equal(
-    tsConfigFor("японском"),
-    "russian",
-    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
-  );
-  assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
-  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
-  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
-  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
-  // в списке обязан получить словарь или попасть сюда осознанно, иначе
-  // он молча уедет на русский.
-  assert.deepEqual(
-    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
-    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
-    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
-  );
 
   // Недавние запросы лежат в браузере, и что там лежит — знает не наш код:
   // ключ переживает наши правки и правится из консоли. Разбор обязан
@@ -3394,6 +3440,177 @@ for (const [name, table] of [
   assert.equal(storyTitle(12, RU_DICT.feed.story), "Один сюжет, 12 публикаций");
 }
 
+// --- произношение латиницы в русском тексте -----------------------------------
+{
+  // Дефис клеит латиницу с латиницей и останавливается на кириллице.
+  assert.deepEqual(latinRuns("ZETA станет SPL-токеном"), ["ZETA", "SPL"]);
+  assert.deepEqual(latinRuns("Модель Qwen 3.5 в режиме x-High"), ["Qwen", "x-High"]);
+  assert.deepEqual(latinRuns("лотерея H-2B и виза"), ["H-2B"]);
+
+  // Один и тот же термин спрашивается один раз, сколько бы раз ни повторился.
+  assert.deepEqual(
+    latinRuns("Google купил Google, а Gemini остался у Google"),
+    ["Google", "Gemini"],
+    "повтор термина не удваивает вопрос к модели",
+  );
+
+  // По буквам читается то, что иначе не произнести, и то, что всё заглавными.
+  assert.equal(spelledOut("VHDL"), true, "нет гласных — только по буквам");
+  assert.equal(spelledOut("SPL"), true);
+  assert.equal(spelledOut("API"), true, "всё заглавными читается по буквам");
+  assert.equal(spelledOut("Gemini"), false);
+  assert.equal(spelledOut("Google"), false);
+
+  assert.equal(byLetters("VHDL", "русском"), "ви-эйч-ди-эль");
+  assert.equal(byLetters("GPU", "русском"), "джи-пи-ю");
+  // Язык, которому мы не знаем названий букв, отвечает «не умею», а не
+  // латиницей: иначе термин считался бы разобранным и в вопрос к модели
+  // уже не попал.
+  assert.equal(byLetters("GPU", "японском"), "", "чужой алфавит не выдаётся за прочитанный");
+
+  // Подстановка идёт одним проходом по тем же кускам: `AI` лежит внутри
+  // `OpenAI`, и замена по подстроке испортила бы уже разобранное слово.
+  const map = new Map([["openai", "оупен-эй-ай"], ["ai", "эй-ай"]]);
+  assert.equal(
+    applySpoken("OpenAI и AI", map),
+    "оупен-эй-ай и эй-ай",
+    "внутренность длинного термина не переписывается",
+  );
+
+  // Чего не знаем — оставляем как есть. Выдуманное произношение звучит
+  // уверенно и неправильно, пропущенное — просто плохо.
+  assert.equal(applySpoken("Datasette вышел", new Map()), "Datasette вышел");
+
+  // Русский хвост остаётся русским: заменяется кусок, а не слово с падежом.
+  assert.equal(
+    applySpoken("станет SPL-токеном", new Map([["spl", "эс-пи-эль"]])),
+    "станет эс-пи-эль-токеном",
+  );
+
+  // Читаемое по буквам известно из кода — у модели про него не спрашивают.
+  const known = spokenMap("Процессор на VHDL и GPU, модель Datasette", "русском");
+  assert.equal(known.get("vhdl"), "ви-эйч-ди-эль");
+  assert.deepEqual(
+    unknownRuns("Процессор на VHDL и GPU, модель Datasette", known),
+    ["Datasette"],
+    "спрашиваем только то, чего не решает правило",
+  );
+
+  // Затравка принадлежит языку: «джемини» — русское произношение, и японцу
+  // его подставлять нельзя. У языка без затравки словарь пуст, то есть всё
+  // уедет в модель — дороже на вопрос, а не неправильно.
+  assert.equal(spokenMap("Gemini", "русском").get("gemini"), "джемини");
+  assert.equal(
+    spokenMap("Gemini", "японском").get("gemini"),
+    undefined,
+    "кириллица не подставляется японскому читателю",
+  );
+  assert.deepEqual(
+    unknownRuns("Процессор на VHDL", spokenMap("Процессор на VHDL", "японском")),
+    ["VHDL"],
+    "чего не знаем на этом языке — спрашиваем, а не читаем чужими буквами",
+  );
+
+  // Накопленное в базе перекрывает затравку: словарь правится данными.
+  const learned = spokenMap("Google", "русском", { Google: "гуугл" });
+  assert.equal(learned.get("google"), "гуугл");
+}
+
+// --- резка текста под движок озвучки -------------------------------------------
+{
+  // Режем по предложениям: разрыв посреди слова движок читает двумя
+  // обрубками, и это слышно.
+  const text = "Первое предложение. Второе предложение! Третье? Четвёртое.";
+  assert.deepEqual(chunks(text, 25), [
+    "Первое предложение.",
+    "Второе предложение!",
+    "Третье? Четвёртое.",
+  ]);
+
+  // Предложение длиннее куска уезжает целиком: длинный запрос лучше
+  // разорванной фразы.
+  const long = "а".repeat(60) + ".";
+  assert.deepEqual(chunks(long, 25), [long], "длинное предложение не рубится");
+
+  // Ничего не теряется и не дублируется.
+  const article = Array.from({ length: 40 }, (_, i) => `Фраза номер ${i}.`).join(" ");
+  const parts = chunks(article, 100);
+  assert.equal(parts.join(" "), article, "склейка кусков равна исходнику");
+  assert.ok(parts.length > 1, "длинный текст действительно поделился");
+  // Прямо про предел: у фикстуры все предложения короткие, и проверка
+  // «длина либо не больше предела, либо это одно предложение» проходила бы
+  // и у резки, которая предел не смотрит вовсе.
+  for (const part of parts) {
+    assert.ok(part.length <= 100, `кусок длиннее предела: ${part.length}`);
+  }
+
+  // Иероглифы режутся по своей точке: пробела за ней нет, и правило
+  // «точка плюс пробел» отдало бы весь японский текст одним куском.
+  const jp = "あああ。いいい。ううう。";
+  const jpParts = chunks(jp, 8);
+  assert.ok(jpParts.length > 1, "полноширинная точка режет текст без пробела");
+  // И склейка не вставляет пробел туда, где письменность его не знает:
+  // голос читает вставленный пробел как паузу посреди фразы.
+  assert.equal(jpParts.join(""), jp, "иероглифы не разводятся пробелами");
+  for (const part of jpParts) assert.ok(part.length <= 8, `кусок длиннее предела: ${part}`);
+
+  // Знак у иероглифа — это слог, а не буква: те же 880 знаков в минуту
+  // дали бы оценку втрое короче правды, и статья на десять минут прошла бы
+  // под квоту в три.
+  assert.ok(
+    estimateSeconds("あ".repeat(300), "японском") > estimateSeconds("а".repeat(300), "русском") * 2,
+    "плотная письменность звучит дольше при той же длине",
+  );
+
+  // Голос без перевода выбирается по письменности, а не по языку читателя:
+  // языка оригинала в `items` нет вовсе.
+  assert.ok(voiceForText("Первая строка новости про рынок").startsWith("ru-"));
+  assert.ok(voiceForText("The diesel price hit a record high").startsWith("en-"));
+  assert.ok(
+    voiceForText("Google подтвердил, что Gemini забрался в системы").startsWith("ru-"),
+    "русская фраза с английскими названиями остаётся русской",
+  );
+
+  // Язык читателя — те же строки, что в селекте. Разъезд списков означал бы
+  // язык, который есть в настройках и молча не озвучивается.
+  for (const language of LANGUAGES) {
+    if (language === SOURCE_LANGUAGE) continue;
+    assert.ok(voiceFor(language), `нет голоса для языка «${language}»`);
+  }
+
+  // Отказ называет ту же квоту, по которой работает предел: разойдись
+  // числа — читателю сказали бы одно, а применили другое, и оба выглядели
+  // бы одинаково правдоподобно.
+  const t = {
+    audioOnPro: (plan: string) => `нужен ${plan}`,
+    audioNoTelegram: "нет телеграма",
+    audioCapReached: (minutes: number) => `на сегодня всё, завтра ${minutes}`,
+    audioTooLong: (left: number, needed: number) => `осталось ${left}, нужно ${needed}`,
+  };
+  const reader = { telegram_id: "1" };
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 0 }, 0, 60, t, "Pro"),
+    "нужен Pro",
+    "название тарифа берётся из тарифов, а не пишется руками",
+  );
+  assert.equal(
+    audioBlocker({ telegram_id: null }, { audioSecondsPerDay: 600 }, 0, 60, t, "Pro"),
+    "нет телеграма",
+    "слушать негде — озвучивать нечего",
+  );
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 1800 }, 1800, 60, t, "Pro"),
+    "на сегодня всё, завтра 30",
+    "в подписи та же квота, что в пределе",
+  );
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 2700 }, 2400, 600, t, "Pro"),
+    "осталось 5, нужно 10",
+    "длинная статья не начинается наполовину",
+  );
+  assert.equal(audioBlocker(reader, { audioSecondsPerDay: 2700 }, 0, 600, t, "Pro"), "");
+}
+
 // --- какие миграции сверка формы схемы вообще может проверить ------------------
 // Молчание сверки о файле, который ей ничего не обещал, — не ответ. Пока
 // эти две причины были одной, миграция из одних индексов уходила в журнал
@@ -3406,6 +3623,15 @@ for (const [name, table] of [
   assert.ok(!skippable.has("0041_story_index.sql"), "и пропускать его по молчанию сверки нельзя");
   assert.ok(silent.has("0003_seed.sql"), "сид — это данные, и сверка формы схемы про них не знает");
   assert.ok(silent.has("0031_sources_only_added_or_removed.sql"), "update — тоже данные");
+  // Снятие сверке доказать нечем: снятого нет и там, где миграция прошла,
+  // и там, где её не было. Файл из одного drop записывался бы в журнал
+  // «по молчанию» — так 0049 ушла в журнал, не сняв колонку.
+  assert.ok(silent.has("0049_drop_item_body_chars.sql"), "файл из одного drop выполняется как тихий");
+  assert.ok(!skippable.has("0049_drop_item_body_chars.sql"), "и по молчанию сверки не пропускается");
+  assert.ok(
+    skippable.has("0050_search_config_per_digest.sql"),
+    "drop рядом с add column доказывается добавлением",
+  );
 
   // Файл, который делает и то и другое: колонка есть, индекса может не быть,
   // и «обещанное уже есть» пропустило бы половину файла. Но и в отчёт
