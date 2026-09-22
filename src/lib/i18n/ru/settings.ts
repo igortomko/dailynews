@@ -137,15 +137,15 @@ export const settings: typeof En = {
       podcastSaved: "Сохранил",
     },
     kindle: {
-      descriptionDone: "Выпуск уходит книгой на читалку.",
+      descriptionDone: "Выпуск уходит книгой на Kindle.",
       descriptionSetup: "Ты можешь автоматически получать выпуск на свой Kindle. Это 2 шага.",
       step: (now: number, of: number) => `Шаг ${now} из ${of}`,
-      step1Title: "Возьми адрес читалки в Amazon",
+      step1Title: "Возьми адрес Kindle в Amazon",
       openAmazon: "Открой",
       amazonLinkLabel: "«Manage Your Content and Devices»",
       afterAmazonLink:
         "→ Preferences → Personal Document Settings. Там лежит адрес вида имя@kindle.com — вставь его сюда.",
-      addressLabel: "Адрес читалки",
+      addressLabel: "Адрес Kindle",
       addressPlaceholder: "имя@kindle.com",
       addressHint: "Заканчивается на @kindle.com",
       next: "Дальше",
@@ -161,13 +161,13 @@ export const settings: typeof En = {
       senderLabel: "Отправитель",
       notSet: "не задан",
       approvedSuffix: "разрешён в Amazon.",
-      sendToKindle: "Присылать выпуск на читалку",
+      sendToKindle: "Присылать выпуск на Kindle",
       sendToKindleHint: (on: boolean): string =>
         on
           ? "Включено — выпуск уходит книгой каждое утро."
           : "Выключено — адрес остаётся для отправки отдельных статей.",
       resetLink: "Настроить заново",
-      resetTooltip: "Стереть адрес читалки и пройти настройку с начала",
+      resetTooltip: "Стереть адрес Kindle и пройти настройку с начала",
       copyAddress: "Скопировать адрес",
       addressCopied: "Адрес скопирован",
       copyFailed: "Браузер не дал скопировать — выдели адрес вручную",

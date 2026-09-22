@@ -129,7 +129,7 @@ export const onboarding: typeof En = {
     savedDescription: "Собери голос заново",
   },
   opinionDialog: {
-    title: "Своё мнение",
+    title: "Черновик поста",
     hook: (text) => `Вход: ${text}`,
     writing: "Пишу твоим голосом — это занимает несколько секунд",
     failedTitle: "Не написалось",

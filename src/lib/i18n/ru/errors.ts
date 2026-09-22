@@ -15,7 +15,7 @@ export const errors: typeof En = {
   duplicateTopic: "Такой интерес уже есть, назови иначе",
   emptyTopicName: "У одного из интересов нет названия — назови его",
 
-  kindleAddressEmpty: "Впиши адрес читалки",
+  kindleAddressEmpty: "Впиши адрес Kindle",
   kindleAddressSuffix: "Адрес должен заканчиваться на @kindle.com",
 
   emptyLine: "Вставь ссылку",
@@ -40,8 +40,8 @@ export const errors: typeof En = {
   noChannelsYet: "Сначала отметь в настройках, где ты публикуешь",
   draftNotFound: "Черновик не найден",
 
-  kindleOnPlan: (plan: string) => `Читалка есть на тарифе «${plan}»`,
-  kindleNoAddress: "Сначала настрой Kindle в «Доставке»: там нужен адрес читалки",
+  kindleOnPlan: (plan: string) => `Kindle есть на тарифе «${plan}»`,
+  kindleNoAddress: "Сначала настрой Kindle в «Доставке»: там нужен его адрес",
   kindleNoSender: "Это наша поломка, напиши боту в Telegram",
   kindleNotApproved: "Amazon ещё не разрешил наш адрес, доделай настройку в «Доставке»",
   kindleCapReached: "Сегодня больше отправить нельзя, завтра лимит обнулится",
