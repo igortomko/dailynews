@@ -231,7 +231,13 @@ export function ItemCard({
 }) {
   const t = useT();
   const locale = useLocale();
+  /**
+   * Раскрытая карточка больше не сворачивается: читатель раскрыл её, чтобы
+   * дочитать, и промах пальцем по тексту не должен отнимать у него абзац,
+   * на котором он остановился. Обратно её закрывает только уход со страницы.
+   */
   const [expanded, setExpanded] = useState(false);
+  const expand = () => setExpanded(true);
   // Своё состояние, а не expanded: раскрытие описания считается чтением
   // материала и уезжает в калибровку событием «opened». Список повторов —
   // не чтение, и засчитать его за чтение значило бы подмешать в петлю
@@ -1303,13 +1309,13 @@ export function ItemCard({
               «opened» наконец означает чтение — раньше оно уходило от клика
               по тексту, который и так был показан целиком. */}
           {reading ? (
-            <div onClick={() => setExpanded((value) => !value)}>
+            <div onClick={expand}>
               <ReadingSummary reading={reading} labels={t.feed.reading} lang={textLang} open={expanded} />
               {!expanded && hasDetails(reading) ? (
                 <button
                   type="button"
                   aria-expanded={false}
-                  onClick={(event) => { event.stopPropagation(); setExpanded(true); }}
+                  onClick={(event) => { event.stopPropagation(); expand(); }}
                   className="mt-2 flex cursor-pointer items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
                 >
                   {t.feed.reading.more}
@@ -1320,7 +1326,7 @@ export function ItemCard({
           ) : hasSummary ? (
             <p
               lang={textLang ?? undefined}
-              onClick={() => setExpanded((value) => !value)}
+              onClick={expand}
               // 16 пикселей, а не 15: описание — единственный сплошной текст
               // в карточке, и на нём экономить кегль незачем. Колонка — 60ch:
               // ch — это ширина нуля, и кириллицей в такую строку ложится
