@@ -2100,13 +2100,13 @@ assert.ok(pairs.every((pair) => !pair.from.startsWith("```")), "листинги
 assert.ok(pairs.every((pair) => !pair.from.startsWith("##")), "заголовки в выборку не попадают");
 assert.equal(samplePairs([], []).length, 0, "пустая статья не ломает выборку");
 
-// Три причины отказа, и каждая выключает по своей.
+// Четыре причины отказа, и каждая выключает по своей.
 const base = { id: 1, daily_cap_usd: 1, kindle_address: "a@kindle.com", kindle_sender: "52308619", kindle_approved: true } as Reader;
 const blockers = [
-  articleBlocker({ ...base, kindle_address: null }, 0),
-  articleBlocker({ ...base, kindle_sender: null }, 0),
-  articleBlocker({ ...base, kindle_approved: false }, 0),
-  articleBlocker(base, 1),
+  articleBlocker({ ...base, kindle_address: null }, PLANS.plus, 0),
+  articleBlocker({ ...base, kindle_sender: null }, PLANS.plus, 0),
+  articleBlocker({ ...base, kindle_approved: false }, PLANS.plus, 0),
+  articleBlocker(base, PLANS.plus, 1),
 ];
 assert.ok(blockers.every((text) => text.length > 0), "каждая из четырёх причин останавливает отправку");
 // Различимость, а не формулировка: одинаковый текст на разные причины
@@ -2114,14 +2114,23 @@ assert.ok(blockers.every((text) => text.length > 0), "каждая из четы
 // и держать их золотым образцом значит ронять тест на каждой такой правке.
 assert.equal(new Set(blockers).size, 4, "причины отказа должны быть различимы на глаз");
 assert.match(
-  articleBlocker({ ...base, kindle_approved: false }, 0), /Amazon/,
+  articleBlocker({ ...base, kindle_approved: false }, PLANS.plus, 0), /Amazon/,
   "неодобренный отправитель называет Amazon: чинится это только там",
 );
 assert.match(
-  articleBlocker(base, 1), /завтра/,
+  articleBlocker(base, PLANS.plus, 1), /завтра/,
   "предел, который снимется сам, обязан сказать когда — иначе читатель идёт искать несуществующую настройку",
 );
-assert.equal(articleBlocker(base, 0.5), "", "настроенная отправка не блокируется");
+assert.equal(articleBlocker(base, PLANS.plus, 0.5), "", "настроенная отправка не блокируется");
+
+// Пятая, и она стоит первой: адрес читалки переживает понижение тарифа,
+// и без этой проверки отправка статьи продолжала бы стоить цент за нажатие
+// там, где читалки нет. Отказ называет тариф, а не недостающий адрес:
+// вписать его на бесплатном негде — «Доставка» закрыта той же проверкой.
+assert.match(
+  articleBlocker(base, PLANS.free, 0), new RegExp(PLANS.plus.label),
+  "на бесплатном тарифе отправка статьи отказывает тарифом",
+);
 
 // Нажатие кнопки приходит не сообщением, а callback_query. Без этой ветки
 // оно проваливалось в ignore: часики на кнопке крутились, ответ терялся.

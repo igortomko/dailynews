@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { TrashIcon, PlusIcon, ExternalLinkIcon, GlobeIcon } from "lucide-react";
+import { TrashIcon, PlusIcon, CrownIcon, ExternalLinkIcon, GlobeIcon } from "lucide-react";
 import { useT } from "@/components/i18n-provider";
 import { addSource, deleteSource, discoverSource, restoreSource } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import type { Source } from "@/lib/types";
 import type { SourceHealth } from "@/lib/queries";
 import { cleanupOf } from "@/lib/source-health";
 import { PLANS, type Plan } from "@/lib/plans";
-import { PaywallCrown } from "@/components/paywall";
+import { PaywallCrown, usePaywall } from "@/components/paywall";
 import type { Dict } from "@/lib/i18n";
 import type { Found } from "../../../../../pipeline/discover";
 
@@ -201,6 +201,21 @@ export function SourcesManager({
   const [input, setInput] = useState("");
   const [found, setFound] = useState<Found | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Мест больше нет. Считается тем же правилом, что и на сервере
+   * (`denyForKind`): виды, которых тариф не опрашивает, в счёт не идут —
+   * иначе после понижения три ленты X занимали бы места живых источников
+   * ещё и на глаз.
+   *
+   * Предел — не повод молчать: кнопка остаётся нажимаемой и открывает окно
+   * с предложением, как «Добавить» у интересов. До этого она уходила
+   * разбирать ссылку (запрос в сеть), а возвращалась строкой «на тарифе
+   * „Бесплатный“ можно 5 источников» — отказ без единого выхода.
+   */
+  const full =
+    sources.filter((source) => plan.kinds.includes(source.kind)).length >= plan.maxSources;
+  const sourcesPaywall = usePaywall("sources", plan);
 
   const dead = sources.filter((source) => source.last_error);
   const silent = sources.filter(
@@ -413,8 +428,20 @@ export function SourcesManager({
                       описывало внутренний шаг и ничего не обещало: человек
                       не знает, доведёт ли оно до добавления.
                     */}
-                    <Button type="button" onClick={parse} disabled={pending || !input.trim()}>
-                      <PlusIcon data-icon="inline-start" />
+                    <Button
+                      type="button"
+                      onClick={full ? sourcesPaywall.open : parse}
+                      // На пределе кнопка живёт и с пустым полем: разбирать
+                      // нечего, а сказать есть что — и ждать, пока читатель
+                      // наберёт ссылку, ради отказа значит взять плату
+                      // за отказ временем.
+                      disabled={pending || (!full && !input.trim())}
+                    >
+                      {full ? (
+                        <CrownIcon data-icon="inline-start" className="text-amber-500" />
+                      ) : (
+                        <PlusIcon data-icon="inline-start" />
+                      )}
                       {pending ? t.sources.addForm.checking : t.sources.addForm.add}
                     </Button>
                   </div>
@@ -651,6 +678,8 @@ export function SourcesManager({
           ))}
         </CardContent>
       </Card>
+
+      {sourcesPaywall.dialog}
     </div>
   );
 }

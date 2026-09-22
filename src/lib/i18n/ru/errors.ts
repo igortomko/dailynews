@@ -37,6 +37,7 @@ export const errors: typeof En = {
   noChannelsYet: "Сначала отметь в настройках, где ты публикуешь",
   draftNotFound: "Черновик не найден",
 
+  kindleOnPlan: (plan: string) => `Читалка есть на тарифе «${plan}»`,
   kindleNoAddress: "Сначала настрой Kindle в «Доставке»: там нужен адрес читалки",
   kindleNoSender: "Это наша поломка, напиши боту в Telegram",
   kindleNotApproved: "Amazon ещё не разрешил наш адрес, доделай настройку в «Доставке»",

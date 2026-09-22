@@ -10,6 +10,7 @@ import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { sql } from "../src/lib/db";
 import { itemForReader, spentToday } from "../src/lib/readers";
+import { effectivePlan } from "../src/lib/lemon";
 import type { Reader } from "../src/lib/types";
 import { fetchArticle } from "./article";
 import { translateArticle, splitBlocks } from "./translate";
@@ -164,7 +165,9 @@ export async function queueArticleSend(
   /** Язык отказа. По умолчанию русский — тот же уговор, что у `articleBlocker`. */
   t: Dict["errors"] = ru.errors,
 ): Promise<{ id: number } | { error: string }> {
-  const blocker = articleBlocker(reader, await spentToday(reader.id), t);
+  // Тариф считается, а не читается из колонки: в `plan` лежит купленное,
+  // а работает ли оно сейчас — решают статус и `plan_ends_at`.
+  const blocker = articleBlocker(reader, effectivePlan(reader), await spentToday(reader.id), t);
   if (blocker) return { error: blocker };
 
   await reclaimStale();
