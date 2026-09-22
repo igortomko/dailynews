@@ -61,6 +61,11 @@ export function SettingsNav({ plan }: { plan: Plan }) {
           <Link
             key={section.href}
             href={section.href}
+            // Раздел подгружается заранее, пока читают текущий: страницы
+            // динамические, и без этого каждое нажатие ждало бы сервер.
+            // Семь разделов — семь фоновых рендеров по ~50 мс за визит
+            // в настройки; на одном ядре это дешевле семи ожиданий.
+            prefetch={true}
             aria-current={active ? "page" : undefined}
             className={cn(
               "shrink-0 rounded-md px-2 py-1.5 text-sm whitespace-nowrap transition-colors",

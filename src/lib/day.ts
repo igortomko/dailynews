@@ -21,3 +21,7 @@ export function isDay(value: unknown): value is string {
     date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
   );
 }
+
+/** Локальная дата без часового пояса: «2026-09-19» — это день, а не момент. */
+export const toDay = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;

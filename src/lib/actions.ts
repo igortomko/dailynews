@@ -33,6 +33,7 @@ import {
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
+import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
 import { starterBySlug } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
@@ -567,13 +568,16 @@ async function rewriteFor(reader: Reader) {
     return { error: (await getDict()).errors.capReachedRewrite };
   }
 
+  // Переписанный выпуск ищется словарём нового языка: описание теперь
+  // написано им, и вектор (0050) пересчитается вместе с текстом.
+  const voice = effectiveVoice(reader);
   const written = await writeDigest(
     survivors.map((survivor) => ({
       ...survivor,
       axes: typeof survivor.axes === "string" ? JSON.parse(survivor.axes) : survivor.axes,
     })),
     reader.reader_context,
-    effectiveVoice(reader),
+    voice,
     { readerId: reader.id },
   );
   if (!written.accounted) await recordCall({
@@ -595,7 +599,11 @@ async function rewriteFor(reader: Reader) {
     const updated = await sql`
       update dailynews.digest_items
          set title = ${item.title_ru}, summary = ${item.summary ?? ""},
-             summary_document = ${item.reading ? sql.json(item.reading) : null}
+             summary_document = ${item.reading ? sql.json(item.reading) : null},
+             ts_config = coalesce(
+               (select oid from pg_ts_config where cfgname = ${tsConfigFor(voice.language)}),
+               ${SEARCH_CONFIG}::regconfig::oid
+             )::regconfig
        where digest_id = ${digest.id} and item_id = ${survivor.id}
        returning item_id
     `;
@@ -811,16 +819,24 @@ async function fillDigest(reader: Reader) {
       // собрать выпуск»: у нового читателя первый выпуск не собирался вовсе.
       const inserted = await tx<{ item_id: number }[]>`
         insert into dailynews.digest_items
-          (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score)
+          (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score,
+           ts_config)
         values (
           ${digestId}, ${survivor.id}, ${survivor.total}, ${last + index + 1},
           ${text?.title_ru ?? survivor.title}, ${text?.summary ?? ""},
           ${text?.reading ? tx.json(text.reading) : null},
           ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
-          ${scored?.total ?? null}
+          ${scored?.total ?? null},
+          -- Имя словаря через каталог, с откатом на общий: неизвестное имя
+          -- роняло бы вставку уже оплаченного выпуска (см. pipeline/run.ts).
+          coalesce(
+            (select oid from pg_ts_config where cfgname = ${tsConfigFor(voice.language)}),
+            ${SEARCH_CONFIG}::regconfig::oid
+          )::regconfig
         )
         on conflict (digest_id, item_id) do update
-        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document
+        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document,
+            ts_config=excluded.ts_config
         where dailynews.digest_items.summary_document->>'status'='unavailable'
           and excluded.summary_document->>'status'='verified'
         returning item_id::int as item_id
