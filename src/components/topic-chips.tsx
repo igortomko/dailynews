@@ -430,13 +430,19 @@ export function TopicChips({
                     // кто её взял. Поле у общей темы приглашало вписать сюда
                     // имена и продукты, а правка молча терялась. Вместо поля —
                     // адрес, куда имена и идут: слежение личное и буквальное.
-                    <p className="text-xs text-muted-foreground">
-                      {tc.sharedNote}{" "}
-                      <a href={`#${rulesAnchor("follow")}`} className="underline underline-offset-4">
-                        {tc.sharedLink(t.rules.follow.label)}
-                      </a>
-                      .
-                    </p>
+                    <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+                      {/* Подсказка остаётся видимой, хоть и не правится: это
+                          критерий, по которому тема попадает в выпуск, и больше
+                          его негде прочитать. */}
+                      {chip.hint ? <p className="text-foreground/80">{chip.hint}</p> : null}
+                      <p>
+                        {tc.sharedNote}{" "}
+                        <a href={`#${rulesAnchor("follow")}`} className="underline underline-offset-4">
+                          {tc.sharedLink(t.rules.follow.label)}
+                        </a>
+                        .
+                      </p>
+                    </div>
                   )}
 
                   {/* То же, что и полоса, но пальцем и с клавиатуры: на узком

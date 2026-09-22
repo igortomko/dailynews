@@ -1401,6 +1401,10 @@ async function main() {
     const [{ topicIdx }] = await sql<{ topicIdx: number }[]>`
       select count(*)::int as "topicIdx" from pg_indexes
        where schemaname = 'dailynews' and indexname = 'reader_topics_topic_idx'
+         -- По определению, а не по имени: индекс с тем же именем по другой
+         -- колонке прошёл бы проверку, как проходило бы переопределённое
+         -- ограничение под тем же именем.
+         and indexdef like '%(topic_id)'
     `;
     assert.equal(topicIdx, 1, "индекс reader_topics(topic_id) из 0045 должен стоять");
 

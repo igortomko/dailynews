@@ -66,7 +66,7 @@ export function InterestsForm({
           try {
             const result = await saveInterests(new FormData(node));
             if ("error" in result) {
-              setError(result.error ?? t.settings.common.saveError);
+              setError(result.error);
               return resolve(false);
             }
             setSeed((prev) => ({ chips: result.chips, minutes: result.minutes, version: prev.version + 1 }));

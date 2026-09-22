@@ -146,7 +146,16 @@ export async function savePersonalization(formData: FormData) {
  * сохраняется здесь, и только здесь: у поля должен быть один владелец, иначе
  * вторая форма, где этого поля нет, молча вернёт его к минимуму.
  */
-export async function saveInterests(formData: FormData) {
+/** Ответ формы интересов: отказ словами или то, что легло в базу. */
+export type SavedInterests = {
+  ok: true;
+  minutes: number;
+  chips: ReturnType<typeof formChipOf>[];
+};
+
+export async function saveInterests(
+  formData: FormData,
+): Promise<{ error: string } | SavedInterests> {
   const readerId = await currentReaderId();
   const chips = (JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[])
     .map((chip) => ({ ...chip, label: String(chip.label ?? "").trim() }));
