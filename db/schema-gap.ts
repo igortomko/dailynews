@@ -273,3 +273,46 @@ export function numberCollisions(
     }))
     .filter((row) => row.taken.length > 0);
 }
+
+/**
+ * Номера, занятые дважды в самом каталоге.
+ *
+ * `numberCollisions` спрашивает только про то, что вот-вот применится,
+ * и это дыра ровно в обещании AGENTS.md: как только оба файла попали
+ * в журнал, `pending` пуст, цикл не выполняется ни разу, и столкновение
+ * становится невидимым навсегда. 22 сентября 2026 в каталоге лежало три
+ * таких пары — 0036 (три файла), 0042 и 0047, — и `npm run migrate`
+ * отчитался «накатывать нечего». Проверка была описана в документе,
+ * а в коде её не было: тот же класс, что и три файла под 0036.
+ *
+ * Журнал сюда всё равно передаётся: запись без файла (миграция чужой
+ * ветки) номер занимает так же, а каталог её не видит.
+ *
+ * Переименовать старые нельзя, и это не лень. Оба имени уже стоят
+ * в `dailynews.migrations`: переименованный файл заведёт третью запись,
+ * а прежняя останется записью без файла — то есть ровно та поломка,
+ * от которой здесь и защищаемся, только на одну больше. Поэтому они
+ * перечислены поимённо, а не по номеру: четвёртый файл под 0047 —
+ * это новое столкновение, и молчать о нём не за что.
+ */
+const SETTLED = new Set([
+  "0036_blogger.sql",
+  "0036_interests_stage.sql",
+  "0036_item_transcribed.sql",
+  "0042_reader_rules.sql",
+  "0042_ui_language.sql",
+  "0047_audio_one_in_flight.sql",
+  "0047_item_body_chars.sql",
+]);
+
+export function catalogCollisions(
+  dir = "db/migrations",
+  journal: Iterable<string> = [],
+): { file: string; taken: string[] }[] {
+  const files = readdirSync(dir).filter((name) => name.endsWith(".sql")).sort();
+  const names = new Set([...journal, ...files.map((name) => name.replace(/\.sql$/, ""))]);
+  return numberCollisions(files, names).filter(
+    (row) =>
+      !(SETTLED.has(row.file) && row.taken.every((name) => SETTLED.has(`${name}.sql`))),
+  );
+}
