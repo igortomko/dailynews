@@ -158,14 +158,11 @@ export function ChannelsForm({
             {NETWORK_IDS.filter((id) => NETWORKS[id].tab).map((id) => {
               const network = NETWORKS[id];
               const mine = byNetwork.get(id);
+              // Тумблер у правого края, а не слева, как у одиночных настроек
+              // «Доставки»: это строка списка, и управление в ней стоит там же,
+              // где корзина у источника.
               return (
-                <div key={id} className="flex items-center gap-3 py-1.5">
-                  <Switch
-                    checked={Boolean(mine)}
-                    onCheckedChange={(on) => toggle(id, on)}
-                    disabled={busy}
-                    aria-label={t.onboarding.channels.publishingIn(t.onboarding.networks[id])}
-                  />
+                <div key={id} className="flex items-center justify-between gap-3 py-1.5">
                   {/* Значок общий с источниками: строка площадки и строка
                       источника — один и тот же список чужих сервисов,
                       и узнаются они знаком раньше, чем названием. */}
@@ -183,14 +180,19 @@ export function ChannelsForm({
                       {mine?.input_url || mine?.label || t.onboarding.channels.charLimit(network.limit)}
                     </span>
                   </div>
+                  <Switch
+                    checked={Boolean(mine)}
+                    onCheckedChange={(on) => toggle(id, on)}
+                    disabled={busy}
+                    aria-label={t.onboarding.channels.publishingIn(t.onboarding.networks[id])}
+                  />
                 </div>
               );
             })}
           </FieldGroup>
 
           {byNetwork.get("blog") ? (
-            <div className="flex items-center gap-3 border-t pt-3">
-              <span aria-hidden className="w-[32px] shrink-0" />
+            <div className="flex items-center justify-between gap-3 border-t pt-3">
               <SourceIcon
                 kind="rss"
                 url={byNetwork.get("blog")?.input_url ?? byNetwork.get("blog")?.handle ?? ""}
