@@ -139,7 +139,7 @@ export const plans = {
   },
 
   about: {
-    heroTitle: "Every morning, only what's worth reading",
+    heroTitle: "Only what's worth reading",
     newsWord: (n: number): string => (n === 1 ? "story" : "stories"),
     minutesWord: (n: number): string => (n === 1 ? "minute" : "minutes"),
     // Фраза целиком, а не куски под полужирные числа: подпись из трёх
