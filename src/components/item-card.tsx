@@ -14,6 +14,7 @@ import {
   PenLineIcon,
   CrownIcon,
   ChevronDownIcon,
+  HeadphonesIcon,
   EyeIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -106,6 +107,34 @@ function siteOf(url: string): string | null {
 }
 
 /**
+ * Значок и подпись кнопки озвучки — по записи на состояние.
+ *
+ * Одна таблица на оба места: значок в меню и значок в панели обязаны
+ * означать одно и то же, а два вложенных тернарника рядом расходятся
+ * молча и читаются глазом одинаково.
+ */
+type AudioState = "idle" | "working" | "sent";
+
+/** Как часто спрашиваем шаг и сколько всего ждём: пять минут. */
+const AUDIO_POLL_MS = 2000;
+const AUDIO_POLL_TIMES = 150;
+
+// Размер задан здесь: обёртка `size-3.5` собственный размер значка
+// не уменьшает, а кнопка в панели, в отличие от DropdownMenuItem,
+// правила `[&_svg]:size-4` не несёт — значок вылезал бы на полный рост.
+const AUDIO_ICON: Record<AudioState, ReactNode> = {
+  idle: <HeadphonesIcon className="size-3.5" />,
+  working: <Spinner className="size-3.5" />,
+  sent: <CheckIcon className="size-3.5" />,
+};
+
+const AUDIO_LABEL = (t: ReturnType<typeof useT>): Record<AudioState, string> => ({
+  idle: t.feed.item.audioSpeak,
+  working: t.feed.item.audioWorking,
+  sent: t.feed.item.audioSent,
+});
+
+/**
  * Кнопка действия с подсказкой — или та же кнопка без неё, пока карточку
  * не тронули. Tooltip от base-ui стоит своих хуков и слушателей на каждой
  * из двухсот кнопок ленты, а нужен только той карточке, над которой курсор
@@ -177,6 +206,16 @@ export function ItemCard({
   // индекса и честно об этом говорит.
   // Начальное состояние приходит из базы, а не всегда «ещё не отправляли»:
   // отправка идёт минуту, и перезагрузка посреди неё стирала весь след.
+  const [audio, setAudio] = useState<AudioState>("idle");
+  // Живость карточки — ref, а не состояние: цикл опроса читает её между
+  // запросами, и перерисовка ему для этого не нужна.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const [kindle, setKindle] = useState<"idle" | "sending" | "sent">(
     item.kindled ? "sent" : "idle",
   );
@@ -355,6 +394,94 @@ export function ItemCard({
 
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
+  const canListen = FEATURES.audio.has(plan);
+  const audioPaywall = usePaywall("audio", plan);
+
+  /**
+   * Озвучка идёт минутами, поэтому шаг спрашивается, а не угадывается.
+   * Проценты рисовать нечем: перевод занимает минуту, синтез — десятки
+   * секунд, и «43%» о них не говорит ничего, а «перевожу» говорит всё.
+   */
+  const speak = async () => {
+    if (!canListen) {
+      audioPaywall.open();
+      return;
+    }
+    setAudio("working");
+    // Опрос переживает карточку, если его не остановить: читатель уходит
+    // на другой день выпуска, карточка размонтируется, а цикл продолжает
+    // ходить в сеть и звать setState у того, чего уже нет.
+    const alive = aliveRef;
+    // Без явной длительности sonner погасит тост сам, и прогресс исчезнет
+    // на середине работы — ровно так же, как у перестройки выпуска.
+    const toastId = toast.loading(t.feed.item.audioStart, { duration: Infinity });
+    try {
+      const res = await fetch("/api/audio", {
+        method: "POST",
+        body: JSON.stringify({ item_id: item.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? t.feed.item.audioError);
+      // Без номера спрашивать не о чем: цикл ходил бы пять минут по
+      // `send_id=undefined` и кончался бы «ещё готовится» на пустом месте.
+      if (!body?.send_id) throw new Error(t.feed.item.audioError);
+
+      const WORDS: Record<string, string> = {
+        queued: t.feed.item.audioQueued,
+        translating: t.feed.item.audioTranslating,
+        speaking: t.feed.item.audioSpeaking,
+        sending: t.feed.item.audioSending,
+      };
+      // Опрос, а не сокет: одна кнопка на карточку и минуты работы —
+      // держать соединение ради четырёх слов дороже, чем спросить раз
+      // в две секунды.
+      for (let i = 0; i < AUDIO_POLL_TIMES; i++) {
+        await new Promise((done) => setTimeout(done, AUDIO_POLL_MS));
+        // Уход с карточки гасит тост: он глобальный и живёт, пока его
+        // обновляют, — брошенный, он останется на экране навсегда.
+        if (!alive.current) {
+          toast.dismiss(toastId);
+          return;
+        }
+        const tick = await fetch(`/api/audio?send_id=${body.send_id}`);
+        const state = await tick.json().catch(() => ({}));
+        // Код ответа проверяется до статуса. Без этого истёкшая сессия
+        // (401) или пропавшая строка (404) дают `{}`, `state.status`
+        // становится undefined, и цикл крутится пять минут, чтобы
+        // сказать «ещё готовится»: отказ выглядит как медленная работа.
+        if (!tick.ok) throw new Error(state?.error ?? t.feed.item.audioError);
+        if (state.status === "sent") {
+          setAudio("sent");
+          toast.success(t.feed.item.audioDoneTitle, {
+            id: toastId,
+            description: t.feed.item.audioDoneDescription(
+              Math.max(1, Math.round((state.seconds ?? 0) / 60)),
+            ),
+          });
+          return;
+        }
+        if (state.status === "failed") {
+          throw new Error(state.error ?? t.feed.item.audioError);
+        }
+        if (WORDS[state.status]) toast.loading(WORDS[state.status], { id: toastId });
+      }
+      // Пять минут без ответа — это не «ещё чуть-чуть». Молчащий спиннер
+      // читается как поломка, и лучше сказать правду: работа идёт, а мы
+      // перестали ждать.
+      if (!alive.current) return;
+      toast.info(t.feed.item.audioSlowTitle, {
+        id: toastId,
+        description: t.feed.item.audioSlowDescription,
+      });
+      setAudio("idle");
+    } catch (error) {
+      if (!alive.current) return;
+      setAudio("idle");
+      toast.error(error instanceof Error ? error.message : t.feed.item.audioError, {
+        id: toastId,
+      });
+    }
+  };
 
   // Скрытая карточка выходит и из обзора: в ленте её больше нет, и блок
   // из неё в черновике был бы новостью, которую читатель только что убрал.
@@ -690,6 +817,14 @@ export function ItemCard({
                 {canPost ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem
+                disabled={audio === "working"}
+                onClick={audio === "working" ? undefined : speak}
+              >
+                {AUDIO_ICON[audio]}
+                {AUDIO_LABEL(t)[audio]}
+                {canListen ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 disabled={kindle !== "idle"}
                 onClick={kindle === "idle" ? sendToKindle : undefined}
               >
@@ -777,6 +912,29 @@ export function ItemCard({
             }
           >
             <PenLineIcon className="size-3.5" />
+          </Hint>
+
+          <Hint
+            live={hot}
+            tip={canListen ? t.feed.item.audioTooltipReady : t.feed.item.audioTooltipLocked}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.audioAria}
+                aria-disabled={audio === "working"}
+                onClick={audio === "working" ? undefined : speak}
+                className={cn(
+                  "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
+                  audio === "idle"
+                    ? "cursor-pointer text-muted-foreground/50"
+                    : "text-foreground",
+                )}
+              />
+            }
+          >
+            <span className="flex size-3.5 items-center justify-center">
+              {AUDIO_ICON[audio]}
+            </span>
           </Hint>
 
           <Hint
@@ -981,6 +1139,7 @@ export function ItemCard({
       </div>
 
       {paywall.dialog}
+      {audioPaywall.dialog}
       {/* Мотатка монтируется только после нажатия: она пишет пост при открытии,
           и держать её на каждой карточке значило бы сорок запросов на ленту. */}
       {opinion ? (

@@ -1741,12 +1741,127 @@ async function main() {
 
     // Оплаченные этапы обязаны проходить ограничение: этап, которого нет
     // в check, уронил бы запись расхода — а с ней и ответ, уже оплаченный.
-    for (const stage of ["voice", "post", "post-quality"] as const) {
+    for (const stage of ["voice", "post", "post-quality", "spoken-terms"] as const) {
       await readers.recordCall({
         readerId: owner.id, stage, model: "deepseek-flash", tokensIn: 10, tokensOut: 5, costUsd: 0,
       });
     }
-    console.log("  расход: этапы voice, post и post-quality принимаются");
+    console.log("  расход: этапы voice, post, post-quality и spoken-terms принимаются");
+
+    // Озвучка: аудио общее по языку, квота — личная.
+    //
+    // Ключ `item_audio` — материал и язык, а не материал и читатель:
+    // озвучивается перевод, а он уже общий по той же паре. Добавь сюда
+    // читателя — и второй платил бы синтезом за то, что уже синтезировано.
+    // А `audio_sends` наоборот: без `reader_id` в счёте квота считалась бы
+    // по всей ленте, и сосед закрывал бы день тому, кто не слушал ничего.
+    const [firstItem] = await sql<{ id: number }[]>`
+      select id from dailynews.items order by id limit 1
+    `;
+    await sql`
+      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+      values (${firstItem.id}, 'русском', 'AgADfake', 600, 'ru-RU-SvetlanaNeural')
+    `;
+    // Доказывается ключом, а не счётом строк: «строка одна» верно и тогда,
+    // когда ключ включает читателя, — просто вставляли один раз.
+    await rejects(
+      `insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+       values (${firstItem.id}, 'русском', 'AgADother', 700, 'ru-RU-SvetlanaNeural')`,
+      /item_audio_pkey/,
+      "вторая озвучка на тот же язык отвергается ключом: она общая, а не на читателя",
+    );
+    // А другой язык — это другая озвучка, и он проходит.
+    await sql`
+      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+      values (${firstItem.id}, 'английском', 'AgADen', 500, 'en-US-AriaNeural')
+    `;
+
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 600, 'sent')
+    `;
+    // Считает тот же код, что и прод: переписанный здесь предикат
+    // разъедется с рабочим при первом же новом статусе, и проверка
+    // будет доказывать свойство запроса, которого никто не выполняет.
+    const { secondsToday: listened } = await import("../pipeline/tts");
+    assert.equal(await listened(owner.id), 600, "наслушанное считается по читателю");
+    assert.equal(await listened(second.id), 0, "сосед не тратит чужую квоту");
+
+    // Отказ снимает секунды: неудавшаяся озвучка не имеет права съесть
+    // день читателю, который так ничего и не услышал.
+    //
+    // В фикстуре секунды ненулевые нарочно. С нулём сумма оставалась бы
+    // прежней и при подсчёте отказов, и утверждение проходило бы, даже
+    // если `failed` добавить в список статусов, — то есть не доказывало
+    // бы ничего. Прод их зануляет в catch, но строка до этого живёт
+    // с оценкой, и именно такую строку надо уметь не считать.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status, error)
+      values (${owner.id}, ${firstItem.id}, 600, 'failed', 'движок молчит')
+    `;
+    assert.equal(await listened(owner.id), 600, "провалившаяся озвучка квоту не тратит");
+
+    // 0046: произношение принадлежит языку. Один термин живёт на двух
+    // языках, а пара «термин + язык» повторно не вставляется. Без этого
+    // первый ответивший язык занимал бы строку для всех остальных,
+    // и японский читатель получал бы кириллицу.
+    await sql`
+      insert into dailynews.spoken_terms (term, spoken, language)
+      values ('gemini', 'джемини', 'русском'), ('gemini', 'ジェミニ', 'японском')
+    `;
+    const [twoTongues] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.spoken_terms where term = 'gemini'
+    `;
+    assert.equal(twoTongues.n, 2, "один термин звучит по-разному на разных языках");
+    await rejects(
+      `insert into dailynews.spoken_terms (term, spoken, language)
+       values ('gemini', 'другое', 'русском')`,
+      /spoken_terms_pkey/,
+      "пара «термин и язык» повторно не заводится",
+    );
+    // 0047: язык не подставляется молча. С `default 'русском'` вставка
+    // без языка заводила бы русскую строку — тот самый отказ, который
+    // 0046 и чинила.
+    await rejects(
+      `insert into dailynews.spoken_terms (term, spoken) values ('qwen', 'квен')`,
+      /language/,
+      "язык обязателен: молча русским он больше не становится",
+    );
+
+    // 0047: одна незавершённая озвучка на статью, и это ограничение базы.
+    // `where not exists` перед вставкой две одновременные транзакции
+    // проходят обе — ровно тот случай, от которого оно ставилось.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 100, 'speaking')
+    `;
+    await rejects(
+      `insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+       values (${owner.id}, ${firstItem.id}, 100, 'queued')`,
+      /audio_sends_one_in_flight/,
+      "вторая озвучка той же статьи в работе отбивается ключом",
+    );
+    // А законченные копятся: по ним считается квота дня.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 100, 'sent')
+    `;
+    // Идущая озвучка тратит квоту наравне с законченной, и это не мелочь:
+    // иначе читатель ставит в очередь десять статей подряд, пока ни одна
+    // не досчиталась, и выходит за предел на порядок.
+    assert.equal(
+      await listened(owner.id), 800,
+      "незавершённая озвучка считается тоже: 600 + 100 в работе + 100 законченных",
+    );
+
+    // Шаг — состояние той же строки, и выдуманного шага не бывает.
+    await rejects(
+      `insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+       values (${owner.id}, ${firstItem.id}, 1, 'напеваю')`,
+      /audio_sends_status_check/,
+      "выдуманный шаг озвучки отвергается",
+    );
+    console.log("  озвучка: аудио общее по языку, квота и шаги — по читателю");
 
     // --- список колонок читателя не должен отставать от таблицы ------------
     //

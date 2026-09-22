@@ -36,6 +36,10 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
+import {
+  applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
+  spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
+} from "../src/lib/speech";
 import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
 import { en as EN_DICT } from "../src/lib/i18n/en/index";
@@ -3434,6 +3438,177 @@ for (const [name, table] of [
   assert.equal(storyTitle(1, RU_DICT.feed.story), "Один сюжет, 1 публикация");
   assert.equal(storyTitle(4, RU_DICT.feed.story), "Один сюжет, 4 публикации");
   assert.equal(storyTitle(12, RU_DICT.feed.story), "Один сюжет, 12 публикаций");
+}
+
+// --- произношение латиницы в русском тексте -----------------------------------
+{
+  // Дефис клеит латиницу с латиницей и останавливается на кириллице.
+  assert.deepEqual(latinRuns("ZETA станет SPL-токеном"), ["ZETA", "SPL"]);
+  assert.deepEqual(latinRuns("Модель Qwen 3.5 в режиме x-High"), ["Qwen", "x-High"]);
+  assert.deepEqual(latinRuns("лотерея H-2B и виза"), ["H-2B"]);
+
+  // Один и тот же термин спрашивается один раз, сколько бы раз ни повторился.
+  assert.deepEqual(
+    latinRuns("Google купил Google, а Gemini остался у Google"),
+    ["Google", "Gemini"],
+    "повтор термина не удваивает вопрос к модели",
+  );
+
+  // По буквам читается то, что иначе не произнести, и то, что всё заглавными.
+  assert.equal(spelledOut("VHDL"), true, "нет гласных — только по буквам");
+  assert.equal(spelledOut("SPL"), true);
+  assert.equal(spelledOut("API"), true, "всё заглавными читается по буквам");
+  assert.equal(spelledOut("Gemini"), false);
+  assert.equal(spelledOut("Google"), false);
+
+  assert.equal(byLetters("VHDL", "русском"), "ви-эйч-ди-эль");
+  assert.equal(byLetters("GPU", "русском"), "джи-пи-ю");
+  // Язык, которому мы не знаем названий букв, отвечает «не умею», а не
+  // латиницей: иначе термин считался бы разобранным и в вопрос к модели
+  // уже не попал.
+  assert.equal(byLetters("GPU", "японском"), "", "чужой алфавит не выдаётся за прочитанный");
+
+  // Подстановка идёт одним проходом по тем же кускам: `AI` лежит внутри
+  // `OpenAI`, и замена по подстроке испортила бы уже разобранное слово.
+  const map = new Map([["openai", "оупен-эй-ай"], ["ai", "эй-ай"]]);
+  assert.equal(
+    applySpoken("OpenAI и AI", map),
+    "оупен-эй-ай и эй-ай",
+    "внутренность длинного термина не переписывается",
+  );
+
+  // Чего не знаем — оставляем как есть. Выдуманное произношение звучит
+  // уверенно и неправильно, пропущенное — просто плохо.
+  assert.equal(applySpoken("Datasette вышел", new Map()), "Datasette вышел");
+
+  // Русский хвост остаётся русским: заменяется кусок, а не слово с падежом.
+  assert.equal(
+    applySpoken("станет SPL-токеном", new Map([["spl", "эс-пи-эль"]])),
+    "станет эс-пи-эль-токеном",
+  );
+
+  // Читаемое по буквам известно из кода — у модели про него не спрашивают.
+  const known = spokenMap("Процессор на VHDL и GPU, модель Datasette", "русском");
+  assert.equal(known.get("vhdl"), "ви-эйч-ди-эль");
+  assert.deepEqual(
+    unknownRuns("Процессор на VHDL и GPU, модель Datasette", known),
+    ["Datasette"],
+    "спрашиваем только то, чего не решает правило",
+  );
+
+  // Затравка принадлежит языку: «джемини» — русское произношение, и японцу
+  // его подставлять нельзя. У языка без затравки словарь пуст, то есть всё
+  // уедет в модель — дороже на вопрос, а не неправильно.
+  assert.equal(spokenMap("Gemini", "русском").get("gemini"), "джемини");
+  assert.equal(
+    spokenMap("Gemini", "японском").get("gemini"),
+    undefined,
+    "кириллица не подставляется японскому читателю",
+  );
+  assert.deepEqual(
+    unknownRuns("Процессор на VHDL", spokenMap("Процессор на VHDL", "японском")),
+    ["VHDL"],
+    "чего не знаем на этом языке — спрашиваем, а не читаем чужими буквами",
+  );
+
+  // Накопленное в базе перекрывает затравку: словарь правится данными.
+  const learned = spokenMap("Google", "русском", { Google: "гуугл" });
+  assert.equal(learned.get("google"), "гуугл");
+}
+
+// --- резка текста под движок озвучки -------------------------------------------
+{
+  // Режем по предложениям: разрыв посреди слова движок читает двумя
+  // обрубками, и это слышно.
+  const text = "Первое предложение. Второе предложение! Третье? Четвёртое.";
+  assert.deepEqual(chunks(text, 25), [
+    "Первое предложение.",
+    "Второе предложение!",
+    "Третье? Четвёртое.",
+  ]);
+
+  // Предложение длиннее куска уезжает целиком: длинный запрос лучше
+  // разорванной фразы.
+  const long = "а".repeat(60) + ".";
+  assert.deepEqual(chunks(long, 25), [long], "длинное предложение не рубится");
+
+  // Ничего не теряется и не дублируется.
+  const article = Array.from({ length: 40 }, (_, i) => `Фраза номер ${i}.`).join(" ");
+  const parts = chunks(article, 100);
+  assert.equal(parts.join(" "), article, "склейка кусков равна исходнику");
+  assert.ok(parts.length > 1, "длинный текст действительно поделился");
+  // Прямо про предел: у фикстуры все предложения короткие, и проверка
+  // «длина либо не больше предела, либо это одно предложение» проходила бы
+  // и у резки, которая предел не смотрит вовсе.
+  for (const part of parts) {
+    assert.ok(part.length <= 100, `кусок длиннее предела: ${part.length}`);
+  }
+
+  // Иероглифы режутся по своей точке: пробела за ней нет, и правило
+  // «точка плюс пробел» отдало бы весь японский текст одним куском.
+  const jp = "あああ。いいい。ううう。";
+  const jpParts = chunks(jp, 8);
+  assert.ok(jpParts.length > 1, "полноширинная точка режет текст без пробела");
+  // И склейка не вставляет пробел туда, где письменность его не знает:
+  // голос читает вставленный пробел как паузу посреди фразы.
+  assert.equal(jpParts.join(""), jp, "иероглифы не разводятся пробелами");
+  for (const part of jpParts) assert.ok(part.length <= 8, `кусок длиннее предела: ${part}`);
+
+  // Знак у иероглифа — это слог, а не буква: те же 880 знаков в минуту
+  // дали бы оценку втрое короче правды, и статья на десять минут прошла бы
+  // под квоту в три.
+  assert.ok(
+    estimateSeconds("あ".repeat(300), "японском") > estimateSeconds("а".repeat(300), "русском") * 2,
+    "плотная письменность звучит дольше при той же длине",
+  );
+
+  // Голос без перевода выбирается по письменности, а не по языку читателя:
+  // языка оригинала в `items` нет вовсе.
+  assert.ok(voiceForText("Первая строка новости про рынок").startsWith("ru-"));
+  assert.ok(voiceForText("The diesel price hit a record high").startsWith("en-"));
+  assert.ok(
+    voiceForText("Google подтвердил, что Gemini забрался в системы").startsWith("ru-"),
+    "русская фраза с английскими названиями остаётся русской",
+  );
+
+  // Язык читателя — те же строки, что в селекте. Разъезд списков означал бы
+  // язык, который есть в настройках и молча не озвучивается.
+  for (const language of LANGUAGES) {
+    if (language === SOURCE_LANGUAGE) continue;
+    assert.ok(voiceFor(language), `нет голоса для языка «${language}»`);
+  }
+
+  // Отказ называет ту же квоту, по которой работает предел: разойдись
+  // числа — читателю сказали бы одно, а применили другое, и оба выглядели
+  // бы одинаково правдоподобно.
+  const t = {
+    audioOnPro: (plan: string) => `нужен ${plan}`,
+    audioNoTelegram: "нет телеграма",
+    audioCapReached: (minutes: number) => `на сегодня всё, завтра ${minutes}`,
+    audioTooLong: (left: number, needed: number) => `осталось ${left}, нужно ${needed}`,
+  };
+  const reader = { telegram_id: "1" };
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 0 }, 0, 60, t, "Pro"),
+    "нужен Pro",
+    "название тарифа берётся из тарифов, а не пишется руками",
+  );
+  assert.equal(
+    audioBlocker({ telegram_id: null }, { audioSecondsPerDay: 600 }, 0, 60, t, "Pro"),
+    "нет телеграма",
+    "слушать негде — озвучивать нечего",
+  );
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 1800 }, 1800, 60, t, "Pro"),
+    "на сегодня всё, завтра 30",
+    "в подписи та же квота, что в пределе",
+  );
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 2700 }, 2400, 600, t, "Pro"),
+    "осталось 5, нужно 10",
+    "длинная статья не начинается наполовину",
+  );
+  assert.equal(audioBlocker(reader, { audioSecondsPerDay: 2700 }, 0, 600, t, "Pro"), "");
 }
 
 // --- какие миграции сверка формы схемы вообще может проверить ------------------

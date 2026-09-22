@@ -364,7 +364,7 @@ export type CallRecord = {
     | "dedup"
     // Карточка автора и пост — такие же оплаченные вызовы, и потолок
     // читателя считается по той же таблице.
-    | "voice" | "post" | "post-quality";
+    | "voice" | "post" | "post-quality" | "spoken-terms";
   model: string;
   tokensIn: number;
   tokensOut?: number;
@@ -386,15 +386,7 @@ export async function pendingKindleAsks(readerId: number) {
   // остаётся исходный.
   const pending = await sql<{ item_id: number; title: string }[]>`
     select ks.item_id,
-           coalesce(
-             (select di.title
-                from dailynews.digest_items di
-                join dailynews.digests d on d.id = di.digest_id
-               where d.reader_id = ks.reader_id and di.item_id = ks.item_id
-               order by d.day desc
-               limit 1),
-             i.title
-           ) as title
+           coalesce(${readerTitle(sql`ks.reader_id`, sql`ks.item_id`)}, i.title) as title
       from dailynews.kindle_sends ks
       join dailynews.items i on i.id = ks.item_id
      where ks.reader_id = ${readerId}
@@ -681,4 +673,50 @@ export async function removeReaderSource(readerId: number, sourceId: number): Pr
     delete from dailynews.reader_sources
      where reader_id = ${readerId} and source_id = ${sourceId}
   `;
+}
+
+/**
+ * Подзапрос «заголовок из выпуска этого читателя».
+ *
+ * Один на два места: он же нужен вопросу «дочитал?» и озвучке, а две
+ * копии правила «свежий перевод этого читателя, иначе исходный» молча
+ * разъезжаются — у одной появляется условие по читателю, у другой нет,
+ * и заметно это только чужим заголовком в чужом ухе.
+ *
+ * Аргументы — куски запроса, а не значения: в одном месте номера
+ * приходят колонками соседней таблицы, в другом — числами.
+ */
+const readerTitle = (readerId: unknown, itemId: unknown) => sql`
+  (select di.title
+     from dailynews.digest_items di
+     join dailynews.digests d on d.id = di.digest_id
+    where d.reader_id = ${readerId as never} and di.item_id = ${itemId as never}
+    order by d.day desc
+    limit 1)
+`;
+
+/**
+ * Заголовок материала так, как его видит этот читатель.
+ *
+ * Перевод заголовка живёт в `digest_items.title` и персонален: в `items`
+ * колонки `title_ru` нет с 0020, и запрос к ней падает целиком — так
+ * отправка на читалку и не работала вовсе.
+ *
+ * Условие по читателю стоит на самой подзапросной выборке, а не только
+ * на `digests`: с внешним соединением строки `digest_items` приходят
+ * от всех читателей сразу, и порядок по дате лишь делает чужой перевод
+ * маловероятным. Материал, попавший в чужой выпуск и не попавший в свой,
+ * озвучивался бы чужим заголовком — вовремя и не тем.
+ */
+export async function itemForReader(
+  readerId: number,
+  itemId: number,
+): Promise<{ url: string; title: string; body: string | null } | null> {
+  const [row] = await sql<{ url: string; title: string; body: string | null }[]>`
+    select i.url, i.body,
+           coalesce(${readerTitle(readerId, sql`i.id`)}, i.title) as title
+      from dailynews.items i
+     where i.id = ${itemId}
+  `;
+  return row ?? null;
 }

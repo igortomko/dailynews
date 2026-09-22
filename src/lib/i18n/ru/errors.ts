@@ -42,6 +42,13 @@ export const errors: typeof En = {
   kindleNotApproved: "Amazon ещё не разрешил наш адрес, доделай настройку в «Доставке»",
   kindleCapReached: "Сегодня больше отправить нельзя, завтра лимит обнулится",
   kindleAlreadySending: "Эта статья уже в пути",
+  audioOnPro: (plan: string) => `Озвучка есть на тарифе «${plan}»`,
+  audioNoTelegram: "Напиши боту в Telegram: озвучка приходит туда",
+  audioNoText: "У этой новости нет текста, озвучивать нечего",
+  audioCapReached: (minutes: number) => `На сегодня озвучка кончилась, завтра снова ${minutes} мин`,
+  audioTooLong: (left: number, needed: number) => `Осталось ${left} мин, а эта статья на ${needed} мин`,
+  audioAlreadySpeaking: "Эту статью уже озвучиваю",
+  audioNotFound: "Такой озвучки нет",
   noSession: "Сессия кончилась, войди заново",
   badRequest: "Не смогли прочитать запрос",
 

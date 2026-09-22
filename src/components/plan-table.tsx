@@ -8,6 +8,7 @@ import { checkoutUrl, endingAt } from "@/lib/lemon";
 import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
 import { currentLocale, getDict } from "@/lib/i18n/server";
+import { featureWhat } from "@/lib/i18n";
 
 /**
  * Сравнение тарифов.
@@ -51,6 +52,15 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
     {
       feature: "cadence",
       value: (plan) => (plan.everyDays <= 1 ? t.plans.table.dailyCadence : t.plans.table.everyOtherCadence),
+    },
+    {
+      feature: "audio",
+      // Минутами, а не галочкой: разница между тарифами здесь
+      // количественная, и «да/нет» о ней не говорит.
+      value: (plan) =>
+        plan.audioSecondsPerDay > 0
+          ? t.plans.table.audioPerDay(Math.floor(plan.audioSecondsPerDay / 60))
+          : false,
     },
     { feature: "delivery", value: (plan) => FEATURES.delivery.has(plan) },
     { feature: "posts", value: (plan) => FEATURES.posts.has(plan) },
@@ -133,7 +143,7 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
                           {t.plans.feature[feature].title}
                         </TooltipTrigger>
                         <TooltipContent className="max-w-64">
-                          {t.plans.feature[feature].what}
+                          {featureWhat(t, feature)}
                         </TooltipContent>
                       </Tooltip>
                     </dt>

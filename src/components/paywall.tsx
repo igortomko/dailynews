@@ -12,6 +12,7 @@ import {
   type FeatureId, type Plan, type PlanId,
 } from "@/lib/plans";
 import { useT } from "@/components/i18n-provider";
+import { featureWhat } from "@/lib/i18n";
 
 /**
  * Корона и окно с предложением.
@@ -92,7 +93,8 @@ export function PaywallDialog({
 }) {
   const checkout = useContext(CheckoutContext);
   const t = useT();
-  const { title, what } = t.plans.feature[feature];
+  const { title } = t.plans.feature[feature];
+  const what = featureWhat(t, feature);
 
   // Все тарифы, где возможность есть и которые дороже текущего. Показывать
   // один самый дешёвый значит терять место, где читатель мог выбрать Pro:
