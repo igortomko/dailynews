@@ -14,10 +14,6 @@ import { charsForMinutes, minutesOf } from "@/lib/reading-time";
 import { publishedIn, tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
-import { SettingsIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -219,40 +215,17 @@ export default async function FeedPage({
       // и там тега нет — переносить чужой язык русскими правилами хуже,
       // чем не переносить вовсе.
       textLang={langTagFor(effectiveVoice(reader).language)}
-      // key на элементах, уезжающих в проп: шапка ленты ставит left и right
-      // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
-      // теряет пометку «детей ровно столько, сколько написано». React считает
-      // пару списком и просит ключ — в консоли это выглядит как настоящая
-      // ошибка в ленте и прячет собой те, что ошибки и есть.
+      // key на элементе, уезжающем в проп: шапка ленты ставит стрелки дат
+      // соседом кнопки заказа, а элемент, приехавший сюда через полезную
+      // нагрузку сервера, теряет пометку «детей ровно столько, сколько
+      // написано». React считает пару списком и просит ключ — в консоли
+      // это выглядит как настоящая ошибка в ленте и прячет собой те,
+      // что ошибки и есть.
+      //
+      // Тема, поиск и настройки пропом больше не едут: ничего серверного
+      // в них нет, а на телефоне они прячутся под одну кнопку — развилка
+      // по ширине экрана не может жить здесь, где о ширине не знают.
       left={<DateNav key="date" day={day} days={days} span={span} minutes={limit} />}
-      right={
-        // Тема и настройки — одна пара: и то и другое про то, как выглядит
-        // и работает лента, а не про сам выпуск.
-        <div key="actions" className="flex items-center gap-2">
-        <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                nativeButton={false}
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t.nav.settings}
-                className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
-                // Настройки подгружаются заранее, пока читают ленту: страница
-                // динамическая, и без этого каждое нажатие на шестерёнку ждало
-                // бы сервер. Раскладка и первый раздел — это один запрос
-                // о читателе, дёшево.
-                render={<Link href="/settings/personalization" prefetch={true} />}
-              />
-            }
-          >
-            <SettingsIcon />
-          </TooltipTrigger>
-          <TooltipContent>{t.feed.page.settingsHint}</TooltipContent>
-        </Tooltip>
-        </div>
-      }
     />
   );
 }

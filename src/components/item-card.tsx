@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  cloneElement, Fragment, useEffect, useLayoutEffect, useRef, useState,
+  cloneElement, useEffect, useLayoutEffect, useRef, useState,
   type ReactElement, type ReactNode,
 } from "react";
 import {
@@ -792,27 +792,25 @@ export function ItemCard({
       ? [{
           key: "followed",
           node: (
-            // min-w-0 и truncate, как у темы рядом: написание — текст читателя
-            // длиной до 80 знаков, и без обрезки оно наезжало бы на кнопки
-            // на узком экране.
+            // Без обрезки: написание — это и есть то, ради чего пометка
+            // стоит, и «с…» вместо «claude» не сообщает ничего. Длинное
+            // уходит на вторую строку вместе со всем рядом.
             <span
-              className="inline-flex min-w-0 items-center gap-1"
+              className="inline-flex items-center gap-1"
               title={t.feed.rules.followedTitle}
             >
               <EyeIcon className="size-3 shrink-0" aria-hidden />
-              <span className="truncate">{item.followed}</span>
+              <span>{item.followed}</span>
             </span>
           ),
           quiet: true as const,
         }]
       : []),
-    // min-w-0 обязателен: truncate обрезает только то, чему разрешили
-    // сузиться, а гибкий элемент по умолчанию не уже своего содержимого.
-    // Строка в одну линию держала ширину всей карточки, и на телефоне лента
-    // уезжала за край экрана — заголовок и текст обрезались справа,
-    // а докрутить до них было нельзя.
+    // Без обрезки: «Искусственн…» и «Искусственный интеллект» на глаз
+    // одно и то же, а от соседней темы обрезок не отличить. Ряд переносится
+    // целиком, и тема уходит на вторую строку, а не превращается в огрызок.
     ...(topic
-      ? [{ key: "topic", node: <span className="min-w-0 truncate">{topic}</span>, quiet: true as const }]
+      ? [{ key: "topic", node: <span>{topic}</span>, quiet: true as const }]
       : []),
     // Время чтения стоит последним, а не перед темой: оно единственное
     // здесь меняется от материала к материалу сильно, и в середине ряда
@@ -950,26 +948,33 @@ export function ItemCard({
             в покое перед пустотой висел бы болт. На тапе наведения нет
             вовсе, и там видно всё: спрятанное там было бы спрятано
             навсегда. */}
-        <span className="flex min-w-0 items-baseline gap-1">
+        {/* Переносится, а не режется многоточием. На телефоне в строку
+            влезает издание и половина темы, и остальное превращалось
+            в «с…» и «Искусственн…»: обрезанная пометка «За чем следить»
+            не называет написание, ради которого она и стоит, а обрезанная
+            тема неотличима от соседней. Вторая строка стоит четырнадцати
+            пикселей высоты — ровно там, где их есть на что потратить. */}
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5">
           {meta.map(({ key, node, quiet }, index) => (
-            <Fragment key={key}>
+            // Разделитель уезжает на новую строку вместе со своим куском,
+            // а не остаётся висеть болтом в конце предыдущей: пара —
+            // один флекс-элемент, и перенос их не разлучает.
+            //
+            // Обёртка флексовая: иначе флекс-элементом становится она,
+            // а `shrink-0` оказывается на строчном потомке, где ничего
+            // не значит. Сжиматься здесь не должен никто — ряд переносится
+            // целыми кусками.
+            <span
+              key={key}
+              className={cn("flex shrink-0 items-baseline gap-1", quiet && QUIET)}
+            >
               {index > 0 ? (
-                <span
-                  aria-hidden
-                  className={cn(
-                    "shrink-0 text-muted-foreground/40",
-                    quiet && QUIET,
-                  )}
-                >
+                <span aria-hidden className="text-muted-foreground/40">
                   •
                 </span>
               ) : null}
-              {/* Обёртка — тоже флекс: иначе флекс-элементом становится она,
-                  а `shrink-0` у времени и `truncate` у темы оказываются
-                  на строчном потомке, где не значат ничего. Время сжималось
-                  бы многоточием на узком экране, а тема — перестала бы. */}
-              {quiet ? <span className={cn(key === "minutes" ? "flex shrink-0" : "flex min-w-0", QUIET)}>{node}</span> : node}
-            </Fragment>
+              {node}
+            </span>
           ))}
         </span>
 

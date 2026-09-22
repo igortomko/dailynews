@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useT, useLocale } from "@/components/i18n-provider";
-import { formatDay, formatDayRange } from "@/lib/relative-time";
+import { formatDayRange } from "@/lib/relative-time";
 import { feedHref, windowStart } from "@/lib/day";
 
 /**
@@ -80,9 +80,11 @@ export function DateNav({
   const newer = index > 0 ? days[index - 1] : null;
   const older = index >= 0 && index < days.length - 1 ? days[index + 1] : null;
   const available = new Set(days);
-  // Окно называется целиком, а не одним якорем: «22 сентября» над лентой
+  // Окно называется целиком, а не одним якорем: «22 сент.» над лентой
   // из пяти выпусков — это дата, которая не отвечает за то, что под ней.
-  const label = span > 1 ? formatDayRange(windowStart(day, span), day, locale) : formatDay(day, locale);
+  // Одиночный день идёт через ту же функцию: Intl отдаёт «22 сент.», когда
+  // концы совпадают, и две формы записи одной кнопки разъехаться не могут.
+  const label = formatDayRange(windowStart(day, span), day, locale);
 
   // 40 пикселей на телефоне против 28 на мыши: под палец меньшая цель
   // промахивается, а на указателе лишний размер только разъезжается.
@@ -128,7 +130,12 @@ export function DateNav({
             <button
               type="button"
               aria-label={t.feed.dateNav.pickDate}
-              className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2 py-2 tabular-nums transition-colors hover:bg-muted sm:min-h-0 sm:px-1.5 sm:py-0.5"
+              // whitespace-nowrap: дата — цельная подпись, и перенос ломает
+              // её на «22» и «сент.» в две строки, а высота шапки задана.
+              // На телефоне поля узкие: под дату в строке остаётся около
+              // шестидесяти пикселей, и каждые восемь из них решают,
+              // встанет она в строку или сложится.
+              className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-1 py-2 text-center whitespace-nowrap tabular-nums transition-colors hover:bg-muted sm:min-h-0 sm:px-1.5 sm:py-0.5"
             />
           }
         >

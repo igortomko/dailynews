@@ -17,6 +17,8 @@ export const feed = {
       collectNow: "Collect right now:",
     },
     settingsHint: "Settings: interests, sources, delivery",
+    // The one button that holds search, theme and settings on a phone.
+    moreActions: "Search, theme, settings",
   },
 
   /** src/components/date-nav.tsx */
@@ -267,7 +269,7 @@ export const feed = {
     minutesAgo: (n: number) => `${n}m`,
     hoursAgo: (n: number) => `${n}h`,
     daysAgo: (n: number) => `${n}d`,
-    readingMinutes: (n: number) => `~${n} min`,
+    readingMinutes: (n: number) => `${n} min`,
     // Дальше недели — дата. Форматтер свой у каждого языка: месяц называется
     // словом, и «сент.» рядом с английским текстом читается как опечатка,
     // а не как перевод, которого не хватило.

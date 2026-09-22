@@ -1390,7 +1390,12 @@ assert.equal(
 
 // Округление показывается только читателю. «~0 мин» на непустом выпуске
 // выглядит как пустой выпуск — отказ, похожий на успех.
-assert.equal(formatMinutes(0.2, RU_DICT.feed.time), "~1 мин", "меньше минуты не показывается нулём");
+assert.equal(formatMinutes(0.2, RU_DICT.feed.time), "1 мин", "меньше минуты не показывается нулём");
+// Волна снята намеренно: число стоит на кнопке заказа, и «примерно»
+// рядом с меню «10 / 20 / 30 минут» читается как «заказ сработает
+// как-нибудь». В развёрнутых формах она остаётся — там рядом нет ручки.
+assert.doesNotMatch(formatMinutes(21, RU_DICT.feed.time), /~/, "у минут на кнопке заказа волны нет");
+assert.match(formatMinutesLong(21, RU_DICT.feed.time), /~/, "в тексте волна остаётся");
 assert.equal(formatMinutesLong(1, RU_DICT.feed.time), "~1 минута", "единица склоняется");
 assert.equal(formatMinutesLong(3, RU_DICT.feed.time), "~3 минуты", "тройка склоняется");
 assert.equal(formatMinutesLong(11, RU_DICT.feed.time), "~11 минут", "одиннадцать берёт форму множественного");
@@ -1486,6 +1491,13 @@ for (const label of [
 }
 assert.match(formatDayRange("2026-09-19", "2026-09-22", "ru"), /^19.22 сент\.$/,
   "окно называется одним месяцем, а не двумя датами подряд");
+// Шапка зовёт эту же функцию и на одном дне: две формы записи одной кнопки
+// разъехались бы при первой правке любой из них.
+assert.equal(
+  formatDayRange("2026-09-22", "2026-09-22", "ru"), "22 сент.",
+  "окно в один день — это обычная дата, а не «22–22»",
+);
+assert.equal(formatDayRange("2026-09-22", "2026-09-22", "en"), "Sep 22");
 // Ширина шапки: на телефоне под дату остаётся около семидесяти пикселей,
 // и окно, что длиннее одиночного дня, выдавливает кнопки из её высоты.
 assert.ok(
@@ -3349,17 +3361,18 @@ const feedPage = feedSource.slice(feedSource.indexOf("<FeedTabs"));
 // Переименовали компонент — проверка обязана упасть, а не замолчать на пустом
 // срезе: тест, ничего не нашедший, зелёный ровно так же, как тест успешный.
 assert.ok(feedPage.startsWith("<FeedTabs"), "ленту рисует FeedTabs");
-for (const prop of ["left", "right"]) {
-  const at = feedPage.indexOf(`${prop}={`);
-  assert.ok(at >= 0, `${prop} должен передаваться в FeedTabs`);
+{
+  const at = feedPage.indexOf("left={");
+  assert.ok(at >= 0, "left должен передаваться в FeedTabs");
   const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
-  assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
+  assert.match(tag, /\skey=/, "left уезжает соседом и обязан нести key");
 }
-// А требование key держится на том, что каждый стоит не один. Соседями
-// они быть перестали, когда между ними встал поиск: left соседствует
-// со временем выпуска, right — с кнопкой поиска. Останется который-нибудь
-// из них единственным ребёнком — проверка выше станет суеверием,
-// и упасть она должна здесь.
+// А требование key держится на том, что left стоит не один: рядом с ним
+// в той же строке кнопка заказа времени. Правая половина шапки пропом
+// больше не приходит — тема, поиск и настройки собираются в самой шапке,
+// потому что на телефоне прячутся под одну кнопку, а о ширине экрана
+// серверная страница не знает ничего. Останется left единственным
+// ребёнком — проверка выше станет суеверием, и упасть она должна здесь.
 const tabsSource = readFileSync("src/components/feed-tabs.tsx", "utf8");
 const rowFrom = tabsSource.indexOf("{left}");
 const rowTo = tabsSource.indexOf("</header>");
@@ -3367,8 +3380,12 @@ const rowTo = tabsSource.indexOf("</header>");
 // хвост файла — проверка осталась бы зелёной, не посмотрев на шапку вовсе.
 assert.ok(rowFrom >= 0 && rowTo > rowFrom, "шапку ленты рисует feed-tabs");
 const headerRow = tabsSource.slice(rowFrom, rowTo);
-assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left стоит рядом с кнопками");
-assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
+assert.match(headerRow, /\{left\}[\s\S]*<MinutesSelect/, "left стоит соседом кнопки заказа");
+assert.match(headerRow, /<SearchButton[\s\S]*<ThemeToggle[\s\S]*\/settings\//, "на широком экране поиск, тема и настройки стоят подряд");
+// На телефоне те же три — под одной кнопкой: три иконки подряд отнимали
+// у строки треть ширины, и дате не оставалось места даже на «22 сент.».
+assert.match(headerRow, /<FeedMenu[^>]*sm:hidden/, "на телефоне действия шапки прячутся под «⋯»");
+assert.match(headerRow, /hidden items-center gap-2 sm:flex/, "а на широком экране меню не показывается");
 assert.match(
   headerRow,
   /<MinutesSelect[^>]*shown=\{reading\.minutes\}/,
