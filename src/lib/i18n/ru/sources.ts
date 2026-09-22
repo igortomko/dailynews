@@ -26,7 +26,7 @@ export const sources: typeof En = {
       `источник жив и отвечает, но ${count(days, "день", "дня", "дней")} подряд не даёт ни одного свежего материала. Обычно это значит, что его забросили.`,
   },
   addForm: {
-    title: "Добавить источник",
+    title: "Источники",
     linkLabel: "Ссылка на источник",
     placeholder: "https://www.youtube.com/@канал",
     hint: "Вставь ссылку на сайт, блог, канал на YouTube или в Telegram",
@@ -57,7 +57,7 @@ export const sources: typeof En = {
     mostlyDuplicates: (n: number) => `из них ${count(n, "повтор", "повтора", "повторов")}`,
   },
   list: {
-    title: "Источники",
+    title: "Твои источники",
     count: (used: number, max: number, planLabel: string) =>
       `${used} из ${max} на тарифе «${planLabel}»`,
     emptyTitle: "Пока ни одного источника",

@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { SourceIcon } from "@/components/source-icon";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
-import { NETWORK_IDS, NETWORKS } from "@/lib/networks";
+import { NETWORK_IDS, NETWORKS, type NetworkId } from "@/lib/networks";
 import { relativeTime } from "@/lib/relative-time";
 import { useT } from "@/components/i18n-provider";
 import type { ReaderChannel, VoiceCardRow } from "@/lib/types";
@@ -33,6 +34,27 @@ import type { ReaderChannel, VoiceCardRow } from "@/lib/types";
  * и хуже по делу: пост пишется по этим строкам, и если голос описан
  * неправильно, увидеть это можно только прочитав их.
  */
+/**
+ * Откуда берётся значок площадки. Telegram рисуется своим знаком, у X
+ * значок зашит в сам `SourceIcon`, остальным нужен домен — favicon берётся
+ * с него же, а не через чужой сервис.
+ */
+const ICON_KIND: Record<NetworkId, "telegram" | "x" | "rss"> = {
+  telegram: "telegram",
+  x: "x",
+  linkedin: "rss",
+  threads: "rss",
+  blog: "rss",
+};
+
+const NETWORK_HOME: Record<NetworkId, string> = {
+  telegram: "https://t.me",
+  x: "https://x.com",
+  linkedin: "https://www.linkedin.com",
+  threads: "https://www.threads.net",
+  blog: "",
+};
+
 export function ChannelsForm({
   channels,
   card,
@@ -138,13 +160,17 @@ export function ChannelsForm({
               const mine = byNetwork.get(id);
               return (
                 <div key={id} className="flex items-center justify-between gap-3 py-1.5">
-                  <div className="flex min-w-0 flex-col">
+                  {/* Значок общий с источниками: строка площадки и строка
+                      источника — один и тот же список чужих сервисов,
+                      и узнаются они знаком раньше, чем названием. */}
+                  <SourceIcon kind={ICON_KIND[id]} url={NETWORK_HOME[id]} className="size-4 shrink-0" />
+                  <div className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
                       {t.onboarding.networks[id]}
                       {mine?.handle ? (
                         <Badge variant="secondary">{t.onboarding.channels.readableBadge}</Badge>
                       ) : network.readable ? null : (
-                        <Badge variant="outline">{t.onboarding.channels.pasteOnlyBadge}</Badge>
+                        <Badge variant="secondary">{t.onboarding.channels.pasteOnlyBadge}</Badge>
                       )}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
@@ -164,7 +190,12 @@ export function ChannelsForm({
 
           {byNetwork.get("blog") ? (
             <div className="flex items-center justify-between gap-3 border-t pt-3">
-              <div className="flex min-w-0 flex-col">
+              <SourceIcon
+                kind="rss"
+                url={byNetwork.get("blog")?.input_url ?? byNetwork.get("blog")?.handle ?? ""}
+                className="size-4 shrink-0"
+              />
+              <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">{t.onboarding.channels.blogLabel}</span>
                 <span className="truncate text-xs text-muted-foreground">
                   {byNetwork.get("blog")?.input_url ?? byNetwork.get("blog")?.handle}
