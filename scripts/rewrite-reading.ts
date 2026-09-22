@@ -9,7 +9,7 @@ import { pooled } from '../pipeline/fetch';
 async function main() {
   const arg = (name: string) => process.argv[process.argv.indexOf(name) + 1];
   const readerId = Number(arg('--reader'));
-  if (!Number.isSafeInteger(readerId) || readerId <= 0 || !process.argv.includes('--apply')) throw new Error('Usage: rewrite-reading.ts --reader <id> --apply [--limit <n>] [--all]');
+  if (!Number.isSafeInteger(readerId) || readerId <= 0 || !process.argv.includes('--apply')) throw new Error('Usage: rewrite-reading.ts --reader <id> --apply [--limit <n>] [--all] [--items <ids>] [--force]');
   const reader = await getReader(readerId);
   if (!reader?.reading_v2_enabled) throw new Error('Reading v2 is not enabled for this reader');
   const [digest] = await sql<{ id: number; day: string }[]>`select id::int,day::text from dailynews.digests where reader_id=${readerId} order by day desc limit 1`;
@@ -26,6 +26,7 @@ async function main() {
     left join dailynews.topics t on t.id=sc.topic_id
     where d.reader_id=${readerId} and d.id=${digest.id}
       ${process.argv.includes('--all') ? sql`` : sql`and coalesce(di.summary_document->>'status','') <> 'verified'`}
+      ${process.argv.includes('--items') ? sql`and di.item_id = any(${arg('--items')!.split(',').map(Number)}::bigint[])` : sql``}
     order by di.position`;
   const limit = process.argv.includes('--limit') ? Number(arg('--limit')) : rows.length;
   if (!rows.length) { console.log(JSON.stringify({ readerId, day: digest.day, rewritten: 0, failed: 0, backup: dir })); return; }
@@ -34,7 +35,7 @@ async function main() {
   await pooled(rows.slice(0,limit), 3, async item => {
     const started = Date.now();
     try {
-      const result = await writeDigest([item], reader.reader_context, effectiveVoice(reader), { readerId });
+      const result = await writeDigest([item], reader.reader_context, effectiveVoice(reader), { readerId, force: process.argv.includes('--force') });
       if (result.excludedIds?.includes(item.id)) { console.log(JSON.stringify({ item: item.id, status: 'excluded-by-reader' })); return; }
       const written = result.items[0];
       if (!written?.reading) throw new Error('Expected reading document');

@@ -2201,6 +2201,7 @@ import { AUDIT_ALARM, CLAIM_ALARM } from "./reading-gate";
 import { JEV_BASELINE, jevVersionNote } from "../src/lib/jev-version";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
+import { thinkingControl } from "./digest";
 
 // Модель на длинном тексте возвращает пересказ вместо перевода. Книга при
 // этом приходит, текст на русском, абзацы на месте — просто их меньше.
@@ -2286,8 +2287,9 @@ assert.match(
     .map((body, at) => item(at + 1, body));
 
   const { deep, plain } = readingPicks(edition, 5);
-  assert.deepEqual(deep.map((one) => one.id), [1, 3, 4, 5, 7],
-    "короткие пропускаются, а не занимают место разбора");
+  assert.deepEqual(deep.map((one) => one.id), [1, 3, 5, 7, 10],
+    "разборы расставлены по выпуску, а короткие пропускаются");
+  assert.equal(deep[0].id, 1, "первая карточка выпуска получает разбор всегда");
   assert.equal(deep.length + plain.length, edition.length, "ни один материал не теряется");
   assert.ok(!plain.some((one) => deep.includes(one)), "и не попадает в оба списка");
 
@@ -2311,8 +2313,21 @@ assert.match(
   assert.ok(markup.body.length > 3000, "сырое тело длиннее порога");
   assert.equal(readingPicks([markup], 5).deep.length, 0, "разметка не считается текстом");
 
-  // Предел соблюдается даже когда подходящих больше.
-  assert.equal(readingPicks(edition, 2).deep.map((one) => one.id).join(","), "1,3", "берём столько, сколько разрешено");
+  // Предел соблюдается даже когда подходящих больше, и две карточки
+  // Plus расходятся по половинам выпуска: разборы подряд наверху читались бы
+  // как выпуск, оборвавшийся на середине.
+  assert.equal(readingPicks(edition, 2).deep.map((one) => one.id).join(","), "1,7", "квота раскладывается по выпуску");
+  assert.equal(readingPicks(edition, 0).deep.length, 0, "нулевая квота тарифа не даёт ни одного разбора");
+
+  // Внутри окна берётся лучший по скору, а не первый попавшийся: догрузка
+  // и переписывание выпуска приходят в порядке, который скором не задан.
+  const scored = [
+    { id: 1, body: "я".repeat(9000), excerpt: "а", total: 10 },
+    { id: 2, body: "я".repeat(9000), excerpt: "а", total: 90 },
+    { id: 3, body: "я".repeat(9000), excerpt: "а", total: 80 },
+    { id: 4, body: "я".repeat(9000), excerpt: "а", total: 20 },
+  ];
+  assert.deepEqual(readingPicks(scored, 2).deep.map((one) => one.id), [2, 3], "в каждом окне выигрывает больший скор");
 }
 
 // Версия Jev плавающая, а от неё зависят числа, которые сравниваются между
@@ -4685,5 +4700,31 @@ assert.equal(
   null,
   "твит без ссылок остаётся твитом",
 );
+
+// Как просить «не рассуждай», решает провайдер. MiMo принимает чужой
+// reasoning_effort молча и продолжает думать — счёт растёт невидимо,
+// потому что рассуждение тарифицируется как выход.
+{
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com/v1", "low"), { thinking: { type: "enabled" } });
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com/v1", "none"), { thinking: { type: "disabled" } });
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com/v1", ""), { thinking: { type: "disabled" } });
+  assert.deepEqual(thinkingControl("https://api.deepseek.com", "low"), { reasoning_effort: "low" });
+  assert.deepEqual(thinkingControl("https://api.deepseek.com", ""), {});
+  // Хост сверяется целиком: чужой домен с нашим именем внутри — не наш.
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com.evil.test/v1", "none"), { reasoning_effort: "none" });
+}
+
+// Квота разборов — решение продукта, и корона над строкой тарифа обязана
+// совпадать с тем, сколько их действительно пишется.
+{
+  assert.equal(PLANS.free.richCards, 0, "на бесплатном разборов нет");
+  assert.equal(PLANS.plus.richCards, 2, "Plus — две карточки разбором");
+  assert.equal(PLANS.pro.richCards, 10, "Pro — десять");
+  assert.equal(FEATURES.rich.has(PLANS.free), false, "корона над строкой совпадает с пределом");
+  assert.ok(FEATURES.rich.has(PLANS.plus) && FEATURES.rich.has(PLANS.pro));
+  for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
+    assert.ok(plan.richCards <= plan.maxItems, `разборов не больше, чем карточек: ${plan.id}`);
+  }
+}
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

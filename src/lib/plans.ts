@@ -75,6 +75,15 @@ export type Plan = {
    * стоит мелким шрифтом под таблицей — там, где ему и место.
    */
   maxItems: number;
+  /**
+   * Сколько карточек выпуска пишутся разбором со сверкой (rich), а не
+   * заголовком и описанием. Замер 22 сентября 2026: rich стоит $0.0080
+   * против $0.00031 у обычной — в двадцать шесть раз дороже, потому что
+   * статья читается целиком, разбирается на утверждения и сверяется
+   * с источником. Весь выпуск разбором не вписывается ни в один тариф:
+   * шестнадцать rich на Plus — это $3.29 в месяц при цене $3.99.
+   */
+  richCards: number;
   /** Виды источников, разрешённые тарифом. X платный, поэтому только Pro. */
   kinds: Source["kind"][];
   /** Разделы настроек, открытые тарифом. */
@@ -115,6 +124,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxTopics: 5,
     maxMinutes: 5,
     maxItems: 10,
+    richCards: 0,
     everyDays: 2,
     kinds: FREE_KINDS,
     // На бесплатном остаётся то, без чего ленты не будет: интересы,
@@ -131,6 +141,9 @@ export const PLANS: Record<PlanId, Plan> = {
     maxTopics: 15,
     maxMinutes: 20,
     maxItems: 40,
+    // Две на выпуск: первая карточка и одна в середине. Бюджет тарифа
+    // при марже 70% — $0.0166 на выпуск, и две rich забирают из него $0.011.
+    richCards: 2,
     everyDays: 1,
     kinds: FREE_KINDS,
     // Читалка переехала сюда с Pro: Plus — тариф для того, кто читает,
@@ -156,6 +169,11 @@ export const PLANS: Record<PlanId, Plan> = {
     // перестаёт означать «сегодня мало важного».
     maxMinutes: 45,
     maxItems: 100,
+    // Десять: столько rich-карточек укладывается в бюджет Pro при марже
+    // 70% ($0.0666 на выпуск), и столько же примерно читают за день —
+    // замер на живой базе давал 16–18 открытых карточек независимо
+    // от размера выпуска.
+    richCards: 10,
     everyDays: 1,
     // X — единственный платный источник: twitterapi.io берёт около $0.15
     // за тысячу постов. На бесплатном тарифе он окупаться не может.
@@ -278,7 +296,7 @@ export const cheapestWith = (section: Gated): Plan =>
  */
 export type FeatureId =
   | "personalization" | "delivery" | "x" | "posts"
-  | "topics" | "digest" | "sources" | "cadence" | "audio";
+  | "topics" | "digest" | "sources" | "cadence" | "audio" | "rich";
 
 export type Feature = {
   has: (plan: Plan) => boolean;
@@ -298,6 +316,12 @@ export const FEATURES: Record<FeatureId, Feature> = {
   },
   delivery: {
     has: (plan) => allows(plan, "delivery"),
+  },
+  rich: {
+    // Разбор — количественная возможность, как озвучка: у Plus две карточки,
+    // у Pro десять. Корона ставится по тому же правилу, по которому работает
+    // предел, иначе она обещает не то.
+    has: (plan) => plan.richCards > 0,
   },
   posts: {
     has: (plan) => allows(plan, "posts"),

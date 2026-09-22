@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
-import { splitSource, composeDocument, analyzeSource, reasoningEffortFor, type Ask } from "./reading";
+import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, restates, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
+import { splitSource, composeDocument, analyzeSource, reasoningEffortFor, VERIFY_SOURCE_CHARS, type Ask } from "./reading";
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
 import { DEFAULT_VOICE } from "../src/lib/voice";
@@ -88,8 +88,8 @@ assert.ok(kindle.includes('&quot;'));
 assert.ok(blockText({ kind: 'steps', sequence: 'timeline', items: [{ label: 'Launch', content: evidence('Release', 's1-a'), state: 'planned' }, { label: 'Pilot', content: evidence('Trial', 's1-a'), state: 'current' }] }).includes('(предстоит)'));
 // Цель — 220 слов, отказ — на десятую часть позже: сверенная карточка,
 // выброшенная за десять лишних слов, стоит читателю новости целиком.
-assert.deepEqual(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(180), 's1-b') }] }, analysis, '', []), [], 'перебор в пределах десятой части не отказ');
-assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(260), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
+assert.deepEqual(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(120), 's1-b') }] }, analysis, '', []), [], 'перебор в пределах десятой части не отказ (170 + 10%)');
+assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(200), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
 // Обязательных утверждений не больше семи на секцию: при восьми и больше
 // «все critical видимы» и «не длиннее 220 слов» перестают быть совместимы,
 // и карточка не собирается вовсе (замер на выпуске 22 сентября 2026).
@@ -123,6 +123,35 @@ const correction: ReadingDocument['blocks'] = [{ kind: 'correction', claim: 'М�
 assert.ok(documentSchema.safeParse({ ...twoLayer, blocks: correction }).success);
 assert.ok(blockText(correction[0]).includes('Замер показал обратное'));
 assert.ok(blockText(figuresBlock[0]).includes('78%') && blockText(figuresBlock[0]).includes('7,3×'));
+// Матрица: несколько объектов на одних шкалах. Абзацем это читается подряд
+// и не сравнивается — замер на живой карточке про Grok 4.7, где четыре модели
+// стояли в тексте по двум бенчмаркам.
+const tableBlock: ReadingDocument['blocks'] = [{ kind: 'table',
+  columns: ['CursorBench', 'Terminal-Bench'],
+  rows: [
+    { label: 'Grok 4.7', cells: ['46,3%', '38,0%'], claimIds: ['s1-a'] },
+    { label: 'Fable 5.1', cells: ['51,8%', '57,9%'], claimIds: ['s1-b'] },
+  ], context: null }];
+assert.ok(documentSchema.safeParse({ ...twoLayer, blocks: tableBlock }).success, 'таблица проходит схему');
+assert.ok(blockText(tableBlock[0]).includes('Grok 4.7: 46,3% · 38,0%'), 'таблица читается строками и в тексте');
+assert.deepEqual(validateCoverage(planned('table', tableBlock), analysis, '', []), [], 'план table закрывается таблицей');
+assert.ok(validateCoverage(planned('table', valid.blocks), analysis, '', []).some(e => e.includes('requires a table block')));
+
+// Повтор между слоями ловится кодом: запрет в промпте протекает, а читатель
+// видит сразу. Замер на живой карточке Grok 4.7 — лид обещал «цена как у 4.6»
+// и «тщательнее себя проверяет», абзацы ниже повторяли и то и другое.
+{
+  const lead = 'Grok 4.7 — новая модель для программирования и работы со знаниями. Разработчик обещает: дольше тянет трудные задачи, тщательнее себя проверяет, цена как у 4.6.';
+  const again = 'Внутри — новая, более крупная базовая модель, чем у 4.6, и более длинное обучение с подкреплением (дообучение на наградах) на наборе задач посложнее, с упором на те, что занимают много часов. Модель лучше проверяет свою работу и держит более длинный контекст, а также нативно понимает Grok Bot — собственный агентный каркас разработчика.';
+  const next = 'Защиты новые: разработчик называет модель сильнейшей из протестированных по отказам и джейлбрейкам; на HackerBench v0.3 она пропустила лишь 3,3% рискованных запросов.';
+  assert.ok(restates(lead, again), 'повтор обещания и числа виден счётчиком');
+  assert.ok(!restates(lead, next), 'новое содержание повтором не считается');
+  assert.ok(!restates('46,3 балла', 'Балл сводного индекса вырос до 46,3 против прошлой версии'),
+    'короткий акцент рядом с абзацем про то же число — не повтор, его судит промпт');
+  const repeating: ReadingDocument = { ...twoLayer, answer: { text: lead, claimIds: ['s1-a'] },
+    blocks: [{ kind: 'paragraph', content: { text: again, claimIds: ['s1-b'] } }] };
+  assert.ok(validateCoverage(repeating, analysis, '', []).some(e => e.includes('restates the answer')));
+}
 // Сравнение перестало быть строго парным: у моделей и тарифов вариантов больше.
 assert.ok(documentSchema.safeParse({ ...twoLayer, blocks: [{ kind: 'comparison', commonBasis: evidence('Цена за миллион', 's1-a'), emphasis: 'content',
   items: [{ label: 'A', content: evidence('1$', 's1-a') }, { label: 'B', content: evidence('2$', 's1-b') }, { label: 'C', content: evidence('3$', 's1-c') }] }] }).success, 'сравнение на три варианта');
@@ -159,6 +188,20 @@ async function main() {
   const repaired = await composeDocument(ask, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", []);
   assert.equal(repaired.blocks[0].kind, "paragraph");
   assert.deepEqual(phases, ["compose", "compose-repair", "verify"]);
+
+  // Проверка идёт по статье целиком, а не по кускам извлечения: иначе
+  // документ, разбор и правила оплачиваются столько раз, сколько у статьи
+  // кусков, а модель объявляет неподтверждённым то, что подтверждено
+  // страницей раньше.
+  const wholeArticle: string[] = [];
+  const countingVerify: Ask = async (phase, _rules, data, schema) => {
+    if (phase === "verify") wholeArticle.push((data as { sourceSection: { text: string } }).sourceSection.text);
+    return schema.parse(phase.startsWith("compose") ? valid : { defects: [] });
+  };
+  const longSource = `${"Speed improved. No effect on accuracy. 24 participants. ".repeat(600)}`;
+  assert.ok(longSource.length > 30_000 && longSource.length < VERIFY_SOURCE_CHARS, 'источник замера длиннее трёх кусков извлечения');
+  await composeDocument(countingVerify, longSource, analysis, "", DEFAULT_VOICE, "Research", []);
+  assert.equal(wholeArticle.length, 1, 'статья на тридцать тысяч знаков проверяется одним вызовом, а не тремя');
   const semanticPhases: string[] = [];
   const semanticRepair: Ask = async (phase, _rules, _data, schema) => {
     semanticPhases.push(phase);

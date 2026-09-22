@@ -50,6 +50,12 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
     { feature: "topics", value: (plan) => String(plan.maxTopics) },
     { feature: "digest", value: (plan) => t.plans.table.upToMinutes(plan.maxMinutes) },
     {
+      // Числом, а не галочкой: между тарифами разница количественная,
+      // и «да» одинаково выглядело бы у двух карточек и у десяти.
+      feature: "rich",
+      value: (plan) => (plan.richCards > 0 ? t.plans.table.richCards(plan.richCards) : false),
+    },
+    {
       feature: "cadence",
       value: (plan) => (plan.everyDays <= 1 ? t.plans.table.dailyCadence : t.plans.table.everyOtherCadence),
     },

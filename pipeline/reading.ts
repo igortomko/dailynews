@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import type { Sql } from "postgres";
-import { resolve, type Survivor, type Usage, type Written, type DigestResult } from "./digest";
+import { resolve, thinkingControl, type Survivor, type Usage, type Written, type DigestResult } from "./digest";
 import { llmCost } from "./cost";
 import { fetchArticle } from "./article";
 import { articleHtml, videoIdOf } from "./youtube";
@@ -12,7 +12,7 @@ import { styleOf, type Voice } from "../src/lib/voice";
 import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
-  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes,
+  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes, CRITICAL_PER_SECTION,
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
@@ -54,6 +54,20 @@ export function readingReasoningProfile(): string {
     || DEFAULT_REASONING_PROFILE;
 }
 export const MAX_SOURCE_CHARS = 160_000;
+/**
+ * Проверке источник режется втрое крупнее, чем извлечению. Двенадцать тысяч
+ * знаков — предел ответа на извлечении: сто утверждений в один ответ иначе
+ * не помещаются. Проверке отвечать нечем, кроме списка дефектов, и делить
+ * по тому же размеру значит платить за документ, разбор и правила столько
+ * раз, сколько у статьи кусков: на выпуске 22 сентября это 60 вызовов
+ * на 35 карточек, и 98% их выхода — рассуждение.
+ *
+ * Дело не только в деньгах. Проверяя документ против одного куска, модель
+ * не видит остальных и объявляет неподтверждённым то, что подтверждено
+ * страницей раньше; оговорка про «другие секции» в VERIFY_RULES стоит там
+ * ровно поэтому. Целая статья в одном вызове — проверка строже, а не мягче.
+ */
+export const VERIFY_SOURCE_CHARS = 40_000;
 
 export function splitSource(text: string, limit = 12_000): { id: string; start: number; end: number; text: string }[] {
   if (text.length > MAX_SOURCE_CHARS) throw new Error("Source exceeds processing limit; no partial summary is published");
@@ -91,7 +105,7 @@ function caller(sql: Sql, readerId: number, usage: Usage): Ask {
       const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ model, max_tokens: outputTokens, response_format: { type: "json_object" },
-          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}), messages }),
+          ...thinkingControl(baseUrl, reasoningEffort), messages }),
         signal: AbortSignal.timeout(150_000),
       });
       if (!response.ok) throw new Error(`Reading model HTTP ${response.status}`);
@@ -159,6 +173,17 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
     if (errors.length) {
       raw = await ask("extract-repair", EXTRACT_RULES, { ...input, previous: raw, defects: errors }, extractionSchema);
       extracted = materialize(raw);
+      // Потолок обязательных утверждений — наше редакционное правило,
+      // и после ремонта оно применяется кодом, а не отказом. Модели дают
+      // один круг выбрать самой, что важнее; не уложилась — лишние
+      // помечаются major по порядку текста. Иначе правило, заведённое
+      // против отказов, само становится отказом: 22 сентября так ушла
+      // карточка, у которой извлечение второй раз вернуло восемь critical.
+      let critical = 0;
+      extracted = { ...extracted, claims: extracted.claims.map((claim) =>
+        claim.importance === "critical" && ++critical > CRITICAL_PER_SECTION
+          ? { ...claim, importance: "major" as const }
+          : claim) };
       errors = await check();
       if (errors.length) throw new Error(`Source analysis failed verification: ${errors[0]}`);
     }
@@ -202,36 +227,52 @@ export const READING_MIN_CHARS = 3000;
 /**
  * Кому из выживших достанется разбор.
  *
- * Порядок остаётся важностью — это порядок отбора, и читают ленту сверху.
- * Но короткие пропускаются: на том же выпуске вторая карточка имела 1984
- * знака текста и получала полный разбор, а материал на 13 390 знаков
- * стоял десятым и не получал ничего.
+ * Важность берётся у скора: порядок отбора уже взвесил глубину, конкретику,
+ * новизну, горизонт и тип материала весами этого читателя. Вторая мерка
+ * важности спорила бы с калибровкой, и ряды по дням перестали бы
+ * сравниваться с прошлыми.
  *
- * Длинные наверх не поднимаются: пять самых длинных в том выпуске стояли
- * на 1, 7, 15, 16 и 17 местах, и отдать разбор пятнадцатому значило бы
- * заплатить за карточку, до которой читатель не долистает. Выбирается
- * первое N подходящих по порядку, а не N лучших по длине.
+ * Короткие пропускаются: разбор читает статью целиком, а из 1984 знаков
+ * выходит тот же заголовок с описанием, что и у обычной карточки, по цене
+ * в двадцать шесть раз выше. На выпуске 22 сентября таких было двое
+ * из восемнадцати.
  *
- * Не набралось N — берём сколько есть. Добрать короткими значило бы
- * потратить полную цену на то, ради чего разбор и не нужен.
+ * **Квота раскладывается по выпуску, а не отдаётся верхушке подряд.**
+ * Выпуск, где первые карточки разобраны, а остальные пересказаны
+ * заголовком, читается как оборвавшийся на середине. Выпуск делится
+ * на столько окон, сколько разборов разрешено, и в каждом окне разбор
+ * достаётся лучшему подходящему. Первая карточка попадает в первое окно
+ * и выигрывает его по построению — она и есть лучшая по скору.
  *
- * Меряется текст, а не тело с разметкой: разбор читает текст после
- * `stripHtml`, и у материала из ленты тело бывает на треть тегами.
- * На выпуске 21 сентября 2026 у ZetaChain было 3967 знаков сырого тела
- * и 2961 после снятия разметки — сырое число пустило бы его в разбор.
+ * Пустое окно ничем не добивается: разбор, отданный материалу без текста,
+ * был бы обычной карточкой по цене разбора.
  */
-export function readingPicks<T extends { id: number; body?: string | null; excerpt: string }>(
+export function readingPicks<T extends { id: number; body?: string | null; excerpt: string; total?: number }>(
   survivors: T[],
   cards = readingCards(),
   minChars = READING_MIN_CHARS,
 ): { deep: T[]; plain: T[] } {
-  const deep: T[] = [];
-  const plain: T[] = [];
-  for (const item of survivors) {
-    const long = stripHtml(item.body ?? "").length >= minChars;
-    if (long && deep.length < cards) deep.push(item);
-    else plain.push(item);
+  // Мерка — текст, а не тело с разметкой: у материала из ленты тело
+  // бывает на треть тегами, и сырое число пускало бы в разбор пустое.
+  const fits = (item: T) => stripHtml(item.body ?? "").length >= minChars;
+  const chosen = new Set<number>();
+  const windows = Math.min(Math.max(Math.trunc(cards), 0), survivors.length);
+  const size = windows ? survivors.length / windows : 0;
+  for (let index = 0; index < windows; index++) {
+    const from = Math.floor(index * size);
+    const to = index === windows - 1 ? survivors.length : Math.floor((index + 1) * size);
+    let best: T | null = null;
+    for (const item of survivors.slice(from, to)) {
+      if (!fits(item) || chosen.has(item.id)) continue;
+      // Скор у выживших уже отсортирован по убыванию, но окно берётся
+      // по позициям: сравнение оставлено на случай, когда порядок задан
+      // не скором (догрузка, переписывание выпуска).
+      if (!best || (item.total ?? 0) > (best.total ?? 0)) best = item;
+    }
+    if (best) chosen.add(best.id);
   }
+  const deep = survivors.filter((item) => chosen.has(item.id));
+  const plain = survivors.filter((item) => !chosen.has(item.id));
   return { deep, plain };
 }
 
@@ -273,7 +314,7 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
     // подтверждается» отменяет дорогой вызов; всё остальное, включая отказ
     // самого привратника, пропускает дальше — см. `reading-gate.ts`.
     if (gate && !(await gate(source, `${doc.title.text}\n${documentText(doc)}`))) return errors;
-    for (const section of splitSource(source)) {
+    for (const section of splitSource(source, VERIFY_SOURCE_CHARS)) {
       const result = await ask("verify", VERIFY_RULES, { ...input, sourceSection: section, document: doc }, auditSchema);
       errors.push(...auditDefects(result));
     }

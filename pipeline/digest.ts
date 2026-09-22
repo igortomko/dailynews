@@ -1,7 +1,7 @@
 import { budgetedFetch } from "./model-budget";
 import type { StoredReading } from "../src/lib/reading-document";
 import type { ReadingOptions } from "./reading";
-import type { Axes } from "../src/lib/types";
+import type { Axes, Reader } from "../src/lib/types";
 import { checkLexicon, repeatsHeadline } from "./lexicon";
 import { complexityAt, styleOf, DEFAULT_VOICE, type Voice } from "../src/lib/voice";
 import { stripHtml } from "./fetch";
@@ -190,6 +190,23 @@ export function resolve() {
 }
 
 /**
+ * Чем провайдеру сказать «не рассуждай». У OpenAI-совместимых это
+ * `reasoning_effort`, у Xiaomi MiMo — своё поле `thinking`, а чужой
+ * параметр он принимает молча и продолжает думать: замер 22 сентября
+ * 2026 — `reasoning_effort: "low"` и `thinking: enabled` дают одинаковые
+ * рассуждающие ответы, ошибки нет ни одной. Рассуждение тарифицируется
+ * как выход, и невидимая строка счёта — это ровно тот отказ, который
+ * выглядит успехом.
+ */
+export function thinkingControl(baseUrl: string, effort: string): Record<string, unknown> {
+  // Хост сверяется до конца: `api.xiaomimimo.com.example.net` — чужой.
+  if (/(^|\.)xiaomimimo\.com$/u.test(new URL(baseUrl).hostname)) {
+    return { thinking: { type: effort && effort !== "none" ? "enabled" : "disabled" } };
+  }
+  return effort ? { reasoning_effort: effort } : {};
+}
+
+/**
  * Дорогая модель видит только выживших — пятнадцать материалов вместо трёхсот.
  * Отбор уже сделан кодом по оценкам Jev, здесь только письмо.
  */
@@ -201,10 +218,17 @@ export async function writeDigest(
 ): Promise<DigestResult> {
   reading: if (options) {
     const { sql } = await import("../src/lib/db");
-    const [reader] = await sql<{ reading_v2_enabled: boolean }[]>`select reading_v2_enabled from dailynews.readers where id=${options.readerId}`;
+    // Тариф спрашивается здесь же: сколько разборов в выпуске — решение
+    // продукта (`PLANS.richCards`), а не переменная окружения. Переменная
+    // осталась ручкой замера и может только урезать квоту тарифа, иначе
+    // одна строка в окружении молча выдала бы Pro-выпуск бесплатному.
+    const [reader] = await sql<(Reader & { reading_v2_enabled: boolean })[]>`
+      select reading_v2_enabled, owner, plan, subscription_status, plan_ends_at
+        from dailynews.readers where id=${options.readerId}`;
     if (!reader) throw new Error("Reader unavailable");
     if (reader.reading_v2_enabled) {
-      const { writeReadingDigest, readingPicks } = await import("./reading");
+      const { writeReadingDigest, readingPicks, readingCards } = await import("./reading");
+      const { effectivePlan } = await import("../src/lib/lemon");
       /**
        * Разбор получают только верхние карточки выпуска, остальные пишутся
        * как обычно.
@@ -223,7 +247,8 @@ export async function writeDigest(
        * Число — переменной, а не константой: это ручка цены, и крутить её
        * придётся вместе с ценой тарифа, а не правкой кода.
        */
-      const { deep, plain } = readingPicks(survivors);
+      const quota = Math.min(effectivePlan(reader).richCards, readingCards());
+      const { deep, plain } = readingPicks(survivors, quota);
       if (!deep.length) break reading;
       const read = await writeReadingDigest(sql, deep, readerContext, voice, options);
       if (!plain.length) return read;
@@ -405,7 +430,9 @@ ${blockOf(list)}
       // из двадцати, и дайджест внешне собрался — просто девятнадцать
       // заголовков остались на языке источника.
       max_tokens: 32000,
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      // Как просить «не рассуждай», решает провайдер: MiMo чужой параметр
+      // принимает молча и думает дальше (pipeline/reading.ts).
+      ...thinkingControl(baseUrl, reasoningEffort ?? ""),
       response_format: { type: "json_object" },
       messages: [{ role: "user", content: promptFor(list, askIntro) }],
     }),
