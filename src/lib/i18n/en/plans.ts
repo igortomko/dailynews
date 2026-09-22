@@ -141,7 +141,7 @@ export const plans = {
   about: {
     // Порядок слов свой: по-русски число идёт первым, по-английски
     // так звучит объявлением, а не строкой о читателе.
-    heroSaved: (saved: string): string => `You win back ${saved} today`,
+    heroSaved: (saved: string): string => `You saved ${saved} today`,
     heroTitle: "Only what's worth reading",
     newsWord: (n: number): string => (n === 1 ? "story" : "stories"),
     minutesWord: (n: number): string => (n === 1 ? "minute" : "minutes"),
