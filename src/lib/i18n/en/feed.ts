@@ -115,6 +115,8 @@ export const feed = {
     audioPlay: "Play",
     audioPause: "Pause",
     audioPlayError: "Playback failed — the audio is in Telegram",
+    audioRateTooltip: "Speed: tap to change",
+    audioRateAria: "Playback speed",
     audioAria: "Read this article aloud",
     audioTooltipReady: "Listen to the article in Telegram",
     audioTooltipLocked: "Audio is on the Pro plan",
