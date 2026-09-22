@@ -31,6 +31,7 @@ import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { cleanupOf } from "../src/lib/source-health";
 import { applyRules, rulesOf } from "../src/lib/rules";
 import { toSlug } from "../src/lib/slug";
+import { starterBySlug } from "../src/lib/starter-topics";
 
 
 
@@ -1452,6 +1453,148 @@ async function main() {
        where day = ${rulesDay}::date and reader_id in (${owner.id}, ${second.id})
     `;
     await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
+
+    // Индекс из 0051 смотрится в pg_indexes, а не по ответу migrate:
+    // миграцию из одного индекса сверка формы схемы не видит (урок 0041).
+    const [{ topicIdx }] = await sql<{ topicIdx: number }[]>`
+      select count(*)::int as "topicIdx" from pg_indexes
+       where schemaname = 'dailynews' and indexname = 'reader_topics_topic_idx'
+         -- По определению, а не по имени: индекс с тем же именем по другой
+         -- колонке прошёл бы проверку, как проходило бы переопределённое
+         -- ограничение под тем же именем. strpos, а не like: в like «_» —
+         -- любой знак, и «(topicXid)» прошёл бы.
+         and strpos(indexdef, '(topic_id)') > 0
+    `;
+    assert.equal(topicIdx, 1, "индекс reader_topics(topic_id) из 0051 должен стоять");
+
+    // --- своя тема правится, каталожная и общая — нет ----------------------
+    // Подсказка темы — критерий классификации Jev, один на всех, кто тему
+    // взял. Правка каталожной темы молча терялась: форма показывала новое
+    // до перезагрузки, база хранила прежнее. Решает сервер, а не форма.
+    //
+    // Каталожную ветку держит `blockchain`: его к этому месту держит только
+    // владелец. «Дизайн» не годится — он взят и вторым читателем, и запись
+    // отбило бы условие про соседа, а не про каталог.
+    const [{ holders }] = await sql<{ holders: number }[]>`
+      select count(*)::int as holders from dailynews.reader_topics rt
+        join dailynews.topics t on t.id = rt.topic_id where t.slug = 'blockchain'
+    `;
+    assert.equal(holders, 1, "проверка каталожной ветки держится на теме, взятой только одним читателем");
+    assert.ok(
+      (await readers.getReaderTopics(owner.id)).some((topic) => topic.slug === "blockchain"),
+      "и держит её именно владелец, а не сосед",
+    );
+    /** Имя и подсказка темы — то, о чём здесь каждое утверждение. */
+    const textOf = async (topic: { slug: string } | { id: number }) => {
+      const rows = "slug" in topic
+        ? await sql<{ label: string; hint: string }[]>`select label, hint from dailynews.topics where slug = ${topic.slug}`
+        : await sql<{ label: string; hint: string }[]>`select label, hint from dailynews.topics where id = ${topic.id}`;
+      return rows[0];
+    };
+    const chainBefore = await textOf({ slug: "blockchain" });
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
+    );
+    const chainAfter = await textOf({ slug: "blockchain" });
+    assert.deepEqual(chainAfter, chainBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
+    // Каталожная строка, разошедшаяся с набором (набрана руками до каталога
+    // или переименована в базе), сходится к нему при следующей записи: иначе
+    // она висела бы в третьем состоянии — ни своя, ни каталожная, и править
+    // её было бы нечем. На живой базе такая была одна: «Психотерапия»
+    // при «Психотерапия и mental health» в наборе.
+    await sql`update dailynews.topics set label = 'Крипта' where slug = 'blockchain'`;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
+    );
+    const chainRestored = await textOf({ slug: "blockchain" });
+    assert.deepEqual(chainRestored, chainBefore, "каталожная тема, разошедшаяся с набором, возвращается к нему при записи");
+
+    // Каталожная тема, которой в сиде ещё нет, заводится из стартового
+    // набора, а не из присланного: иначе первый взявший определял бы критерий
+    // классификации для всех своим именем и пустой подсказкой.
+    const music = starterBySlug.get("music");
+    assert.ok(music, "в стартовом наборе есть «music» — на нём держится проверка");
+    const [{ musicRows }] = await sql<{ musicRows: number }[]>`
+      select count(*)::int as "musicRows" from dailynews.topics where slug = 'music'
+    `;
+    assert.equal(musicRows, 0, "«music» в сиде нет — проверяется именно заведение");
+    const musicId = await readers.upsertTopic(
+      sql, owner.id, { slug: "music", label: "Мой музон", hint: "только винил", position: 1 },
+    );
+    const musicRow = await textOf({ id: musicId });
+    assert.deepEqual(musicRow, { label: music.label, hint: music.hint }, "заведённая каталожная тема — из набора, а не от вызвавшего");
+    await sql`delete from dailynews.topics where id = ${musicId}`;
+
+    const ownId = await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 },
+    );
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${owner.id}, ${ownId}, 1, 9) on conflict do nothing
+    `;
+    assert.equal(
+      await readers.upsertTopic(
+        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 },
+      ),
+      ownId,
+      "повторная запись отдаёт ту же тему",
+    );
+    const ownTopic = await textOf({ id: ownId });
+    assert.deepEqual(ownTopic, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "своя тема правится");
+    assert.equal(
+      (await readers.getReaderTopics(owner.id)).find((topic) => topic.id === ownId)?.shared, false,
+      "тема, которую взял только я, не общая",
+    );
+    // Держащий тему читатель стирает подсказку осознанно: пустая — это стёртая.
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 },
+    );
+    const [cleared] = await sql<{ hint: string }[]>`select hint from dailynews.topics where id = ${ownId}`;
+    assert.equal(cleared.hint, "", "у своей темы пустая подсказка — стёртая, а не пропущенная");
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 },
+    );
+
+    // Убрал тему, сохранил, взял снова: новый чип приходит с пустой
+    // подсказкой, и присоединение к ничьей теме не должно стирать сохранённую;
+    // а набранное при присоединении — применяется.
+    await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 },
+    );
+    const rejoined = await textOf({ id: ownId });
+    assert.deepEqual(rejoined, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "повторное взятие не стирает подсказку");
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "Nubank, Pix, Inter", position: 9 },
+    );
+    const rejoinedTyped = await textOf({ id: ownId });
+    assert.deepEqual(rejoinedTyped, { label: "Финтех", hint: "Nubank, Pix, Inter" }, "набранное при повторном взятии применяется");
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${owner.id}, ${ownId}, 1, 9) on conflict do nothing
+    `;
+
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${second.id}, ${ownId}, 1, 1)
+    `;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 },
+    );
+    const sharedTopic = await textOf({ id: ownId });
+    assert.deepEqual(
+      sharedTopic, { label: "Финтех", hint: "Nubank, Pix, Inter" },
+      "тема, взятая соседом, больше не правится никем",
+    );
+    assert.equal(
+      (await readers.getReaderTopics(owner.id)).find((topic) => topic.id === ownId)?.shared, true,
+      "и помечена общей",
+    );
+    // Уборка целиком: оценок на эту тему нет, а лишняя тема в справочнике
+    // сдвинула бы счёт тем в проверках ниже.
+    await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
+    await sql`delete from dailynews.topics where id = ${ownId}`;
+    console.log("  темы: каталожная не переписывается и заводится из набора, своя правится, взятая соседом — уже нет");
 
     // --- потолок расходов -------------------------------------------------------
     assert.equal(await readers.spentToday(second.id), 0, "новый читатель ничего не потратил");

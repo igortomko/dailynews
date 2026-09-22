@@ -4,6 +4,7 @@ import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { minutesOf } from "@/lib/reading-time";
 import { asNames } from "@/lib/rules";
+import { formChipOf } from "@/lib/starter-topics";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -34,12 +35,9 @@ export default async function InterestsPage() {
       // asNames, чтобы форма не упала на битой записи.
       follow={asNames(reader.follow_rules)}
       exclude={asNames(reader.exclude_rules)}
-      chips={topics.map((topic) => ({
-        slug: topic.slug,
-        label: topic.label,
-        hint: topic.hint,
-        count: topic.weight,
-      }))}
+      // Тем же переводом, каким действие отдаёт темы после записи: форма
+      // и до, и после сохранения показывает то, что лежит в базе.
+      chips={topics.map(formChipOf)}
     />
   );
 }

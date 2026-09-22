@@ -17,7 +17,7 @@ import { enrichImages } from "../../pipeline/og";
 import {
   addReaderSource, deleteChannel, digestProgress, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules,
-  saveVoiceCard, saveVoiceSample, spentToday,
+  saveVoiceCard, saveVoiceSample, spentToday, upsertTopic,
 } from "./readers";
 import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
@@ -35,7 +35,7 @@ import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
-import { starterBySlug } from "./starter-topics";
+import { clampTopicText, formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
 
 /**
@@ -66,8 +66,12 @@ export async function logout() {
   redirect("/login");
 }
 
-/** `count` — цель по числу новостей в день; в базе это `reader_topics.weight`. */
-export type ChipInput = { slug: string; label: string; hint: string; count: number };
+/**
+ * `count` — цель по числу новостей в день; в базе это `reader_topics.weight`.
+ * `own` — только для формы: можно ли править название и подсказку. Сервер
+ * ей не верит и решает сам (`upsertTopic`).
+ */
+export type ChipInput = { slug: string; label: string; hint: string; count: number; own?: boolean };
 
 /**
  * Персонализация и интересы — две формы, поэтому два действия. Одна функция
@@ -137,16 +141,48 @@ export async function savePersonalization(formData: FormData) {
   return { ok: true as const };
 }
 
+/** Ответ формы интересов: отказ словами или то, что легло в базу. */
+export type SavedInterests = {
+  ok: true;
+  minutes: number;
+  chips: ReturnType<typeof formChipOf>[];
+};
+
 /**
  * Интересы и бюджет внимания — одна форма: сколько новостей в день и как они
  * делятся между темами, задаётся одним движением. Поэтому размер дайджеста
  * сохраняется здесь, и только здесь: у поля должен быть один владелец, иначе
  * вторая форма, где этого поля нет, молча вернёт его к минимуму.
  */
-export async function saveInterests(formData: FormData) {
+export async function saveInterests(
+  formData: FormData,
+): Promise<{ error: string } | SavedInterests> {
   const readerId = await currentReaderId();
-  const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
+  // Не разобралось или разобралось не списком объектов — отказ словами,
+  // как у правил: иначе `[null]` или `{}` роняли бы действие исключением.
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(formData.get("chips") ?? "[]"));
+  } catch {
+    raw = null;
+  }
+  if (!Array.isArray(raw) || raw.some((chip) => typeof chip !== "object" || chip === null)) {
+    return { error: (await getDict()).errors.badRequest };
+  }
+  const chips = (raw as ChipInput[]).map((chip) => ({
+    ...chip,
+    // Имя и подсказка уходят в общий справочник и в промпт всем читателям:
+    // режется тем же пределом, что и поле, — форму рисует браузер.
+    label: clampTopicText(chip.label, TOPIC_LIMITS.label),
+    hint: clampTopicText(chip.hint, TOPIC_LIMITS.hint),
+  }));
   if (chips.length === 0) return { error: (await getDict()).errors.pickOneTopic };
+  // Имя уходит в общий справочник и в вопрос Jev как вариант ответа:
+  // пустое там бесполезно всем. Поле добавления пустое отвергает, а имя
+  // прямо в чипе можно стереть — отказ здесь, до записи.
+  if (chips.some((chip) => chip.label === "")) {
+    return { error: (await getDict()).errors.emptyTopicName };
+  }
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
@@ -195,7 +231,14 @@ export async function saveInterests(formData: FormData) {
   await writeTopics(readerId, chips, slugs, counts, minutes, true, rules);
 
   revalidatePath("/", "layout");
-  return { ok: true as const };
+  // Форме возвращается то, что записано на самом деле, а не то, что она
+  // прислала: каталожная тема и тема, взятая соседом, остаются прежними,
+  // и без пересева форма показывала бы «сохранённое», которого нет.
+  return {
+    ok: true as const,
+    minutes,
+    chips: (await getReaderTopics(readerId)).map(formChipOf),
+  };
 }
 
 /**
@@ -262,17 +305,14 @@ async function writeTopics(
 
     const ids: number[] = [];
     for (const [index, chip] of chips.entries()) {
-      // Справочник общий: по нему Jev классифицирует поток один раз на всех.
-      // Название и подсказку существующей темы вторым читателем не
-      // переписываем — этим он менял бы критерий классификации всем, и
-      // заметить это можно было бы только по съехавшим темам чужих лент.
-      const [topic] = await tx<{ id: number }[]>`
-        insert into dailynews.topics (slug, label, hint, position)
-        values (${slugs[index]}, ${chip.label}, ${chip.hint ?? ""}, ${index + 1})
-        on conflict (slug) do update set slug = excluded.slug
-        returning id::int as id
-      `;
-      ids.push(topic.id);
+      // Справочник общий, и что в нём можно править, решает `upsertTopic`,
+      // а не флаг из формы: каталожная тема и тема, взятая соседом, остаются
+      // как были, своя — переписывается.
+      ids.push(await upsertTopic(
+        tx,
+        readerId,
+        { slug: slugs[index], label: chip.label, hint: chip.hint ?? "", position: index + 1 },
+      ));
     }
 
     // Убранная тема — удалённая строка связки, а не флаг: отбор сразу
@@ -1078,7 +1118,7 @@ export async function saveOnboardingInterests(
   // Вписанное руками: подсказки у него нет, и это нормально — Jev получит
   // само название. Пустая тема в справочник не уезжает.
   const mine = custom
-    .map((label) => label.trim().slice(0, 60))
+    .map((label) => clampTopicText(label, TOPIC_LIMITS.label))
     .filter(Boolean)
     .map((label) => ({ slug: toSlug(label), label, hint: "", count: MIN_PER_TOPIC }));
 

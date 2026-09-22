@@ -13,6 +13,7 @@ export const errors: typeof En = {
     `На тарифе «${plan}» можно ${allowed} ${plural(allowed, "интерес", "интереса", "интересов")}, ` +
     `а выбрано ${picked}`,
   duplicateTopic: "Такой интерес уже есть, назови иначе",
+  emptyTopicName: "У одного из интересов нет названия — назови его",
 
   kindleAddressEmpty: "Впиши адрес читалки",
   kindleAddressSuffix: "Адрес должен заканчиваться на @kindle.com",

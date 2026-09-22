@@ -12,12 +12,14 @@ import { markSaved, markUnsaved } from "@/components/unsaved-guard";
  * правка этого порядка требовала бы двух одинаковых правок в разных файлах.
  * Разъезжаются такие копии тише всего: обе работают, просто по-разному.
  *
- * `write` пишет и отвечает, получилось ли. `rebuild` доводит правку
- * до сегодняшнего выпуска; обе должны быть стабильными (`useCallback`),
- * иначе сторож ухода перерегистрируется на каждом кадре.
+ * `write` пишет и отвечает, получилось ли; `stale()` в его руках говорит,
+ * тронули ли форму с момента снимка — форма, пересеивающая себя ответом
+ * сервера, без этого стёрла бы правку, сделанную пока шла запись. `rebuild`
+ * доводит правку до сегодняшнего выпуска; обе должны быть стабильными
+ * (`useCallback`), иначе сторож ухода перерегистрируется на каждом кадре.
  */
 export function useSettingsSave(
-  write: () => Promise<boolean>,
+  write: (stale: () => boolean) => Promise<boolean>,
   rebuild: () => Promise<Outcome>,
 ) {
   const [dirty, setDirty] = useState(false);
@@ -44,7 +46,7 @@ export function useSettingsSave(
     setApplying(true);
     try {
       const mark = edits.current;
-      const ok = await write();
+      const ok = await write(() => edits.current !== mark);
       if (!ok) return;
       settle(mark);
       const outcome = await rebuild().catch((): Outcome => "failed");
@@ -70,7 +72,7 @@ export function useSettingsSave(
     // и сама расскажет о себе тостом уже на следующей странице.
     markUnsaved(async () => {
       const mark = edits.current;
-      const ok = await write();
+      const ok = await write(() => edits.current !== mark);
       if (ok) {
         settle(mark);
         void rebuild().catch(() => {});

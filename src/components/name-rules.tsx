@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useT } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
 import {
-  mergeDraft, RULE_LIMITS, splitNames, withVariants, type Names, type RuleKind,
+  mergeDraft, RULE_LIMITS, rulesAnchor, splitNames, withVariants, type Names, type RuleKind,
 } from "@/lib/rules";
 
 /**
@@ -131,7 +131,11 @@ export function NameRules({
   };
 
   return (
-    <Field ref={box}>
+    // Якорь: на него ведёт подсказка у общей темы в «Твоих темах». Отступ
+    // сверху — под липкую шапку настроек, а на телефоне ещё и под липкую
+    // полосу разделов под ней: без него переход прятал бы за ними ровно
+    // ту подпись, ради которой нажали.
+    <Field ref={box} id={rulesAnchor(kind)} className="scroll-mt-28 sm:scroll-mt-16">
       {name ? <input type="hidden" name={name} value={JSON.stringify(pending())} /> : null}
       <FieldLabel className="flex items-center gap-2">
         {area.label}
