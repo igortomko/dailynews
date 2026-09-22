@@ -314,10 +314,19 @@ async function runForReader(
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
+  const readingStartedAt = new Date();
   const digest = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
   const published = survivors.filter(item => !digest.excludedIds?.includes(item.id));
   const digestCost = llmCost(digest.usage);
-  if (!published.length) { log(`  ${name}: полный текст исключён личными правилами; пустой выпуск не создаётся`); return digestCost; }
+  const [readingAccounting] = await sql<{ cost: number; calls: number }[]>`
+    select coalesce(sum(cost_usd), 0)::float as cost, count(*)::int as calls
+      from dailynews.reading_calls
+     where reader_id = ${reader.id}
+       and at >= ${readingStartedAt}
+       and status in ('settled', 'uncertain')
+  `;
+  const readingCost = readingAccounting?.cost ?? 0;
+  if (!published.length) { log(`  ${name}: полный текст исключён личными правилами; пустой выпуск не создаётся`); return digestCost + readingCost; }
   if (!digest.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
     tokensIn: digest.usage.input, tokensOut: digest.usage.output, costUsd: digestCost,
@@ -406,7 +415,11 @@ async function runForReader(
         digest_reasoning_tokens: digest.usage.reasoning,
         digest_reasoning_effort: digest.reasoningEffort,
         jev_input_tokens: quality?.inputTokens ?? 0,
-        cost_usd: Number((digestCost + qualityCost).toFixed(5)),
+        // reading-v2 пишет фактические вызовы отдельно; без этой суммы
+        // статистика выпуска показывала только старый writeDigest.
+        reading_cost_usd: Number(readingCost.toFixed(5)),
+        reading_calls: readingAccounting?.calls ?? 0,
+        cost_usd: Number((digestCost + readingCost + qualityCost).toFixed(5)),
         // Объект, а не JSON.stringify: лишний stringify кладёт в jsonb
         // строку, и stats->>'cost_usd' молча возвращает null.
       } as unknown as Parameters<typeof sql.json>[0])}
@@ -462,7 +475,7 @@ async function runForReader(
       ? (reader.reading_v2_enabled ? "выжимки сверены с доступным источником, " : "качество не меряли (промпт один на всех), ")
       : `качество ${meanQuality.toFixed(0)} из 85 по ${quality?.scored.length} описаниям, `) +
     `${perSentence.toFixed(1)} слов в предложении (ползунок ${reader.complexity} из 5), ` +
-    `$${(digestCost + qualityCost).toFixed(4)}`,
+    `$${(digestCost + readingCost + qualityCost).toFixed(4)}`,
   );
   // Рассуждение тарифицируется как выход и в ответ не попадает: без этой
   // строки главная статья счёта выглядит как длинный текст.
@@ -482,7 +495,7 @@ async function runForReader(
   }
 
   await deliver(reader, day, digest.intro, published, writtenById, name, { minutes, target });
-  return digestCost + qualityCost;
+  return digestCost + readingCost + qualityCost;
 }
 
 /** Доставка: ссылка в Telegram и, если подключён, выпуск книгой в Kindle. */

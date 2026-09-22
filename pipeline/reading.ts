@@ -23,6 +23,35 @@ export type Ask = <T>(phase: string, rules: string, data: unknown, schema: z.Zod
 export const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const emptyUsage = (): Usage => ({ input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 });
 const OUTPUT_TOKENS = 6000;
+const DEFAULT_REASONING_PROFILE = "extract:none;edit+audit:low";
+
+const phaseBase = (phase: string) => phase.replace(/-(?:format-)?repair$/u, "");
+const phaseSettings = () => new Map(
+  (process.env.READING_REASONING_PHASES ?? "").split(";")
+    .map((part) => part.trim().split(":", 2))
+    .filter(([phase, effort]) => phase && effort)
+    .map(([phase, effort]) => [phase, effort]),
+);
+
+/** Exact phase settings make a cost experiment reproducible without changing production defaults. */
+export function reasoningEffortFor(phase: string): string {
+  const configured = phaseSettings();
+  const base = phaseBase(phase);
+  const mapped = configured.get(phase) ?? configured.get(base)
+    ?? (base === "compose" ? configured.get("compose") : undefined)
+    ?? (base === "extract" ? configured.get("extract") : undefined)
+    ?? (base === "source-audit" || base === "verify" ? configured.get("audit") : undefined);
+  if (mapped) return mapped;
+  const override = process.env.READING_REASONING_EFFORT?.trim();
+  if (override) return override;
+  return base === "extract" ? "none" : "low";
+}
+
+export function readingReasoningProfile(): string {
+  return process.env.READING_REASONING_PHASES?.trim()
+    || process.env.READING_REASONING_EFFORT?.trim()
+    || DEFAULT_REASONING_PROFILE;
+}
 export const MAX_SOURCE_CHARS = 160_000;
 
 export function splitSource(text: string, limit = 12_000): { id: string; start: number; end: number; text: string }[] {
@@ -45,9 +74,7 @@ export function splitSource(text: string, limit = 12_000): { id: string; start: 
 function caller(sql: Sql, readerId: number, usage: Usage): Ask {
   const request = async <T>(phase: string, rules: string, data: unknown, schema: z.ZodType<T>): Promise<string> => {
     const { apiKey, baseUrl, model } = resolve();
-    // The live replay rejected valid text and ignored length with reasoning disabled.
-    // Extraction is mechanical; editing and checking use bounded reasoning.
-    const reasoningEffort = process.env.READING_REASONING_EFFORT?.trim() || (phase.startsWith("extract") ? "none" : "low");
+    const reasoningEffort = reasoningEffortFor(phase);
     if (!apiKey) throw new Error("No model key");
     const outputTokens = reasoningEffort && reasoningEffort !== "none" ? 32000 : OUTPUT_TOKENS;
     const messages = [
@@ -163,6 +190,21 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
     doc = normalizeDocument(await ask("compose-repair", `${COMPOSE_RULES}
 REPAIR: rewrite from scratch to 120–160 visible words (up to 260 for narratives). Do not just append missing content. Merge related facts and keep minor details omitted. Fix only real defects; do not reintroduce every previously omitted major/detail claim.`, { ...input, previous: doc, defects: errors }, documentSchema));
     errors = await check(doc);
+    if (errors.length && errors.every((error) => /^Summary is \d+ words/u.test(error))) {
+      doc = normalizeDocument(await ask("compose-length-repair", `${COMPOSE_RULES}
+LENGTH REPAIR: the previous document exceeded the hard word limit. Rewrite it once more under the limit, counting the title, lead, evidence, application and every block. Preserve the central answer, mechanism, direction, evidence limit and all critical claims; remove repetition and minor setup. Do not add facts.`, { ...input, previous: doc, defects: errors }, documentSchema));
+      errors = await check(doc);
+    }
+    if (errors.length) {
+      doc = normalizeDocument(await ask("compose-final-repair", `${COMPOSE_RULES}
+FINAL REPAIR: the previous rewrite still has the listed material defects. Rewrite the whole document once. Keep it under the hard word limit, counting the title, lead, evidence, application and every block. Restore every missing critical conclusion, mechanism, scope or limit; remove secondary setup before removing an essential claim. Fix unsupported or contradictory claims instead of repeating them. Do not add facts.`, { ...input, previous: doc, defects: errors }, documentSchema));
+      errors = await check(doc);
+      if (errors.some((error) => /^Summary is \d+ words/u.test(error))) {
+        doc = normalizeDocument(await ask("compose-compact-repair", `${COMPOSE_RULES}
+COMPACT REPAIR: the document is still over the hard word limit. Keep the lead's answer and every critical conclusion, mechanism, direction, evidence limit and application that changes a decision. Remove secondary examples, setup and repeated wording until the title, lead and all blocks fit the limit. Do not add facts.`, { ...input, previous: doc, defects: errors }, documentSchema));
+        errors = await check(doc);
+      }
+    }
     if (errors.length) throw new Error(`Summary failed verification: ${errors[0]}`);
   }
   return doc;
@@ -204,7 +246,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
   const excludedIds: number[] = [];
   const retainedIds: number[] = [];
   const { model } = resolve();
-  const reasoningEffort = process.env.READING_REASONING_EFFORT?.trim() || "extract:none;edit+audit:low";
+  const reasoningEffort = readingReasoningProfile();
   const writeOne = async (item: Survivor): Promise<Written | null> => {
     let sourceVersion = "";
     let availability: SourceAvailability = "excerpt_only";

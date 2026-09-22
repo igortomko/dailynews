@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
-import { splitSource, composeDocument, analyzeSource, type Ask } from "./reading";
+import { splitSource, composeDocument, analyzeSource, reasoningEffortFor, type Ask } from "./reading";
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
 import { DEFAULT_VOICE } from "../src/lib/voice";
@@ -18,10 +18,13 @@ const analysis: ArticleAnalysis = { sourceVersion: "v", availability: "article_t
 }] };
 const valid: ReadingDocument = {
   schemaVersion: 2, genre: "research", title: evidence("Speed improved in 24 participants", "s1-a", "s1-c"),
-  lead: null, blocks: [{ kind: "paragraph", content: evidence("No effect on accuracy.", "s1-b") }], evidence: null, application: null,
+  lead: evidence("In a 24-person test, participants completed the task faster without losing accuracy. The result is limited to this small sample and does not establish that the intervention works for other people, settings or longer periods, but it gives a concrete measured effect.", "s1-a", "s1-c"),
+  blocks: [{ kind: "paragraph", content: evidence("No effect on accuracy.", "s1-b") }], evidence: null, application: null,
   omitted: [], baselineId: null,
 };
 assert.deepEqual(validateCoverage(valid, analysis, "", []), []);
+assert.ok(validateCoverage({ ...valid, lead: null }, analysis, "", []).some((e) => e.includes("Missing a 35–60 word lead")));
+assert.ok(validateCoverage({ ...valid, lead: evidence("Too short.", "s1-a") }, analysis, "", []).some((e) => e.includes("Lead is 2 words")));
 const missing = structuredClone(valid); missing.blocks = [{ kind: "paragraph", content: evidence("Speed improved", "s1-a") }];
 assert.ok(validateCoverage(missing, analysis, "", []).some((e) => e.includes("s1-b")));
 assert.ok(!documentSchema.safeParse({ ...valid, blocks: [{ kind: "html", html: "<script>alert(1)</script>" }] }).success);
@@ -49,6 +52,10 @@ assert.equal(typography('6 сентября'), '6\u00a0сентября');
 assert.equal(typography('Шаг 1'), 'Шаг\u00a01');
 assert.equal(typography('Qwen2.5-32B и 2026-09-21'), 'Qwen2.5-32B и\u00a02026-09-21');
 assert.equal(typography('2023–2024 годы'), '2023\u2060–\u20602024 годы');
+assert.equal(reasoningEffortFor('extract'), 'none');
+assert.equal(reasoningEffortFor('extract-repair'), 'none');
+assert.equal(reasoningEffortFor('compose'), 'low');
+assert.equal(reasoningEffortFor('verify'), 'low');
 // Короткое слово не висит в конце строки ни в одной письменности: мера —
 // длина, а не словарь предлогов. Список отвечал только за кириллицу,
 // и латинские «a», «is», «of» не совпадают с ней даже там, где выглядят
@@ -101,6 +108,52 @@ async function main() {
   const repaired = await composeDocument(ask, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", []);
   assert.equal(repaired.blocks[0].kind, "paragraph");
   assert.deepEqual(phases, ["compose", "compose-repair", "verify"]);
+  const semanticPhases: string[] = [];
+  const semanticRepair: Ask = async (phase, _rules, _data, schema) => {
+    semanticPhases.push(phase);
+    if (phase === "compose" || phase === "compose-repair") return schema.parse(missing);
+    if (phase === "compose-final-repair") return schema.parse(valid);
+    return schema.parse({ defects: [] });
+  };
+  const semanticallyRepaired = await composeDocument(semanticRepair, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", []);
+  assert.equal(semanticallyRepaired.blocks[0].kind, "paragraph");
+  assert.deepEqual(semanticPhases, [
+    "compose", "compose-repair", "compose-final-repair", "verify",
+  ], "a remaining missing critical claim receives one bounded semantic repair");
+  const overlong: ReadingDocument = {
+    ...valid,
+    blocks: [{ kind: "paragraph", content: evidence(`No effect on accuracy. ${"Detail ".repeat(220)}`, "s1-b") }],
+  };
+  const compactPhases: string[] = [];
+  const compactRepair: Ask = async (phase, _rules, _data, schema) => {
+    compactPhases.push(phase);
+    if (phase === "compose" || phase === "compose-repair") return schema.parse(missing);
+    if (phase === "compose-final-repair") return schema.parse(overlong);
+    if (phase === "compose-compact-repair") return schema.parse(valid);
+    return schema.parse({ defects: [] });
+  };
+  const compacted = await composeDocument(compactRepair, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", []);
+  assert.equal(compacted.blocks[0].kind, "paragraph");
+  assert.deepEqual(compactPhases, [
+    "compose", "compose-repair", "compose-final-repair", "compose-compact-repair", "verify",
+  ], "an overlong semantic repair receives one bounded compact repair");
+  const lostConclusion = {
+    ...valid,
+    blocks: [{ kind: "paragraph" as const, content: evidence("Speed improved.", "s1-a") }],
+  };
+  const lengthPhases: string[] = [];
+  const lengthRepair: Ask = async (phase, _rules, _data, schema) => {
+    lengthPhases.push(phase);
+    if (phase === "compose" || phase === "compose-repair") return schema.parse(overlong);
+    if (phase === "compose-length-repair") return schema.parse(lostConclusion);
+    if (phase === "compose-final-repair") return schema.parse(valid);
+    return schema.parse({ defects: [] });
+  };
+  const finalRepaired = await composeDocument(lengthRepair, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", []);
+  assert.equal(finalRepaired.blocks[0].kind, "paragraph");
+  assert.deepEqual(lengthPhases, [
+    "compose", "compose-repair", "compose-length-repair", "compose-final-repair", "verify",
+  ], "a length repair that loses a critical conclusion receives one bounded semantic repair");
   const rejecting: Ask = async (phase, _rules, _data, schema) => schema.parse(phase.startsWith("compose") ? valid : { defects: [{ kind: "contradiction", issue: "The limitation is misstated", sourceEvidence: "No effect on accuracy", correction: "Keep the null result" }] });
   await assert.rejects(() => composeDocument(rejecting, "Source", analysis, "", DEFAULT_VOICE, "Research", []), /failed verification/);
   console.log("  reading: full-source coverage, semantic repair/failure, unsafe block rejection, reader context, typography and text delivery passed");

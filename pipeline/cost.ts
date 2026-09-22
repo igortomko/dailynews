@@ -32,12 +32,18 @@ export const jevCost = (inputTokens: number) => (inputTokens / 1e6) * JEV_INPUT_
  * Рассуждение уже входит в `output`: провайдер считает его выходом, и
  * прибавлять его отдельно значило бы посчитать дважды.
  *
- * Кэшированный вход тарифицируется дешевле, но насколько — зависит
- * от провайдера, и выдуманный коэффициент был бы хуже завышенной оценки:
- * потолок сработает чуть раньше, а не чуть позже.
- * ponytail: появится провайдер с известной ценой кэша — здесь добавится
- * третье слагаемое по usage.cached.
+ * Кэшированный вход тарифицируется отдельно, только когда для текущей
+ * модели настроена её цена. Без неё оставляем полную цену входа: так
+ * дневной потолок будет консервативным, а не выдуманно дешёвым.
  */
-export const llmCost = (usage: Usage) =>
-  (usage.input / 1e6) * price("LLM_INPUT_PRICE", 0.3) +
-  (usage.output / 1e6) * price("LLM_OUTPUT_PRICE", 2.5);
+export const llmCost = (usage: Usage) => {
+  const input = Math.max(0, usage.input);
+  // Провайдер иногда возвращает cache-hit breakdown одновременно с
+  // округлённым prompt_tokens. Нельзя дать этому полю сделать вход отрицательным.
+  const cached = Math.min(input, Math.max(0, usage.cached));
+  const uncached = input - cached;
+  const inputPrice = price("LLM_INPUT_PRICE", 0.3);
+  return (uncached / 1e6) * inputPrice +
+    (cached / 1e6) * price("LLM_CACHE_INPUT_PRICE", inputPrice) +
+    (usage.output / 1e6) * price("LLM_OUTPUT_PRICE", 2.5);
+};

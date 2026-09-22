@@ -6,7 +6,7 @@ import sharp from 'sharp';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../public/brand');
 const catalog = JSON.parse(await readFile(join(root, 'illustrations/catalog.json'), 'utf8'));
 const report = [];
-for (const folder of ['light', 'dark', 'preview']) await mkdir(join(root, 'illustrations', folder), { recursive: true });
+for (const folder of ['light', 'dark', 'preview', 'web']) await mkdir(join(root, 'illustrations', folder), { recursive: true });
 for (const item of catalog) {
   const { data, info } = await sharp(join(root, 'illustrations/sources', `${item.id}.png`)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const light = Buffer.alloc(data.length);
@@ -29,6 +29,13 @@ for (const item of catalog) {
   for (const [theme, pixels] of [['light', light], ['dark', dark]]) {
     await sharp(pixels, { raw }).png().toFile(join(root, 'illustrations', theme, `${item.id}.png`));
     await sharp(pixels, { raw }).resize({ width: 640 }).webp({ lossless: true }).toFile(join(root, 'illustrations/preview', `${item.id}-${theme}.webp`));
+    // Web copies for the product UI. The lossless previews are reference
+    // exports at over 100 KB each, while a page draws the scene at about
+    // 180 px and ships both themes in the markup, paying for two files to
+    // show one. Most of the weight is the alpha channel, not the ink:
+    // `alphaQuality` 60 takes one scene from 43 KB to 19 with no visible
+    // change on paper or on a dark surface.
+    await sharp(pixels, { raw }).resize({ width: 384 }).webp({ quality: 82, alphaQuality: 60 }).toFile(join(root, 'illustrations/web', `${item.id}-${theme}.webp`));
   }
   if (['observer', 'attention', 'city'].includes(item.id)) {
     await sharp(light, { raw }).webp({ lossless: true }).toFile(join(root, 'illustrations', `${item.id}.webp`));

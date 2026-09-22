@@ -129,6 +129,7 @@ fi
 echo "→ отправка файлов"
 rsync -az --delete \
   --exclude '.git' \
+  --exclude '.claude' \
   --exclude 'node_modules' \
   --exclude '.next' \
   --exclude '.env' \
