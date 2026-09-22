@@ -27,6 +27,7 @@ import {
 // Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
 import { feed as ruFeed } from "../src/lib/i18n/ru/feed";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
+import { tsConfigFor } from "../src/lib/search";
 import { sleepVerdict } from "../src/lib/sleep";
 import { rulesOf } from "../src/lib/rules";
 
@@ -424,19 +425,24 @@ async function runForReader(
     const scored = qualityById.get(String(survivor.id));
     // Текст пишется сюда, а не в items: язык, сложность и манера персональны,
     // и общая колонка означала бы, что второй читатель переписывает ленту
-    // первого своим языком.
+    // первого своим языком. Словарь поиска — тоже свойство выпуска:
+    // вектор описания считается им при записи (0050), и искать выпуск
+    // будут им же, каким бы ни был язык читателя потом.
     await sql`
       insert into dailynews.digest_items
-        (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score)
+        (digest_id, item_id, total, position, title, summary, summary_document, summary_axes, summary_score,
+         ts_config)
       values (
         ${row.id}, ${survivor.id}, ${survivor.total}, ${taken + index + 1},
         ${written?.title_ru ?? survivor.title}, ${written?.summary ?? ""},
         ${written?.reading ? sql.json(written.reading) : null},
         ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
-        ${scored?.total ?? null}
+        ${scored?.total ?? null},
+        ${tsConfigFor(voice.language)}::regconfig
       )
       on conflict (digest_id, item_id) do update
-        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document
+        set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document,
+            ts_config=excluded.ts_config
         where dailynews.digest_items.summary_document->>'status'='unavailable'
           and excluded.summary_document->>'status'='verified'
     `;

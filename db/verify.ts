@@ -643,6 +643,15 @@ async function main() {
          where item_id = ${ids[2]}
       `;
 
+      // Словарь выпуска пишется при письме; у посеянных строк — общий
+      // по умолчанию, и вектор описания считается им.
+      const [dictionary] = await sql<{ ts_config: string; ready: boolean }[]>`
+        select ts_config::text as ts_config, tsv is not null as ready
+          from dailynews.digest_items where item_id = ${ids[2]} limit 1
+      `;
+      assert.equal(dictionary.ts_config, "russian", "словарь выпуска по умолчанию — общий");
+      assert.ok(dictionary.ready, "вектор описания считается при записи");
+
       const archive = await queries.archiveSize(owner.id);
       assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
       assert.deepEqual(

@@ -1,7 +1,8 @@
 "use client";
 
 import {
-  cloneElement, Fragment, useEffect, useRef, useState, type ReactElement, type ReactNode,
+  cloneElement, Fragment, useEffect, useLayoutEffect, useRef, useState,
+  type ReactElement, type ReactNode,
 } from "react";
 import {
   ThumbsUpIcon,
@@ -102,9 +103,14 @@ function siteOf(url: string): string | null {
  * из двухсот кнопок ленты, а нужен только той карточке, над которой курсор
  * или фокус. Кнопка при этом одна и та же: `render` получает её целиком,
  * поэтому классы и aria-label не расходятся между двумя состояниями.
- * `data-hint` — метка для карточки: фокус, пришедший прямо на такую кнопку,
- * не должен пересобирать её под собой, иначе фокус теряется.
+ * `HINT` — метка на кнопке в обоих состояниях: по ней карточка узнаёт, что
+ * фокус пришёл прямо на кнопку действия, и возвращает его после пересборки.
+ * Одна константа на оба места, иначе имя атрибута разъехалось бы молча,
+ * и проверка фокуса перестала бы срабатывать без единой ошибки компилятора.
  */
+const HINT = { "data-hint": "" };
+type HintButton = ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement> & Partial<typeof HINT>>;
+
 function Hint({
   live,
   tip,
@@ -113,13 +119,13 @@ function Hint({
 }: {
   live: boolean;
   tip: ReactNode;
-  button: ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement>>;
+  button: HintButton;
   children: ReactNode;
 }) {
-  if (!live) return cloneElement(button, { "data-hint": "" } as object, children);
+  if (!live) return cloneElement(button, HINT, children);
   return (
     <Tooltip>
-      <TooltipTrigger render={button} data-hint="">
+      <TooltipTrigger render={button} {...HINT}>
         {children}
       </TooltipTrigger>
       <TooltipContent>{tip}</TooltipContent>
@@ -177,6 +183,22 @@ export function ItemCard({
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
+  // Подпись кнопки, на которую пришёл фокус до того, как подсказки включились:
+  // её пересобирают под фокусом, и фокус пропадает. После пересборки кнопка
+  // с той же подписью получает его обратно — до отрисовки, чтобы обход
+  // клавиатурой не заметил подмены.
+  const refocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!hot || refocus.current === null) return;
+    const label = refocus.current;
+    refocus.current = null;
+    for (const button of article.current?.querySelectorAll<HTMLElement>("[data-hint]") ?? []) {
+      if (button.getAttribute("aria-label") === label) {
+        button.focus({ preventScroll: true });
+        break;
+      }
+    }
+  }, [hot]);
 
   // Знаменатель калибровки: что действительно дошло до экрана. Без него
   // доля открытий считается от показанного в дайджесте, а это другое число.
@@ -395,11 +417,19 @@ export function ItemCard({
   return (
     <article
       ref={article}
-      onPointerEnter={() => setHot(true)}
+      // Только курсор: на тапе ряд с подсказками скрыт, и собирать их
+      // значило бы платить за то, чего на экране не бывает.
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") setHot(true);
+      }}
       onFocus={(event) => {
         // Фокус, пришедший прямо на кнопку действия (у карточки без ссылки
-        // на издание она первая в обходе), не пересобирает её под собой.
-        if (!(event.target as HTMLElement).closest("[data-hint]")) setHot(true);
+        // на издание она первая в обходе), включает подсказки как и любой
+        // другой. Пересборка кнопки под фокусом его теряет — кнопка
+        // запоминается по подписи и получает фокус обратно в эффекте выше.
+        const target = event.target as HTMLElement;
+        if (!hot && target.closest("[data-hint]")) refocus.current = target.getAttribute("aria-label");
+        setHot(true);
       }}
       data-selected={selected || undefined}
       className={cn(

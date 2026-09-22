@@ -67,7 +67,9 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
-import { anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG } from "../src/lib/search";
+import {
+  anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG, TS_CONFIGS, tsConfigFor,
+} from "../src/lib/search";
 import { recentFrom, remember } from "../src/lib/search-history";
 import { blockOf, move, overviewMarkdown, overviewText, reconcile } from "../src/lib/overview";
 import { formatDay } from "../src/lib/relative-time";
@@ -3190,17 +3192,34 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
   assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
 
-  // Словарь один на векторы и на запрос, и это константа: хранимые tsvector
-  // (миграция 0048) считаются Postgres тем же словарём, и любое другое
-  // значение здесь искало бы слова, которых в разобранном тексте нет
-  // по построению. Совпадение проверяется по самому файлу миграции, а не
-  // по памяти: две копии одного решения расходятся молча.
-  assert.equal(SEARCH_CONFIG, "russian", "латиницу разбирает тем же стеммером, кириллицу сводит только он");
-  const vectors = readFileSync("db/migrations/0048_search_vectors.sql", "utf8");
+  // Словарь выпуска пишется при письме и живёт в строке выпуска (0050):
+  // вектор описания и запрос к нему разбираются им же. Общий словарь —
+  // у источника (0048) и по умолчанию; совпадение проверяется по самим
+  // файлам миграций, а не по памяти: две копии одного решения расходятся молча.
+  assert.equal(tsConfigFor("русском"), "russian");
+  assert.equal(tsConfigFor("английском"), "english");
+  assert.equal(tsConfigFor("португальском (бразильский)"), "portuguese");
   assert.equal(
-    vectors.split(`to_tsvector('${SEARCH_CONFIG}'::regconfig`).length - 1,
-    2,
-    "оба хранимых вектора считаются словарём запроса",
+    tsConfigFor(SOURCE_LANGUAGE),
+    SEARCH_CONFIG,
+    "язык источника заранее неизвестен: общий словарь разбирает и латиницу",
+  );
+  assert.equal(
+    tsConfigFor("японском"),
+    SEARCH_CONFIG,
+    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
+  );
+  assert.equal(tsConfigFor(""), SEARCH_CONFIG, "пустое значение колонки не роняет поиск");
+  assert.equal(SEARCH_CONFIG, "russian", "латиницу разбирает тем же стеммером, кириллицу сводит только он");
+  const shared = readFileSync("db/migrations/0048_search_vectors.sql", "utf8");
+  assert.ok(
+    shared.includes(`to_tsvector('${SEARCH_CONFIG}'::regconfig`),
+    "вектор источника считается общим словарём",
+  );
+  const perDigest = readFileSync("db/migrations/0050_search_config_per_digest.sql", "utf8");
+  assert.ok(
+    perDigest.includes(`default '${SEARCH_CONFIG}'::regconfig`),
+    "словарь выпуска по умолчанию — тот же общий",
   );
 
 // --- два языка интерфейса ---------------------------------------------------
@@ -3240,12 +3259,13 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   assert.deepEqual(found, [], "в английском словаре осталась русская строка");
 }
 
-// Языки названы строкой, и эта строка лежит ещё в двух словарях: скорость
-// чтения и флажок. Переименуй язык в списке — и остальные молча откатятся
-// к значению по умолчанию: время выпуска посчитается русской меркой, флажок
-// исчезнет. Ни одной ошибки при этом не будет. Словарь поиска сюда больше
-// не входит: он один на всех (SEARCH_CONFIG), см. выше.
+// Языки названы строкой, и эта строка лежит сразу в трёх словарях: скорость
+// чтения, словарь поиска и флажок. Переименуй язык в списке — и остальные
+// молча откатятся к значению по умолчанию: время выпуска посчитается русской
+// меркой, поиск возьмёт русский стеммер, флажок исчезнет. Ни одной ошибки
+// при этом не будет.
 for (const [name, table] of [
+  ["словарь поиска", TS_CONFIGS],
   ["скорость чтения", CHARS_PER_MINUTE],
 ] as const) {
   const orphans = Object.keys(table).filter((key) => !LANGUAGES.includes(key));

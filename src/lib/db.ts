@@ -1,3 +1,4 @@
+import { setInterval } from "node:timers";
 import postgres from "postgres";
 
 /**
@@ -50,6 +51,9 @@ export const sql = postgres(url, {
 // паузы — он платил за DNS, TCP, TLS и SCRAM 150–500 мс. unref: таймер
 // не держит процесс, и сборка образа (у неё DATABASE_URL — заглушка)
 // его не ждёт; отказ заглушки глотается — это не запрос читателя.
+// setInterval взят из node:timers явно: с `lib: dom` в tsconfig глобальный
+// мог бы разрешиться в браузерную сигнатуру без unref, смотря по порядку
+// подключения типов.
 if (process.env.NEXT_RUNTIME) {
   setInterval(() => {
     sql`select 1`.catch(() => {});
