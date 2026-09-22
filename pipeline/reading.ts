@@ -218,31 +218,50 @@ export const READING_MIN_CHARS = 3000;
 /**
  * Кому из выживших достанется разбор.
  *
- * Порядок остаётся важностью — это порядок отбора, и читают ленту сверху.
- * Но короткие пропускаются: на том же выпуске вторая карточка имела 1984
- * знака текста и получала полный разбор, а материал на 13 390 знаков
- * стоял десятым и не получал ничего.
+ * Важность берётся у скора: порядок отбора уже взвесил глубину, конкретику,
+ * новизну, горизонт и тип материала весами этого читателя. Вторая мерка
+ * важности спорила бы с калибровкой, и ряды по дням перестали бы
+ * сравниваться с прошлыми.
  *
- * Длинные наверх не поднимаются: пять самых длинных в том выпуске стояли
- * на 1, 7, 15, 16 и 17 местах, и отдать разбор пятнадцатому значило бы
- * заплатить за карточку, до которой читатель не долистает. Выбирается
- * первое N подходящих по порядку, а не N лучших по длине.
+ * Короткие пропускаются: разбор читает статью целиком, а из 1984 знаков
+ * выходит тот же заголовок с описанием, что и у обычной карточки, по цене
+ * в двадцать шесть раз выше. На выпуске 22 сентября таких было двое
+ * из восемнадцати.
  *
- * Не набралось N — берём сколько есть. Добрать короткими значило бы
- * потратить полную цену на то, ради чего разбор и не нужен.
+ * **Квота раскладывается по выпуску, а не отдаётся верхушке подряд.**
+ * Выпуск, где первые карточки разобраны, а остальные пересказаны
+ * заголовком, читается как оборвавшийся на середине. Выпуск делится
+ * на столько окон, сколько разборов разрешено, и в каждом окне разбор
+ * достаётся лучшему подходящему. Первая карточка попадает в первое окно
+ * и выигрывает его по построению — она и есть лучшая по скору.
+ *
+ * Пустое окно ничем не добивается: разбор, отданный материалу без текста,
+ * был бы обычной карточкой по цене разбора.
  */
-export function readingPicks<T extends { id: number; body?: string | null; excerpt: string }>(
+export function readingPicks<T extends { id: number; body?: string | null; excerpt: string; total?: number }>(
   survivors: T[],
   cards = readingCards(),
   minChars = READING_MIN_CHARS,
 ): { deep: T[]; plain: T[] } {
-  const deep: T[] = [];
-  const plain: T[] = [];
-  for (const item of survivors) {
-    const long = (item.body ?? "").length >= minChars;
-    if (long && deep.length < cards) deep.push(item);
-    else plain.push(item);
+  const fits = (item: T) => (item.body ?? "").length >= minChars;
+  const chosen = new Set<number>();
+  const windows = Math.min(Math.max(Math.trunc(cards), 0), survivors.length);
+  const size = windows ? survivors.length / windows : 0;
+  for (let index = 0; index < windows; index++) {
+    const from = Math.floor(index * size);
+    const to = index === windows - 1 ? survivors.length : Math.floor((index + 1) * size);
+    let best: T | null = null;
+    for (const item of survivors.slice(from, to)) {
+      if (!fits(item) || chosen.has(item.id)) continue;
+      // Скор у выживших уже отсортирован по убыванию, но окно берётся
+      // по позициям: сравнение оставлено на случай, когда порядок задан
+      // не скором (догрузка, переписывание выпуска).
+      if (!best || (item.total ?? 0) > (best.total ?? 0)) best = item;
+    }
+    if (best) chosen.add(best.id);
   }
+  const deep = survivors.filter((item) => chosen.has(item.id));
+  const plain = survivors.filter((item) => !chosen.has(item.id));
   return { deep, plain };
 }
 

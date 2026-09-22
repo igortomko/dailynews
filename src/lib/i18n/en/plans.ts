@@ -69,6 +69,10 @@ export const plans = {
       title: "How often it arrives",
       what: "Paid plans get a digest every night. Free gets one every other night.",
     },
+    rich: {
+      title: "Verified deep dives",
+      what: "The article is read in full and the summary is checked against it: numbers with their baseline, both sides of a comparison and the limits come from the text, not the headline. The rest of the cards stay ordinary summaries.",
+    },
     digest: {
       title: "Reading time",
       what: "How long the digest takes: based on the length of our own summaries, not the linked articles. Five minutes is a coffee break, forty-five replaces a social feed.",
@@ -105,6 +109,7 @@ export const plans = {
     dailyCadence: "every day",
     everyOtherCadence: "every other day",
     upToMinutes: (n: number) => `up to ${n} min`,
+    richCards: (n: number) => `${n} per edition`,
     tryFree: (days: number) => `${days} days free`,
     thenPerMonth: (price: number) => `then $${price} a month`,
     hasFeature: "included",

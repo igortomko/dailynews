@@ -1,7 +1,7 @@
 import { budgetedFetch } from "./model-budget";
 import type { StoredReading } from "../src/lib/reading-document";
 import type { ReadingOptions } from "./reading";
-import type { Axes } from "../src/lib/types";
+import type { Axes, Reader } from "../src/lib/types";
 import { checkLexicon, repeatsHeadline } from "./lexicon";
 import { complexityAt, styleOf, DEFAULT_VOICE, type Voice } from "../src/lib/voice";
 import { stripHtml } from "./fetch";
@@ -218,10 +218,17 @@ export async function writeDigest(
 ): Promise<DigestResult> {
   reading: if (options) {
     const { sql } = await import("../src/lib/db");
-    const [reader] = await sql<{ reading_v2_enabled: boolean }[]>`select reading_v2_enabled from dailynews.readers where id=${options.readerId}`;
+    // Тариф спрашивается здесь же: сколько разборов в выпуске — решение
+    // продукта (`PLANS.richCards`), а не переменная окружения. Переменная
+    // осталась ручкой замера и может только урезать квоту тарифа, иначе
+    // одна строка в окружении молча выдала бы Pro-выпуск бесплатному.
+    const [reader] = await sql<(Reader & { reading_v2_enabled: boolean })[]>`
+      select reading_v2_enabled, owner, plan, plan_status, plan_ends_at
+        from dailynews.readers where id=${options.readerId}`;
     if (!reader) throw new Error("Reader unavailable");
     if (reader.reading_v2_enabled) {
-      const { writeReadingDigest, readingPicks } = await import("./reading");
+      const { writeReadingDigest, readingPicks, readingCards } = await import("./reading");
+      const { effectivePlan } = await import("../src/lib/lemon");
       /**
        * Разбор получают только верхние карточки выпуска, остальные пишутся
        * как обычно.
@@ -240,7 +247,8 @@ export async function writeDigest(
        * Число — переменной, а не константой: это ручка цены, и крутить её
        * придётся вместе с ценой тарифа, а не правкой кода.
        */
-      const { deep, plain } = readingPicks(survivors);
+      const quota = Math.min(effectivePlan(reader).richCards, readingCards());
+      const { deep, plain } = readingPicks(survivors, quota);
       if (!deep.length) break reading;
       const read = await writeReadingDigest(sql, deep, readerContext, voice, options);
       if (!plain.length) return read;
