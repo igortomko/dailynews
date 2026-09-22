@@ -36,6 +36,29 @@ Migration `0044_generative_reading` is additive. Existing readers are enabled wh
 
 Human comprehension, memory retention and reading-speed gains have not been measured. Source consistency and structural checks do not replace that evaluation. Full-source availability is constrained by publishers and extraction; the system summarizes the text it actually obtained.
 
+## Cost shape (2026-09-22)
+
+A card with a reading document costs $0.0204–0.026 against $0.00037 for an
+ordinary summary. Two thirds of that is reasoning tokens, not written text:
+`source-audit` spends 99.3% of its output on thinking, `verify` 98.4%.
+
+Only the top `READING_CARDS` survivors (default `LEAD_CARDS` = 5) get a
+document; the rest are written by the ordinary generator in one batched
+call. Selection order is importance, and readers open 16–18 cards a day
+whatever the edition size, so the documents go to the cards that are read.
+The knob is an environment variable because it moves with the plan price,
+not with the code. Values below one read as unset: switching reading off is
+the reader flag, not a zero here.
+
+Two cost experiments are settled and recorded in `docs/economics.md`, so
+they do not need repeating. Turning reasoning off in the audits saves about
+a third and blinds them — the audit then answers 1031 output tokens over six
+calls and misses a real misattributed figure it caught with reasoning on.
+Putting Jev in front of the audits works for `verify` (18% false alarms at
+threshold 0.5, catching 93% of altered numbers and 100% of invented claims)
+but not for `source-audit`, where a list of dozens of restated claims draws
+93–100% false alarms under either question form.
+
 ## Gate for new visual forms
 
 New visual patterns are not added because a model can produce them. Before adding a new block type or making an existing accent more frequent, run a human worksheet over 10–15 verified cards:

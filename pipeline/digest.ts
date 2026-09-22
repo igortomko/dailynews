@@ -204,8 +204,47 @@ export async function writeDigest(
     const [reader] = await sql<{ reading_v2_enabled: boolean }[]>`select reading_v2_enabled from dailynews.readers where id=${options.readerId}`;
     if (!reader) throw new Error("Reader unavailable");
     if (reader.reading_v2_enabled) {
-      const { writeReadingDigest } = await import("./reading");
-      return writeReadingDigest(sql, survivors, readerContext, voice, options);
+      const { writeReadingDigest, readingCards } = await import("./reading");
+      /**
+       * Разбор получают только верхние карточки выпуска, остальные пишутся
+       * как обычно.
+       *
+       * Замер 22 сентября 2026: карточка с разбором стоит $0.0204–0.026
+       * против $0.00037 у обычного описания — в 55–70 раз. Разбором всего
+       * выпуска Pro обходился бы в $27 в месяц при цене $9.99, то есть
+       * работал бы в минус на любом размере выпуска.
+       *
+       * Режется именно хвост, и не ради экономии как таковой: читатель
+       * открывает 16–18 карточек в день независимо от того, сорок их
+       * в выпуске или сто (замер по `reads` за 19–21 сентября), а порядок
+       * отбора и есть важность. Разбор достаётся тем, кого читают;
+       * остальные и раньше пролистывались — теперь они просто дешевле.
+       *
+       * Число — переменной, а не константой: это ручка цены, и крутить её
+       * придётся вместе с ценой тарифа, а не правкой кода.
+       */
+      const cards = readingCards();
+      const deep = survivors.slice(0, cards);
+      const plain = survivors.slice(cards);
+      const read = await writeReadingDigest(sql, deep, readerContext, voice, options);
+      if (!plain.length) return read;
+      // Хвост идёт обычным путём — тем же вызовом, но уже без разбора:
+      // `options` не передаётся, иначе он снова ушёл бы в ветку выше.
+      const rest = await writeDigest(plain, readerContext, voice);
+      return {
+        ...read,
+        // Вступление пишется по верхним карточкам и остаётся от них:
+        // второе, собранное по хвосту, спорило бы с первым.
+        items: [...read.items, ...rest.items],
+        flagged: (read.flagged ?? 0) + (rest.flagged ?? 0),
+        usage: {
+          input: read.usage.input + rest.usage.input,
+          output: read.usage.output + rest.usage.output,
+          cached: read.usage.cached + rest.usage.cached,
+          reasoning: read.usage.reasoning + rest.usage.reasoning,
+          requests: read.usage.requests + rest.usage.requests,
+        },
+      };
     }
   }
   const language = voice.language || "русском";
