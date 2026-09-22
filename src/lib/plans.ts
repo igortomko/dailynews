@@ -11,7 +11,6 @@
  * Поэтому предел применяется в двух местах, а живёт в одном.
  */
 import type { Source } from "./types";
-import { plural } from "./plural";
 
 export const PLAN_IDS = ["free", "plus", "pro"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
@@ -169,22 +168,6 @@ export function planOf(id: string | null | undefined): Plan {
 }
 
 /**
- * Как вид источника называется для читателя.
- *
- * Без словаря в строку отказа уходил ключ из базы: «Источники x есть только
- * на тарифе «Pro»», а для остальных вышло бы «Источники rss…». Ключ отвечает
- * на вопрос, каким кодом это заведено, — читатель такого не спрашивал.
- */
-const KIND_NAME: Record<Source["kind"], string> = {
-  rss: "Сайты и блоги",
-  hackernews: "Hacker News",
-  telegram: "Каналы Telegram",
-  email: "Рассылки на почту",
-  reddit: "Reddit",
-  x: "Посты из X",
-};
-
-/**
  * Слова отказа: чем заменить `KIND_NAME`/`.label` и как собрать фразу.
  * Форма — ровно то, что несёт `plans` из словаря (`src/lib/i18n/en|ru/plans.ts`),
  * но описана здесь своим типом, а не импортом словаря: `lib/plans.ts` считает
@@ -194,7 +177,11 @@ const KIND_NAME: Record<Source["kind"], string> = {
 type DenialText = {
   kindName: Record<Source["kind"], string>;
   label: Record<PlanId, string>;
-  kindOnlyOn: (kind: string, planNames: string) => string;
+  // Список тарифов приходит списком, а склеивает его словарь. Склейка
+  // здесь была русской — `join("», «")`, — и по-английски давала
+  // «is only on the Plus», «Pro plan». Разделитель — такое же слово,
+  // как остальная фраза, и жить ему там же, где она.
+  kindOnlyOn: (kind: string, planNames: string[]) => string;
   kindUnavailable: (kind: string) => string;
 };
 
@@ -205,31 +192,21 @@ type DenialText = {
  * при сохранении и до разбора ссылки. X — платный, у него счёт
  * за прочитанные посты, и разбор сам по себе уже стоит денег.
  *
- * Третий параметр — необязательный словарь. Принимает готовые слова,
+ * Третий параметр — словарь, и он обязателен. Принимает готовые слова,
  * а не отдаёт ключ отказа: вызывающему (`sources.ts`, `actions.ts`) нужна
  * готовая строка для тоста, а ключ переложил бы сборку фразы на каждый
- * вызов — там, где сейчас достаточно прочитать результат. По умолчанию —
- * русские слова, как было раньше: старые вызовы этой функции ещё не читают
- * язык читателя и продолжают получать тот же текст без единой правки на
- * своей стороне.
+ * вызов — там, где сейчас достаточно прочитать результат. Русские слова
+ * по умолчанию тут стояли и ровно один вызов их и получил: `discoverSource`
+ * отказывал по-русски читателю с английским интерфейсом. Отказ на чужом
+ * языке — это отказ, который выглядит как успех сборки.
  */
-export function kindDenial(plan: Plan, kind: Source["kind"], t: DenialText = RU_DENIAL_TEXT): string | null {
+export function kindDenial(plan: Plan, kind: Source["kind"], t: DenialText): string | null {
   if (plan.kinds.includes(kind)) return null;
   const where = PLAN_IDS.filter((id) => PLANS[id].kinds.includes(kind)).map((id) => t.label[id]);
   return where.length
-    ? t.kindOnlyOn(t.kindName[kind], where.join("», «"))
+    ? t.kindOnlyOn(t.kindName[kind], where)
     : t.kindUnavailable(t.kindName[kind]);
 }
-
-const RU_DENIAL_TEXT: DenialText = {
-  kindName: KIND_NAME,
-  // Из PLANS, а не отдельным литералом: другого источника русских имён
-  // тарифов в этом файле нет, и второй набор строк расходился бы с первым
-  // молча при следующей правке label.
-  label: Object.fromEntries(PLAN_IDS.map((id) => [id, PLANS[id].label])) as Record<PlanId, string>,
-  kindOnlyOn: (kindName, planNames) => `${kindName} — только на тарифе «${planNames}»`,
-  kindUnavailable: (kindName) => `${kindName} сейчас недоступны`,
-};
 
 /**
  * Что можно заказать. Список один на все тарифы, за чужими значениями —
@@ -276,20 +253,6 @@ export const targetMinutes = (minutes: number, plan: Plan, perCard: number) =>
   Math.min(minutesCap(minutes, plan), plan.maxItems * perCard);
 
 export const allows = (plan: Plan, section: Gated) => plan.sections.includes(section);
-
-/**
- * «2 интереса», «5 интересов» — форма нужна и в отказе, и в заглушке.
- *
- * Второй параметр — необязательная функция словаря (`t.plans.topicsWord`
- * из `src/lib/i18n/en|ru/plans.ts`), а не сам словарь: этой функции нужна ровно
- * одна форма множественного числа, и передавать ради неё весь объект —
- * лишний уровень распаковки на каждый вызов. По умолчанию — русская форма,
- * как и раньше: экраны, которые ещё не подключены к словарю (мастер
- * интересов, серверные действия), продолжают звать `topicsWord(n)` без
- * правок и получают тот же текст, что и до словаря.
- */
-export const topicsWord = (n: number, wordOf: (n: number) => string = RU_TOPICS_WORD) => wordOf(n);
-const RU_TOPICS_WORD = (n: number) => plural(n, "интерес", "интереса", "интересов");
 
 /** Самый дешёвый тариф, который открывает раздел. Для подписи в заглушке. */
 export const cheapestWith = (section: Gated): Plan =>

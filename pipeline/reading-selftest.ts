@@ -4,6 +4,8 @@ import { splitSource, composeDocument, analyzeSource, type Ask } from "./reading
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
 import { DEFAULT_VOICE } from "../src/lib/voice";
+import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
+import { en as EN_DICT } from "../src/lib/i18n/en/index";
 
 const evidence = (text: string, ...claimIds: string[]) => ({ text, claimIds });
 const analysis: ArticleAnalysis = { sourceVersion: "v", availability: "article_text", sections: [{
@@ -38,7 +40,9 @@ assert.equal(parts.map((p) => p.text).join(""), long);
 assert.ok(parts.at(-1)?.text.endsWith('final section.'));
 assert.ok(parts.every((p,i) => p.start === (i ? parts[i-1].end : 0)));
 assert.throws(() => splitSource('a'.repeat(160001)), /limit/);
-assert.equal(summaryTime(61), '1\u00a0мин 10\u00a0с');
+assert.equal(summaryTime(61, RU_DICT.feed.time), '1\u00a0мин 10\u00a0с');
+// «мин» и «с» тоже подписи, а не разметка: у английского они «min» и «s».
+assert.equal(summaryTime(61, EN_DICT.feed.time), '1\u00a0min 10\u00a0s');
 assert.equal(typography('на 5 км'), 'на\u00a05\u00a0км');
 assert.equal(typography('и в статье'), 'и\u00a0в\u00a0статье');
 assert.equal(typography('6 сентября'), '6\u00a0сентября');

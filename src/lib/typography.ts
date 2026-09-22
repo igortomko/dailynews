@@ -10,7 +10,10 @@ export function typography(value: string): string {
     .replace(/(Шаг|Этап) +(\d)/gu, "$1\u00a0$2")
     .replace(/(\d) +(из) +(\d)/gu, "$1\u00a0$2\u00a0$3");
 }
-export function summaryTime(seconds: number, labels = { summaryMinute: "мин", summarySecond: "с" }): string {
+export function summaryTime(
+  seconds: number,
+  labels: { summaryMinute: string; summarySecond: string },
+): string {
   const rounded = Math.max(10, Math.ceil(seconds / 10) * 10);
   const minutes = Math.floor(rounded / 60);
   const rest = rounded % 60;

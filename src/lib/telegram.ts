@@ -1,6 +1,12 @@
 import { equal } from "./auth";
 import { localeOf, type Locale } from "./i18n/locale";
 import { formatMinutesLong, isShort, shortfallNote } from "./reading-time";
+// Сообщение бота написано по-русски целиком — «Выпуск за…», «Читать», —
+// и время выпуска стоит внутри русской фразы. Словарь читателя дал бы
+// «Выпуск за 21 сентября — 19 min read»: полперевода заметнее, чем его
+// отсутствие. Русский назван вслух, чтобы тот, кто возьмётся переводить
+// бота, нашёл это место поиском, а не глазами на проде.
+import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 
 /**
  * Бот здесь делает две вещи: заводит читателя по /start и присылает ему
@@ -467,8 +473,8 @@ export async function notify(
   // Недобор называется вслух, а не заметается добором слабого материала:
   // короткий выпуск без объяснения читается как поломка отбора.
   const size = isShort(reading.minutes, reading.target)
-    ? shortfallNote(reading.minutes, reading.target)
-    : formatMinutesLong(reading.minutes);
+    ? shortfallNote(reading.minutes, reading.target, ruFeed.time)
+    : formatMinutesLong(reading.minutes, ruFeed.time);
 
   const text = [
     `<b>Выпуск за ${escapeHtml(dayInWords(day))}</b> — ${escapeHtml(size)}`,

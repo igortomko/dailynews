@@ -23,6 +23,9 @@ import { issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
 import {
   cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf,
 } from "../src/lib/reading-time";
+// Лог прогона владельческий и русский: «набран», «материалов», «пропуск».
+// Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
+import { feed as ruFeed } from "../src/lib/i18n/ru/feed";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { sleepVerdict } from "../src/lib/sleep";
 import { rulesOf } from "../src/lib/rules";
@@ -273,7 +276,7 @@ async function runForReader(
     const filled = minutesOf(today.chars, voice);
     log(
       `  ${name}: выпуск за ${day} ${isShort(filled, target) ? "добирать нечем" : "набран"} ` +
-      `(${formatMinutes(filled)} из ${Math.round(target)}, ${today.items} материалов) — пропуск`,
+      `(${formatMinutes(filled, ruFeed.time)} из ${Math.round(target)}, ${today.items} материалов) — пропуск`,
     );
     return 0;
   }
@@ -440,7 +443,7 @@ async function runForReader(
   }
 
   log(
-    `  ${name}: ${formatMinutes(minutes)} из ${Math.round(target)} заказанных, ` +
+    `  ${name}: ${formatMinutes(minutes, ruFeed.time)} из ${Math.round(target)} заказанных, ` +
     `${published.length} материалов, ` +
     (meanQuality === null
       ? (reader.reading_v2_enabled ? "выжимки сверены с доступным источником, " : "качество не меряли (промпт один на всех), ")

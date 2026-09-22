@@ -41,6 +41,14 @@ import { alsoLine, otherSources, storyLines, storyTitle } from "@/lib/story";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
 const SEEN_MS = 1500;
+/** Долгий тап: столько же, сколько у системного выделения на iOS. */
+const LONG_PRESS_MS = 500;
+/** Сдвиг пальца, после которого это уже прокрутка, а не удержание. */
+const LONG_PRESS_SLOP = 10;
+/** Столько после отпускания пальца нажатие считается хвостом удержания. */
+const LONG_PRESS_SUPPRESS_MS = 700;
+/** Отклик под пальцем там, где он есть (Android); iOS его не даёт. */
+const LONG_PRESS_VIBRATE_MS = 15;
 const DWELL_FLOOR_MS = 4000;
 
 /**
@@ -175,6 +183,83 @@ export function ItemCard({
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
+
+  // Долгий тап отмечает карточку для обзора. На телефоне чекбокс виден,
+  // но удержание — жест, которым выбирают строки в почте и мессенджерах,
+  // и рука тянется к нему раньше, чем глаз находит квадрат. Только с пальца:
+  // у мыши есть чекбокс и клавиша x, а удержание кнопки там ничего не значит.
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  // Сработавшее удержание гасит нажатие, которое браузер шлёт следом
+  // за отпусканием: иначе выбор карточки заодно открывал бы статью.
+  // Отсчёт идёт от отпускания пальца, а не от срабатывания таймера:
+  // палец держат сколько угодно, а хвостовое нажатие приходит сразу
+  // за отпусканием. Момент, а не флаг: флаг переживал бы жест без
+  // нажатия (палец ушёл в прокрутку) и глотал бы следующий Enter
+  // на заголовке — окно в семьсот миллисекунд пережить нельзя.
+  const fired = useRef(false);
+  // Минус бесконечность, а не ноль: нажатие в первые семьсот миллисекунд
+  // жизни страницы имеет timeStamp меньше окна, и ноль читался бы как
+  // «только что отпустили».
+  const releasedAt = useRef(Number.NEGATIVE_INFINITY);
+  // Таймер читает состояние на момент срабатывания, а не на момент касания:
+  // за полсекунды выбор могли снять с клавиатуры или из редактора, и снимок
+  // из замыкания вернул бы его обратно.
+  const selectedNow = useRef(selected);
+  useEffect(() => {
+    selectedNow.current = selected;
+  }, [selected]);
+  // Карточка может уйти раньше, чем истекут полсекунды (смена вкладки,
+  // обновление ленты): без отмены таймер дёрнул бы выбор у карточки,
+  // которой на экране уже нет.
+  useEffect(
+    () => () => {
+      if (press.current) clearTimeout(press.current.timer);
+    },
+    [],
+  );
+  const cancelPress = () => {
+    if (!press.current) return;
+    clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  // Окно взводится только на pointerup: после pointercancel (палец ушёл
+  // в прокрутку уже после срабатывания) хвостового нажатия не бывает,
+  // и взведённое окно глотало бы следующий настоящий тап.
+  // Часы одни — timeStamp события: с ним же сравнивается хвостовое нажатие.
+  const endPress = (event: React.PointerEvent) => {
+    cancelPress();
+    if (!fired.current) return;
+    fired.current = false;
+    releasedAt.current = event.timeStamp;
+  };
+  const dropPress = () => {
+    cancelPress();
+    fired.current = false;
+  };
+  const startPress = (event: React.PointerEvent) => {
+    // Новый жест закрывает чужое окно, если оно почему-то осталось.
+    fired.current = false;
+    releasedAt.current = Number.NEGATIVE_INFINITY;
+    if (event.pointerType !== "touch" || event.button !== 0) return;
+    cancelPress();
+    const { clientX: x, clientY: y } = event;
+    press.current = {
+      x,
+      y,
+      timer: setTimeout(() => {
+        press.current = null;
+        fired.current = true;
+        navigator.vibrate?.(LONG_PRESS_VIBRATE_MS);
+        onSelectedChange(!selectedNow.current);
+      }, LONG_PRESS_MS),
+    };
+  };
+  const movePress = (event: React.PointerEvent) => {
+    if (!press.current) return;
+    if (Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > LONG_PRESS_SLOP) {
+      cancelPress();
+    }
+  };
 
   // Знаменатель калибровки: что действительно дошло до экрана. Без него
   // доля открытий считается от показанного в дайджесте, а это другое число.
@@ -476,8 +561,26 @@ export function ItemCard({
     <article
       ref={article}
       data-selected={selected || undefined}
+      onPointerDown={startPress}
+      onPointerMove={movePress}
+      onPointerUp={endPress}
+      onPointerCancel={dropPress}
+      // Системное меню по удержанию (Android) и выделение текста (iOS)
+      // отбирали бы жест себе; на мыши правая кнопка работает как обычно.
+      onContextMenu={(event) => {
+        if (press.current || fired.current || event.timeStamp - releasedAt.current < LONG_PRESS_SUPPRESS_MS) {
+          event.preventDefault();
+        }
+      }}
+      onClickCapture={(event) => {
+        if (event.timeStamp - releasedAt.current > LONG_PRESS_SUPPRESS_MS) return;
+        releasedAt.current = Number.NEGATIVE_INFINITY;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
       className={cn(
         "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0",
+        "[@media(hover:none)]:select-none [@media(hover:none)]:[-webkit-touch-callout:none]",
         // Отмеченная карточка подсвечена всей строкой до краёв контейнера,
         // а не рамкой вокруг текста: рамка внутри полей читалась бы как
         // коробка в коробке. Фон приглушённый и постоянный — выбор должен
