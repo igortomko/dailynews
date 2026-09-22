@@ -522,7 +522,7 @@ export function ItemCard({
   const menuIcon =
     vote === "up" ? <ThumbsUpIcon className="size-4 text-foreground" /> : <EllipsisIcon className="size-4" />;
   const menuButton =
-    "flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
+    "flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
 
   if (vote === "down") {
     return (
@@ -719,8 +719,6 @@ export function ItemCard({
               aria-label={selected ? t.feed.overview.remove(title) : t.feed.overview.add(title)}
               className={cn(
                 "size-4 bg-card transition-[opacity,background-color,border-color] duration-150",
-                // На тапе цель под палец — сорок пикселей вокруг.
-                "[@media(hover:none)]:after:-inset-3",
                 selected || selecting ? "opacity-100" : QUIET,
               )}
             />

@@ -351,7 +351,7 @@ export function FeedTabs({
           управление лентой относится ко всей странице. Вкладки под ними
           по центру; когда не помещаются, начинают прокручиваться —
           семь тем по-русски не влезают ни в какую ширину. */}
-      <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur touch:bg-background touch:backdrop-blur-none">
         {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
             это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
         {/* Строка и поле лежат в одной клетке сетки и меняются местами
@@ -449,7 +449,7 @@ export function FeedTabs({
                    h-full вместо штатных calc(100%-1px): вкладка на пиксель
                    ниже полосы да ещё по центру не доставала до низа, и между
                    подчёркиванием и границей шапки оставался уступ. */
-                className="h-full px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground group-data-horizontal/tabs:after:bottom-0 sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
+                className="h-full px-2.5 pt-1 pb-3 text-sm whitespace-nowrap text-muted-foreground touch:min-h-11 group-data-horizontal/tabs:after:bottom-0 sm:px-2 sm:pb-2.5 sm:text-[0.8125rem] data-active:font-medium data-active:text-foreground"
               >
                 {tab.label}
                 <span className="ml-1.5 text-muted-foreground/70">{tab.count}</span>

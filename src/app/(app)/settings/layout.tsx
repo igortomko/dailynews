@@ -104,7 +104,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
           экрана списка, и перейти в соседний без прокрутки наверх иначе
           нельзя. Полоса выходит за поля страницы, чтобы под ней не
           просвечивал текст, и закрывается снизу тем же бордюром, что шапка. */}
-      <aside className="sticky top-14 z-10 -mx-4 -mt-6 flex shrink-0 flex-col gap-1 border-b bg-background/85 px-4 py-2 backdrop-blur sm:top-[4.5rem] sm:mx-0 sm:mt-0 sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+      <aside className="sticky top-14 z-10 -mx-4 -mt-6 flex shrink-0 flex-col gap-1 border-b bg-background/85 px-4 py-2 backdrop-blur touch:bg-background touch:backdrop-blur-none sm:top-[4.5rem] sm:mx-0 sm:mt-0 sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
         <SettingsNav plan={plan} />
         <form action={logout} className="mt-4 hidden sm:mt-auto sm:block">
           <Button variant="ghost" size="sm" type="submit" className="w-full justify-start px-2">

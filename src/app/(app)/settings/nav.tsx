@@ -68,7 +68,7 @@ export function SettingsNav({ plan }: { plan: Plan }) {
             prefetch={true}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "shrink-0 rounded-md px-2 py-1.5 text-sm whitespace-nowrap transition-colors",
+              "flex shrink-0 items-center rounded-md px-2 py-1.5 text-sm whitespace-nowrap transition-colors touch:min-h-10 touch:px-2.5",
               // Полупрозрачный тон вместо сплошной заливки: сплошная на сером
               // фоне читается как отдельный светлый блок поверх страницы,
               // а не как выделение внутри неё.
