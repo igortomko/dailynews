@@ -16,6 +16,7 @@ import {
   PauseIcon,
   CrownIcon,
   ChevronDownIcon,
+  ShareIcon,
   HeadphonesIcon,
   EyeIcon,
 } from "lucide-react";
@@ -458,6 +459,52 @@ export function ItemCard({
     } catch (error) {
       setKindle("idle");
       toast.error(error instanceof Error ? error.message : t.feed.item.kindleError);
+    }
+  };
+
+  /**
+   * Поделиться материалом.
+   *
+   * Уходит ссылка на статью и наш заголовок, а не адрес карточки: лента
+   * стоит за входом, и по нашему адресу получатель упрётся в дверь вместо
+   * новости. Описание в посылку не идёт по той же причине, по которой оно
+   * вообще есть: оно написано языком и сложностью этого читателя — это его
+   * текст, а не общая страница, и в чужом чате он объясняет не то.
+   *
+   * Сначала системное окно: на телефоне шеринг живёт там, и своего списка
+   * сетей ему не заменить — он не знает ни про чат, в котором переписываются
+   * сейчас, ни про то, что стоит на этом телефоне. Нет его (десктоп,
+   * небезопасный адрес) — ссылка уходит в буфер, и об этом говорится вслух:
+   * молча скопировать значит сделать вид, что ничего не произошло.
+   *
+   * Тарифом не закрыто и не будет: закрывать имеет смысл то, что стоит
+   * денег, а здесь нет ни одного вызова модели — и ровно этой кнопкой
+   * бесплатный читатель приводит следующего.
+   */
+  const share = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url: item.url });
+        return;
+      } catch (error) {
+        // Отмена своей же рукой приходит тем же исключением, что и отказ.
+        // Тост «не получилось» на закрытое окно — это ложь; всё остальное
+        // (нет разрешения, не тот контекст) лечится буфером ниже.
+        if ((error as Error).name === "AbortError") return;
+      }
+    }
+    try {
+      // Без буфера (небезопасный адрес, старый браузер) `clipboard`
+      // отсутствует вовсе — это тот же отказ, что и запрет доступа.
+      if (!navigator.clipboard) throw new Error("буфер недоступен");
+      await navigator.clipboard.writeText(item.url);
+      toast.success(t.feed.item.shareCopied, {
+        description: t.feed.item.shareCopiedDescription,
+      });
+    } catch {
+      toast.warning(t.feed.item.shareFailed, {
+        description: t.feed.item.shareFailedDescription,
+      });
     }
   };
 
@@ -955,6 +1002,13 @@ export function ItemCard({
                     : t.feed.item.kindleSend}
                 {canKindle ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
+              {/* После читалки и до «Своего мнения»: порядок тот же, что
+                  и в ряду под курсором, — отложить себе, отдать другому,
+                  написать своё. */}
+              <DropdownMenuItem onClick={share}>
+                <ShareIcon />
+                {t.feed.item.share}
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
                   if (!canPost) {
@@ -1105,6 +1159,21 @@ export function ItemCard({
               <CheckIcon className={cn("absolute", swap(kindle === "sent"))} />
               <BookOpenIcon className={swap(kindle === "idle")} />
             </span>
+          </Hint>
+
+          <Hint
+            live={hot}
+            tip={t.feed.item.shareTooltip}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.shareAria}
+                onClick={share}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground"
+              />
+            }
+          >
+            <ShareIcon className="size-3.5" />
           </Hint>
 
           <Hint

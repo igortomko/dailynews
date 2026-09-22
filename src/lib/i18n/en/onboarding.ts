@@ -41,7 +41,8 @@ export const onboarding = {
     },
     ready: {
       buildingTitle: "Building your first digest",
-      readyTitle: "Your feed is ready",
+      readyTitle: (added: number) => `${added} ${added === 1 ? "story" : "stories"} for today`,
+      emptyTitle: "Your feed is set up",
       buildingLead: "Picking from what came in overnight and writing the summaries.",
       readyLead: (everyOtherDay: boolean) =>
         `From now on, your digest arrives ${everyOtherDay ? "every other day" : "every night"}; the link is in the bot.`,
@@ -51,8 +52,8 @@ export const onboarding = {
         seconds > USUAL_SECONDS ? `${seconds}s. Longer than usual, still going.` : `${seconds}s. Usually under forty.`,
       noFreshItems: "No fresh stories for your topics yet — I'll build one tonight.",
       buildFailed: "Couldn't build the first digest — I'll try again tonight.",
-      digestSummary: (added: number, topics: number) =>
-        `Your first digest has ${added} ${added === 1 ? "story" : "stories"} across ${topics} ${topics === 1 ? "interest" : "interests"}.`,
+      byTopics: (topics: number) =>
+        `Picked across your ${topics} ${topics === 1 ? "interest" : "interests"} from everything that came in overnight.`,
     },
   },
   login: {
