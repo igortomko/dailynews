@@ -9,15 +9,51 @@ const block = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("quote"), attribution: text.max(160), content: supported.extend({ text: text.max(500) }) }).strict(),
   z.object({ kind: z.literal("qa"), items: z.array(z.object({ question: supported, answer: supported }).strict()).min(1).max(3) }).strict(),
   z.object({ kind: z.literal("flow"), nodes: z.array(z.object({ value: text, label: text, claimIds: ids }).strict()).min(2).max(4), relations: z.array(z.enum(["earns", "equivalent", "leads_to", "follows"])).min(1).max(3) }).strict(),
-  z.object({ kind: z.literal("comparison"), commonBasis: supported, emphasis: z.enum(["label", "content"]), items: z.array(z.object({ label: text, content: supported }).strict()).length(2) }).strict(),
+  z.object({ kind: z.literal("comparison"), commonBasis: supported, emphasis: z.enum(["label", "content"]), items: z.array(z.object({ label: text, content: supported }).strict()).min(2).max(4) }).strict(),
   z.object({ kind: z.literal("metric"), value: text, label: text, context: supported }).strict(),
+  // Ряд чисел — не тот же блок, что metric: одно число это герой карточки,
+  // два-четыре — таблица результатов, и крупным кеглем они спорят друг
+  // с другом. Замер на выпусках 21–22 сентября: у десяти карточек из
+  // тридцати пяти было три и больше измеримых чисел, а показать их рядом
+  // было нечем — они уходили в прозу поодиночке.
+  z.object({ kind: z.literal("figures"), items: z.array(z.object({ value: text, label: text, claimIds: ids }).strict()).min(2).max(4), context: supported.nullable() }).strict(),
+  // Разоблачение — обычный сюжет технической ленты: «обещали X, на деле Y».
+  // Сравнением его не выразить: у сторон разный статус, а не общий базис.
+  z.object({ kind: z.literal("correction"), claim: text, reality: supported }).strict(),
   z.object({ kind: z.literal("steps"), sequence: z.enum(["procedure", "timeline"]), items: z.array(z.object({ label: text, content: supported, state: z.enum(["done", "current", "planned", "unspecified"]) }).strict()).min(2).max(6) }).strict(),
   z.object({ kind: z.literal("takeaway"), attribution: text, content: supported }).strict(),
 ]);
+/**
+ * Редакционная форма карточки. Она называется до письма, а не выводится
+ * после: пока форма была необязательной опцией в конце промпта, её получали
+ * семь карточек из тридцати пяти — при том что у десяти в тексте лежало
+ * по три измеримых числа. Решение, принятое заранее и подкреплённое
+ * утверждениями источника, проверяется кодом: документ, не совпавший
+ * со своим планом, отправляется на переделку.
+ */
+export const editorialFormat = z.enum([
+  "brief", "story", "bullets", "steps", "timeline", "data", "figures",
+  "quote", "comparison", "mechanism", "qa", "correction",
+]);
+export type EditorialFormat = z.infer<typeof editorialFormat>;
+export const formatPlanSchema = z.object({
+  format: editorialFormat,
+  reason: z.string().trim().min(1).max(420),
+  claimIds: ids,
+  fallback: editorialFormat,
+}).strict();
 export const documentSchema = z.object({
   schemaVersion: z.literal(2),
   genre: z.enum(["news", "explanation", "research", "narrative", "argument", "investigation"]),
   title: supported.extend({ text: text.max(180) }),
+  /**
+   * Ответ на главный вопрос — первый слой карточки: его видно свёрнутым,
+   * остальное раскрывается. Поле необязательное, потому что выпуски,
+   * написанные до двухслойного чтения, лежат в базе и должны читаться:
+   * у них первым слоем остаётся лид.
+   */
+  answer: supported.extend({ text: text.max(600) }).nullable().optional(),
+  formatPlan: formatPlanSchema.optional(),
   lead: supported.nullable(),
   blocks: z.array(block).min(1).max(8),
   evidence: supported.nullable(),
@@ -27,6 +63,11 @@ export const documentSchema = z.object({
 }).strict();
 export type ReadingDocument = z.infer<typeof documentSchema>;
 export type ReadingBlock = ReadingDocument["blocks"][number];
+/** Какой блок обязан появиться у формы, если она выбрана. */
+export const formatBlock: Partial<Record<EditorialFormat, ReadingBlock["kind"]>> = {
+  bullets: "list", steps: "steps", timeline: "steps", data: "metric", figures: "figures",
+  quote: "quote", comparison: "comparison", mechanism: "flow", qa: "qa", correction: "correction",
+};
 export type SourceAvailability = "article_text" | "feed_text" | "excerpt_only" | "derived_summary";
 export type StoredReading = {
   version: 2;
@@ -60,8 +101,9 @@ export const auditSchema = z.object({ defects: z.array(z.object({
 export const auditDefects = (result: z.infer<typeof auditSchema>) => result.defects.map(d => `${d.kind}: ${d.issue} Source: ${d.sourceEvidence} Required correction: ${d.correction}`);
 
 export const isAccent = (b: ReadingBlock) => !["paragraph", "list", "qa"].includes(b.kind);
+export const ACCENT_KINDS = ["flow", "comparison", "metric", "figures", "steps", "takeaway", "quote", "correction"] as const;
 export function supportedFields(doc: ReadingDocument): z.infer<typeof supported>[] {
-  const values = [doc.title, ...(doc.lead ? [doc.lead] : [])];
+  const values = [doc.title, ...(doc.answer ? [doc.answer] : []), ...(doc.lead ? [doc.lead] : [])];
   for (const b of doc.blocks) {
     switch (b.kind) {
       case "paragraph": case "takeaway": case "quote": values.push(b.content); break;
@@ -70,6 +112,8 @@ export function supportedFields(doc: ReadingDocument): z.infer<typeof supported>
       case "flow": values.push(...b.nodes.map((n) => ({ text: `${n.value} ${n.label}`, claimIds: n.claimIds }))); break;
       case "comparison": values.push(b.commonBasis, ...b.items.map((i) => i.content)); break;
       case "metric": values.push(b.context); break;
+      case "figures": values.push(...b.items.map((i) => ({ text: `${i.value} ${i.label}`, claimIds: i.claimIds })), ...(b.context ? [b.context] : [])); break;
+      case "correction": values.push(b.reality); break;
       case "steps": values.push(...b.items.map((i) => i.content)); break;
     }
   }
@@ -87,14 +131,26 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   const issues: string[] = [];
   const words = `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
   const limit = ["narrative", "argument", "investigation"].includes(doc.genre) ? 320 : 220;
-  if (words > limit) issues.push(`Summary is ${words} words; maximum ${limit}. Merge related facts, remove repeated claims and omit minor setup, biography, names and examples. Keep the main mechanism, result and evidence limits.`);
-  if (!doc.lead) {
-    issues.push("Missing a 35–60 word lead that answers the article's central question before the details.");
+  // Цель называется точной, а отказ наступает на десятую часть позже.
+  // Лимит — редакционная мерка, а не обещание читателю: время выпуска
+  // считается по написанному тексту. Сверенная карточка, выброшенная
+  // за десять лишних слов, стоит читателю новости целиком — 21 сентября
+  // так ушёл «AMD briefly joins the $1T club» (230 слов при 220).
+  if (words > Math.round(limit * 1.1)) issues.push(`Summary is ${words} words; maximum ${limit}. Merge related facts, remove repeated claims and omit minor setup, biography, names and examples. Keep the main mechanism, result and evidence limits.`);
+  // Первый слой карточки: у новых документов это answer, у написанных
+  // до двухслойного чтения — лид. Требование к нему одно и то же, иначе
+  // старые выпуски стали бы дефектными задним числом.
+  const opener = doc.answer ?? doc.lead;
+  if (!opener) {
+    issues.push("Missing a 35–60 word answer that closes the article's central question before the details.");
   } else {
-    const leadWords = doc.lead.text.split(/\s+/u).filter(Boolean).length;
-    if (leadWords < 35 || leadWords > 60) {
-      issues.push(`Lead is ${leadWords} words; it must answer the central question in 35–60 words before the details.`);
+    const openerWords = opener.text.split(/\s+/u).filter(Boolean).length;
+    if (openerWords < 35 || openerWords > 60) {
+      issues.push(`The answer is ${openerWords} words; it must close the central question in 35–60 words before the details.`);
     }
+  }
+  if (doc.answer && doc.lead && normalize(doc.answer.text) === normalize(doc.lead.text)) {
+    issues.push("The lead repeats the answer; it must add detail or be null.");
   }
   const claims = analysis.sections.flatMap((s) => s.claims);
   const known = new Set(claims.map((c) => c.id));
@@ -106,6 +162,16 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
     if (claim.importance === "critical" && !visible.has(claim.id)) issues.push(`Missing critical claim ${claim.id}: ${claim.text}`);
     else if (!visible.has(claim.id) && !omitted.has(claim.id)) issues.push(`Account for claim ${claim.id} in text or omitted with a reason.`);
     if (visible.has(claim.id) && omitted.has(claim.id)) issues.push(`Claim ${claim.id} is both visible and omitted.`);
+  }
+  // План формы проверяется, а не принимается на слово: форма, названная
+  // в плане и не собранная в документе, — это возврат к прозе под видом
+  // решения. Запасная форма на то и запасная: не вышло — план называет её.
+  if (doc.formatPlan) {
+    for (const id of doc.formatPlan.claimIds) if (!known.has(id)) issues.push(`Unknown format-plan claim ${id}`);
+    const required = formatBlock[doc.formatPlan.format];
+    if (required && !doc.blocks.some((b) => b.kind === required)) {
+      issues.push(`Format ${doc.formatPlan.format} requires a ${required} block. Build it from the cited claims, or set the plan to your fallback form and write that one.`);
+    }
   }
   if (doc.application && !normalize(context).includes(normalize(doc.application.contextQuote))) issues.push("Application must cite an exact relevant statement from the reader context, or be null.");
   if (doc.baselineId !== null && !baselineIds.includes(doc.baselineId)) issues.push("Unknown previous article.");
@@ -121,8 +187,19 @@ export function validateQuotes(doc: ReadingDocument, source: string): string[] {
   }
   return issues;
 }
+/**
+ * Сколько утверждений секции обязаны попасть в карточку. Замер на живом
+ * выпуске 22 сентября 2026: при семи и меньше собрались все девятнадцать
+ * карточек, при восьми и больше треть не собралась вовсе — «все critical
+ * видимы» и «не длиннее 220 слов» несовместимы, когда обязательных
+ * утверждений двадцать пять. Отказ выглядел как разовая осечка модели,
+ * а был арифметикой.
+ */
+export const CRITICAL_PER_SECTION = 7;
 export function validateSection(section: z.infer<typeof sectionSchema>, source: string): string[] {
   const errors: string[] = [];
+  const critical = section.claims.filter((c) => c.importance === "critical").length;
+  if (critical > CRITICAL_PER_SECTION) errors.push(`${critical} critical claims; at most ${CRITICAL_PER_SECTION} per section. Keep only what a reader MUST remember to retell the central finding or story; demote the rest to major or detail.`);
   if (new Set(section.claims.map((c) => c.id)).size !== section.claims.length) errors.push("Duplicate claim IDs");
   for (const c of section.claims) if (!normalize(source).includes(normalize(c.quote))) errors.push(`Quote for ${c.id} was not found: ${JSON.stringify(c.quote)}. Replace it with a SHORT exact substring (3-15 words) of the supplied source supporting this claim.`);
   return errors;
@@ -138,13 +215,16 @@ export function blockText(b: ReadingBlock): string {
     case "flow": return b.nodes.map((n, i) => `${i ? `${relationText[b.relations[i - 1]]} ` : ""}${n.value} ${n.label}`).join(" ");
     case "comparison": return `${b.commonBasis.text}\n${b.items.map((i) => `${i.label}: ${i.content.text}`).join("\n")}`;
     case "metric": return `${b.value} ${b.label}\n${b.context.text}`;
+    case "figures": return [b.items.map((i) => `${i.value} ${i.label}`).join(" · "), b.context?.text].filter(Boolean).join("\n");
+    case "correction": return `${b.claim}\n${b.reality.text}`;
     case "steps": return b.items.map((i, at) => `${at + 1}. ${i.label}${stepStateText[i.state] ? ` (${stepStateText[i.state]})` : ""}: ${i.content.text}`).join("\n");
     case "takeaway": return `${b.content.text}\n${b.attribution}`;
     case "quote": return `“${b.content.text}”\n— ${b.attribution}`;
   }
 }
 export function documentText(doc: ReadingDocument): string {
-  return [doc.lead?.text, ...doc.blocks.map(blockText), doc.application && `${doc.application.condition} ${doc.application.text}`, doc.evidence?.text].filter(Boolean).join("\n\n");
+  const details = doc.lead && doc.answer && normalize(doc.lead.text) === normalize(doc.answer.text) ? null : doc.lead?.text;
+  return [doc.answer?.text, details, ...doc.blocks.map(blockText), doc.application && `${doc.application.condition} ${doc.application.text}`, doc.evidence?.text].filter(Boolean).join("\n\n");
 }
 /**
  * Документ чтения обычным текстом — ровно то же и в том же порядке, что
@@ -165,7 +245,7 @@ export const readingText = (reading: StoredReading): string =>
  * из одного числа хуже абзаца, но лучше пустого места.
  */
 export const readingLead = (reading: StoredReading): string =>
-  [reading.notice, reading.document && (reading.document.lead?.text
+  [reading.notice, reading.document && (reading.document.answer?.text ?? reading.document.lead?.text
     ?? blockText(reading.document.blocks.find((b) => b.kind === "paragraph") ?? reading.document.blocks[0]))]
     .filter(Boolean).join("\n\n");
 export function parseStoredReading(value: unknown): StoredReading | null {

@@ -2269,6 +2269,11 @@ async function main() {
       await sql`update dailynews.digest_items set summary_document=${sql.json(record)} where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
       const afterUnavailable = await readers.digestProgress(owner.id, null);
       assert.equal(afterUnavailable.items, beforeUnavailable.items - 1, "unavailable summaries do not fill usable card capacity");
+      // Выпуски, собранные прежней версией, держат заглушки. Отбор и прогресс
+      // их не считают — лента и поиск не должны быть единственным местом,
+      // где читатель встречает «выжимку подготовить не удалось».
+      assert.ok(!(await queries.getFeed(owner.id, null)).some(card => card.id === placeholder.item_id), "a stored placeholder never reaches the feed");
+      assert.ok(!(await queries.searchArchive(owner.id, 'выжимку')).hits.some(hit => hit.item_id === placeholder.item_id), "a stored placeholder never answers a search");
       await sql`update dailynews.digest_items set summary_document=null where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
     }
     const good = { ...record, status: "verified" as const };
@@ -2298,6 +2303,23 @@ async function main() {
     }
     await sql`update dailynews.readers set exclude_rules='[]'::jsonb where id=${owner.id}`;
     console.log("  reading: full-source exclusions prevent generation and hide existing cards");
+
+    // Материал, для которого проверенной выжимки не вышло, карточкой
+    // не становится: заглушка «подготовить не удалось» занимала место
+    // новости в ленте, в сообщении, в книге и в подкасте. Ключ модели
+    // здесь снимается нарочно — отказ нужен настоящий, а сеть не нужна.
+    const modelKey = process.env.LLM_API_KEY;
+    delete process.env.LLM_API_KEY;
+    try {
+      const failed = await writeReadingDigest(sql, [{ id: deep[0], title: 'Neutral title', excerpt: 'Neutral teaser', body: null,
+        url: 'https://example.com/full-source', source_label: 'Source', topic_label: 'Topic', total: 0, axes: {} as import("../src/lib/types").Axes }],
+        '', { language: 'русском', complexity: 3, style: 'нейтральный' }, { readerId: owner.id, force: true });
+      assert.equal(failed.items.length, 0, "a card without a verified summary never reaches the edition");
+      assert.deepEqual(failed.unavailableIds, [deep[0]], "the failure is named, not published");
+    } finally {
+      if (modelKey) process.env.LLM_API_KEY = modelKey;
+    }
+    console.log("  reading: an unverified summary is dropped instead of shown as a placeholder");
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
