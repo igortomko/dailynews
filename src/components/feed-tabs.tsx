@@ -95,10 +95,17 @@ function ToTop({ lifted }: { lifted: boolean }) {
  * `visibility` едет в переходе вместе с ними: без неё ушедший слой ловил бы
  * мышь поверх пришедшего. `motion-reduce` выключает переход целиком —
  * попросившему систему ничего не двигать поле открывается мгновенно.
+ *
+ * `min-w-0` обязателен: слой — элемент сетки, а у него минимальная ширина
+ * по умолчанию равна содержимому. Полоса вкладок внутри прокручивается,
+ * но её собственная ширина — все вкладки в ряд, и слой растягивался под
+ * неё: на телефоне шапка выходила за экран вдвое, страница отдалялась,
+ * чтобы вместить её, а над шапкой оставалась полоса, сквозь которую
+ * просвечивал текст.
  */
 const layerClass = (shown: boolean, from: "above" | "below", extra?: string) =>
   cn(
-    "col-start-1 row-start-1 transition-[opacity,translate,visibility] duration-150 ease-out",
+    "col-start-1 row-start-1 min-w-0 transition-[opacity,translate,visibility] duration-150 ease-out",
     "motion-reduce:transition-none",
     shown
       ? "visible translate-y-0 opacity-100"
@@ -461,10 +468,15 @@ export function FeedTabs({
         до обрезанного было нельзя, горизонтальной прокрутки нет.
       */}
       {/* Снизу — место под плашку выбора, пока она есть: иначе последняя
-          карточка выпуска лежала бы под ней, и дочитать её было бы нельзя. */}
+          карточка выпуска лежала бы под ней, и дочитать её было бы нельзя.
+
+          На телефоне карточки нет: белая колонка со скруглением и тенью
+          на экране в 390 пикселей — это рамка вокруг текста, отнимающая
+          у него ширину. Белым становится сама страница под шапкой,
+          а текст идёт от края до края с обычным полем. */}
       <div
         className={cn(
-          "mx-auto w-full max-w-page px-4 pt-4 sm:pt-6",
+          "mx-auto w-full max-w-page bg-card px-4 pt-4 sm:bg-transparent sm:pt-6",
           selecting ? "pb-24" : "pb-4 sm:pb-6",
         )}
       >
@@ -491,7 +503,7 @@ export function FeedTabs({
             .
           </p>
         ) : null}
-        <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
+        <div className="sm:rounded-xl sm:bg-card sm:px-6 sm:shadow-(--shadow-border)">
       {items.length === 0 && hidden > 0 ? (
         // Выпуск есть, но исключения закрыли его целиком. Спокойно и с выходом:
         // пустая лента без причины и без ссылки — тупик, и чинить её пошли бы

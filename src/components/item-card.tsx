@@ -40,6 +40,10 @@ import { alsoLine, otherSources, storyLines, storyTitle } from "@/lib/story";
 
 /** Ниже этого порога материал попался на глаза, но прочитан не был. */
 const SEEN_MS = 1500;
+/** Долгий тап: столько же, сколько у системного выделения на iOS. */
+const LONG_PRESS_MS = 500;
+/** Сдвиг пальца, после которого это уже прокрутка, а не удержание. */
+const LONG_PRESS_SLOP = 10;
 const DWELL_FLOOR_MS = 4000;
 
 /**
@@ -136,6 +140,42 @@ export function ItemCard({
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
+
+  // Долгий тап отмечает карточку для обзора. На телефоне чекбокс виден,
+  // но удержание — жест, которым выбирают строки в почте и мессенджерах,
+  // и рука тянется к нему раньше, чем глаз находит квадрат. Только с пальца:
+  // у мыши есть чекбокс и клавиша x, а удержание кнопки там ничего не значит.
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  // Сработавшее удержание гасит нажатие, которое браузер шлёт следом
+  // за отпусканием: иначе выбор карточки заодно открывал бы статью.
+  const longPressed = useRef(false);
+  const cancelPress = () => {
+    if (!press.current) return;
+    clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  const startPress = (event: React.PointerEvent) => {
+    longPressed.current = false;
+    if (event.pointerType !== "touch" || event.button !== 0) return;
+    cancelPress();
+    const { clientX: x, clientY: y } = event;
+    press.current = {
+      x,
+      y,
+      timer: setTimeout(() => {
+        press.current = null;
+        longPressed.current = true;
+        navigator.vibrate?.(15);
+        onSelectedChange(!selected);
+      }, LONG_PRESS_MS),
+    };
+  };
+  const movePress = (event: React.PointerEvent) => {
+    if (!press.current) return;
+    if (Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > LONG_PRESS_SLOP) {
+      cancelPress();
+    }
+  };
 
   // Знаменатель калибровки: что действительно дошло до экрана. Без него
   // доля открытий считается от показанного в дайджесте, а это другое число.
@@ -349,8 +389,24 @@ export function ItemCard({
     <article
       ref={article}
       data-selected={selected || undefined}
+      onPointerDown={startPress}
+      onPointerMove={movePress}
+      onPointerUp={cancelPress}
+      onPointerCancel={cancelPress}
+      // Системное меню по удержанию (Android) и выделение текста (iOS)
+      // отбирали бы жест себе; на мыши правая кнопка работает как обычно.
+      onContextMenu={(event) => {
+        if (press.current || longPressed.current) event.preventDefault();
+      }}
+      onClickCapture={(event) => {
+        if (!longPressed.current) return;
+        longPressed.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
       className={cn(
         "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0",
+        "[@media(hover:none)]:select-none [@media(hover:none)]:[-webkit-touch-callout:none]",
         // Отмеченная карточка подсвечена всей строкой до краёв контейнера,
         // а не рамкой вокруг текста: рамка внутри полей читалась бы как
         // коробка в коробке. Фон приглушённый и постоянный — выбор должен
