@@ -2197,7 +2197,7 @@ import { samplePairs } from "./translation-quality";
 import { articleBlocker } from "./kindle";
 import { iconHref, publicHost } from "../src/lib/favicon";
 import { LEAD_CARDS, readingCards, readingPicks } from "./reading";
-import { AUDIT_ALARM } from "./reading-gate";
+import { AUDIT_ALARM, CLAIM_ALARM } from "./reading-gate";
 import { JEV_BASELINE, jevVersionNote } from "../src/lib/jev-version";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
@@ -2270,6 +2270,10 @@ assert.match(
   // Замер 22 сентября 2026 на 28 карточках: на этом пороге тревога встаёт
   // у 18% чистых, ловится 93% подменённых чисел и 100% дописанных выводов.
   assert.equal(AUDIT_ALARM, 0.5, "порог взят замером, а не на глаз: ниже растут ложные тревоги, выше падает ловля чисел");
+  // Тот же порог у привратника по парам перед сверкой анализа: на 971
+  // утверждении 0,5 ловит 98% подменённых чисел, 0,7 — 95%, а отдаёт
+  // за это лишь 11% секций. Полнота, а не экономия.
+  assert.equal(CLAIM_ALARM, 0.5, "порог пары взят тем же замером и с тем же выбором полноты");
 }
 
 // Разбор достаётся тому, где есть что разбирать, но порядок остаётся
@@ -2300,6 +2304,14 @@ assert.match(
   const shorts = readingPicks([item(1, 500), item(2, 900)], 5);
   assert.equal(shorts.deep.length, 0, "у коротких материалов разбора нет вовсе");
   assert.equal(shorts.plain.length, 2, "и все они уходят обычным путём");
+
+  // Мерка — текст, а не тело с разметкой: у материала из ленты тело бывает
+  // на треть тегами. На выпуске 21 сентября 2026 у ZetaChain было 3967
+  // знаков сырого тела и 2961 после stripHtml — сырое число пустило бы
+  // его в разбор.
+  const markup = { id: 1, body: "<p>" + "<a href=\"https://example.com/x\">я</a>".repeat(120) + "</p>", excerpt: "анонс" };
+  assert.ok(markup.body.length > 3000, "сырое тело длиннее порога");
+  assert.equal(readingPicks([markup], 5).deep.length, 0, "разметка не считается текстом");
 
   // Предел соблюдается даже когда подходящих больше, и две карточки
   // Plus расходятся по половинам выпуска: разборы подряд наверху читались бы

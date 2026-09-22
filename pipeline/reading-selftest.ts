@@ -167,6 +167,19 @@ async function main() {
   const grounded = await analyzeSource(extract, long, 'Story', 'v', 'article_text');
   assert.equal(visited.join(''), long, 'the extractor sees every character, including the end');
   assert.ok(grounded.sections.at(-1)!.claims[0].quote.endsWith('final section.'), 'source evidence is attached from the original span, not copied by the model');
+  // Привратник перед сверкой анализа: уверенное «подтверждается» по всем
+  // парам отменяет дорогой вызов, тревога зовёт его, а без привратника
+  // сверка идёт всегда — как и до него.
+  const audited: string[] = [];
+  const counting: Ask = async (phase, rules, data, schema) => { audited.push(phase); return extract(phase, rules, data, schema); };
+  await analyzeSource(counting, long, 'Story', 'v', 'article_text', async () => false);
+  assert.ok(!audited.includes('source-audit'), 'чистые пары отменяют сверку анализа');
+  audited.length = 0;
+  await analyzeSource(counting, long, 'Story', 'v', 'article_text', async () => true);
+  assert.ok(audited.includes('source-audit'), 'тревога привратника зовёт сверку');
+  audited.length = 0;
+  await analyzeSource(counting, long, 'Story', 'v', 'article_text');
+  assert.ok(audited.includes('source-audit'), 'без привратника сверка идёт всегда');
   const phases: string[] = [];
   const ask: Ask = async (phase, _rules, _data, schema) => {
     phases.push(phase);
@@ -181,13 +194,13 @@ async function main() {
   // кусков, а модель объявляет неподтверждённым то, что подтверждено
   // страницей раньше.
   const wholeArticle: string[] = [];
-  const counting: Ask = async (phase, _rules, data, schema) => {
+  const countingVerify: Ask = async (phase, _rules, data, schema) => {
     if (phase === "verify") wholeArticle.push((data as { sourceSection: { text: string } }).sourceSection.text);
     return schema.parse(phase.startsWith("compose") ? valid : { defects: [] });
   };
   const longSource = `${"Speed improved. No effect on accuracy. 24 participants. ".repeat(600)}`;
   assert.ok(longSource.length > 30_000 && longSource.length < VERIFY_SOURCE_CHARS, 'источник замера длиннее трёх кусков извлечения');
-  await composeDocument(counting, longSource, analysis, "", DEFAULT_VOICE, "Research", []);
+  await composeDocument(countingVerify, longSource, analysis, "", DEFAULT_VOICE, "Research", []);
   assert.equal(wholeArticle.length, 1, 'статья на тридцать тысяч знаков проверяется одним вызовом, а не тремя');
   const semanticPhases: string[] = [];
   const semanticRepair: Ask = async (phase, _rules, _data, schema) => {

@@ -16,7 +16,7 @@ import {
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
-import { auditNeeded } from "./reading-gate";
+import { auditNeeded, sectionAuditNeeded } from "./reading-gate";
 import { acquireAnalysis, finishAnalysis, getDocument, saveDocument, reserveCall, settleCall, recentBaselines, ReadingBudgetError, ReadingBusyError, type Baseline } from "./reading-store";
 
 export type ReadingOptions = { readerId: number; force?: boolean };
@@ -146,7 +146,13 @@ function caller(sql: Sql, readerId: number, usage: Usage): Ask {
 
 const extractionSchema = sectionSchema.extend({ claims: z.array(claimSchema.omit({ quote: true }).extend({ sourceSpan: z.number().int().positive() })).min(1).max(100) });
 
-export async function analyzeSource(ask: Ask, source: string, title: string, sourceVersion: string, availability: SourceAvailability): Promise<ArticleAnalysis> {
+/**
+ * Решает, звать ли дорогую сверку анализа с текстом. Параметром, как
+ * и у документа: проверка подменяет его, а замер отключает.
+ */
+export type SectionGate = (spans: { id: number; text: string }[], claims: { id: string; text: string; sourceSpan: number }[]) => Promise<boolean>;
+
+export async function analyzeSource(ask: Ask, source: string, title: string, sourceVersion: string, availability: SourceAvailability, gate?: SectionGate): Promise<ArticleAnalysis> {
   const sections: ArticleAnalysis['sections'] = [];
   for (const part of splitSource(source)) {
     const spans = splitSource(part.text, 1600).map((span, at) => ({ id: at + 1, text: span.text }));
@@ -157,7 +163,10 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
     const check = async () => {
       const errors = raw.claims.filter(c => !spans[c.sourceSpan - 1]).map(c => `Claim ${c.id} must reference an existing sourceSpan between 1 and ${spans.length}.`);
       errors.push(...validateSection(extracted, part.text));
-      if (!errors.length) errors.push(...auditDefects(await ask("source-audit", VERIFY_RULES, { ...input, analysis: raw }, auditSchema)));
+      // Дешёвый вопрос по каждой паре «утверждение ↔ отрывок» впереди
+      // дорогой сверки: только уверенное «подтверждается» по всем парам
+      // отменяет её — см. `sectionAuditNeeded` в `reading-gate.ts`.
+      if (!errors.length && (!gate || await gate(spans, raw.claims))) errors.push(...auditDefects(await ask("source-audit", VERIFY_RULES, { ...input, analysis: raw }, auditSchema)));
       return errors;
     };
     let errors = await check();
@@ -243,7 +252,9 @@ export function readingPicks<T extends { id: number; body?: string | null; excer
   cards = readingCards(),
   minChars = READING_MIN_CHARS,
 ): { deep: T[]; plain: T[] } {
-  const fits = (item: T) => (item.body ?? "").length >= minChars;
+  // Мерка — текст, а не тело с разметкой: у материала из ленты тело
+  // бывает на треть тегами, и сырое число пускало бы в разбор пустое.
+  const fits = (item: T) => stripHtml(item.body ?? "").length >= minChars;
   const chosen = new Set<number>();
   const windows = Math.min(Math.max(Math.trunc(cards), 0), survivors.length);
   const size = windows ? survivors.length / windows : 0;
@@ -400,7 +411,8 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       analysisKey = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion]));
       const shared = await acquireAnalysis(sql, item.id, analysisKey, sourceVersion);
       lease = shared.token;
-      const analysis = shared.analysis ?? await analyzeSource(ask, source.text, item.title, sourceVersion, availability);
+      const analysis = shared.analysis ?? await analyzeSource(ask, source.text, item.title, sourceVersion, availability,
+        (spans, claims) => sectionAuditNeeded(spans, claims, options.readerId));
       if (lease) { await finishAnalysis(sql, analysisKey, lease, analysis); lease = null; }
       const document = await composeDocument(
         ask, source.text, analysis, readerContext, voice, item.topic_label, baselines, prominence,

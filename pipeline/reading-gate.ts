@@ -1,5 +1,6 @@
 import { TypeSafeClient, choice } from "@typesafe-ai/sdk";
 import { jevCost } from "./cost";
+import { pooled } from "./fetch";
 
 /**
  * Дешёвый привратник перед дорогой сверкой документа с источником.
@@ -79,4 +80,89 @@ export async function auditNeeded(
     // Сторож молчит — сверяем дорогой моделью, как и раньше.
     return true;
   }
+}
+
+/**
+ * Привратник перед сверкой анализа с текстом (`source-audit`) — самой
+ * дорогой фазой разбора: 35% счёта, и 99,3% её выхода — рассуждение.
+ *
+ * Вопрос про весь список утверждений здесь не работает, и это замер:
+ * на полусотне переформулированных утверждений Jev находил «расхождение»
+ * в 93–100% чистых секций. Поэтому спрашивается не список, а пара —
+ * одно утверждение и отрывок, на который оно ссылается, — и по одному
+ * запросу на утверждение: пятнадцать вопросов в одном запросе ловили
+ * дописанный вывод в 57% случаев, по одному — в 100%. Отрывок отдаётся
+ * с соседями: утверждение, склеенное из двух соседних абзацев, без них
+ * читается как выдуманное (14% ложных тревог против 8%).
+ *
+ * Как и перед `verify`, только уверенное «подтверждается» по каждому
+ * утверждению отменяет дорогой вызов; первая же тревога зовёт сверку,
+ * и остальные пары не спрашиваются. Отказ Jev — тоже «звать».
+ *
+ * Замер 22 сентября 2026: 971 утверждение из 49 секций, прошедших дорогую
+ * сверку на проде, плюс те же утверждения с подменённым числом (450)
+ * и с дописанным выводом (971). На пороге 0,5 тревога поднимается
+ * на 4,9% чистых утверждений — то есть на трети секций, — ловит 98%
+ * подменённых чисел и 100% дописанных выводов. Порог 0,7 отдавал бы ещё
+ * 11% секций за 3% чисел; выбрана полнота, как и перед `verify`.
+ * Вопрос стоит 1 300 токенов входа, $0.00005; секция в пятнадцать
+ * утверждений — $0.0008 против $0.0048 за сверку.
+ */
+export const CLAIM_ALARM = 0.5;
+
+export type Span = { id: number; text: string };
+export type ClaimPair = { id: string; text: string; sourceSpan: number };
+
+export async function sectionAuditNeeded(spans: Span[], claims: ClaimPair[], readerId: number): Promise<boolean> {
+  const client = new TypeSafeClient();
+  const usage = { input: 0, output: 0 };
+  let model = "";
+  let alarm = false;
+  let failed = false;
+  try {
+    // Пул на четыре: пятнадцать утверждений — это три секунды, а не
+    // пятнадцать. Первая тревога останавливает остальных: сверка пойдёт
+    // всё равно, и платить за ответы, которые ничего не решат, незачем.
+    await pooled(claims, 4, async (claim) => {
+      if (alarm || failed) return;
+      const at = claim.sourceSpan - 1;
+      const span = spans[at];
+      if (!span) { alarm = true; return; }
+      try {
+        const answered = await client.systemOne({
+          state: { span: span.text, textBefore: spans[at - 1]?.text ?? null, textAfter: spans[at + 1]?.text ?? null, claim: claim.text },
+          questions: {
+            verdict: choice(
+              "Is the claim supported by the span, read together with the text before and after it? " +
+              "A paraphrase, a merge of several sentences, or a shorter restatement in other words is SUPPORTED. " +
+              "A number, date, actor or outcome that the span attributes to something else is DISTORTED. " +
+              "A statement, conclusion or event that the span does not contain at all is INVENTED.",
+              {
+                supported: "the span supports every fact in the claim, possibly in other words",
+                distorted: "the claim takes a number, date, actor or outcome from the span but attaches it to the wrong thing",
+                invented: "part of the claim is not in the span at all",
+              },
+            ),
+          },
+        });
+        usage.input += answered.usage.input_tokens;
+        usage.output += answered.usage.output_tokens;
+        model = answered.model;
+        const probabilities = answered.answers.verdict.probabilities as Record<string, number>;
+        if (1 - (probabilities?.supported ?? 0) >= CLAIM_ALARM) alarm = true;
+      } catch {
+        failed = true;
+      }
+    });
+  } finally {
+    // Одна строка расхода на секцию, а не на утверждение: считаются деньги,
+    // а не вопросы, и полтора десятка строк по центу ничего не добавляют.
+    if (usage.input) {
+      try {
+        const { recordCall } = await import("../src/lib/readers");
+        await recordCall({ readerId, stage: "reading-gate", model, tokensIn: usage.input, tokensOut: usage.output, costUsd: jevCost(usage.input) });
+      } catch { /* расход не записался — сверка от этого не зависит */ }
+    }
+  }
+  return alarm || failed;
 }
