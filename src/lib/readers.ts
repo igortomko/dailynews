@@ -5,6 +5,7 @@ import { DEFAULT_LOCALE, type Locale } from "./i18n/locale";
 import { effectiveVoice } from "./lemon";
 import { cardMinutes } from "./reading-time";
 import type { Rules } from "./rules";
+import { starterBySlug } from "./starter-topics";
 import type { Sql, TransactionSql } from "postgres";
 
 /**
@@ -81,21 +82,20 @@ export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> 
  * новую подсказку до перезагрузки, база хранила прежнюю — отказ, похожий
  * на успех. Теперь своя тема (заведена руками и никем больше не взята)
  * правится, у остальных форма поля не показывает, а сервер решает сам,
- * не веря форме: `catalog` — из стартового набора, соседей спрашивает база.
+ * не веря форме.
  *
- * Повторно взятая ничья тема — присоединение, и у него своё правило:
- * имя и непустая подсказка применяются (читатель их только что набрал
- * и ждёт, что они сохранятся), а пустая подсказка сохранённую не стирает —
- * новый чип приходит без подсказки, и стирал бы ту, которую читатель
- * писал руками до того, как убрал тему. У темы, которую читатель уже
- * держит, пустая подсказка — это стёртая им самим: форма показывала
- * сохранённую, и он её убрал.
+ * Каталожная тема берёт имя и подсказку из стартового набора, а не
+ * от вызвавшего: в сиде лежат шесть тем из двадцати семи, остальные заводит
+ * первый, кто их взял, — и без этого первый же читатель, набравший «Music»
+ * руками, определял бы критерий классификации для всех своим именем
+ * и пустой подсказкой, а поправить это потом было бы нечем.
  *
- * `joining` приходит от формы (чип без слага — новый в этом сеансе),
- * а не читается из связок: связки переписываются после этого шага
- * и отражают прошлое сохранение, а не присланный чип — тема, убранная
- * и добавленная снова в одном заходе, числилась бы «взятой» и теряла
- * подсказку.
+ * Правка от присоединения отличается связкой в базе. Тему, которую читатель
+ * уже держит, он видел в форме вместе с подсказкой, и пустая подсказка —
+ * стёртая им самим. К ничьей теме он присоединяется вслепую: новый чип
+ * приходит без подсказки, и пустая сохранённую не стирает, а набранная
+ * применяется. Убрал и добавил снова в одном заходе — связка ещё стоит,
+ * и тема начинает с того, что в форме: чистого листа.
  *
  * Отдаёт id темы в любом случае: связка читателя с темой заводится по нему.
  */
@@ -103,28 +103,37 @@ export async function upsertTopic(
   db: Sql | TransactionSql,
   readerId: number,
   topic: { slug: string; label: string; hint: string; position: number },
-  flags: { catalog: boolean; joining: boolean },
 ): Promise<number> {
+  const starter = starterBySlug.get(topic.slug);
   const [row] = await db<{ id: number }[]>`
     insert into dailynews.topics (slug, label, hint, position)
-    values (${topic.slug}, ${topic.label}, ${topic.hint}, ${topic.position})
+    values (
+      ${topic.slug}, ${starter?.label ?? topic.label}, ${starter?.hint ?? topic.hint},
+      ${topic.position}
+    )
     on conflict (slug) do update set slug = excluded.slug
     returning id::int as id
   `;
-  if (!flags.catalog) {
-    // null — оставить сохранённую: присоединение с пустой подсказкой.
-    const hint = topic.hint === "" && flags.joining ? null : topic.hint;
-    await db`
-      update dailynews.topics t
-         set label = ${topic.label}, hint = coalesce(${hint}::text, t.hint)
-       where t.id = ${row.id}
-         and (t.label, t.hint) is distinct from (${topic.label}, coalesce(${hint}::text, t.hint))
-         and not exists (
-           select 1 from dailynews.reader_topics o
-            where o.topic_id = t.id and o.reader_id <> ${readerId}
-         )
-    `;
-  }
+  if (starter) return row.id;
+
+  const [{ held }] = await db<{ held: boolean }[]>`
+    select exists (
+      select 1 from dailynews.reader_topics mine
+       where mine.topic_id = ${row.id} and mine.reader_id = ${readerId}
+    ) as held
+  `;
+  // null — оставить сохранённую: присоединение с пустой подсказкой.
+  const hint = topic.hint === "" && !held ? null : topic.hint;
+  await db`
+    update dailynews.topics t
+       set label = ${topic.label}, hint = coalesce(${hint}::text, t.hint)
+     where t.id = ${row.id}
+       and (t.label, t.hint) is distinct from (${topic.label}, coalesce(${hint}::text, t.hint))
+       and not exists (
+         select 1 from dailynews.reader_topics o
+          where o.topic_id = t.id and o.reader_id <> ${readerId}
+       )
+  `;
   return row.id;
 }
 
