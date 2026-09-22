@@ -113,6 +113,8 @@ export const feed: typeof En = {
     audioPlay: "Слушать",
     audioPause: "Пауза",
     audioPlayError: "Не получилось проиграть — озвучка есть в Telegram",
+    audioRateTooltip: "Скорость: нажми, чтобы переключить",
+    audioRateAria: "Скорость воспроизведения",
     audioAria: "Озвучить статью",
     audioTooltipReady: "Слушать статью в Telegram",
     audioTooltipLocked: "Озвучка — на тарифе «Pro»",

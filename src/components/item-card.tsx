@@ -39,7 +39,7 @@ import { typography, summaryTime } from "@/lib/typography";
 import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
-import { useT } from "@/components/i18n-provider";
+import { useLocale, useT } from "@/components/i18n-provider";
 import { OpinionDialog } from "@/components/opinion-dialog";
 import type { NetworkId } from "@/lib/networks";
 import type { FeedCard } from "@/lib/queries";
@@ -133,6 +133,41 @@ export const AUDIO_STEP = (
   sending: t.feed.item.audioSending,
 });
 
+/**
+ * Скорость воспроизведения по кругу.
+ *
+ * Кнопка, а не список: выбор из четырёх значений на карточке — это меню
+ * ради одного нажатия, а по кругу нужное находится за три тапа в худшем
+ * случае. Порядок возрастающий и замыкается на единице: с ×2 возвращаются
+ * к обычной чаще, чем идут дальше.
+ */
+const RATES = [1, 1.25, 1.5, 2] as const;
+
+/**
+ * Выбранная скорость переживает и карточку, и перезагрузку: слушают
+ * подряд, и переставлять её на каждой новости значит не дать ею
+ * пользоваться. Хранится у читателя в браузере — это его привычка,
+ * а не настройка ленты, и общей базе о ней знать незачем.
+ */
+/**
+ * Подпись скорости. Запятая или точка — по языку интерфейса: «×1.25»
+ * в русской ленте выглядит чужим форматом рядом со своим текстом,
+ * ровно как дата.
+ */
+const rateLabel = (rate: number, locale: string) =>
+  `×${rate.toLocaleString(locale === "ru" ? "ru-RU" : "en-US")}`;
+
+const RATE_KEY = "reporta:audio-rate";
+const storedRate = (): number => {
+  try {
+    const saved = Number(localStorage.getItem(RATE_KEY));
+    return RATES.includes(saved as (typeof RATES)[number]) ? saved : 1;
+  } catch {
+    // Приватное окно и запрещённые куки отвечают исключением, а не пустотой.
+    return 1;
+  }
+};
+
 /** Как часто спрашиваем шаг и сколько всего ждём: пять минут. */
 export const AUDIO_POLL_MS = 2000;
 export const AUDIO_POLL_TIMES = 150;
@@ -220,6 +255,7 @@ export function ItemCard({
   onSelectedChange: (next: boolean) => void;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [expanded, setExpanded] = useState(false);
   // Своё состояние, а не expanded: раскрытие описания считается чтением
   // материала и уезжает в калибровку событием «opened». Список повторов —
@@ -240,6 +276,11 @@ export function ItemCard({
   // синтезировало заново то, что уже лежит в Telegram.
   const [audio, setAudio] = useState<AudioState>(item.voiced ? "sent" : "idle");
   const [step, setStep] = useState<string | null>(null);
+  // Читается сразу, а не эффектом: эффект с `setState` даёт каскадную
+  // перерисовку на каждой карточке выпуска. Расхождения с сервером тут
+  // быть не может — кнопка скорости появляется только на играющем звуке,
+  // а на первой отрисовке ничего не играет.
+  const [rate, setRate] = useState(() => (typeof window === "undefined" ? 1 : storedRate()));
   // Живость карточки — ref, а не состояние: цикл опроса читает её между
   // запросами, и перерисовка ему для этого не нужна.
   const aliveRef = useRef(true);
@@ -461,8 +502,21 @@ export function ItemCard({
       });
       player.current = audioEl;
     }
+    player.current.playbackRate = rate;
     if (player.current.paused) void player.current.play().catch(() => {});
     else player.current.pause();
+  };
+
+  /** Следующая скорость по кругу — и сразу же на играющем звуке. */
+  const cycleRate = () => {
+    const next = RATES[(RATES.indexOf(rate as (typeof RATES)[number]) + 1) % RATES.length];
+    setRate(next);
+    if (player.current) player.current.playbackRate = next;
+    try {
+      localStorage.setItem(RATE_KEY, String(next));
+    } catch {
+      // Не сохранилось — скорость всё равно применена к текущему звуку.
+    }
   };
 
   const speak = async () => {
@@ -972,6 +1026,26 @@ export function ItemCard({
               отделена чертой: она не про этот материал, а про следующие
               выпуски, и стоять с ними в одном ряду ей не по чину. */}
 
+          {/* Слева от плеера и только пока играет: до нажатия скорость
+              нечему менять, а кнопка, которая ничего не делает, занимает
+              место в ряду из шести. */}
+          {busy === "playing" ? (
+            <Hint
+              live={hot}
+              tip={t.feed.item.audioRateTooltip}
+              button={
+                <button
+                  type="button"
+                  aria-label={t.feed.item.audioRateAria}
+                  onClick={cycleRate}
+                  className="flex h-7 cursor-pointer items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground"
+                />
+              }
+            >
+              {rateLabel(rate, locale)}
+            </Hint>
+          ) : null}
+
           <Hint
             live={hot}
             tip={
@@ -990,9 +1064,11 @@ export function ItemCard({
                 onClick={busy === "working" ? undefined : speak}
                 className={cn(
                   "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
-                  audio === "idle"
-                    ? "cursor-pointer text-muted-foreground/50"
-                    : "text-foreground",
+                  // Тёмной кнопка становится только пока идёт работа.
+                  // Готовность — это не занятость: чёрный треугольник
+                  // рядом с серыми соседями читался приоритетом,
+                  // которого у озвучки нет.
+                  busy === "working" ? "text-foreground" : "cursor-pointer text-muted-foreground/50",
                 )}
               />
             }
