@@ -1454,7 +1454,7 @@ async function main() {
     `;
     await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
 
-    // Индекс из 0045 смотрится в pg_indexes, а не по ответу migrate:
+    // Индекс из 0051 смотрится в pg_indexes, а не по ответу migrate:
     // миграцию из одного индекса сверка формы схемы не видит (урок 0041).
     const [{ topicIdx }] = await sql<{ topicIdx: number }[]>`
       select count(*)::int as "topicIdx" from pg_indexes
@@ -1464,7 +1464,7 @@ async function main() {
          -- ограничение под тем же именем.
          and indexdef like '%(topic_id)'
     `;
-    assert.equal(topicIdx, 1, "индекс reader_topics(topic_id) из 0045 должен стоять");
+    assert.equal(topicIdx, 1, "индекс reader_topics(topic_id) из 0051 должен стоять");
 
     // --- своя тема правится, каталожная и общая — нет ----------------------
     // Подсказка темы — критерий классификации Jev, один на всех, кто тему

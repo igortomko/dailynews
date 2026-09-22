@@ -14,5 +14,5 @@
 create index if not exists reader_topics_topic_idx
   on dailynews.reader_topics (topic_id);
 
-insert into dailynews.migrations (name) values ('0045_reader_topics_topic_idx')
+insert into dailynews.migrations (name) values ('0051_reader_topics_topic_idx')
   on conflict (name) do nothing;
