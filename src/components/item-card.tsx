@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { currentRate, forget, nextRate, onRate, pauseIfPlaying, playOnly } from "@/lib/audio-bus";
 import { QUIET } from "@/lib/quiet";
 import { parseStoredReading } from "@/lib/reading-document";
-import { ReadingSummary } from "@/components/reading-summary";
+import { ReadingSummary, hasDetails } from "@/components/reading-summary";
 import { typography, summaryTime } from "@/lib/typography";
 import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
 import { cheapestFor, FEATURES, type Plan } from "@/lib/plans";
@@ -1284,7 +1284,25 @@ export function ItemCard({
             </a>
           </h3>
 
-          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} lang={textLang} /></div> : hasSummary ? (
+          {/* Два слоя: ответ виден сразу, подробности раскрываются. Событие
+              «opened» наконец означает чтение — раньше оно уходило от клика
+              по тексту, который и так был показан целиком. */}
+          {reading ? (
+            <div onClick={() => setExpanded((value) => !value)}>
+              <ReadingSummary reading={reading} labels={t.feed.reading} lang={textLang} open={expanded} />
+              {!expanded && hasDetails(reading) ? (
+                <button
+                  type="button"
+                  aria-expanded={false}
+                  onClick={(event) => { event.stopPropagation(); setExpanded(true); }}
+                  className="mt-2 flex cursor-pointer items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {t.feed.reading.more}
+                  <ChevronDownIcon className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ) : hasSummary ? (
             <p
               lang={textLang ?? undefined}
               onClick={() => setExpanded((value) => !value)}

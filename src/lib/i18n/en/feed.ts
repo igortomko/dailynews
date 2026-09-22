@@ -223,6 +223,7 @@ export const feed = {
   },
   reading: {
     equals: "equals", then: "then", step: "Step", stage: "Stage",
+    claimed: "commonly believed", reality: "in fact", more: "More",
     planned: "planned", done: "completed", current: "current", unspecified: "",
   },
   time: {

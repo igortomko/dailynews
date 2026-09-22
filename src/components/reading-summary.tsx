@@ -49,6 +49,22 @@ function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
       <p className="font-medium">{t(item.label)}</p><p>{t(item.content.text)}</p>
     </li>)}</ol>;
     case "takeaway": return <div className="rounded-xl bg-muted/40 p-4"><p className="font-medium">{t(b.content.text)}</p><p className="mt-2 text-sm text-muted-foreground">{t(b.attribution)}</p></div>;
+    // Ряд чисел: подложка и кегль те же, что у metric, но значения стоят
+    // рядом — результат читается одним взглядом, а не тремя абзацами.
+    case "figures": return <div className="rounded-xl bg-muted/40 p-4">
+      <div className="flex flex-wrap gap-x-8 gap-y-3">{b.items.map((item, i) => <div key={i} className="min-w-0">
+        <p className={VALUE}>{t(item.value)}</p><p className="mt-0.5 text-sm text-muted-foreground">{t(item.label)}</p>
+      </div>)}</div>
+      {b.context ? <p className="mt-3 text-sm text-muted-foreground">{t(b.context.text)}</p> : null}
+    </div>;
+    // У разоблачения стороны неравны, и подложка одна на обе: два блока
+    // рядом читались бы как выбор между ними.
+    case "correction": return <div className="rounded-xl bg-muted/40 p-4">
+      <p className="text-sm text-muted-foreground">{labels.claimed}</p>
+      <p className="mt-1 text-muted-foreground">{t(b.claim)}</p>
+      <p className="mt-3 text-sm text-muted-foreground">{labels.reality}</p>
+      <p className="mt-1 font-medium">{t(b.reality.text)}</p>
+    </div>;
   }
 }
 
@@ -58,15 +74,33 @@ function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
  * чем рвать его чужими. Стоит на самом тексте, а не на странице: интерфейс
  * может быть английским при русском выпуске.
  */
-export function ReadingSummary({ reading, labels = ru.feed.reading, lang }: { reading: StoredReading; labels?: Labels; lang?: string | null }) {
+/**
+ * Карточка читается двумя слоями: ответ виден сразу, остальное
+ * раскрывается. У выпусков, написанных до двухслойного чтения, ответа
+ * в документе нет — первым слоем у них работает лид, и раскрывать
+ * им тоже есть что.
+ */
+export function ReadingSummary({ reading, labels = ru.feed.reading, lang, open = true }: { reading: StoredReading; labels?: Labels; lang?: string | null; open?: boolean }) {
   const doc = reading.document;
+  const answer = doc?.answer ?? doc?.lead ?? null;
+  const details = doc && doc.lead && doc.lead !== answer ? doc.lead : null;
   return <div lang={lang ?? undefined} className={`mt-3 max-w-[60ch] space-y-4 break-words text-pretty text-base leading-[1.6] text-foreground [overflow-wrap:anywhere]${lang ? " hyphens-auto" : ""}`}>
     {reading.notice ? <p className="text-sm text-muted-foreground">{t(reading.notice)}</p> : null}
     {doc ? <>
-      {doc.lead ? <p>{t(doc.lead.text)}</p> : null}
-      {doc.blocks.map((b,i) => <Block key={i} block={b} labels={labels} />)}
-      {doc.application ? <p>{t(`${doc.application.condition} ${doc.application.text}`)}</p> : null}
-      {doc.evidence ? <p className="text-sm leading-relaxed text-muted-foreground">{t(doc.evidence.text)}</p> : null}
+      {answer ? <p>{t(answer.text)}</p> : null}
+      {open ? <>
+        {details ? <p>{t(details.text)}</p> : null}
+        {doc.blocks.map((b,i) => <Block key={i} block={b} labels={labels} />)}
+        {doc.application ? <p>{t(`${doc.application.condition} ${doc.application.text}`)}</p> : null}
+        {doc.evidence ? <p className="text-sm leading-relaxed text-muted-foreground">{t(doc.evidence.text)}</p> : null}
+      </> : null}
     </> : null}
   </div>;
 }
+/** Есть ли у карточки второй слой: без него подсказка «подробнее» лишняя. */
+export const hasDetails = (reading: StoredReading): boolean => {
+  const doc = reading.document;
+  if (!doc) return false;
+  return doc.blocks.length > 0 || Boolean(doc.application) || Boolean(doc.evidence)
+    || Boolean(doc.answer && doc.lead && doc.lead.text !== doc.answer.text);
+};

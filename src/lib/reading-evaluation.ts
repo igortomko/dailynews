@@ -62,15 +62,19 @@ export type EvaluationSummary = {
   }>;
 };
 
-const formOf = (reading: StoredReading) => {
+export const formOf = (reading: StoredReading) => {
   const document = reading.document;
   if (!document) return "legacy";
+  // План формы называет её сам. Вывод по блокам остаётся для выпусков,
+  // написанных до того, как форма стала решением, а не следствием.
+  if (document.formatPlan) return document.formatPlan.format;
   if (["narrative", "argument", "investigation"].includes(document.genre)) return "story";
   const firstStructured = document.blocks.find((block) => block.kind !== "paragraph");
   if (!firstStructured) return "brief";
   if (firstStructured.kind === "list") return firstStructured.numbering === "facts" ? "numbered-list" : "bullets";
   if (firstStructured.kind === "steps") return firstStructured.sequence === "timeline" ? "timeline" : "steps";
   if (firstStructured.kind === "flow") return "mechanism";
+  if (firstStructured.kind === "metric") return "data";
   return firstStructured.kind;
 };
 

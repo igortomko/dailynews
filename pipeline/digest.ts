@@ -77,6 +77,8 @@ export type DigestResult = {
   items: Written[];
   excludedIds?: number[];
   retainedIds?: number[];
+  /** Материалы, для которых проверенной выжимки не вышло: карточки не будет. */
+  unavailableIds?: number[];
   flagged?: number;
   usage: Usage;
   /**

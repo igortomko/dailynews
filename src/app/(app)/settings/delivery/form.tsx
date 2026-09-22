@@ -192,7 +192,7 @@ export function DeliveryForm({
               }}
             />
             <FieldContent>
-              <FieldLabel htmlFor="podcast" className="items-center gap-1.5 font-normal">
+              <FieldLabel htmlFor="podcast" className="items-center gap-1.5 text-foreground">
                 {t.settings.delivery.telegram.podcast}
                 {noAudio ? <PaywallCrown feature="audio" plan={plan} /> : null}
               </FieldLabel>
@@ -308,7 +308,7 @@ export function DeliveryForm({
                 <Field orientation="horizontal">
                   <Switch id="kindle_digest" name="kindle_digest" defaultChecked={kindleDigest} disabled={locked} />
                   <FieldContent>
-                    <FieldLabel htmlFor="kindle_digest" className="font-normal">
+                    <FieldLabel htmlFor="kindle_digest">
                       {k.sendToKindle}
                     </FieldLabel>
                     <FieldDescription>{k.sendToKindleHint}</FieldDescription>
