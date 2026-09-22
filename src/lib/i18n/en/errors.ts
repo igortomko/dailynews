@@ -51,6 +51,13 @@ export const errors = {
   kindleNotApproved: "Amazon hasn't approved our address yet. Finish the setup in Delivery",
   kindleCapReached: "That's all you can send today. The limit resets tomorrow",
   kindleAlreadySending: "That article is already on its way",
+  audioOnPro: "Audio comes with the {plan} plan",
+  audioNoTelegram: "Message the bot on Telegram: audio arrives there",
+  audioNoText: "This story has no text, there is nothing to read aloud",
+  audioCapReached: "No audio left for today, tomorrow it is {minutes} min again",
+  audioTooLong: "{left} min left, and this article runs {needed}",
+  audioAlreadySpeaking: "That article is already being read aloud",
+  audioNotFound: "No such audio",
   noSession: "Your session is over. Sign in again",
   badRequest: "We couldn't read that request",
 

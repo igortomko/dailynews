@@ -195,11 +195,14 @@ export function looksLikeSource(text: string): boolean {
   return value.includes("://") || value.startsWith("@") || /[^\s@]+\.[^\s@]{2,}/.test(value);
 }
 
+/** Адрес API. Литерал живёт в одном месте: заливка аудио ходит мимо `call`. */
+const apiBase = (token: string) => `https://api.telegram.org/bot${token}`;
+
 async function call<T = unknown>(method: string, body: object): Promise<T> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
 
-  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const res = await fetch(`${apiBase(token)}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -237,7 +240,7 @@ export async function sendMessage(chatId: number, text: string): Promise<void> {
 export async function sendAudio(
   chatId: number,
   audio: Buffer | string,
-  meta: { title: string; duration?: number; caption?: string },
+  meta: { title: string; url: string; duration?: number },
 ): Promise<{ fileId: string; messageId: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
@@ -248,37 +251,40 @@ export async function sendAudio(
     // обрезанным без следа в ответе.
     title: meta.title.slice(0, 120),
     performer: "Retorta",
+    // Подпись собирается здесь, а не приезжает готовой разметкой.
+    // Адрес приходит из чужого фида, и кавычка внутри него выбивается
+    // из атрибута: Telegram отвечает «can't parse entities» и не шлёт
+    // ничего — озвучка пропадает целиком из-за одного знака в ссылке.
+    caption: `<a href="${escapeAttr(meta.url)}">${escapeHtml(meta.title).slice(0, 900)}</a>`,
+    parse_mode: "HTML",
   };
   if (meta.duration) fields.duration = String(Math.round(meta.duration));
-  if (meta.caption) {
-    fields.caption = meta.caption.slice(0, 1000);
-    fields.parse_mode = "HTML";
-  }
 
-  let res: Response;
   if (typeof audio === "string") {
-    res = await fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...fields, audio }),
-      signal: AbortSignal.timeout(60_000),
-    });
-  } else {
-    const form = new FormData();
-    for (const [key, value] of Object.entries(fields)) form.append(key, value);
-    form.append(
-      "audio",
-      new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }),
-      `${slugOf(meta.title)}.mp3`,
+    // Пересылка готового — обычный вызов, и делает его общий `call`:
+    // токен, адрес и разбор отказа живут там в одном экземпляре.
+    const result = await call<{ message_id: number; audio?: { file_id: string } }>(
+      "sendAudio",
+      { ...fields, audio },
     );
-    res = await fetch(`https://api.telegram.org/bot${token}/sendAudio`, {
-      method: "POST",
-      body: form,
-      // Заливка пяти мегабайт с общей машины бывает и минутой.
-      signal: AbortSignal.timeout(180_000),
-    });
+    if (!result?.audio?.file_id) throw new Error("Telegram не вернул file_id");
+    return { fileId: result.audio.file_id, messageId: result.message_id };
   }
 
+  // Заливка идёт multipart — единственное, чего `call` не умеет.
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+  form.append(
+    "audio",
+    new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }),
+    `${slugOf(meta.title)}.mp3`,
+  );
+  const res = await fetch(`${apiBase(token)}/sendAudio`, {
+    method: "POST",
+    body: form,
+    // Заливка пяти мегабайт с общей машины бывает и минутой.
+    signal: AbortSignal.timeout(180_000),
+  });
   if (!res.ok) {
     throw new Error(`Telegram HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
@@ -294,6 +300,15 @@ export async function sendAudio(
   }
   return { fileId: body.result.audio.file_id, messageId: body.result.message_id };
 }
+
+/**
+ * Значение атрибута: к `& < >` добавляется кавычка.
+ *
+ * `escapeHtml` её не трогает намеренно — в тексте она безобидна. В атрибуте
+ * она закрывает его досрочно, и дальше Telegram читает остаток ссылки как
+ * разметку.
+ */
+const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
 
 /** Имя файла для Telegram: кириллицу он принимает, а служебные знаки — нет. */
 const slugOf = (title: string) =>

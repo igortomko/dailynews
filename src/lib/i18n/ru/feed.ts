@@ -114,7 +114,7 @@ export const feed: typeof En = {
     audioSpeaking: "Читаю вслух…",
     audioSending: "Отправляю в Telegram…",
     audioDoneTitle: "Озвучка в Telegram",
-    audioDoneDescription: "{minutes} мин — открой чат с ботом",
+    audioDoneDescription: (minutes: number) => `${minutes} мин — открой чат с ботом`,
     audioSlowTitle: "Озвучка ещё готовится",
     audioSlowDescription: "Придёт в Telegram, когда будет готова",
     audioError: "Не получилось озвучить — попробуй ещё раз",

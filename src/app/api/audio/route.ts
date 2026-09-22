@@ -1,8 +1,10 @@
 import { after, NextResponse, type NextRequest } from "next/server";
+import { dictOf } from "@/lib/i18n";
 import { sql } from "@/lib/db";
 import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 import { getReader } from "@/lib/readers";
 import { effectivePlan } from "@/lib/lemon";
+import { cheapestFor } from "@/lib/plans";
 import { queueAudioSend, runAudioSend } from "../../../../pipeline/tts";
 
 /**
@@ -23,18 +25,24 @@ import { queueAudioSend, runAudioSend } from "../../../../pipeline/tts";
  */
 export async function POST(request: NextRequest) {
   const readerId = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!readerId) return NextResponse.json({ error: "нет сессии" }, { status: 401 });
+  // Язык отказа — язык читателя: ответ этого адреса показывается тостом
+  // в ленте как есть, и русская строка в английском интерфейсе выглядела бы
+  // не переводом, который забыли, а поломкой.
+  const reader = readerId ? await getReader(readerId) : undefined;
+  const t = dictOf(reader?.ui_language).errors;
+
+  if (!readerId) return NextResponse.json({ error: t.noSession }, { status: 401 });
 
   let payload: { item_id?: number };
   try {
     payload = JSON.parse(await request.text());
   } catch {
-    return NextResponse.json({ error: "не JSON" }, { status: 400 });
+    return NextResponse.json({ error: t.badRequest }, { status: 400 });
   }
 
   const itemId = Number(payload.item_id);
   if (!Number.isInteger(itemId) || itemId <= 0) {
-    return NextResponse.json({ error: "нужен item_id" }, { status: 400 });
+    return NextResponse.json({ error: t.badRequest }, { status: 400 });
   }
 
   const [mine] = await sql<{ one: number }[]>`
@@ -45,22 +53,21 @@ export async function POST(request: NextRequest) {
      limit 1
   `;
   if (!mine) {
-    return NextResponse.json({ error: "Этой новости нет в твоих выпусках" }, { status: 404 });
+    return NextResponse.json({ error: t.itemNotYours }, { status: 404 });
   }
 
-  const reader = await getReader(readerId);
-  if (!reader) return NextResponse.json({ error: "нет читателя" }, { status: 401 });
+  if (!reader) return NextResponse.json({ error: t.noSession }, { status: 401 });
 
   // Тариф считается, а не читается из колонки: в `plan` лежит купленное,
   // а работает ли оно сейчас — решают статус и `plan_ends_at`.
   const plan = effectivePlan(reader);
-  const queued = await queueAudioSend(reader, plan, itemId);
+  const queued = await queueAudioSend(reader, plan, itemId, t, cheapestFor("audio").label);
   if ("error" in queued) {
     return NextResponse.json({ error: queued.error }, { status: 409 });
   }
 
   after(async () => {
-    await runAudioSend(queued.id, reader, plan, itemId);
+    await runAudioSend(queued.id, reader, itemId);
   });
 
   return NextResponse.json({ ok: true, send_id: queued.id, seconds: queued.seconds });
@@ -74,18 +81,20 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   const readerId = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!readerId) return NextResponse.json({ error: "нет сессии" }, { status: 401 });
+  const reader = readerId ? await getReader(readerId) : undefined;
+  const t = dictOf(reader?.ui_language).errors;
+  if (!readerId) return NextResponse.json({ error: t.noSession }, { status: 401 });
 
   const sendId = Number(request.nextUrl.searchParams.get("send_id"));
   if (!Number.isInteger(sendId) || sendId <= 0) {
-    return NextResponse.json({ error: "нужен send_id" }, { status: 400 });
+    return NextResponse.json({ error: t.badRequest }, { status: 400 });
   }
 
   const [row] = await sql<{ status: string; error: string | null; seconds: number | null }[]>`
     select status, error, seconds from dailynews.audio_sends
      where id = ${sendId} and reader_id = ${readerId}
   `;
-  if (!row) return NextResponse.json({ error: "нет такой озвучки" }, { status: 404 });
+  if (!row) return NextResponse.json({ error: t.audioNotFound }, { status: 404 });
 
   return NextResponse.json({ status: row.status, error: row.error, seconds: row.seconds });
 }

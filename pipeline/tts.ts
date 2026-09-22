@@ -13,10 +13,10 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { sql } from "../src/lib/db";
 import {
-  applySpoken, audioBlocker, chunks, estimateSeconds, NON_LATIN, SEED_SPOKEN,
-  spokenMap, unknownRuns, voiceFor, voiceForText,
+  applySpoken, audioBlocker, chunks, estimateSeconds, latinRuns, NON_LATIN,
+  spokenMap, unknownRuns, voiceFor, voiceForText, type AudioErrors,
 } from "../src/lib/speech";
-import { escapeHtml, sendAudio } from "../src/lib/telegram";
+import { sendAudio } from "../src/lib/telegram";
 import { recordCall } from "../src/lib/readers";
 import { SOURCE_LANGUAGE } from "../src/lib/voice";
 import type { Plan } from "../src/lib/plans";
@@ -80,23 +80,38 @@ export async function askSpoken(
 
 ${terms.join("\n")}`;
 
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      max_tokens: 2000,
-      // Как звучит слово — не предмет для размышления, а справка.
-      reasoning_effort: "none",
-      messages: [{ role: "user", content: prompt }],
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!res.ok) {
-    console.log(`  ! произношение не спросилось: HTTP ${res.status}`);
+  // Всё, что может не получиться, здесь кончается пустым словарём,
+  // а не исключением. Непрочитанный термин — это оговорка диктора;
+  // упавшая озвучка — это минута работы и цент перевода в мусор.
+  // Разница между ними стоит одного try.
+  let payload: {
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    choices?: { message?: { content?: string } }[];
+  };
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 2000,
+        // Как звучит слово — не предмет для размышления, а справка.
+        reasoning_effort: "none",
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      console.log(`  ! произношение не спросилось: HTTP ${res.status}`);
+      return {};
+    }
+    payload = await res.json();
+  } catch (error) {
+    console.log(
+      `  ! произношение не спросилось: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return {};
   }
-  const payload = await res.json();
   usage.requests += 1;
   usage.input += payload.usage?.prompt_tokens ?? 0;
   usage.output += payload.usage?.completion_tokens ?? 0;
@@ -128,7 +143,7 @@ export async function spokenText(
 ): Promise<string> {
   if (!NON_LATIN.has(language)) return text;
 
-  const known = spokenMap(text, await learnedTerms(latinOf(text), language));
+  const known = spokenMap(text, language, await learnedTerms(latinRuns(text), language));
   const unknown = unknownRuns(text, known);
   if (unknown.length > 0) {
     const asked = await askSpoken(unknown, language, usage);
@@ -151,11 +166,6 @@ export async function spokenText(
   }
   return applySpoken(text, known);
 }
-
-/** Латинские куски текста — для запроса в базу словаря. */
-const latinOf = (text: string): string[] => [
-  ...new Set([...text.matchAll(/[A-Za-z][A-Za-z0-9]*(?:[-.+][A-Za-z0-9]+)*/g)].map((m) => m[0])),
-];
 
 /**
  * Синтез. Куски склеиваются буфером: кадры mp3 стыкуются встык,
@@ -181,7 +191,6 @@ export async function synthesize(text: string, voice: string): Promise<Buffer> {
 /** 48 кбит/с — столько секунд в байтах отданного движком потока. */
 export const secondsOf = (audio: Buffer): number => Math.round(audio.length / (48_000 / 8));
 
-export { SEED_SPOKEN, llmCost };
 
 /**
  * Сколько секунд озвучки читатель получил сегодня.
@@ -214,29 +223,48 @@ export async function queueAudioSend(
   reader: Reader,
   plan: Plan,
   itemId: number,
+  t: AudioErrors & { audioNoText: string; audioAlreadySpeaking: string },
+  planLabel: string,
 ): Promise<{ id: number; seconds: number } | { error: string }> {
+  // Оценка считается по тому тексту, который и будет озвучен: перевод
+  // на кириллицу длиннее английского оригинала примерно на треть, а фид
+  // отдаёт куда меньше, чем догрузка. Мерить по `items.body`, а звучать
+  // переводом — значит отказывать на коротком и пропускать за предел
+  // на длинном, и оба раза числа выглядят правдоподобно.
+  const [ready] = await sql<{ markdown: string }[]>`
+    select markdown from dailynews.item_translations
+     where item_id = ${itemId} and language = ${reader.language}
+  `;
   const [item] = await sql<{ body: string | null; excerpt: string | null }[]>`
     select body, excerpt from dailynews.items where id = ${itemId}
   `;
-  if (!item) return { error: "Такой новости нет" };
+  if (!item) return { error: t.audioNoText };
 
-  // Оценка по тому, что уже есть: если текста нет вовсе, озвучивать
-  // придётся описание, и оно короткое. Точная длина известна только
-  // после синтеза, но решать надо до него.
-  const source = item.body ?? item.excerpt ?? "";
-  if (source.trim().length < 200) {
-    return { error: "У этой новости нет текста — озвучивать нечего" };
-  }
-  const want = estimateSeconds(source);
+  const source = ready?.markdown ?? item.body ?? item.excerpt ?? "";
+  if (source.trim().length < 200) return { error: t.audioNoText };
+  // Без готового перевода длина известна только приблизительно: догрузка
+  // даёт больше текста, перевод — ещё. Берётся запас, чтобы разрешить
+  // то, что потом не влезет, было нельзя.
+  const want = Math.ceil(estimateSeconds(source, reader.language) * (ready ? 1 : 1.4));
 
-  const blocker = audioBlocker(reader, plan, await secondsToday(reader.id), want);
+  const blocker = audioBlocker(reader, plan, await secondsToday(reader.id), want, t, planLabel);
   if (blocker) return { error: blocker };
 
+  // Второе нажатие на ту же карточку не заводит вторую озвучку: два
+  // одновременных запроса оба видят свободную квоту, и читатель уходит
+  // за предел вдвое. Ограничение в базе, а не проверка перед вставкой:
+  // между чтением и записью помещается ровно этот случай.
   const [row] = await sql<{ id: number }[]>`
     insert into dailynews.audio_sends (reader_id, item_id, seconds)
-    values (${reader.id}, ${itemId}, ${want})
+    select ${reader.id}, ${itemId}, ${want}
+     where not exists (
+       select 1 from dailynews.audio_sends
+        where reader_id = ${reader.id} and item_id = ${itemId}
+          and status in ('queued', 'translating', 'speaking', 'sending')
+     )
     returning id
   `;
+  if (!row) return { error: t.audioAlreadySpeaking };
   return { id: row.id, seconds: want };
 }
 
@@ -254,7 +282,6 @@ const step = (sendId: number, status: string) =>
 export async function runAudioSend(
   sendId: number,
   reader: Reader,
-  plan: Plan,
   itemId: number,
 ): Promise<void> {
   try {
@@ -289,8 +316,8 @@ export async function runAudioSend(
       await step(sendId, "sending");
       await sendAudio(Number(reader.telegram_id), ready.file_id, {
         title,
+        url: item.url,
         duration: ready.seconds,
-        caption: `<a href="${item.url}">${escapeHtml(title)}</a>`,
       });
       await sql`
         update dailynews.audio_sends
@@ -302,8 +329,11 @@ export async function runAudioSend(
     }
 
     await step(sendId, "translating");
-    const article = await fetchArticle(item.url, item.body);
 
+    // За статьёй идём только когда её нечем заменить: готовый перевод
+    // делает догрузку бесполезной, а она стоит запроса к чужому сайту
+    // и секунд ожидания. Раньше она шла всегда, в том числе у читателя,
+    // которому оставалось только переслать готовое.
     let body: string;
     const [cached] = await sql<{ markdown: string }[]>`
       select markdown from dailynews.item_translations
@@ -313,8 +343,9 @@ export async function runAudioSend(
       body = cached.markdown;
     } else if (language === SOURCE_LANGUAGE) {
       // Читатель просил не переводить — переводить и не надо.
-      body = article.markdown;
+      body = (await fetchArticle(item.url, item.body)).markdown;
     } else {
+      const article = await fetchArticle(item.url, item.body);
       const translated = await translateArticle(article.markdown, language);
       body = translated.markdown;
       await recordCall({
@@ -348,8 +379,8 @@ export async function runAudioSend(
     await step(sendId, "sending");
     const sent = await sendAudio(Number(reader.telegram_id), audio, {
       title,
+      url: item.url,
       duration: seconds,
-      caption: `<a href="${item.url}">${escapeHtml(title)}</a>`,
     });
 
     // Кладём file_id только после успешной отправки: строка про аудио,

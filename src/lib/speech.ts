@@ -30,12 +30,26 @@
  */
 const RUN = /[A-Za-z][A-Za-z0-9]*(?:[-.+][A-Za-z0-9]+)*/g;
 
-/** Английские буквы по-русски — для аббревиатур, которые читают по буквам. */
-const LETTERS: Record<string, string> = {
-  a: "эй", b: "би", c: "си", d: "ди", e: "и", f: "эф", g: "джи",
-  h: "эйч", i: "ай", j: "джей", k: "кей", l: "эль", m: "эм", n: "эн",
-  o: "оу", p: "пи", q: "кью", r: "ар", s: "эс", t: "ти", u: "ю",
-  v: "ви", w: "дабл-ю", x: "экс", y: "уай", z: "зед",
+/**
+ * Английские буквы по буквам — для аббревиатур вроде `VHDL`.
+ *
+ * Ряд на язык, а не один на всех: `GPU` по-русски «джи-пи-ю», по-украински
+ * «джі-пі-ю», а по-японски ジーピーユー. Общий ряд отдал бы японцу кириллицу —
+ * вовремя, без ошибки и совершенно не ту.
+ */
+const LETTERS: Record<string, Record<string, string>> = {
+  "русском": {
+    a: "эй", b: "би", c: "си", d: "ди", e: "и", f: "эф", g: "джи",
+    h: "эйч", i: "ай", j: "джей", k: "кей", l: "эль", m: "эм", n: "эн",
+    o: "оу", p: "пи", q: "кью", r: "ар", s: "эс", t: "ти", u: "ю",
+    v: "ви", w: "дабл-ю", x: "экс", y: "уай", z: "зед",
+  },
+  "украинском": {
+    a: "ей", b: "бі", c: "сі", d: "ді", e: "і", f: "еф", g: "джі",
+    h: "ейч", i: "ай", j: "джей", k: "кей", l: "ел", m: "ем", n: "ен",
+    o: "оу", p: "пі", q: "к'ю", r: "ар", s: "ес", t: "ті", u: "ю",
+    v: "ві", w: "дабл-ю", x: "екс", y: "уай", z: "зед",
+  },
 };
 
 /**
@@ -44,28 +58,35 @@ const LETTERS: Record<string, string> = {
  *
  * Это не механизм, а несколько строк, чтобы первый же выпуск не пошёл
  * в модель за `Google`. Всё остальное копится в базе по мере встречи.
+ *
+ * Затравка тоже по языку: «джемини» — русское произношение, и подставить
+ * его японскому читателю значит выдать кириллицу за перевод. Для языка,
+ * которого здесь нет, затравки просто нет — всё уедет в модель и осядет
+ * в базе, то есть дороже на один вопрос, а не неправильно.
  */
-export const SEED_SPOKEN: Record<string, string> = {
-  google: "гугл",
-  gemini: "джемини",
-  openai: "оупен-эй-ай",
-  anthropic: "энтропик",
-  claude: "клод",
-  qwen: "квен",
-  chatgpt: "чат-джи-пи-ти",
-  github: "гитхаб",
-  telegram: "телеграм",
-  youtube: "ютуб",
-  kindle: "киндл",
-  amazon: "амазон",
-  microsoft: "майкрософт",
-  apple: "эпл",
-  nvidia: "энвидиа",
-  bitcoin: "биткоин",
-  x: "икс",
-  ai: "эй-ай",
-  api: "эй-пи-ай",
-  gpu: "джи-пи-ю",
+export const SEED_SPOKEN: Record<string, Record<string, string>> = {
+  "русском": {
+    google: "гугл",
+    gemini: "джемини",
+    openai: "оупен-эй-ай",
+    anthropic: "энтропик",
+    claude: "клод",
+    qwen: "квен",
+    chatgpt: "чат-джи-пи-ти",
+    github: "гитхаб",
+    telegram: "телеграм",
+    youtube: "ютуб",
+    kindle: "киндл",
+    amazon: "амазон",
+    microsoft: "майкрософт",
+    apple: "эпл",
+    nvidia: "энвидиа",
+    bitcoin: "биткоин",
+    x: "икс",
+    ai: "эй-ай",
+    api: "эй-пи-ай",
+    gpu: "джи-пи-ю",
+  },
 };
 
 /**
@@ -84,8 +105,17 @@ export function spelledOut(run: string): boolean {
   return letters === letters.toUpperCase();
 }
 
-/** Произношение по буквам: `VHDL` → «ви-эйч-ди-эль». */
-export function byLetters(run: string): string {
+/**
+ * Произношение по буквам: `VHDL` → «ви-эйч-ди-эль».
+ *
+ * Для языка, которому мы не знаем названий букв, возвращается пустая
+ * строка: «не умею» должно отличаться от «прочитал». Вернуть латиницу
+ * как есть значило бы сказать, что правило сработало, и такой термин
+ * уже не попал бы в вопрос к модели.
+ */
+export function byLetters(run: string, language: string): string {
+  const names = LETTERS[language];
+  if (!names) return "";
   return run
     .split(/([-.+])/)
     .map((part) =>
@@ -93,7 +123,7 @@ export function byLetters(run: string): string {
         ? " "
         : part
             .split("")
-            .map((ch) => LETTERS[ch.toLowerCase()] ?? ch)
+            .map((ch) => names[ch.toLowerCase()] ?? ch)
             .join("-"),
     )
     .join("")
@@ -142,9 +172,7 @@ export function applySpoken(text: string, spoken: Map<string, string>): string {
  * платить за то, что уже решено.
  */
 export function unknownRuns(text: string, known: Map<string, string>): string[] {
-  return latinRuns(text).filter(
-    (run) => !known.has(run.toLowerCase()) && !spelledOut(run),
-  );
+  return latinRuns(text).filter((run) => !known.has(run.toLowerCase()));
 }
 
 /**
@@ -214,19 +242,47 @@ export function audioBlocker(
   plan: { audioSecondsPerDay: number },
   secondsToday: number,
   wantSeconds: number,
+  t: AudioErrors,
+  planLabel: string,
 ): string {
-  if (plan.audioSecondsPerDay <= 0) return "Озвучка есть на Pro";
+  // Ни одно из чисел здесь не написано руками: подпись берёт ту же
+  // `audioSecondsPerDay`, по которой работает предел. Разойдись они —
+  // читателю назвали бы одну квоту, а применили другую, и оба числа
+  // выглядели бы одинаково правдоподобно.
+  if (plan.audioSecondsPerDay <= 0) return t.audioOnPro.replace("{plan}", planLabel);
   // Слушать нечем: озвучка уходит в Telegram, другого плеера у неё нет.
-  if (!reader.telegram_id) return "Напиши боту в Telegram — озвучка приходит туда";
+  if (!reader.telegram_id) return t.audioNoTelegram;
   const left = plan.audioSecondsPerDay - secondsToday;
-  if (left <= 0) return "На сегодня озвучка кончилась — завтра снова 45 минут";
+  if (left <= 0) {
+    return t.audioCapReached.replace("{minutes}", String(Math.floor(plan.audioSecondsPerDay / 60)));
+  }
   // Длинную статью не режем и не начинаем наполовину: обрезанная на
   // середине статья звучит как поломка, а не как исчерпанная квота.
   if (wantSeconds > left) {
-    return `Осталось ${Math.floor(left / 60)} мин, а эта статья на ${Math.ceil(wantSeconds / 60)}`;
+    return t.audioTooLong
+      .replace("{left}", String(Math.floor(left / 60)))
+      .replace("{needed}", String(Math.ceil(wantSeconds / 60)));
   }
   return "";
 }
+
+/** Те строки словаря, которые нужны отказу. Больше он ни о чём не знает. */
+export type AudioErrors = {
+  audioOnPro: string;
+  audioNoTelegram: string;
+  audioCapReached: string;
+  audioTooLong: string;
+};
+
+/**
+ * Языки, где знак несёт куда больше звука, чем буква.
+ *
+ * Иероглиф — это слог или слово, а не буква, поэтому те же 880 знаков
+ * в минуту дали бы оценку втрое короче правды, и статья на десять минут
+ * прошла бы под квоту в три. Резать их тоже надо иначе: точка у них
+ * полноширинная и пробела за собой не тянет.
+ */
+const DENSE = new Set(["японском", "китайском", "корейском"]);
 
 /**
  * Сколько секунд будет звучать текст.
@@ -237,7 +293,8 @@ export function audioBlocker(
  * то есть медленная: ошибиться в сторону «не хватит» дешевле, чем
  * оборвать статью на середине.
  */
-export const estimateSeconds = (text: string): number => Math.ceil((text.length / 880) * 60);
+export const estimateSeconds = (text: string, language = "русском"): number =>
+  Math.ceil((text.length / (DENSE.has(language) ? 300 : 880)) * 60);
 
 /** Сколько знаков уходит в один запрос к движку. */
 const CHUNK = 2500;
@@ -252,7 +309,10 @@ const CHUNK = 2500;
 export function chunks(text: string, limit = CHUNK): string[] {
   const out: string[] = [];
   let current = "";
-  for (const piece of text.split(/(?<=[.!?…])\s+/)) {
+  // Полноширинные знаки конца предложения режут и без пробела за ними:
+  // у японского и китайского пробелов нет вовсе, и правило «точка плюс
+  // пробел» отдавало бы весь текст одним куском.
+  for (const piece of text.split(/(?<=[.!?…])\s+|(?<=[。！？])/)) {
     if (current && current.length + piece.length + 1 > limit) {
       out.push(current);
       current = piece;
@@ -269,13 +329,17 @@ export function chunks(text: string, limit = CHUNK): string[] {
  * накопилось в базе. Накопленное перекрывает затравку: словарь правится
  * данными, а не выкаткой.
  */
-export function spokenMap(text: string, learned: Record<string, string> = {}): Map<string, string> {
+export function spokenMap(
+  text: string,
+  language: string,
+  learned: Record<string, string> = {},
+): Map<string, string> {
   const map = new Map<string, string>();
-  for (const [key, value] of Object.entries(SEED_SPOKEN)) map.set(key, value);
+  for (const [key, value] of Object.entries(SEED_SPOKEN[language] ?? {})) map.set(key, value);
   for (const run of latinRuns(text)) {
-    if (spelledOut(run) && !map.has(run.toLowerCase())) {
-      map.set(run.toLowerCase(), byLetters(run));
-    }
+    if (!spelledOut(run) || map.has(run.toLowerCase())) continue;
+    const letters = byLetters(run, language);
+    if (letters) map.set(run.toLowerCase(), letters);
   }
   for (const [key, value] of Object.entries(learned)) map.set(key.toLowerCase(), value);
   return map;

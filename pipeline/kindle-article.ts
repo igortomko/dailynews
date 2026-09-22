@@ -55,9 +55,23 @@ export async function runArticleSend(
   itemId: number,
 ): Promise<void> {
   try {
+    // Переведённый заголовок живёт в `digest_items.title` и персонален.
+    // Колонки `items.title_ru` нет с 0020, и запрос к ней падал целиком:
+    // единственная строка в `kindle_sends` провалилась именно так —
+    // «column "title_ru" does not exist», а на вид это была обычная
+    // неудачная отправка.
     const [item] = await sql<
-      { url: string; title: string; title_ru: string | null; body: string | null }[]
-    >`select url, title, title_ru, body from dailynews.items where id = ${itemId}`;
+      { url: string; title: string; mine: string | null; body: string | null }[]
+    >`
+      select i.url, i.title, i.body, di.title as mine
+        from dailynews.items i
+        left join dailynews.digest_items di on di.item_id = i.id
+        left join dailynews.digests d
+               on d.id = di.digest_id and d.reader_id = ${reader.id}
+       where i.id = ${itemId}
+       order by d.day desc nulls last
+       limit 1
+    `;
     if (!item) throw new Error(`материала ${itemId} нет`);
 
     // body — полный текст из фида, если он был. Тогда никуда идти не надо.
@@ -101,7 +115,7 @@ export async function runArticleSend(
     const epub = await buildEpub({
       // Заголовок берётся из выпуска: он уже переведён прогоном, платить
       // за перевод одной строки второй раз незачем.
-      title: item.title_ru || article.title,
+      title: item.mine || article.title,
       author: article.author,
       site: article.site,
       url: item.url,
@@ -112,7 +126,7 @@ export async function runArticleSend(
     await sendArticleToKindle({
       to: reader.kindle_address!,
       sender: reader.kindle_sender!,
-      title: item.title_ru || article.title,
+      title: item.mine || article.title,
       epub,
     });
 
@@ -142,7 +156,7 @@ export async function runArticleSend(
     `;
 
     console.log(
-      `  на Kindle: ${item.title_ru || article.title} ` +
+      `  на Kindle: ${item.mine || article.title} ` +
       `(${(epub.length / 1024).toFixed(0)} КБ, качество ${quality?.total?.toFixed(0) ?? "—"})`,
     );
   } catch (error) {

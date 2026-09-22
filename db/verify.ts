@@ -1561,34 +1561,42 @@ async function main() {
       insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
       values (${firstItem.id}, 'русском', 'AgADfake', 600, 'ru-RU-SvetlanaNeural')
     `;
-    const [oneVoice] = await sql<{ n: number }[]>`
-      select count(*)::int as n from dailynews.item_audio
-       where item_id = ${firstItem.id} and language = 'русском'
+    // Доказывается ключом, а не счётом строк: «строка одна» верно и тогда,
+    // когда ключ включает читателя, — просто вставляли один раз.
+    await rejects(
+      `insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+       values (${firstItem.id}, 'русском', 'AgADother', 700, 'ru-RU-SvetlanaNeural')`,
+      /item_audio_pkey/,
+      "вторая озвучка на тот же язык отвергается ключом: она общая, а не на читателя",
+    );
+    // А другой язык — это другая озвучка, и он проходит.
+    await sql`
+      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
+      values (${firstItem.id}, 'английском', 'AgADen', 500, 'en-US-AriaNeural')
     `;
-    assert.equal(oneVoice.n, 1, "одна озвучка на язык, а не на читателя");
 
     await sql`
       insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
       values (${owner.id}, ${firstItem.id}, 600, 'sent')
     `;
-    const listened = async (readerId: number) => {
-      const [row] = await sql<{ total: number }[]>`
-        select coalesce(sum(seconds), 0)::int as total
-          from dailynews.audio_sends
-         where reader_id = ${readerId}
-           and status in ('queued', 'translating', 'speaking', 'sending', 'sent')
-           and at > now() - interval '1 day'
-      `;
-      return row.total;
-    };
+    // Считает тот же код, что и прод: переписанный здесь предикат
+    // разъедется с рабочим при первом же новом статусе, и проверка
+    // будет доказывать свойство запроса, которого никто не выполняет.
+    const { secondsToday: listened } = await import("../pipeline/tts");
     assert.equal(await listened(owner.id), 600, "наслушанное считается по читателю");
     assert.equal(await listened(second.id), 0, "сосед не тратит чужую квоту");
 
     // Отказ снимает секунды: неудавшаяся озвучка не имеет права съесть
     // день читателю, который так ничего и не услышал.
+    //
+    // В фикстуре секунды ненулевые нарочно. С нулём сумма оставалась бы
+    // прежней и при подсчёте отказов, и утверждение проходило бы, даже
+    // если `failed` добавить в список статусов, — то есть не доказывало
+    // бы ничего. Прод их зануляет в catch, но строка до этого живёт
+    // с оценкой, и именно такую строку надо уметь не считать.
     await sql`
       insert into dailynews.audio_sends (reader_id, item_id, seconds, status, error)
-      values (${owner.id}, ${firstItem.id}, 0, 'failed', 'движок молчит')
+      values (${owner.id}, ${firstItem.id}, 600, 'failed', 'движок молчит')
     `;
     assert.equal(await listened(owner.id), 600, "провалившаяся озвучка квоту не тратит");
 

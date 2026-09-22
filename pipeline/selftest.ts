@@ -37,8 +37,8 @@ import {
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
 import {
-  applySpoken, byLetters, chunks, latinRuns, spelledOut, spokenMap, unknownRuns,
-  voiceFor, voiceForText,
+  applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
+  spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
 } from "../src/lib/speech";
 import { fileCoverage, numberCollisions } from "../db/schema-gap";
 import { readingTime } from "../src/lib/relative-time";
@@ -3384,8 +3384,12 @@ for (const [name, table] of [
   assert.equal(spelledOut("Gemini"), false);
   assert.equal(spelledOut("Google"), false);
 
-  assert.equal(byLetters("VHDL"), "ви-эйч-ди-эль");
-  assert.equal(byLetters("GPU"), "джи-пи-ю");
+  assert.equal(byLetters("VHDL", "русском"), "ви-эйч-ди-эль");
+  assert.equal(byLetters("GPU", "русском"), "джи-пи-ю");
+  // Язык, которому мы не знаем названий букв, отвечает «не умею», а не
+  // латиницей: иначе термин считался бы разобранным и в вопрос к модели
+  // уже не попал.
+  assert.equal(byLetters("GPU", "японском"), "", "чужой алфавит не выдаётся за прочитанный");
 
   // Подстановка идёт одним проходом по тем же кускам: `AI` лежит внутри
   // `OpenAI`, и замена по подстроке испортила бы уже разобранное слово.
@@ -3407,7 +3411,7 @@ for (const [name, table] of [
   );
 
   // Читаемое по буквам известно из кода — у модели про него не спрашивают.
-  const known = spokenMap("Процессор на VHDL и GPU, модель Datasette");
+  const known = spokenMap("Процессор на VHDL и GPU, модель Datasette", "русском");
   assert.equal(known.get("vhdl"), "ви-эйч-ди-эль");
   assert.deepEqual(
     unknownRuns("Процессор на VHDL и GPU, модель Datasette", known),
@@ -3415,8 +3419,23 @@ for (const [name, table] of [
     "спрашиваем только то, чего не решает правило",
   );
 
+  // Затравка принадлежит языку: «джемини» — русское произношение, и японцу
+  // его подставлять нельзя. У языка без затравки словарь пуст, то есть всё
+  // уедет в модель — дороже на вопрос, а не неправильно.
+  assert.equal(spokenMap("Gemini", "русском").get("gemini"), "джемини");
+  assert.equal(
+    spokenMap("Gemini", "японском").get("gemini"),
+    undefined,
+    "кириллица не подставляется японскому читателю",
+  );
+  assert.deepEqual(
+    unknownRuns("Процессор на VHDL", spokenMap("Процессор на VHDL", "японском")),
+    ["VHDL"],
+    "чего не знаем на этом языке — спрашиваем, а не читаем чужими буквами",
+  );
+
   // Накопленное в базе перекрывает затравку: словарь правится данными.
-  const learned = spokenMap("Google", { Google: "гуугл" });
+  const learned = spokenMap("Google", "русском", { Google: "гуугл" });
   assert.equal(learned.get("google"), "гуугл");
 }
 
@@ -3443,6 +3462,22 @@ for (const [name, table] of [
   assert.ok(parts.length > 1, "длинный текст действительно поделился");
   for (const part of parts) assert.ok(part.length <= 100 || !part.includes(" ") || part.split(/(?<=[.!?…])\s+/).length === 1);
 
+  // Иероглифы режутся по своей точке: пробела за ней нет, и правило
+  // «точка плюс пробел» отдало бы весь японский текст одним куском.
+  assert.equal(
+    chunks("あああ。いいい。ううう。", 8).length,
+    3,
+    "полноширинная точка режет текст без пробела",
+  );
+
+  // Знак у иероглифа — это слог, а не буква: те же 880 знаков в минуту
+  // дали бы оценку втрое короче правды, и статья на десять минут прошла бы
+  // под квоту в три.
+  assert.ok(
+    estimateSeconds("あ".repeat(300), "японском") > estimateSeconds("а".repeat(300), "русском") * 2,
+    "плотная письменность звучит дольше при той же длине",
+  );
+
   // Голос без перевода выбирается по письменности, а не по языку читателя:
   // языка оригинала в `items` нет вовсе.
   assert.ok(voiceForText("Первая строка новости про рынок").startsWith("ru-"));
@@ -3458,6 +3493,38 @@ for (const [name, table] of [
     if (language === SOURCE_LANGUAGE) continue;
     assert.ok(voiceFor(language), `нет голоса для языка «${language}»`);
   }
+
+  // Отказ называет ту же квоту, по которой работает предел: разойдись
+  // числа — читателю сказали бы одно, а применили другое, и оба выглядели
+  // бы одинаково правдоподобно.
+  const t = {
+    audioOnPro: "нужен {plan}",
+    audioNoTelegram: "нет телеграма",
+    audioCapReached: "на сегодня всё, завтра {minutes}",
+    audioTooLong: "осталось {left}, нужно {needed}",
+  };
+  const reader = { telegram_id: "1" };
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 0 }, 0, 60, t, "Pro"),
+    "нужен Pro",
+    "название тарифа берётся из тарифов, а не пишется руками",
+  );
+  assert.equal(
+    audioBlocker({ telegram_id: null }, { audioSecondsPerDay: 600 }, 0, 60, t, "Pro"),
+    "нет телеграма",
+    "слушать негде — озвучивать нечего",
+  );
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 1800 }, 1800, 60, t, "Pro"),
+    "на сегодня всё, завтра 30",
+    "в подписи та же квота, что в пределе",
+  );
+  assert.equal(
+    audioBlocker(reader, { audioSecondsPerDay: 2700 }, 2400, 600, t, "Pro"),
+    "осталось 5, нужно 10",
+    "длинная статья не начинается наполовину",
+  );
+  assert.equal(audioBlocker(reader, { audioSecondsPerDay: 2700 }, 0, 600, t, "Pro"), "");
 }
 
 // --- какие миграции сверка формы схемы вообще может проверить ------------------

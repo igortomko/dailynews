@@ -95,6 +95,27 @@ function siteOf(url: string): string | null {
   }
 }
 
+/**
+ * Значок и подпись кнопки озвучки — по записи на состояние.
+ *
+ * Одна таблица на оба места: значок в меню и значок в панели обязаны
+ * означать одно и то же, а два вложенных тернарника рядом расходятся
+ * молча и читаются глазом одинаково.
+ */
+type AudioState = "idle" | "working" | "sent";
+
+const AUDIO_ICON: Record<AudioState, ReactNode> = {
+  idle: <HeadphonesIcon />,
+  working: <Spinner />,
+  sent: <CheckIcon />,
+};
+
+const AUDIO_LABEL = (t: ReturnType<typeof useT>): Record<AudioState, string> => ({
+  idle: t.feed.item.audioSpeak,
+  working: t.feed.item.audioWorking,
+  sent: t.feed.item.audioSent,
+});
+
 export function ItemCard({
   item,
   showTopic,
@@ -131,7 +152,16 @@ export function ItemCard({
   // индекса и честно об этом говорит.
   // Начальное состояние приходит из базы, а не всегда «ещё не отправляли»:
   // отправка идёт минуту, и перезагрузка посреди неё стирала весь след.
-  const [audio, setAudio] = useState<"idle" | "working" | "sent">("idle");
+  const [audio, setAudio] = useState<AudioState>("idle");
+  // Живость карточки — ref, а не состояние: цикл опроса читает её между
+  // запросами, и перерисовка ему для этого не нужна.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const [kindle, setKindle] = useState<"idle" | "sending" | "sent">(
     item.kindled ? "sent" : "idle",
   );
@@ -223,6 +253,10 @@ export function ItemCard({
       return;
     }
     setAudio("working");
+    // Опрос переживает карточку, если его не остановить: читатель уходит
+    // на другой день выпуска, карточка размонтируется, а цикл продолжает
+    // ходить в сеть и звать setState у того, чего уже нет.
+    const alive = aliveRef;
     const toastId = toast.loading(t.feed.item.audioStart);
     try {
       const res = await fetch("/api/audio", {
@@ -231,6 +265,9 @@ export function ItemCard({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error ?? t.feed.item.audioError);
+      // Без номера спрашивать не о чем: цикл ходил бы пять минут по
+      // `send_id=undefined` и кончался бы «ещё готовится» на пустом месте.
+      if (!body?.send_id) throw new Error(t.feed.item.audioError);
 
       const WORDS: Record<string, string> = {
         queued: t.feed.item.audioQueued,
@@ -241,17 +278,17 @@ export function ItemCard({
       // Опрос, а не сокет: одна кнопка на карточку и минуты работы —
       // держать соединение ради четырёх слов дороже, чем спросить раз
       // в две секунды.
-      for (let i = 0; i < 150; i++) {
+      for (let i = 0; i < 150 && alive.current; i++) {
         await new Promise((done) => setTimeout(done, 2000));
+        if (!alive.current) return;
         const tick = await fetch(`/api/audio?send_id=${body.send_id}`);
         const state = await tick.json().catch(() => ({}));
         if (state.status === "sent") {
           setAudio("sent");
           toast.success(t.feed.item.audioDoneTitle, {
             id: toastId,
-            description: t.feed.item.audioDoneDescription.replace(
-              "{minutes}",
-              String(Math.max(1, Math.round((state.seconds ?? 0) / 60))),
+            description: t.feed.item.audioDoneDescription(
+              Math.max(1, Math.round((state.seconds ?? 0) / 60)),
             ),
           });
           return;
@@ -270,6 +307,7 @@ export function ItemCard({
       });
       setAudio("idle");
     } catch (error) {
+      if (!alive.current) return;
       setAudio("idle");
       toast.error(error instanceof Error ? error.message : t.feed.item.audioError, {
         id: toastId,
@@ -576,18 +614,8 @@ export function ItemCard({
                 disabled={audio === "working"}
                 onClick={audio === "working" ? undefined : speak}
               >
-                {audio === "working" ? (
-                  <Spinner />
-                ) : audio === "sent" ? (
-                  <CheckIcon />
-                ) : (
-                  <HeadphonesIcon />
-                )}
-                {audio === "working"
-                  ? t.feed.item.audioWorking
-                  : audio === "sent"
-                    ? t.feed.item.audioSent
-                    : t.feed.item.audioSpeak}
+                {AUDIO_ICON[audio]}
+                {AUDIO_LABEL(t)[audio]}
                 {canListen ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -686,10 +714,8 @@ export function ItemCard({
                 />
               }
             >
-              <span className="relative flex size-3.5 items-center justify-center">
-                <Spinner className={cn("absolute", swap(audio === "working"))} />
-                <CheckIcon className={cn("absolute", swap(audio === "sent"))} />
-                <HeadphonesIcon className={swap(audio === "idle")} />
+              <span className="flex size-3.5 items-center justify-center">
+                {AUDIO_ICON[audio]}
               </span>
             </TooltipTrigger>
             <TooltipContent>

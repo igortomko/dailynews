@@ -116,7 +116,7 @@ export const feed = {
     audioSpeaking: "Reading it aloud…",
     audioSending: "Sending to Telegram…",
     audioDoneTitle: "Audio is in Telegram",
-    audioDoneDescription: "{minutes} min — open the chat with the bot",
+    audioDoneDescription: (minutes: number) => `${minutes} min — open the chat with the bot`,
     audioSlowTitle: "Still working on the audio",
     audioSlowDescription: "It will arrive in Telegram when it is ready",
     audioError: "Could not read it aloud — try again",
