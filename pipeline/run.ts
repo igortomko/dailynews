@@ -541,7 +541,7 @@ async function deliver(
     }
     try {
       await notify(
-        Number(reader.telegram_id), day, intro,
+        Number(reader.telegram_id), day,
         survivors.map((s) => ({
           id: Number(s.id),
           title: titleOf(s),
