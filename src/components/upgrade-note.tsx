@@ -35,11 +35,13 @@ export function UpgradeLine({ note, plan }: { note: UpgradeNote; plan: Plan }) {
     : words.minutes(note.collected, note.kept, note.from, note.to, to);
 
   return (
-    <div className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-muted-foreground">
+    <div className="mt-4 flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
       <span>{text}</span>
-      {/* Кнопка-ссылка, а не Button: строка идёт прозой, и кнопка в её
-          середине читалась бы как отдельное действие, которого тут два —
-          дочитать выпуск и посмотреть цену. */}
+      {/* Кнопка-ссылка, а не Button: под лентой стоит подпись, а не панель
+          действий, и полноценная кнопка забирала бы внимание у выпуска,
+          который читают прямо над ней. Строкой ниже, а не в конце фразы:
+          предложение цены — это второе действие, и в одной строке с прозой
+          оно упиралось в её правый край, уводя всю пару влево. */}
       <button
         type="button"
         onClick={paywall.open}
