@@ -75,6 +75,7 @@ import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
 import { ru as ruDict } from "../src/lib/i18n/ru/index";
+import { en as enDict } from "../src/lib/i18n/en/index";
 import {
   anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG, TS_CONFIGS, tsConfigFor,
 } from "../src/lib/search";
@@ -2641,6 +2642,24 @@ assert.deepEqual(
 {
   const slugs = new Set(STARTER_TOPICS.map((topic) => topic.slug));
   assert.equal(slugs.size, STARTER_TOPICS.length, "слаги стартовых интересов не повторяются");
+
+  // Подпись живёт в двух словарях, и каждая обязана быть в обоих: интерес
+  // без перевода показывается читателю слагом из файла — по-английски тому,
+  // кто выбрал русский, и наоборот.
+  for (const topic of STARTER_TOPICS) {
+    assert.ok(ruDict.onboarding.starterTopics[topic.slug], `«${topic.slug}» нет в русском словаре`);
+    assert.ok(enDict.onboarding.starterTopics[topic.slug], `«${topic.slug}» нет в английском словаре`);
+  }
+
+  // Два алфавита в одной подписи читаются как недоделанное: «Психотерапия
+  // и mental health» год стояла первой на первом экране продукта.
+  for (const topic of STARTER_TOPICS) {
+    const label = ruDict.onboarding.starterTopics[topic.slug].label;
+    assert.ok(
+      !(/[А-Яа-яЁё]/.test(label) && /[A-Za-z]/.test(label)),
+      `русская подпись «${label}» смешивает кириллицу с латиницей`,
+    );
+  }
   for (const topic of STARTER_TOPICS) {
     assert.ok(topic.hint.length > 10, `у «${topic.label}» должна быть подсказка: она уходит в вопрос Jev`);
     assert.ok(topic.feeds.length > 0, `у «${topic.label}» должен быть хоть один источник`);
