@@ -11,7 +11,7 @@ import { langTagFor } from "@/lib/voice";
 import { issuesToday, sourcesForPlan } from "@/lib/plans";
 import { upgradeNote, upgradeReason } from "@/lib/upgrade";
 import { charsForMinutes, minutesOf } from "@/lib/reading-time";
-import { tabsOf } from "@/lib/networks";
+import { publishedIn, tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
@@ -80,7 +80,7 @@ export default async function FeedPage({
   // Действующий, а не купленный: у отменённой подписки оплаченный месяц
   // дочитывается, и кнопка обязана жить ровно столько же, сколько предел.
   const plan = effectivePlan(reader);
-  const networks = tabsOf(channels.map((channel) => channel.network)).map((network) => network.id);
+  const networks = tabsOf(publishedIn(channels)).map((network) => network.id);
 
   if (days.length === 0) {
     return (
