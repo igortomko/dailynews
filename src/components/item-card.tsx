@@ -44,6 +44,8 @@ const SEEN_MS = 1500;
 const LONG_PRESS_MS = 500;
 /** Сдвиг пальца, после которого это уже прокрутка, а не удержание. */
 const LONG_PRESS_SLOP = 10;
+/** Столько после сработавшего удержания нажатие считается его хвостом. */
+const LONG_PRESS_SUPPRESS_MS = 700;
 const DWELL_FLOOR_MS = 4000;
 
 /**
@@ -148,7 +150,10 @@ export function ItemCard({
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
   // Сработавшее удержание гасит нажатие, которое браузер шлёт следом
   // за отпусканием: иначе выбор карточки заодно открывал бы статью.
-  const longPressed = useRef(false);
+  // Помнится момент, а не флаг: флаг переживал бы жест, если нажатие
+  // после него не пришло (палец ушёл в прокрутку), и глотал бы следующий
+  // Enter на заголовке. Окно в семьсот миллисекунд пережить нельзя.
+  const longPressedAt = useRef(0);
   // Таймер читает состояние на момент срабатывания, а не на момент касания:
   // за полсекунды выбор могли снять с клавиатуры или из редактора, и снимок
   // из замыкания вернул бы его обратно.
@@ -171,7 +176,6 @@ export function ItemCard({
     press.current = null;
   };
   const startPress = (event: React.PointerEvent) => {
-    longPressed.current = false;
     if (event.pointerType !== "touch" || event.button !== 0) return;
     cancelPress();
     const { clientX: x, clientY: y } = event;
@@ -180,7 +184,7 @@ export function ItemCard({
       y,
       timer: setTimeout(() => {
         press.current = null;
-        longPressed.current = true;
+        longPressedAt.current = performance.now();
         navigator.vibrate?.(15);
         onSelectedChange(!selectedNow.current);
       }, LONG_PRESS_MS),
@@ -412,11 +416,13 @@ export function ItemCard({
       // Системное меню по удержанию (Android) и выделение текста (iOS)
       // отбирали бы жест себе; на мыши правая кнопка работает как обычно.
       onContextMenu={(event) => {
-        if (press.current || longPressed.current) event.preventDefault();
+        if (press.current || event.timeStamp - longPressedAt.current < LONG_PRESS_SUPPRESS_MS) {
+          event.preventDefault();
+        }
       }}
       onClickCapture={(event) => {
-        if (!longPressed.current) return;
-        longPressed.current = false;
+        if (event.timeStamp - longPressedAt.current > LONG_PRESS_SUPPRESS_MS) return;
+        longPressedAt.current = 0;
         event.preventDefault();
         event.stopPropagation();
       }}
