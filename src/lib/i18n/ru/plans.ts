@@ -51,7 +51,7 @@ export const plans: typeof En = {
     audio: {
       title: "Озвучка статьи",
       what: (minutes: number) =>
-        `Любая статья выпуска читается вслух и приходит в Telegram — слушать за рулём и на прогулке. ${minutes} минут в день.`,
+        `Любая статья выпуска читается вслух и приходит в Telegram — слушать за рулём и на прогулке. ${minutes} ${plural(minutes, "минута", "минуты", "минут")} в день.`,
     },
     x: {
       title: "Посты из X",
@@ -89,6 +89,7 @@ export const plans: typeof En = {
     checkoutNotReady: "Ссылка на оплату пока не настроена. Напиши боту",
     changesAfterPeriod: "Изменится после оплаченного периода",
     belowYours: "Ниже твоего",
+    audioPerDay: (minutes: number) => `${minutes} мин в день`,
     dailyCadence: "каждый день",
     everyOtherCadence: "через день",
     upToMinutes: (n) => `до ${n} мин`,

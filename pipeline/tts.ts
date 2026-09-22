@@ -198,7 +198,16 @@ export async function synthesize(text: string, voice: string): Promise<Buffer> {
  * не ошибившись ни разу заметно.
  */
 const FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3;
-const BYTES_PER_SECOND = Number(/(\d+)KBITRATE/.exec(FORMAT)?.[1] ?? 48) * 1000 / 8;
+/**
+ * Значения `OUTPUT_FORMAT` — строчными (`audio-24khz-48kbitrate-mono-mp3`),
+ * поэтому разбор без учёта регистра. С чувствительным к регистру он
+ * не совпадал никогда и молча брал запасное число: правка, которая должна
+ * была убрать зашитый битрейт, зашивала его второй раз и прятала.
+ * Отсутствие совпадения — это поломка, а не повод подставить 48.
+ */
+const kbitrate = /(\d+)kbitrate/i.exec(FORMAT)?.[1];
+if (!kbitrate) throw new Error(`не разобрал битрейт формата: ${FORMAT}`);
+const BYTES_PER_SECOND = (Number(kbitrate) * 1000) / 8;
 
 export const secondsOf = (audio: Buffer): number => Math.round(audio.length / BYTES_PER_SECOND);
 
@@ -263,16 +272,17 @@ export async function queueAudioSend(
 
   // Второе нажатие на ту же карточку не заводит вторую озвучку: два
   // одновременных запроса оба видят свободную квоту, и читатель уходит
-  // за предел вдвое. Ограничение в базе, а не проверка перед вставкой:
-  // между чтением и записью помещается ровно этот случай.
+  // за предел вдвое. Решает это индекс `audio_sends_one_in_flight` из
+  // 0047, а не проверка перед вставкой: между чтением и записью
+  // помещается ровно этот случай.
+  //
+  // Проигравший гонку должен получить внятный отказ, а не пятисотую:
+  // `on conflict do nothing` превращает нарушение ключа в пустой ответ,
+  // и он читается так же, как «уже озвучиваю».
   const [row] = await sql<{ id: number }[]>`
     insert into dailynews.audio_sends (reader_id, item_id, seconds)
-    select ${reader.id}, ${itemId}, ${want}
-     where not exists (
-       select 1 from dailynews.audio_sends
-        where reader_id = ${reader.id} and item_id = ${itemId}
-          and status in ('queued', 'translating', 'speaking', 'sending')
-     )
+    values (${reader.id}, ${itemId}, ${want})
+    on conflict do nothing
     returning id
   `;
   if (!row) return { error: t.audioAlreadySpeaking };
@@ -319,6 +329,9 @@ export async function runAudioSend(
         url: item.url,
         duration: ready.seconds,
       });
+      // Пересылка — такая же доставка: читатель уже слушает, и упавшая
+      // после неё запись не имеет права выдать это за провал.
+      delivered = true;
       await sql`
         update dailynews.audio_sends
            set status = 'sent', seconds = ${ready.seconds}, fresh = false
@@ -366,7 +379,10 @@ export async function runAudioSend(
     const spoken = await spokenText(plain, language, usage);
     if (usage.requests > 0) {
       await recordCall({
-        readerId: reader.id, stage: "spoken-terms", model: process.env.LLM_MODEL ?? "?",
+        // Та же модель, которую и звали: `resolve()` подставляет
+        // умолчание, когда переменной нет, и запись из переменной
+        // назвала бы расход чужим именем.
+        readerId: reader.id, stage: "spoken-terms", model: resolve().model,
         tokensIn: usage.input, tokensOut: usage.output, costUsd: llmCost(usage),
       });
     }

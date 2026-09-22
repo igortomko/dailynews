@@ -104,10 +104,17 @@ function siteOf(url: string): string | null {
  */
 type AudioState = "idle" | "working" | "sent";
 
+/** Как часто спрашиваем шаг и сколько всего ждём: пять минут. */
+const AUDIO_POLL_MS = 2000;
+const AUDIO_POLL_TIMES = 150;
+
+// Размер задан здесь: обёртка `size-3.5` собственный размер значка
+// не уменьшает, а кнопка в панели, в отличие от DropdownMenuItem,
+// правила `[&_svg]:size-4` не несёт — значок вылезал бы на полный рост.
 const AUDIO_ICON: Record<AudioState, ReactNode> = {
-  idle: <HeadphonesIcon />,
-  working: <Spinner />,
-  sent: <CheckIcon />,
+  idle: <HeadphonesIcon className="size-3.5" />,
+  working: <Spinner className="size-3.5" />,
+  sent: <CheckIcon className="size-3.5" />,
 };
 
 const AUDIO_LABEL = (t: ReturnType<typeof useT>): Record<AudioState, string> => ({
@@ -257,7 +264,9 @@ export function ItemCard({
     // на другой день выпуска, карточка размонтируется, а цикл продолжает
     // ходить в сеть и звать setState у того, чего уже нет.
     const alive = aliveRef;
-    const toastId = toast.loading(t.feed.item.audioStart);
+    // Без явной длительности sonner погасит тост сам, и прогресс исчезнет
+    // на середине работы — ровно так же, как у перестройки выпуска.
+    const toastId = toast.loading(t.feed.item.audioStart, { duration: Infinity });
     try {
       const res = await fetch("/api/audio", {
         method: "POST",
@@ -278,8 +287,8 @@ export function ItemCard({
       // Опрос, а не сокет: одна кнопка на карточку и минуты работы —
       // держать соединение ради четырёх слов дороже, чем спросить раз
       // в две секунды.
-      for (let i = 0; i < 150; i++) {
-        await new Promise((done) => setTimeout(done, 2000));
+      for (let i = 0; i < AUDIO_POLL_TIMES; i++) {
+        await new Promise((done) => setTimeout(done, AUDIO_POLL_MS));
         // Уход с карточки гасит тост: он глобальный и живёт, пока его
         // обновляют, — брошенный, он останется на экране навсегда.
         if (!alive.current) {

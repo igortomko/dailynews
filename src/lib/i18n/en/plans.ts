@@ -52,7 +52,7 @@ export const plans = {
     audio: {
       title: "Article audio",
       what: (minutes: number) =>
-        `Any article from your issue is read aloud and arrives in Telegram — listen while driving or walking. ${minutes} minutes a day.`,
+        `Any article from your issue is read aloud and arrives in Telegram — listen while driving or walking. ${minutes} ${minutes === 1 ? "minute" : "minutes"} a day.`,
     },
     x: {
       title: "Posts from X",
@@ -98,6 +98,7 @@ export const plans = {
     checkoutNotReady: "Checkout isn't set up yet. Message the bot",
     changesAfterPeriod: "Takes effect after the paid period ends",
     belowYours: "Below yours",
+    audioPerDay: (minutes: number) => `${minutes} min a day`,
     dailyCadence: "every day",
     everyOtherCadence: "every other day",
     upToMinutes: (n: number) => `up to ${n} min`,

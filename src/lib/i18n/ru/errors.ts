@@ -45,7 +45,7 @@ export const errors: typeof En = {
   audioNoTelegram: "Напиши боту в Telegram: озвучка приходит туда",
   audioNoText: "У этой новости нет текста, озвучивать нечего",
   audioCapReached: (minutes: number) => `На сегодня озвучка кончилась, завтра снова ${minutes} мин`,
-  audioTooLong: (left: number, needed: number) => `Осталось ${left} мин, а эта статья на ${needed}`,
+  audioTooLong: (left: number, needed: number) => `Осталось ${left} мин, а эта статья на ${needed} мин`,
   audioAlreadySpeaking: "Эту статью уже озвучиваю",
   audioNotFound: "Такой озвучки нет",
   noSession: "Сессия кончилась, войди заново",

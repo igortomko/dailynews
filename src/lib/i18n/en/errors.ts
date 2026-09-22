@@ -55,7 +55,7 @@ export const errors = {
   audioNoTelegram: "Message the bot on Telegram: audio arrives there",
   audioNoText: "This story has no text, there is nothing to read aloud",
   audioCapReached: (minutes: number) => `No audio left for today, tomorrow it is ${minutes} min again`,
-  audioTooLong: (left: number, needed: number) => `${left} min left, and this article runs ${needed}`,
+  audioTooLong: (left: number, needed: number) => `${left} min left, and this article runs ${needed} min`,
   audioAlreadySpeaking: "That article is already being read aloud",
   audioNotFound: "No such audio",
   noSession: "Your session is over. Sign in again",

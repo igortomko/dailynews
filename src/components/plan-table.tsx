@@ -53,6 +53,15 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
       feature: "cadence",
       value: (plan) => (plan.everyDays <= 1 ? t.plans.table.dailyCadence : t.plans.table.everyOtherCadence),
     },
+    {
+      feature: "audio",
+      // Минутами, а не галочкой: разница между тарифами здесь
+      // количественная, и «да/нет» о ней не говорит.
+      value: (plan) =>
+        plan.audioSecondsPerDay > 0
+          ? t.plans.table.audioPerDay(Math.floor(plan.audioSecondsPerDay / 60))
+          : false,
+    },
     { feature: "delivery", value: (plan) => FEATURES.delivery.has(plan) },
     { feature: "posts", value: (plan) => FEATURES.posts.has(plan) },
     { feature: "x", value: (plan) => plan.kinds.includes("x") },

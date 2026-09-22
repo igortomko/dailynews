@@ -302,15 +302,7 @@ export async function pendingKindleAsks(readerId: number) {
   // остаётся исходный.
   const pending = await sql<{ item_id: number; title: string }[]>`
     select ks.item_id,
-           coalesce(
-             (select di.title
-                from dailynews.digest_items di
-                join dailynews.digests d on d.id = di.digest_id
-               where d.reader_id = ks.reader_id and di.item_id = ks.item_id
-               order by d.day desc
-               limit 1),
-             i.title
-           ) as title
+           coalesce(${readerTitle(sql`ks.reader_id`, sql`ks.item_id`)}, i.title) as title
       from dailynews.kindle_sends ks
       join dailynews.items i on i.id = ks.item_id
      where ks.reader_id = ${readerId}
@@ -600,6 +592,26 @@ export async function removeReaderSource(readerId: number, sourceId: number): Pr
 }
 
 /**
+ * Подзапрос «заголовок из выпуска этого читателя».
+ *
+ * Один на два места: он же нужен вопросу «дочитал?» и озвучке, а две
+ * копии правила «свежий перевод этого читателя, иначе исходный» молча
+ * разъезжаются — у одной появляется условие по читателю, у другой нет,
+ * и заметно это только чужим заголовком в чужом ухе.
+ *
+ * Аргументы — куски запроса, а не значения: в одном месте номера
+ * приходят колонками соседней таблицы, в другом — числами.
+ */
+const readerTitle = (readerId: unknown, itemId: unknown) => sql`
+  (select di.title
+     from dailynews.digest_items di
+     join dailynews.digests d on d.id = di.digest_id
+    where d.reader_id = ${readerId as never} and di.item_id = ${itemId as never}
+    order by d.day desc
+    limit 1)
+`;
+
+/**
  * Заголовок материала так, как его видит этот читатель.
  *
  * Перевод заголовка живёт в `digest_items.title` и персонален: в `items`
@@ -618,15 +630,7 @@ export async function itemForReader(
 ): Promise<{ url: string; title: string; body: string | null } | null> {
   const [row] = await sql<{ url: string; title: string; body: string | null }[]>`
     select i.url, i.body,
-           coalesce(
-             (select di.title
-                from dailynews.digest_items di
-                join dailynews.digests d on d.id = di.digest_id
-               where di.item_id = i.id and d.reader_id = ${readerId}
-               order by d.day desc
-               limit 1),
-             i.title
-           ) as title
+           coalesce(${readerTitle(readerId, sql`i.id`)}, i.title) as title
       from dailynews.items i
      where i.id = ${itemId}
   `;
