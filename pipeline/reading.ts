@@ -167,6 +167,25 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
  */
 export type Prominence = "lead" | "regular";
 export const LEAD_CARDS = 5;
+
+/**
+ * Сколько верхних карточек выпуска получают разбор. Остальные пишутся
+ * обычным описанием.
+ *
+ * Ручка цены, поэтому переменной: карточка с разбором стоит в 55–70 раз
+ * дороже обычной (замер 22 сентября 2026, `docs/economics.md`), и сколько
+ * их себе позволить — это решение про тариф, а не про код. Ноль означал бы
+ * «разбора нет вовсе», и такое выключение делается флагом читателя,
+ * а не этим числом, — поэтому меньше единицы оно не опускается.
+ */
+export function readingCards(): number {
+  const asked = Math.trunc(Number(process.env.READING_CARDS));
+  // Ноль и минус читаются как «не задано», а не как «одна карточка»:
+  // поставивший ноль хотел выключить разбор, а выключается он флагом
+  // читателя. Молча оставить ему одну карточку с разбором значило бы
+  // сделать не то, о чём просили, и не сказать об этом.
+  return Number.isFinite(asked) && asked >= 1 ? asked : LEAD_CARDS;
+}
 export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[], prominence: Prominence = "regular"): Promise<ReadingDocument> {
   const input = {
     language: voice.language, style: styleOf(voice.style).instruction,

@@ -2195,6 +2195,7 @@ import { splitBlocks, chunkBlocks, chunkProblem, alreadyIn } from "./translate";
 import { samplePairs } from "./translation-quality";
 import { articleBlocker } from "./kindle";
 import { iconHref, publicHost } from "../src/lib/favicon";
+import { LEAD_CARDS, readingCards } from "./reading";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
 
@@ -2256,6 +2257,28 @@ assert.match(
   articleBlocker(base, PLANS.free, 0), new RegExp(PLANS.plus.label),
   "на бесплатном тарифе отправка статьи отказывает тарифом",
 );
+
+// Разбор получают только верхние карточки: он стоит в 55–70 раз дороже
+// обычного описания, и разбором всего выпуска Pro работал бы в минус
+// на любом его размере. Ручка — переменной, потому что крутить её придётся
+// вместе с ценой тарифа, а не правкой кода.
+{
+  const was = process.env.READING_CARDS;
+  try {
+    delete process.env.READING_CARDS;
+    assert.equal(readingCards(), LEAD_CARDS, "по умолчанию разбор получают те же карточки, что считаются ведущими");
+    process.env.READING_CARDS = "12";
+    assert.equal(readingCards(), 12, "число берётся из переменной, а не из перезапуска");
+    for (const junk of ["", "нет", "0", "-3"]) {
+      process.env.READING_CARDS = junk;
+      assert.equal(readingCards(), LEAD_CARDS,
+        `«${junk}» читается как «не задано»: выключается разбор флагом читателя, а не нулём здесь`);
+    }
+  } finally {
+    if (was === undefined) delete process.env.READING_CARDS;
+    else process.env.READING_CARDS = was;
+  }
+}
 
 // Значок сайта берётся из того, что объявила сама страница: угадывать путь
 // бесполезно — замер 22 сентября 2026 на стартовом наборе дал 404 у nngroup,
