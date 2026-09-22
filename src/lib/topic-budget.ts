@@ -85,20 +85,76 @@ export function normalize(counts: number[], total: number): number[] {
 }
 
 /**
- * Двигает границу между соседями: сколько ушло слева, столько пришло справа.
+ * Раздаёт бюджет между темами: недостачу снимает с самых жирных, излишек
+ * отдаёт самым тощим.
+ *
+ * Это и есть правило полосы. Пока растущая тема отнимала у соседней, граница
+ * упиралась в соседа с одной новостью и вставала намертво — при том, что
+ * рядом лежали темы по шесть. Теперь платит самый крупный, и застрять можно
+ * только когда справа у всех по минимуму.
+ *
+ * Отдаётся освободившееся место зеркально — самой тощей теме. Любое другое
+ * правило для обратного хода делало бы гребок туда и обратно невосстановимым:
+ * ушло бы у одного, вернулось бы другому.
+ */
+function level(parts: number[], budget: number): number[] {
+  const next = [...parts];
+  let left = budget - next.reduce((a, b) => a + b, 0);
+  while (left > 0) {
+    next[next.indexOf(Math.min(...next))]++;
+    left--;
+  }
+  while (left < 0) {
+    const fattest = next.indexOf(Math.max(...next));
+    // Вызывающий обрезает запрос по сумме минимумов, так что сюда мы
+    // не доходим. Без проверки цикл стал бы вечным, а не неточным.
+    if (next[fattest] <= MIN_PER_TOPIC) break;
+    next[fattest]--;
+    left++;
+  }
+  return next;
+}
+
+/**
+ * Двигает границу: тема слева от неё берёт ровно столько, сколько отмерил
+ * курсор, а разницу отдают темы правее — начиная с самой жирной.
+ *
+ * Слева не берётся ничего, и это не выбор из двух: положение границы — это
+ * сумма всего, что левее, поэтому отними место у темы левее — и сама граница
+ * не сдвинется, то есть ручка отстанет от курсора.
+ *
  * Сумма не меняется — значит, размер дайджеста не поедет от перетаскивания.
  */
 export function moveBoundary(counts: number[], boundary: number, cumulative: number): number[] {
-  const next = [...counts];
-  const before = next.slice(0, boundary).reduce((a, b) => a + b, 0);
-  const pair = next[boundary] + next[boundary + 1];
+  const before = counts.slice(0, boundary).reduce((a, b) => a + b, 0);
+  const rest = counts.slice(boundary + 1);
+  const pool = counts[boundary] + rest.reduce((a, b) => a + b, 0);
   const target = Math.min(
-    before + pair - MIN_PER_TOPIC,
-    Math.max(before + MIN_PER_TOPIC, Math.round(cumulative)),
+    pool - MIN_PER_TOPIC * rest.length,
+    Math.max(MIN_PER_TOPIC, Math.round(cumulative) - before),
   );
-  next[boundary] = target - before;
-  next[boundary + 1] = pair - next[boundary];
-  return next;
+  return [...counts.slice(0, boundary), target, ...level(rest, pool - target)];
+}
+
+/**
+ * Кнопки «+» и «−» на теме — та же полоса пальцем, поэтому и правило то же:
+ * растущая тема ест самую жирную, а отданное место уходит самой тощей.
+ * Разойдись они — одно и то же нажатие означало бы разное в двух местах
+ * одного экрана.
+ *
+ * Упёрлось в предел — возвращаем тот же массив, а не молча другой: наверху
+ * по нему решают, зажигать ли «Сохранить».
+ */
+export function nudgeTopic(counts: number[], index: number, by: number): number[] {
+  const others = counts.filter((_, i) => i !== index);
+  if (others.length === 0) return counts;
+  const total = counts.reduce((a, b) => a + b, 0);
+  const target = Math.min(
+    total - MIN_PER_TOPIC * others.length,
+    Math.max(MIN_PER_TOPIC, counts[index] + by),
+  );
+  const rest = level(others, total - target);
+  return counts.map((_, i) => (i === index ? target : rest[i < index ? i : i - 1]));
 }
 
 /**
