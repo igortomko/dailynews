@@ -4165,18 +4165,20 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   assert.ok(!/<новость>/.test(withAudio.html), "сырой угловой скобки в разметке нет");
 
   // Метка времени — только у того, что в записи есть.
-  assert.ok(withAudio.html.includes("(12:34)"), "у второй статьи её место в записи");
+  assert.ok(withAudio.html.includes("· 12:34"), "у второй статьи её место в записи");
+  assert.ok(!withAudio.html.includes("(12:34)"),
+    "скобок нет: точка отделяет число от заголовка одним знаком, а не двумя");
   assert.ok(!withAudio.html.includes("слушать"),
     "слова «слушать» нет: оно вело бы туда же, куда и сам заголовок");
   const third = withAudio.html.slice(withAudio.html.indexOf("Третья"));
-  assert.ok(!/\(\d+:\d\d\)/.test(third),
+  assert.ok(!/· \d+:\d\d/.test(third),
     "у статьи вне записи метки нет: она указывала бы на соседнюю новость");
 
   const noAudio = digestMessage({
     day: "2026-09-21", headlines: heads, appUrl: APP, size: "19 мин", podcast: false,
   });
   assert.ok(!noAudio.html.includes("<audio"), "без подкаста блока аудио нет");
-  assert.ok(!/\(\d+:\d\d\)/.test(noAudio.html),
+  assert.ok(!/· \d+:\d\d/.test(noAudio.html),
     "без подкаста метки времени не печатаются даже у того, у кого они есть");
   assert.ok(noAudio.html.includes("#item-13"), "ссылки на статьи остаются и без записи");
   assert.match(noAudio.html, /<\/h2>\n<h3>/,
