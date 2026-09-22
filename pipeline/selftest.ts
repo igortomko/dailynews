@@ -83,7 +83,7 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, s
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
-import { catalogSlug, ownLabel, STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
+import { catalogSlug, formChipOf, ownLabel, STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { countOf, explain, parseTelegram } from "./fetch";
@@ -768,6 +768,12 @@ assert.equal(catalogSlug(toSlug("Финтех Бразилии")), false, "св�
 assert.equal(catalogSlug(""), false, "пустой слаг — не каталожная");
 assert.equal(ownLabel("AI-инфра"), false, "имя каталожной темы, набранное руками, — не своя тема");
 assert.equal(ownLabel("Финтех Бразилии"), true, "своё имя — своя тема");
+// Флаг формы — оба слагаемых: без `!shared` взятая соседом тема снова стала бы
+// правимой в форме, а сервер молча отбрасывал бы правку.
+const fintech = { id: 1, slug: "fintech-brazil", label: "Финтех", hint: "", weight: 1, position: 1 };
+assert.equal(formChipOf({ ...fintech, shared: false }).own, true, "свою тему форма показывает с полем правки");
+assert.equal(formChipOf({ ...fintech, shared: true }).own, false, "взятую соседом — уже нет");
+assert.equal(formChipOf({ ...fintech, slug: "design", shared: false }).own, false, "каталожную — тоже нет, даже ничью");
 
 // --- личные правила: за чем следить и что исключать ----------------------------
 // Правило — список написаний одного и того же. Ищется буквально, с границей

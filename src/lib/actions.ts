@@ -141,12 +141,6 @@ export async function savePersonalization(formData: FormData) {
   return { ok: true as const };
 }
 
-/**
- * Интересы и бюджет внимания — одна форма: сколько новостей в день и как они
- * делятся между темами, задаётся одним движением. Поэтому размер дайджеста
- * сохраняется здесь, и только здесь: у поля должен быть один владелец, иначе
- * вторая форма, где этого поля нет, молча вернёт его к минимуму.
- */
 /** Ответ формы интересов: отказ словами или то, что легло в базу. */
 export type SavedInterests = {
   ok: true;
@@ -154,12 +148,22 @@ export type SavedInterests = {
   chips: ReturnType<typeof formChipOf>[];
 };
 
+/**
+ * Интересы и бюджет внимания — одна форма: сколько новостей в день и как они
+ * делятся между темами, задаётся одним движением. Поэтому размер дайджеста
+ * сохраняется здесь, и только здесь: у поля должен быть один владелец, иначе
+ * вторая форма, где этого поля нет, молча вернёт его к минимуму.
+ */
 export async function saveInterests(
   formData: FormData,
 ): Promise<{ error: string } | SavedInterests> {
   const readerId = await currentReaderId();
   const chips = (JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[])
-    .map((chip) => ({ ...chip, label: String(chip.label ?? "").trim() }));
+    .map((chip) => ({
+      ...chip,
+      label: String(chip.label ?? "").trim(),
+      hint: String(chip.hint ?? "").trim(),
+    }));
   if (chips.length === 0) return { error: (await getDict()).errors.pickOneTopic };
   // Имя уходит в общий справочник и в вопрос Jev как вариант ответа:
   // пустое там бесполезно всем. Поле добавления пустое отвергает, а имя

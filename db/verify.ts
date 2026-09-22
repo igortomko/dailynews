@@ -1461,8 +1461,9 @@ async function main() {
        where schemaname = 'dailynews' and indexname = 'reader_topics_topic_idx'
          -- По определению, а не по имени: индекс с тем же именем по другой
          -- колонке прошёл бы проверку, как проходило бы переопределённое
-         -- ограничение под тем же именем.
-         and indexdef like '%(topic_id)'
+         -- ограничение под тем же именем. strpos, а не like: в like «_» —
+         -- любой знак, и «(topicXid)» прошёл бы.
+         and strpos(indexdef, '(topic_id)') > 0
     `;
     assert.equal(topicIdx, 1, "индекс reader_topics(topic_id) из 0051 должен стоять");
 
@@ -1493,6 +1494,19 @@ async function main() {
       select label, hint from dailynews.topics where slug = 'blockchain'
     `;
     assert.deepEqual(chainAfter, chainBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
+    // Каталожная строка, разошедшаяся с набором (набрана руками до каталога
+    // или переименована в базе), сходится к нему при следующей записи: иначе
+    // она висела бы в третьем состоянии — ни своя, ни каталожная, и править
+    // её было бы нечем. На живой базе такая была одна: «Психотерапия»
+    // при «Психотерапия и mental health» в наборе.
+    await sql`update dailynews.topics set label = 'Крипта' where slug = 'blockchain'`;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
+    );
+    const [chainRestored] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where slug = 'blockchain'
+    `;
+    assert.deepEqual(chainRestored, chainBefore, "каталожная тема, разошедшаяся с набором, возвращается к нему при записи");
 
     // Каталожная тема, которой в сиде ещё нет, заводится из стартового
     // набора, а не из присланного: иначе первый взявший определял бы критерий

@@ -171,7 +171,7 @@ export function TopicChips({
   const settleOwn = (index: number) => {
     const chip = chips[index];
     // У темы со слагом имя на слаг не влияет — пересчитывать нечего.
-    if (!chip || chip.slug) return;
+    if (chip.slug) return;
     const own = ownLabel(chip.label);
     // Без изменений — без записи: setChips зовёт `touch`, и одно наведение
     // на имя с уходом зажигало бы «Сохранить» и сторожа ухода впустую.

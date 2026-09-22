@@ -105,13 +105,20 @@ export async function upsertTopic(
   topic: { slug: string; label: string; hint: string; position: number },
 ): Promise<number> {
   const starter = catalogTopic(topic.slug);
+  // Каталожная тема — из стартового набора, и уже заведённая тоже: строка,
+  // набранная руками до каталога, держала бы чужой критерий вечно, а править
+  // её нечем — у каталожной форма поля не показывает. У своей темы конфликт
+  // ничего не меняет: её правит условие ниже.
+  const catalog = starter !== undefined;
   const [row] = await db<{ id: number }[]>`
-    insert into dailynews.topics (slug, label, hint, position)
+    insert into dailynews.topics as t (slug, label, hint, position)
     values (
       ${topic.slug}, ${starter?.label ?? topic.label}, ${starter?.hint ?? topic.hint},
       ${topic.position}
     )
-    on conflict (slug) do update set slug = excluded.slug
+    on conflict (slug) do update
+       set label = case when ${catalog} then excluded.label else t.label end,
+           hint = case when ${catalog} then excluded.hint else t.hint end
     returning id::int as id
   `;
   if (starter) return row.id;

@@ -56,7 +56,7 @@ export function InterestsForm({
    * уходить ли.
    */
   const write = useCallback(
-    () =>
+    (stale: () => boolean) =>
       new Promise<boolean>((resolve) => {
         const node = form.current;
         if (!node) return resolve(false);
@@ -69,7 +69,13 @@ export function InterestsForm({
               setError(result.error);
               return resolve(false);
             }
-            setSeed((prev) => ({ chips: result.chips, minutes: result.minutes, version: prev.version + 1 }));
+            // Правка, сделанная пока шла запись, в ответ сервера не попала:
+            // пересев стёр бы её молча, кнопка осталась бы зажжённой,
+            // и следующая запись вернула бы серверное. Тронуто — чипы
+            // остаются как есть, их запишет следующее нажатие.
+            if (!stale()) {
+              setSeed((prev) => ({ chips: result.chips, minutes: result.minutes, version: prev.version + 1 }));
+            }
           } catch {
             setError(t.settings.common.saveError);
             return resolve(false);
