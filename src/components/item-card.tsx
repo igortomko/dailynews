@@ -1283,7 +1283,7 @@ export function ItemCard({
           {/* Заголовок не переносится: перенос на крупном кегле читается
               как опечатка, а строк тут две-три — рвать нечего. Язык всё
               равно объявлен: по нему говорит скринридер. */}
-          <h3 lang={textLang ?? undefined} className="mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
+          <h3 lang={textLang ?? undefined} className="mt-2.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
             <a
               href={item.url}
               target="_blank"

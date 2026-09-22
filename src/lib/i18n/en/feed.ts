@@ -60,7 +60,7 @@ export const feed = {
     remove: (title: string) => `Remove from overview: ${title}`,
     tooltipAdd: "Add to overview",
     tooltipRemove: "Remove from overview",
-    podcast: "Podcast",
+    podcast: "Record podcast",
     podcastWorking: "Building the podcast…",
     podcastQueued: (n: number) => `Podcast of ${n} ${n === 1 ? "story" : "stories"} is on its way`,
     podcastQueuedNote: "It will arrive in Telegram as one file",
