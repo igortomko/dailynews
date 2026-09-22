@@ -134,13 +134,11 @@ export const onboarding: typeof En = {
   opinionDialog: {
     title: "Черновик поста",
     hook: (text) => `Вход: ${text}`,
-    writing: "Пишу твоим голосом — это занимает несколько секунд",
+    writing: "Готовим черновики постов — это несколько секунд",
     failedTitle: "Не написалось",
     voiceNotBuiltTitle: "Твоих постов ещё не читали",
     voiceNotBuiltDescription:
       "Это написано твоими настройками подачи, а не твоими постами. Дай почитать свои посты в «Черновиках постов» — и черновик станет твоим.",
-    checkBeforePublishTitle: "Проверь перед публикацией",
-    addedBeyondSource: "Добавлено сверх материала:",
     variant1: "Первый вариант",
     variant2: "Второй вариант",
     noDraftForNetwork: "Для этой сети модель ничего не дала — попробуй ещё раз.",

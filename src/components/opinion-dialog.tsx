@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
+import { BrandIllustration } from "@/components/brand-illustration";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { takeOpinion, writeOpinion } from "@/lib/actions";
@@ -121,9 +122,15 @@ export function OpinionDialog({
         </DialogHeader>
 
         {state.kind === "writing" ? (
-          <div className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
-            <Spinner />
-            {t.onboarding.opinionDialog.writing}
+          // Картинка занимает ожидание чем-то, кроме текста и спиннера:
+          // «tuning» — подгонка под чужой лад, то же самое, что здесь
+          // происходит с голосом автора.
+          <div className="flex flex-col items-center gap-4 py-8 text-center">
+            <BrandIllustration name="tuning" alt="" size={140} />
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <Spinner />
+              {t.onboarding.opinionDialog.writing}
+            </div>
           </div>
         ) : null}
 
@@ -140,20 +147,6 @@ export function OpinionDialog({
               <Alert>
                 <AlertTitle>{t.onboarding.opinionDialog.voiceNotBuiltTitle}</AlertTitle>
                 <AlertDescription>{t.onboarding.opinionDialog.voiceNotBuiltDescription}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            {state.added.length ? (
-              <Alert variant="destructive">
-                <AlertTitle>{t.onboarding.opinionDialog.checkBeforePublishTitle}</AlertTitle>
-                <AlertDescription>
-                  {t.onboarding.opinionDialog.addedBeyondSource}
-                  <ul className="mt-1 flex flex-col gap-0.5">
-                    {state.added.map((line) => (
-                      <li key={line}>— {line}</li>
-                    ))}
-                  </ul>
-                </AlertDescription>
               </Alert>
             ) : null}
 

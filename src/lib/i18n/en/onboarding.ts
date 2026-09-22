@@ -119,13 +119,11 @@ export const onboarding = {
   opinionDialog: {
     title: "Your take",
     hook: (text: string) => `Hook: ${text}`,
-    writing: "Writing in your voice — this takes a few seconds",
+    writing: "Preparing draft posts — this takes a few seconds",
     failedTitle: "Couldn't write it",
     voiceNotBuiltTitle: "We haven't read your posts yet",
     voiceNotBuiltDescription:
       "This was written from your delivery settings, not from your posts. Let us read your posts under Post drafts — then the draft will sound like you.",
-    checkBeforePublishTitle: "Check before you publish",
-    addedBeyondSource: "Added beyond the source:",
     variant1: "Variant 1",
     variant2: "Variant 2",
     noDraftForNetwork: "The model didn't return anything for this network — try again.",
