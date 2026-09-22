@@ -719,7 +719,6 @@ export function FeedTabs({
           показывать, а состояние копирования не должно жить зря. */}
       {picked.draft ? (
         <OverviewDialog
-          day={day}
           overview={picked.draft}
           open={editing}
           onOpenChange={setEditing}

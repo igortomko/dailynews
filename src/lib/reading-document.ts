@@ -138,6 +138,28 @@ export function blockText(b: ReadingBlock): string {
 export function documentText(doc: ReadingDocument): string {
   return [doc.lead?.text, ...doc.blocks.map(blockText), doc.application && `${doc.application.condition} ${doc.application.text}`, doc.evidence?.text].filter(Boolean).join("\n\n");
 }
+/**
+ * Документ чтения обычным текстом — ровно то же и в том же порядке, что
+ * рисует карточка: оговорка, лид, блоки, вывод. Он ложится в
+ * `digest_items.summary`, откуда его берут и письмо на читалку, и всё
+ * остальное, чему нужен конспект строкой; три копии этой склейки
+ * разошлись бы на первой правке любой из них.
+ */
+export const readingText = (reading: StoredReading): string =>
+  [reading.notice, reading.document && documentText(reading.document)].filter(Boolean).join("\n\n");
+/**
+ * Абзац, которым конспект открывается, — описание материала одной мыслью.
+ *
+ * Не весь конспект: он написан на экран карточки, и десять конспектов
+ * подряд не влезают даже в одно сообщение Telegram (4096 знаков), ради
+ * которого обзор и собирают. Лида в документе может не быть — тогда
+ * берётся первый обычный абзац, а если и его нет, первый блок: акцент
+ * из одного числа хуже абзаца, но лучше пустого места.
+ */
+export const readingLead = (reading: StoredReading): string =>
+  [reading.notice, reading.document && (reading.document.lead?.text
+    ?? blockText(reading.document.blocks.find((b) => b.kind === "paragraph") ?? reading.document.blocks[0]))]
+    .filter(Boolean).join("\n\n");
 export function parseStoredReading(value: unknown): StoredReading | null {
   const shape = z.object({
     version: z.literal(2), sourceVersion: z.string(),

@@ -3834,6 +3834,64 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   assert.equal(blockOf({ ...card(4, "Orig", null), title_ru: "Перевод" }).title, "Перевод");
   assert.equal(blockOf(card(4, "Orig", null)).summary, "");
 
+  // Текст берётся из документа чтения, когда его разобрали: лента снимает
+  // `summary` с таких карточек, и обзор без этой ветки собирался бы
+  // из одних заголовков со ссылками — окно открывается, текста нет.
+  // Берётся лид, а не весь конспект: десять конспектов не влезают
+  // и в одно сообщение Telegram, ради которого обзор и собирают.
+  const readingBlock = blockOf({
+    ...card(5, "С документом", null),
+    summary_document: {
+      version: 2, sourceVersion: "v1", availability: "article_text", status: "verified",
+      notice: null, seconds: 42,
+      document: {
+        schemaVersion: 2, genre: "news",
+        title: { text: "Заголовок документа", claimIds: ["c1"] },
+        lead: { text: "Лид документа.", claimIds: ["c1"] },
+        blocks: [{ kind: "paragraph", content: { text: "Абзац документа.", claimIds: ["c1"] } }],
+        evidence: null, application: null, omitted: [], baselineId: null,
+      },
+    },
+  });
+  assert.equal(readingBlock.summary, "Лид документа.");
+  // Заголовок — по-прежнему тот, что в ленте: заголовок документа приезжает
+  // в карточку как `title_ru`, и читать его отсюда второй раз незачем.
+  assert.equal(readingBlock.title, "С документом");
+  // Оговорка о нехватке источника — часть текста, как в письме и на читалке.
+  assert.equal(
+    blockOf({
+      ...card(6, "Без выжимки", null),
+      summary_document: {
+        version: 2, sourceVersion: "v1", availability: "excerpt_only", status: "unavailable",
+        notice: "Выжимку подготовить не удалось.", seconds: 0, document: null,
+      },
+    }).summary,
+    "Выжимку подготовить не удалось.",
+  );
+  // Без лида берётся первый обычный абзац, а не акцент из одного числа.
+  assert.equal(
+    blockOf({
+      ...card(8, "Без лида", null),
+      summary_document: {
+        version: 2, sourceVersion: "v1", availability: "article_text", status: "verified",
+        notice: null, seconds: 42,
+        document: {
+          schemaVersion: 2, genre: "news",
+          title: { text: "Заголовок", claimIds: ["c1"] }, lead: null,
+          blocks: [
+            { kind: "metric", value: "18–0", label: "побед", context: { text: "У лидера.", claimIds: ["c1"] } },
+            { kind: "paragraph", content: { text: "Обычный абзац.", claimIds: ["c1"] } },
+          ],
+          evidence: null, application: null, omitted: [], baselineId: null,
+        },
+      },
+    }).summary,
+    "Обычный абзац.",
+  );
+
+  // Мусор в колонке читается как «документа нет», а не роняет обзор.
+  assert.equal(blockOf({ ...card(7, "Мусор", null), summary_document: { version: 9 } }).summary, "");
+
   // Дата выпуска на языке читателя, одна на шапку и на обзор.
   assert.equal(formatDay("2026-09-21", "ru"), "21 сентября 2026 г.");
   assert.equal(formatDay("2026-09-21", "en"), "September 21, 2026");

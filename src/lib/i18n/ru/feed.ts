@@ -69,7 +69,6 @@ export const feed: typeof En = {
     clearTooltip: "Снять выбор",
     build: "Собрать обзор",
     dialogTitle: "Обзор для коллег",
-    issueOf: (date: string, n: number) => `Выпуск за ${date} · ${count(n, "новость", "новости", "новостей")}`,
     defaultTitle: (date: string) => `Обзор за ${date}`,
     titleLabel: "Название",
     introLabel: "Вступление",
