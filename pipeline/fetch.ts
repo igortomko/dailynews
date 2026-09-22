@@ -429,8 +429,41 @@ type XTweet = {
   likeCount?: number;
   retweetCount?: number;
   viewCount?: number;
+  isReply?: boolean;
+  retweeted_tweet?: unknown;
+  entities?: { urls?: { expanded_url?: string }[] };
   author?: { userName?: string; name?: string };
 };
+
+/**
+ * Ссылка на материал из самого твита.
+ *
+ * Твит с внешней ссылкой — это анонс статьи, и адресом материала должна быть
+ * статья, а не твит: по адресу твита `enrich` не получит ничего (X без
+ * браузера не отдаёт содержимого), и оценка встанет по 280 знакам анонса.
+ * Заодно бесплатно чинится дедуп: `url_canon` статьи сойдётся с тем же
+ * адресом из RSS первым слоем, без вопроса к Jev по заголовкам, которые
+ * у твита и у издания не сходятся никогда.
+ *
+ * Свои адреса X не считаются: цитата другого твита — не материал. `t.co`
+ * тоже не годится — это сокращатель, за которым неизвестно что, а тянуть
+ * его в сборе значит платить запросом за каждую ссылку в каждом твите.
+ */
+export function tweetLink(tweet: XTweet): string | null {
+  for (const entry of tweet.entities?.urls ?? []) {
+    const raw = entry.expanded_url;
+    if (!raw?.startsWith("http")) continue;
+    let host: string;
+    try {
+      host = new URL(raw).hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      continue;
+    }
+    if (host === "x.com" || host === "twitter.com" || host === "t.co") continue;
+    return raw;
+  }
+  return null;
+}
 
 export async function fetchX(source: Source): Promise<RawItem[]> {
   const apiKey = process.env.X_API_KEY;
@@ -464,7 +497,13 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
 
     for (const tweet of payload.tweets ?? []) {
       if (!tweet?.text) continue;
+      // Реплай — это разговор, ретвит — чужой материал второй раз. Операторы
+      // `-is:reply -is:retweet` убирают их до оплаты, но запрос пишет
+      // читатель, и рассчитывать на них нельзя: без этой отсечки лента
+      // выбранных авторов приходит их перепиской.
+      if (tweet.isReply || tweet.retweeted_tweet) continue;
       const handle = tweet.author?.userName ? `@${tweet.author.userName}` : "";
+      const link = tweetLink(tweet);
       const published = new Date(tweet.createdAt);
       // Текст приходит с неразвёрнутыми HTML-сущностями (&amp;, &gt;).
       // В заголовке дайджеста они видны читателю как есть.
@@ -473,7 +512,7 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
         // Первая строка поста работает заголовком: у твита его нет,
         // а Jev и дайджест ждут заголовок отдельно от текста.
         title: `${handle ? `${handle}: ` : ""}${text.slice(0, 200)}`,
-        url: tweet.url || `https://x.com/i/status/${tweet.id}`,
+        url: link ?? tweet.url ?? `https://x.com/i/status/${tweet.id}`,
         excerpt: text.slice(0, 1200),
         points: tweet.likeCount ?? null,
         comments: tweet.retweetCount ?? null,
