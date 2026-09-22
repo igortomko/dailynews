@@ -39,6 +39,7 @@ export const feed: typeof En = {
     kbdBetween: "между материалами",
     kbdOpen: "открыть",
     kbdOverview: "в обзор",
+    kbdListen: "озвучить",
     kbdSearch: "поиск по выпускам",
   },
 
@@ -149,7 +150,7 @@ export const feed: typeof En = {
   search: {
     label: "Поиск по выпускам",
     submit: "Найти",
-    openHint: "Поиск по прошлым выпускам — клавиша /",
+    openHint: "Поиск по прошлым выпускам",
     fieldPlaceholder: "Найти в прошлых выпусках: uranium дата-центры",
     close: "Закрыть поиск",
     recent: "недавнее",

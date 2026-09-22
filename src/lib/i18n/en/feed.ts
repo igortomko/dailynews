@@ -40,6 +40,7 @@ export const feed = {
     kbdBetween: "between stories",
     kbdOpen: "open",
     kbdOverview: "add to overview",
+    kbdListen: "listen",
     kbdSearch: "search digests",
   },
 
@@ -148,7 +149,7 @@ export const feed = {
   search: {
     label: "Search digests",
     submit: "Search",
-    openHint: "Search past digests — press /",
+    openHint: "Search past digests",
     fieldPlaceholder: "Search past digests: uranium data centers",
     close: "Close search",
     recent: "recent",
