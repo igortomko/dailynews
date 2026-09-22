@@ -2072,6 +2072,7 @@ assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем
 import { splitBlocks, chunkBlocks, chunkProblem, alreadyIn } from "./translate";
 import { samplePairs } from "./translation-quality";
 import { articleBlocker } from "./kindle";
+import { iconHref } from "../src/lib/favicon";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
 
@@ -2133,6 +2134,64 @@ assert.match(
   articleBlocker(base, PLANS.free, 0), new RegExp(PLANS.plus.label),
   "на бесплатном тарифе отправка статьи отказывает тарифом",
 );
+
+// Значок сайта берётся из того, что объявила сама страница: угадывать путь
+// бесполезно — замер 22 сентября 2026 на стартовом наборе дал 404 у nngroup,
+// 405 у arstechnica и 200 с нулём байт у psypost и crunchbase. Разбор чужой
+// разметки, поэтому проверка идёт по сохранённому куску настоящих страниц.
+{
+  const heads = readFileSync("pipeline/fixtures/favicon-heads.html", "utf8").split("<!--");
+  const headOf = (host: string) => heads.find((one) => one.startsWith(` ${host},`))!;
+
+  assert.equal(
+    iconHref(headOf("www.nngroup.com"), "https://www.nngroup.com/"),
+    "https://media.nngroup.com/static/img/favicon.ico",
+    "«shortcut icon» — такое же объявление значка, как «icon»",
+  );
+  // Крупнее, а не первый попавшийся: 32×32 растянутые до 64 мылятся,
+  // а размер объявлен прямо в разметке — гадать не по чему.
+  assert.match(
+    iconHref(headOf("www.psypost.org"), "https://www.psypost.org/")!,
+    /w_192,h_192/,
+    "из нескольких размеров берётся самый крупный",
+  );
+  assert.match(
+    iconHref(headOf("news.crunchbase.com"), "https://news.crunchbase.com/")!,
+    /300x300/,
+    "и у второго сайта тоже, а не по порядку в разметке",
+  );
+
+  // Относительный адрес — обычное дело, и он обязан стать полным: иначе
+  // наш сервер пойдёт за значком к себе.
+  assert.equal(
+    iconHref('<link rel="icon" href="/static/f.png">', "https://example.com/"),
+    "https://example.com/static/f.png",
+    "относительный адрес разворачивается от страницы",
+  );
+  // svg вне конкурса размеров: он резкий на любом.
+  assert.match(
+    iconHref(
+      '<link rel="icon" sizes="192x192" href="/big.png"><link rel="icon" href="/i.svg">',
+      "https://example.com/",
+    )!,
+    /i\.svg$/,
+    "svg побеждает любой растровый размер",
+  );
+  // Силуэт Safari — не значок: он одноцветный и в списке читается пятном.
+  assert.equal(
+    iconHref('<link rel="mask-icon" href="/m.svg">', "https://example.com/"),
+    null,
+    "mask-icon значком не считается",
+  );
+  assert.equal(iconHref("<html><head></head></html>", "https://example.com/"), null, "нет объявления — нет адреса");
+  // Кривой адрес в чужой разметке не должен уносить с собой годное соседнее
+  // объявление: разбор переживает мусор, а не падает на нём.
+  assert.equal(
+    iconHref('<link rel="icon" href="http://["><link rel="icon" href="/ok.png">', "https://example.com/"),
+    "https://example.com/ok.png",
+    "кривое объявление пропускается, годное берётся",
+  );
+}
 
 // Нажатие кнопки приходит не сообщением, а callback_query. Без этой ветки
 // оно проваливалось в ignore: часики на кнопке крутились, ответ терялся.
