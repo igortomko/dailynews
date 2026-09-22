@@ -61,7 +61,7 @@ import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
-  channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
+  botUpsellLine, channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
   splitClassic, stamp, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -1670,6 +1670,79 @@ assert.deepEqual(
   ["pro"],
   "за своим мнением с Plus предлагается ровно Pro",
 );
+import {
+  botMayUpsell, featureOf, upgradeReason, UPGRADE_REASONS, UPSELL_QUIET_DAYS, type UpgradeFacts,
+} from "../src/lib/upgrade";
+
+// --- когда говорить про тариф, и когда молчать ----------------------------
+// Правило одно на два места показа: строка под выпуском и блок в сообщении
+// бота. Разойдись они — один и тот же день объяснялся бы по-разному.
+{
+  const facts = (extra: Partial<UpgradeFacts> = {}): UpgradeFacts => ({
+    sources: 1, topics: 1, collected: 10, kept: 8, active: true, issuesToday: true, ...extra,
+  });
+
+  // Молчание — тоже ответ, и у него три причины.
+  assert.equal(
+    upgradeReason(PLANS.free, facts({ active: false, sources: PLANS.free.maxSources })),
+    null,
+    "тому, кто не открыл ни одной карточки, платный тариф не предлагается",
+  );
+  assert.equal(
+    upgradeReason(PLANS.pro, facts({ sources: PLANS.pro.maxSources, topics: PLANS.pro.maxTopics })),
+    null,
+    "на самом дорогом тарифе предлагать нечего",
+  );
+  assert.equal(upgradeReason(PLANS.free, facts()), null, "без упёртого предела молчим");
+
+  // Порядок — по заметности предела, а не по нашей выгоде.
+  assert.equal(
+    upgradeReason(PLANS.free, facts({ issuesToday: false, sources: PLANS.free.maxSources }))?.reason,
+    "cadence",
+    "пропущенный день заметнее исчерпанного списка источников",
+  );
+  assert.equal(
+    upgradeReason(PLANS.free, facts({ sources: PLANS.free.maxSources, topics: PLANS.free.maxTopics }))?.reason,
+    "sources",
+    "источники раньше интересов: за ними приходят чаще",
+  );
+  // Отбрасывается всегда, поэтому порог — вдвое, а не «что-то отброшено»:
+  // строка, горящая каждый день, ничем не отличается от выключенной.
+  assert.equal(upgradeReason(PLANS.free, facts({ collected: 15, kept: 8 })), null, "поток меньше вдвое — не повод");
+  assert.equal(
+    upgradeReason(PLANS.free, facts({ collected: 106, kept: 8 }))?.reason,
+    "minutes",
+    "поток вдвое шире выпуска — повод сказать про время чтения",
+  );
+  assert.equal(upgradeReason(PLANS.free, facts({ collected: 0, kept: 0 })), null, "пустой день ничего не доказывает");
+
+  // Зовём туда, где предел снимается, а не на самый дорогой тариф.
+  const sourcesUp = upgradeReason(PLANS.free, facts({ sources: PLANS.free.maxSources }));
+  assert.equal(sourcesUp?.to.id, "plus", "за источниками зовём на самый дешёвый подходящий");
+  assert.ok(
+    sourcesUp && PLANS[sourcesUp.to.id].maxSources > PLANS.free.maxSources,
+    "названный тариф обязан снимать именно тот предел, о котором сказано",
+  );
+  // Окно пейвола открывается по той же возможности, о которой сказала строка.
+  for (const reason of UPGRADE_REASONS) {
+    assert.ok(FEATURES[featureOf(reason)], `у причины ${reason} есть своя возможность`);
+  }
+  // Предел Plus по источникам уже выше бесплатного, поэтому Plus, упёршийся
+  // в свои сорок, зовётся на Pro, а не остаётся с собственным тарифом.
+  assert.equal(
+    upgradeReason(PLANS.plus, facts({ sources: PLANS.plus.maxSources }))?.to.id,
+    "pro",
+    "с Plus за источниками зовём на Pro",
+  );
+
+  // В чат предложение приходит само, поэтому реже: каждую ночь — это спам.
+  const day = 86_400_000;
+  assert.ok(botMayUpsell(null), "ни разу не говорили — можно");
+  assert.ok(!botMayUpsell(new Date(Date.now() - day)), "вчера говорили — молчим");
+  assert.ok(botMayUpsell(new Date(Date.now() - (UPSELL_QUIET_DAYS + 1) * day)), "через неделю можно снова");
+  assert.ok(botMayUpsell("не дата"), "нечитаемая отметка не запирает предложение навсегда");
+}
+
 // Подписка открыта всем и тарифом не закрывается вовсе: закрыть её значит
 // показать кнопку «подписаться» только тем, кто уже подписан. Поэтому её
 // и нет среди разделов, которые тариф может закрыть.
@@ -4383,6 +4456,31 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   assert.ok(noAudio.html.includes("#item-13"), "ссылки на статьи остаются и без записи");
   assert.match(noAudio.html, /<\/h2>\n<h3>/,
     "без записи первый раздел идёт сразу за заголовком, без разделителя");
+
+  // Предложение тарифа стоит в самом конце, после всех тем: до первой
+  // новости в сообщении только то, ради чего его открыли, а строка,
+  // поднятая выше, заняла бы место в сгибе.
+  const line = botUpsellLine(PLANS.free, {
+    reason: "minutes", plan: "plus", from: 5, to: 20, collected: 106, kept: 8,
+  }, APP);
+  assert.match(line, /106/, "строка называет поток: без первого числа второе ничего не значит");
+  assert.match(line, /Plus/, "и тариф, куда зовём");
+  assert.match(line, new RegExp(`${APP}/settings/subscription`), "в чате нет окна пейвола — нужна ссылка");
+
+  const sold = digestMessage({
+    day: "2026-09-21", headlines: heads, appUrl: APP, size: "19 мин", podcast: false, upsell: line,
+  });
+  assert.ok(sold.html.trimEnd().endsWith("</p>"), "предложение — последний блок сообщения");
+  assert.ok(
+    sold.html.indexOf("#item-13") < sold.html.indexOf("settings/subscription"),
+    "заголовки идут раньше предложения, а не наоборот",
+  );
+  assert.ok(sold.classic.trimEnd().endsWith(line), "в классическом пути оно тоже последнее");
+  assert.equal(
+    digestMessage({ day: "2026-09-21", headlines: heads, appUrl: APP, size: "19 мин", podcast: false }).html,
+    noAudio.html,
+    "без предложения сообщение не меняется ни на знак",
+  );
 
   // Ничего не обрезается: старое сообщение упиралось в 4000 знаков
   // и обрывалось на полуслове у двух выпусков из трёх.

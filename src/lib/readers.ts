@@ -34,7 +34,7 @@ const COLUMNS = sql`
   kindle_address, kindle_sender, kindle_digest, kindle_approved, podcast,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
-  paused_at, sleep_asked_at, resume_at,
+  paused_at, sleep_asked_at, resume_at, upsell_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
   voice_card, voice_built_at, voice_sample,
   follow_rules, exclude_rules

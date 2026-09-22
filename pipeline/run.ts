@@ -12,7 +12,7 @@ import { composite, scoreAll, type Scorable } from "./score";
 import { resolve, writeDigest, type Survivor, type Usage } from "./digest";
 import { buildPodcast } from "./tts";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
-import { askResume, notify } from "../src/lib/telegram";
+import { askResume, botUpsellLine, notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
 import { askFinished } from "../src/lib/telegram";
 import { enrichImages } from "./og";
@@ -29,6 +29,8 @@ import {
 // Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
 import { feed as ruFeed } from "../src/lib/i18n/ru/feed";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
+import { botMayUpsell, upgradeNote, upgradeReason } from "../src/lib/upgrade";
+import { getUpgradeFacts } from "../src/lib/queries";
 import { SEARCH_CONFIG, tsConfigFor } from "../src/lib/search";
 import { sleepVerdict } from "../src/lib/sleep";
 import { rulesOf } from "../src/lib/rules";
@@ -572,6 +574,32 @@ async function deliver(
         });
       }
     }
+    /**
+     * Предел, в который читатель упёрся, — одной строкой в конце сообщения.
+     *
+     * Правило то же, что у строки под выпуском в ленте (`upgradeReason`):
+     * два места показа, сказавшие разное про один день, читались бы как две
+     * разные ленты. Частота своя и реже: сообщение приходит само.
+     *
+     * Отказ здесь не стоит выпуска — предложение это не доставка.
+     */
+    let upsell: string | null = null;
+    try {
+      if (botMayUpsell(reader.upsell_at)) {
+        const plan = effectivePlan(reader);
+        const mine = sourcesForPlan(await readerSources(reader.id), plan).map((one) => Number(one.id));
+        // `issuesToday` здесь всегда истина: сообщение шлётся только в тот
+        // день, когда выпуск собрался. Про частоту в чате говорить нечего —
+        // читатель как раз получает выпуск.
+        const facts = { ...(await getUpgradeFacts(reader.id, mine)), kept: survivors.length, issuesToday: true };
+        const found = upgradeReason(plan, facts);
+        if (found) upsell = botUpsellLine(plan, upgradeNote(plan, found, facts), appUrl);
+      }
+    } catch (error) {
+      // Предложение — не доставка: не посчиталось, уходит выпуск без него.
+      log(`  ${name}: предложение тарифа не посчиталось — ${(error as Error).message}`);
+    }
+
     try {
       await notify(
         Number(reader.telegram_id), day,
@@ -584,11 +612,17 @@ async function deliver(
         appUrl,
         reading,
         podcast,
+        upsell,
       );
       await sql`
         update dailynews.digests set sent_at = now()
          where reader_id = ${reader.id} and day = ${day}
       `;
+      // Отметка ставится по факту отправки, а не по факту расчёта: упавшее
+      // сообщение не должно запирать предложение на неделю.
+      if (upsell) {
+        await sql`update dailynews.readers set upsell_at = now() where id = ${reader.id}`;
+      }
     } catch (error) {
       // Заблокировавший бота читатель не должен ронять прогон остальных.
       log(`  ${name}: Telegram — ${(error as Error).message}`);

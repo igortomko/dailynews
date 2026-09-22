@@ -91,6 +91,19 @@ export const feed = {
   },
 
   /** src/components/item-card.tsx */
+  /** src/components/upgrade-note.tsx — the line under the digest. */
+  upgrade: {
+    cadence: (to: string) =>
+      `No digest today: on Free it arrives every other day. On ${to} — every morning.`,
+    sources: (now: number, plan: string, up: number, to: string) =>
+      `The feed watches ${now} sources — that is all of ${plan}. On ${to} — ${up}.`,
+    topics: (now: number, plan: string, up: number, to: string) =>
+      `${now} ${now === 1 ? "interest" : "interests"} — that is all of ${plan}. On ${to} — ${up}.`,
+    minutes: (collected: number, kept: number, now: number, up: number, to: string) =>
+      `Your sources published ${collected} ${collected === 1 ? "story" : "stories"} in the last day; ${kept} made the digest — that is what fits in ${now} ${now === 1 ? "minute" : "minutes"}. On ${to} — ${up}.`,
+    see: (to: string, price: number) => `See ${to} for $${price}`,
+  },
+
   item: {
     hidden: (title: string) => `Hidden: ${title}`,
     undo: "Undo",
