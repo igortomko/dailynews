@@ -119,13 +119,13 @@ function FlowGrid({
                 key={index}
                 className={
                   index < lit
-                    ? "aspect-square rounded-[2px] bg-primary"
+                    ? "aspect-square rounded-[2px] bg-signal"
                     : "aspect-square rounded-[2px] bg-foreground/[0.07]"
                 }
               />
             ))}
           </div>
-          {/* Легенда клетками того же вида, что в сетке: сказать «тёмные —
+          {/* Легенда клетками того же вида, что в сетке: сказать «красные —
               это твой выпуск» словами значит попросить читателя сопоставить
               цвет с описанием цвета. Стоит она под сеткой, потому что
               переводит уже увиденное, а не готовит к нему.
@@ -137,7 +137,7 @@ function FlowGrid({
           {dropped > 0 ? (
             <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
-                <span className="size-2.5 shrink-0 rounded-[2px] bg-primary" />
+                <span className="size-2.5 shrink-0 rounded-[2px] bg-signal" />
                 <b className="font-medium tabular-nums text-foreground">{kept}</b> {t.flowKept}
               </span>
               <span className="flex items-center gap-1.5">
