@@ -8,9 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { logout } from "@/lib/actions";
 import { currentReader } from "@/lib/session";
 
-import { checkoutUrl, effectivePlan } from "@/lib/lemon";
-import { PLAN_IDS } from "@/lib/plans";
-import { PaywallProvider } from "@/components/paywall";
+import { effectivePlan } from "@/lib/lemon";
 import { UnsavedGuard } from "@/components/unsaved-guard";
 import { getDict } from "@/lib/i18n/server";
 import { SettingsNav } from "./nav";
@@ -25,13 +23,10 @@ export default async function SettingsLayout({ children }: { children: React.Rea
   const plan = effectivePlan(reader);
   const t = await getDict();
   const onboarding = !reader.onboarded_at;
-  // Ссылки на оплату собираются здесь: их строит сервер из переменных
-  // окружения, а окно с предложением живёт в клиентских компонентах.
-  const checkout = Object.fromEntries(
-    PLAN_IDS.map((id) => [id, checkoutUrl(id, reader.id)]).filter(([, url]) => url),
-  ) as Record<string, string>;
+  // Ссылки на оплату раздаёт раскладка приложения: окно с предложением
+  // открывается и из ленты, и из мастера, а не только отсюда.
   return (
-    <PaywallProvider checkout={checkout}>
+    <>
       {/* Настройки сохраняются кнопкой, а не сами: уход с несохранённой
           правкой перехватывается здесь, над всеми разделами сразу. */}
       <UnsavedGuard />
@@ -114,6 +109,6 @@ export default async function SettingsLayout({ children }: { children: React.Rea
       </aside>
         <div className="min-w-0 flex-1">{children}</div>
       </div>
-    </PaywallProvider>
+    </>
   );
 }

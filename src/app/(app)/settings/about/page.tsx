@@ -260,25 +260,6 @@ export default async function AboutPage() {
         </div>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t.plans.about.stepsTitle}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 text-sm">
-          <ol className="flex flex-col gap-3">
-            {t.plans.about.steps.map((step, index) => (
-              <li key={step.title} className="flex gap-3">
-                <span className="w-5 shrink-0 tabular-nums text-muted-foreground">{index + 1}</span>
-                <span>
-                  <b className="font-medium">{step.title}.</b>{" "}
-                  <span className="text-muted-foreground">{step.text}</span>
-                </span>
-              </li>
-            ))}
-          </ol>
-        </CardContent>
-      </Card>
-
       {next ? (
         <Card>
           <CardHeader>
@@ -331,6 +312,25 @@ export default async function AboutPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t.plans.about.stepsTitle}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 text-sm">
+          <ol className="flex flex-col gap-3">
+            {t.plans.about.steps.map((step, index) => (
+              <li key={step.title} className="flex gap-3">
+                <span className="w-5 shrink-0 tabular-nums text-muted-foreground">{index + 1}</span>
+                <span>
+                  <b className="font-medium">{step.title}.</b>{" "}
+                  <span className="text-muted-foreground">{step.text}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </CardContent>
+      </Card>
     </div>
   );
 }
