@@ -139,7 +139,6 @@ export function FeedTabs({
   networks,
   reading,
   textLang,
-  asked,
   left,
   right,
 }: {
@@ -167,11 +166,6 @@ export function FeedTabs({
   reading: { minutes: number; target: number | null };
   /** Тег языка текста выпуска, null — если выпуск не переводится. */
   textLang: string | null;
-  /**
-   * Номер карточки, за которой пришли: `?play=<id>` из «слушать» в Telegram.
-   * Ссылка ведёт на `#item-<id>` и просит эту карточку зазвучать.
-   */
-  asked: number | null;
   left: React.ReactNode;
   right: React.ReactNode;
 }) {
@@ -711,7 +705,6 @@ export function FeedTabs({
                     selected={selectedIds.has(item.id)}
                     voicing={voicing.get(item.id)}
                     selecting={selecting}
-                    asked={asked === item.id}
                     onSelectedChange={(next) => pick(item.id, next)}
                   />
                   {/* Граница прошлого захода. Виденное лежит подряд сверху:

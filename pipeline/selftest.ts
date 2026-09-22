@@ -4114,7 +4114,8 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
 // что разметку нельзя проверить ни на чём, кроме настоящего чата: Telegram
 // отвечает «chat not found» и на верную, и на неверную. Что можно проверить
 // без сети — что мы отдаём: якорь у каждой статьи, ссылка тегом, а не голым
-// адресом, и метка времени только у того, что в записи есть.
+// адресом, метка времени только у того, что в записи есть, и ничего сверх
+// этого — ни вступления, ни подписи под плеером, ни слова «слушать».
 {
   const APP = "https://news.tomko.io";
   const heads = [
@@ -4132,12 +4133,8 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
     "лишний слеш в APP_URL не удваивается");
   assert.equal(itemUrl(APP, "2026-09-21", 11), `${APP}/?day=2026-09-21#item-11`,
     "ссылка ведёт на карточку в своём дне, а не на корень");
-  assert.match(itemUrl(APP, "2026-09-21", 11, true), /\?day=2026-09-21&play=11#item-11$/,
-    "«слушать» просит ленту нажать кнопку этой карточки");
-
   const withAudio = digestMessage({
-    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
-    size: "19 мин", podcast: 1080,
+    day: "2026-09-21", headlines: heads, appUrl: APP, size: "19 мин", podcast: true,
   });
 
   assert.match(withAudio.html, /^<h2>Выпуск за 21 сентября — 19 мин<\/h2>/,
@@ -4147,7 +4144,12 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   assert.ok(withAudio.html.indexOf("<audio") < withAudio.html.indexOf("<h3>"),
     "запись стоит до тем, то есть до сгиба");
   assert.equal(withAudio.html.match(/<h3>/g)?.length, 2, "тема — раздел, и их две");
-  assert.equal(withAudio.html.match(/<hr>/g)?.length, 2, "перед каждым разделом разделитель");
+  assert.equal(withAudio.html.match(/<hr>/g)?.length, 1,
+    "разделитель между темами, а не перед первой");
+  assert.ok(!withAudio.html.includes("<figcaption>"),
+    "у плеера нет подписи: Telegram пишет на нём имя и длину сам");
+  assert.ok(!withAudio.html.includes("<p>"),
+    "вступления выпуска в сообщении нет: заголовки идут следом и говорят то же");
 
   for (const head of heads) {
     assert.ok(withAudio.html.includes(`href="${APP}/?day=2026-09-21#item-${head.id}"`),
@@ -4162,22 +4164,23 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
     "три знака экранированы");
   assert.ok(!/<новость>/.test(withAudio.html), "сырой угловой скобки в разметке нет");
 
-  // Метка времени и «слушать» — только у того, что в записи есть.
-  assert.ok(withAudio.html.includes("12:34"), "у второй статьи её место в записи");
-  assert.equal(withAudio.html.match(/слушать/g)?.length, 2,
-    "две статьи в записи — две ссылки «слушать»");
+  // Метка времени — только у того, что в записи есть.
+  assert.ok(withAudio.html.includes("(12:34)"), "у второй статьи её место в записи");
+  assert.ok(!withAudio.html.includes("слушать"),
+    "слова «слушать» нет: оно вело бы туда же, куда и сам заголовок");
   const third = withAudio.html.slice(withAudio.html.indexOf("Третья"));
-  assert.ok(!third.includes("слушать"),
-    "у статьи вне записи ссылки на озвучку нет: она вела бы к кнопке «озвучить»");
+  assert.ok(!/\(\d+:\d\d\)/.test(third),
+    "у статьи вне записи метки нет: она указывала бы на соседнюю новость");
 
   const noAudio = digestMessage({
-    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
-    size: "19 мин", podcast: null,
+    day: "2026-09-21", headlines: heads, appUrl: APP, size: "19 мин", podcast: false,
   });
   assert.ok(!noAudio.html.includes("<audio"), "без подкаста блока аудио нет");
-  assert.ok(!noAudio.html.includes("слушать"),
-    "без подкаста не обещаем послушать даже то, у чего есть метка");
+  assert.ok(!/\(\d+:\d\d\)/.test(noAudio.html),
+    "без подкаста метки времени не печатаются даже у того, у кого они есть");
   assert.ok(noAudio.html.includes("#item-13"), "ссылки на статьи остаются и без записи");
+  assert.match(noAudio.html, /<\/h2>\n<h3>/,
+    "без записи первый раздел идёт сразу за заголовком, без разделителя");
 
   // Ничего не обрезается: старое сообщение упиралось в 4000 знаков
   // и обрывалось на полуслове у двух выпусков из трёх.
@@ -4186,8 +4189,7 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
     at: i * 60,
   }));
   const big = digestMessage({
-    day: "2026-09-21", intro: "Вступление", headlines: many, appUrl: APP,
-    size: "45 мин", podcast: 6000,
+    day: "2026-09-21", headlines: many, appUrl: APP, size: "45 мин", podcast: true,
   });
   for (const head of many) {
     assert.ok(big.html.includes(`#item-${head.id}"`), `сотая статья не отрезана: ${head.id}`);

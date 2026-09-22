@@ -29,7 +29,7 @@ export default async function FeedPage({
 }: {
   // Повторённый параметр приезжает массивом (урок поиска): объявить его
   // строкой значит отдать массив в запрос и получить 500 вместо ленты.
-  searchParams: Promise<{ day?: string | string[]; play?: string | string[] }>;
+  searchParams: Promise<{ day?: string | string[] }>;
 }) {
   // Чья это лента, решает подписанная кука и ничто другое.
   const reader = await currentReader();
@@ -41,11 +41,7 @@ export default async function FeedPage({
   // ленту в очередь за самой собой.
   const t = dictOf(reader.ui_language);
 
-  const { day: param, play } = await searchParams;
-  // За какой карточкой пришли: «слушать» в сообщении бота. Число, а не
-  // строка из чужой ссылки: сравнивать его будут с id карточек, и «42abc»
-  // не должно совпасть ни с чем, притворившись сорок вторым.
-  const wanted = Number(Array.isArray(play) ? play[0] : play);
+  const { day: param } = await searchParams;
   // Похожее на день, но не день («2026-02-31», пустая строка, массив) —
   // это null, то есть последний выпуск: в запрос день уходит кастом к date,
   // и непроверенная строка из чужой ссылки роняла бы страницу.
@@ -176,7 +172,6 @@ export default async function FeedPage({
       // и там тега нет — переносить чужой язык русскими правилами хуже,
       // чем не переносить вовсе.
       textLang={langTagFor(effectiveVoice(reader).language)}
-      asked={Number.isInteger(wanted) && wanted > 0 ? wanted : null}
       // key на элементах, уезжающих в проп: шапка ленты ставит left и right
       // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
       // теряет пометку «детей ровно столько, сколько написано». React считает
