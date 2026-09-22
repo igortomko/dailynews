@@ -34,6 +34,18 @@ Migration `0044_generative_reading` is additive. Existing readers are enabled wh
 
 Human comprehension, memory retention and reading-speed gains have not been measured. Source consistency and structural checks do not replace that evaluation. Full-source availability is constrained by publishers and extraction; the system summarizes the text it actually obtained.
 
+## Gate for new visual forms
+
+New visual patterns are not added because a model can produce them. Before adding a new block type or making an existing accent more frequent, run a human worksheet over 10–15 verified cards:
+
+```bash
+npm run reading:evaluate -- --reader <id> --limit 12
+# Fill sourceReview before the reader sees a card, then record readerReview.
+npm run reading:evaluate -- --report /tmp/dailynews-reading-evaluation-<id>-<timestamp>.json
+```
+
+The worksheet tests the answer to the main question, the essential limit, the choice to open the source, time to answer, confidence and misleading claims. It selects already-existing forms first, then fills the sample by release order. A form needs at least four completed reviews and no misleading card before it becomes a candidate for expansion. With fewer than ten readers this is a qualitative gate, not an A/B test; no result may be described as a reading-speed lift. When traffic supports an experiment, assign readers persistently to one form per comparable story, pre-commit a primary comprehension metric and a source-accuracy guardrail, and record the decision.
+
 ## Release validation (2026-09-21)
 
 - `reading-v2.9`: four real articles (reading incentives, exercise research, an ML repository and an engineering essay), generated twice. Eight source-consistency checks passed; 28 provider requests, $0.0894 at the configured rates. Cold articles took 38–180 seconds. The same model audited its output in separate calls; this is not independent factual corroboration.
