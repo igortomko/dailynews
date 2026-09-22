@@ -25,7 +25,7 @@ import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { UpgradeNote } from "@/lib/upgrade";
 import { UpgradeLine } from "@/components/upgrade-note";
-import { isShort, shortfallNote } from "@/lib/reading-time";
+import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
 import { MinutesSelect } from "@/components/minutes-select";
 import { FeedMenu } from "@/components/feed-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -538,11 +538,27 @@ export function FeedTabs({
               <div className="col-start-1 row-start-2 flex min-w-0 items-center gap-2 [&>div]:gap-0 sm:[&>div]:gap-2 lg:row-start-1">
                 {left}
                 {/* Время — рядом с датой: это две вещи об одном и том же.
-                    И это же ручка: «сколько это читать» и «сколько у меня
-                    есть» спрашивают в одном месте. Число карточек осталось
-                    на вкладках, где отвечает на свой вопрос — «сколько
-                    в этой теме». */}
-                <MinutesSelect day={day} days={days} minutes={minutes} shown={reading.minutes} />
+                    Число карточек осталось на вкладках, где отвечает
+                    на свой вопрос — «сколько в этой теме».
+
+                    Ручкой оно становится только на окне из нескольких дней.
+                    На одном дне заказ уже сделан в настройках — выпуск
+                    собран ровно под `digest_minutes` этого читателя, —
+                    и меню «10 / 20 / 30 минут» над ним предлагает резать
+                    то, что и так заказано: ручка без работы. Резать есть
+                    что, когда на экране пять выпусков сразу.
+
+                    Заданный заказ держит ручку и на одном дне: адрес
+                    с `minutes` переживает переход стрелкой к соседнему
+                    дню, и без ручки снять предел было бы нечем — кнопка
+                    под лентой появляется только когда есть что показать. */}
+                {days > 1 || minutes !== null ? (
+                  <MinutesSelect day={day} days={days} minutes={minutes} shown={reading.minutes} />
+                ) : (
+                  <span className="shrink-0 px-1.5 text-sm text-muted-foreground tabular-nums">
+                    {formatMinutes(reading.minutes, t.feed.time)}
+                  </span>
+                )}
               </div>
               <Link
                 href="/"
