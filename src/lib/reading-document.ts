@@ -88,6 +88,14 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   const words = `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
   const limit = ["narrative", "argument", "investigation"].includes(doc.genre) ? 320 : 220;
   if (words > limit) issues.push(`Summary is ${words} words; maximum ${limit}. Merge related facts, remove repeated claims and omit minor setup, biography, names and examples. Keep the main mechanism, result and evidence limits.`);
+  if (!doc.lead) {
+    issues.push("Missing a 35–60 word lead that answers the article's central question before the details.");
+  } else {
+    const leadWords = doc.lead.text.split(/\s+/u).filter(Boolean).length;
+    if (leadWords < 35 || leadWords > 60) {
+      issues.push(`Lead is ${leadWords} words; it must answer the central question in 35–60 words before the details.`);
+    }
+  }
   const claims = analysis.sections.flatMap((s) => s.claims);
   const known = new Set(claims.map((c) => c.id));
   const visible = new Set(supportedFields(doc).flatMap((f) => f.claimIds));

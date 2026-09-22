@@ -70,6 +70,7 @@ jobs:
           # Без ключа выпуск не уходит на читалку, но прогон идёт.
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           LLM_INPUT_PRICE: ${{ vars.LLM_INPUT_PRICE }}
+          LLM_CACHE_INPUT_PRICE: ${{ vars.LLM_CACHE_INPUT_PRICE }}
           LLM_OUTPUT_PRICE: ${{ vars.LLM_OUTPUT_PRICE }}
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}

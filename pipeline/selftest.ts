@@ -1031,6 +1031,7 @@ assert.ok(!book.includes("<тег>"), "сырой тег из источника
 // не срабатывает никогда.
 const million = { input: 1e6, output: 0, cached: 0, reasoning: 0, requests: 1 };
 delete process.env.LLM_INPUT_PRICE;
+delete process.env.LLM_CACHE_INPUT_PRICE;
 assert.equal(llmCost(million), 0.3, "без переменной берётся цена по умолчанию");
 process.env.LLM_INPUT_PRICE = "";
 assert.equal(llmCost(million), 0.3, "пустая переменная — это «не задано», а не ноль");
@@ -1040,7 +1041,14 @@ process.env.LLM_INPUT_PRICE = "0";
 assert.equal(llmCost(million), 0, "ноль — законная цена бесплатного тарифа");
 process.env.LLM_INPUT_PRICE = "дорого";
 assert.equal(llmCost(million), 0.3, "нечисло откатывается к цене по умолчанию");
+process.env.LLM_INPUT_PRICE = "0.15";
+process.env.LLM_CACHE_INPUT_PRICE = "0.003";
+assert.equal(llmCost({ ...million, cached: 600_000 }), 0.0618, "кэшированный вход считается по отдельной цене");
+assert.equal(llmCost({ ...million, cached: 2e6 }), 0.003, "кэш не может превысить вход");
+process.env.LLM_CACHE_INPUT_PRICE = "не число";
+assert.equal(llmCost({ ...million, cached: 600_000 }), 0.15, "неизвестная цена кэша остаётся консервативной");
 delete process.env.LLM_INPUT_PRICE;
+delete process.env.LLM_CACHE_INPUT_PRICE;
 
 // --- адрес ведёт наружу, а не внутрь --------------------------------------------
 // Машина общая: рядом в той же сети чужие контейнеры. Без этой проверки форма
