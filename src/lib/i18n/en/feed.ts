@@ -40,6 +40,7 @@ export const feed = {
     kbdBetween: "between stories",
     kbdOpen: "open",
     kbdOverview: "add to overview",
+    kbdListen: "listen",
     kbdSearch: "search digests",
   },
 
@@ -59,7 +60,7 @@ export const feed = {
     remove: (title: string) => `Remove from overview: ${title}`,
     tooltipAdd: "Add to overview",
     tooltipRemove: "Remove from overview",
-    podcast: "Podcast",
+    podcast: "Record podcast",
     podcastWorking: "Building the podcast…",
     podcastQueued: (n: number) => `Podcast of ${n} ${n === 1 ? "story" : "stories"} is on its way`,
     podcastQueuedNote: "It will arrive in Telegram as one file",
@@ -90,6 +91,29 @@ export const feed = {
   },
 
   /** src/components/item-card.tsx */
+  /** src/components/upgrade-note.tsx — the line under the digest. */
+  upgrade: {
+    // What happened to his feed, never what to buy: every number here can be
+    // checked by eye on the same screen. The plan being offered is named once,
+    // in `offer`, next to its price — said twice, a sentence and the button
+    // under it read as the same line printed by mistake.
+    cadence: "No digest today: on Free it arrives every other day.",
+    sources: (now: number, plan: string) =>
+      `The feed watches ${now} sources — that is all of ${plan}.`,
+    topics: (now: number, plan: string) =>
+      `${now} ${now === 1 ? "interest" : "interests"} — that is all of ${plan}.`,
+    minutes: (collected: number, kept: number, now: number) =>
+      `Your sources published ${collected} ${collected === 1 ? "story" : "stories"} in the last day; ${kept} made the digest — that is what fits in ${now} ${now === 1 ? "minute" : "minutes"}.`,
+    /** What the other plan gives — the same unit the sentence above counts in. */
+    gain: {
+      cadence: "Every morning",
+      sources: (up: number) => `${up} sources`,
+      topics: (up: number) => `${up} interests`,
+      minutes: (up: number) => `${up} minutes of digest`,
+    },
+    offer: (gain: string, to: string, price: number) => `${gain} on ${to} — $${price}`,
+  },
+
   item: {
     hidden: (title: string) => `Hidden: ${title}`,
     undo: "Undo",
@@ -106,6 +130,13 @@ export const feed = {
     kindleAria: "Send to Kindle",
     kindleTooltip: "Send the article to your Kindle",
     kindleTooltipLocked: (plan: string) => `Kindle is on the ${plan} plan`,
+    share: "Share",
+    shareAria: "Share a link to the article",
+    shareTooltip: "Send a link to the article",
+    shareCopied: "Link copied",
+    shareCopiedDescription: "Paste it into a chat or an email",
+    shareFailed: "Couldn't copy",
+    shareFailedDescription: "Open the article from its headline and copy the address there",
     kindleToastTitle: "Sent to your Kindle",
     kindleToastDescription: "Arrives in about a minute",
     kindleError: "Couldn't send to Kindle — try again",
@@ -141,7 +172,7 @@ export const feed = {
   search: {
     label: "Search digests",
     submit: "Search",
-    openHint: "Search past digests — press /",
+    openHint: "Search past digests",
     fieldPlaceholder: "Search past digests: uranium data centers",
     close: "Close search",
     recent: "recent",

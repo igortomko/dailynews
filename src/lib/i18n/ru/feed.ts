@@ -39,6 +39,7 @@ export const feed: typeof En = {
     kbdBetween: "между материалами",
     kbdOpen: "открыть",
     kbdOverview: "в обзор",
+    kbdListen: "озвучить",
     kbdSearch: "поиск по выпускам",
   },
 
@@ -58,7 +59,7 @@ export const feed: typeof En = {
     remove: (title: string) => `Убрать из обзора: ${title}`,
     tooltipAdd: "В обзор",
     tooltipRemove: "Убрать из обзора",
-    podcast: "Подкаст",
+    podcast: "Записать подкаст",
     podcastWorking: "Собираю подкаст…",
     podcastQueued: (n: number) => `Подкаст из ${n} ${plural(n, "новости", "новостей", "новостей")} собирается`,
     podcastQueuedNote: "Придёт в Telegram одним файлом",
@@ -88,6 +89,32 @@ export const feed: typeof En = {
     clipboardDeniedDescription: "Текст уже выделен ниже — нажми ⌘C или Ctrl+C",
   },
 
+  /** src/components/upgrade-note.tsx — строка под выпуском. */
+  upgrade: {
+    // Говорится о том, что произошло с его лентой, а не о том, что купить:
+    // числа в первой половине фразы читатель может проверить глазами
+    // на этом же экране, название тарифа — нет. Поэтому тариф назван один
+    // раз и в `offer`, рядом с ценой: сказанный дважды, он превращал пару
+    // «фраза + кнопка» в одну строку, напечатанную по ошибке два раза.
+    cadence: "Сегодня выпуска нет: на бесплатном он приходит через день.",
+    sources: (now: number, plan: string) =>
+      `Лента следит за ${now} источниками — это весь тариф «${plan}».`,
+    topics: (now: number, plan: string) =>
+      `${now} ${plural(now, "интерес", "интереса", "интересов")} — это весь тариф «${plan}».`,
+    // Сначала поток, потом выпуск: работа ленты — это отброшенное,
+    // и без первого числа второе ничего не значит.
+    minutes: (collected: number, kept: number, now: number) =>
+      `За сутки у твоих источников вышло ${collected} ${plural(collected, "новость", "новости", "новостей")}, в выпуск поместилось ${kept} — столько влезает в ${now} ${plural(now, "минуту", "минуты", "минут")}.`,
+    /** Что там — той же мерой, которой фраза выше считает, что здесь. */
+    gain: {
+      cadence: "Каждое утро",
+      sources: (up: number) => `${up} ${plural(up, "источник", "источника", "источников")}`,
+      topics: (up: number) => `${up} ${plural(up, "интерес", "интереса", "интересов")}`,
+      minutes: (up: number) => `${up} ${plural(up, "минута", "минуты", "минут")} выпуска`,
+    },
+    offer: (gain: string, to: string, price: number) => `${gain} — на «${to}» за $${price}`,
+  },
+
   item: {
     hidden: (title: string) => `Скрыто: ${title}`,
     undo: "Вернуть",
@@ -108,6 +135,13 @@ export const feed: typeof En = {
     kindleAria: "Отправить на Kindle",
     kindleTooltip: "Отправить статью на читалку",
     kindleTooltipLocked: (plan: string) => `Читалка — на тарифе «${plan}»`,
+    share: "Поделиться",
+    shareAria: "Поделиться ссылкой на статью",
+    shareTooltip: "Отправить ссылку на статью",
+    shareCopied: "Ссылка скопирована",
+    shareCopiedDescription: "Вставляй в чат или письмо",
+    shareFailed: "Не получилось скопировать",
+    shareFailedDescription: "Открой статью по заголовку и скопируй адрес оттуда",
     kindleToastTitle: "Статья ушла на Kindle",
     kindleToastDescription: "Придёт примерно через минуту",
     kindleError: "Не отправилось на Kindle — попробуй ещё раз",
@@ -142,7 +176,7 @@ export const feed: typeof En = {
   search: {
     label: "Поиск по выпускам",
     submit: "Найти",
-    openHint: "Поиск по прошлым выпускам — клавиша /",
+    openHint: "Поиск по прошлым выпускам",
     fieldPlaceholder: "Найти в прошлых выпусках: uranium дата-центры",
     close: "Закрыть поиск",
     recent: "недавнее",

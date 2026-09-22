@@ -1,5 +1,8 @@
 import { RebuildOnLeave } from "@/components/rebuild-queue";
 import { I18nProvider } from "@/components/i18n-provider";
+import { PaywallProvider, type Checkout } from "@/components/paywall";
+import { checkoutUrl, trialDaysFor } from "@/lib/lemon";
+import { PLAN_IDS, type PlanId } from "@/lib/plans";
 import { currentLocale } from "@/lib/i18n/server";
 import { currentReader } from "@/lib/session";
 import { brandColorsV2Enabled } from "@/lib/flags";
@@ -15,8 +18,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // компонент, спрашивающий его сам, спрашивал бы у сервера, которого
   // в браузере нет.
   const [locale, reader] = await Promise.all([currentLocale(), currentReader()]);
+  /**
+   * Ссылки на оплату собираются сервером и раздаются вниз, окно с
+   * предложением живёт в клиентских компонентах.
+   *
+   * Провайдер стоял в раскладке настроек, а окно открывается ещё из ленты
+   * и из мастера первого захода: там контекст был пустым, и «Выбрать»
+   * уводило в «Подписку» вместо оплаты — запасной путь, задуманный
+   * на ненастроенные ключи, срабатывал при настроенных.
+   */
+  const checkout: Partial<Record<PlanId, Checkout>> = Object.fromEntries(
+    PLAN_IDS.map((id) => [id, { buy: checkoutUrl(id, reader.id), trialDays: trialDaysFor(id) }])
+      .filter(([, value]) => (value as Checkout).buy),
+  );
   return (
     <I18nProvider locale={locale}>
+    <PaywallProvider checkout={checkout}>
     <div
       // Язык интерфейса на подписях, кнопках и подсказках. Текст выпуска
       // объявляет свой отдельно: интерфейс может быть английским,
@@ -31,6 +48,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           моменту уже размонтирован — его уход и есть сигнал. */}
       <RebuildOnLeave />
     </div>
+    </PaywallProvider>
     </I18nProvider>
   );
 }

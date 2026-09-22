@@ -23,7 +23,6 @@ import {
 } from "@/lib/voice";
 import type { Reader } from "@/lib/types";
 import { FEATURES, type Plan } from "@/lib/plans";
-import { PaywallCrown, usePaywall } from "@/components/paywall";
 import { flushRebuild, queueRebuild } from "@/components/rebuild-queue";
 import { useSettingsSave } from "@/components/settings-save";
 import { useT } from "@/components/i18n-provider";
@@ -41,11 +40,6 @@ const languageOption = (entry: string, display: string) => (
 
 export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: Plan }) {
   const t = useT();
-  // Перевод — платная возможность: на бесплатном выпуск остаётся на языке
-  // источника. Селект показывается целиком и погашенным, а не прячется:
-  // по нему видно, что именно даёт переход.
-  const translates = FEATURES.language.has(plan);
-  const languagePaywall = usePaywall("language", plan);
   const [pending, startTransition] = useTransition();
   const form = useRef<HTMLFormElement>(null);
   const router = useRouter();
@@ -138,32 +132,26 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   «русском» заголовок в именительном не сходится ни с одним
                   пунктом. Английский интерфейс этой проблемы не знает,
                   и показывает обычное имя языка — см. languageNames. */}
-              <FieldLabel htmlFor="language" className="flex items-center gap-1.5">
+              {/* Короны здесь нет и не будет: перевод не стоит ни одного
+                  лишнего токена — та же строка в том же промпте. Пока она
+                  стояла, бесплатный русский читатель получал английскую
+                  ленту, а бесплатный англичанин — полноценную: предел,
+                  зависящий от языка источников, это не тариф, а лотерея. */}
+              <FieldLabel htmlFor="language">
                 {t.settings.personalization.languageLabel}
-                {translates ? null : <PaywallCrown feature="language" plan={plan} />}
               </FieldLabel>
               {/* Список из пятнадцати, а колонка осталась свободным текстом:
                   миграция 0014 убрала список из трёх ровно потому, что его
                   выбирал автор формы. Сохранённое значение вне списка
                   остаётся выбранным, а не подменяется первым пунктом. */}
               <Select
-                value={translates ? language : SOURCE_LANGUAGE}
+                value={language}
                 onValueChange={(value: string | null) => {
                   if (!value) return;
-                  if (!translates) {
-                    languagePaywall.open();
-                    return;
-                  }
                   setLanguage(value);
                   touch();
                 }}
               >
-                {/* Не disabled: выключенный селект не ловит нажатие, и окно
-                    с предложением тарифа, которое открывает onValueChange,
-                    не открывалось никогда — ветка была мёртвой. Корона
-                    у подписи говорит, что раздел платный, а выбор языка
-                    показывает, за что именно платить. Значение при этом
-                    не меняется: окно открывается вместо него. */}
                 <SelectTrigger id="language" className="w-full max-w-xs">
                   <SelectValue>
                     {languageOption(language, t.settings.voice.languageNames[language] ?? language)}
@@ -187,16 +175,11 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   ))}
                 </SelectContent>
               </Select>
-              <input
-                type="hidden"
-                name="language"
-                value={translates ? language : SOURCE_LANGUAGE}
-              />
-              {languagePaywall.dialog}
+              <input type="hidden" name="language" value={language} />
               <FieldDescription>
-                {translates
-                  ? t.settings.personalization.translatedHint
-                  : t.settings.personalization.notTranslatedHint}
+                {language === SOURCE_LANGUAGE
+                  ? t.settings.personalization.notTranslatedHint
+                  : t.settings.personalization.translatedHint}
               </FieldDescription>
             </Field>
 

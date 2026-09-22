@@ -4,6 +4,8 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowUpIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Kbd } from "@/components/ui/kbd";
+import { typingOrModified } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,6 +22,8 @@ import { formatDay } from "@/lib/relative-time";
 import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
+import type { UpgradeNote } from "@/lib/upgrade";
+import { UpgradeLine } from "@/components/upgrade-note";
 import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
 import type { NetworkId } from "@/lib/networks";
 
@@ -138,6 +142,7 @@ export function FeedTabs({
   plan,
   networks,
   reading,
+  upgrade,
   textLang,
   left,
   right,
@@ -164,6 +169,11 @@ export function FeedTabs({
    * по сегодняшней настройке.
    */
   reading: { minutes: number; target: number | null };
+  /**
+   * Предел, в который читатель упёрся сегодня, или null. Считает сервер
+   * (`upgradeReason`) — тем же правилом, каким про тариф говорит бот.
+   */
+  upgrade: UpgradeNote | null;
   /** Тег языка текста выпуска, null — если выпуск не переводится. */
   textLang: string | null;
   left: React.ReactNode;
@@ -393,17 +403,19 @@ export function FeedTabs({
   }, [searching]);
 
   /**
-   * Лента — список, который листают. j и k переводят фокус на соседний
-   * заголовок, o открывает его; заголовки и так ссылки, поэтому Enter
-   * работает сам собой.
+   * Лента — список, который листают. Стрелки вверх и вниз переводят фокус
+   * на соседний заголовок; заголовки и так ссылки, поэтому Enter открывает
+   * сам собой, и своей ветки под него здесь нет. Прокрутка стрелками
+   * на ленте этим отдана списку: колесо, пробел и PgUp/PgDn остаются.
    *
    * Смотрим на e.code, а не на e.key: в кириллической раскладке та же
-   * клавиша отдаёт «о», «л» и «щ», и проверка по букве молча перестаёт
-   * работать ровно у того, кто читает ленту по-русски.
+   * клавиша отдаёт «щ», и проверка по букве молча перестаёт работать
+   * ровно у того, кто читает ленту по-русски.
    *
    * x отмечает материал под фокусом для обзора — та же клавиша, что
-   * в почте выбирает письмо. Нажимается сам чекбокс карточки, а не
-   * состояние напрямую: у него уже есть и подпись, и отчёт диктору.
+   * в почте выбирает письмо, — а a озвучивает его. Нажимается сама кнопка
+   * карточки, а не состояние напрямую: у неё уже есть и подпись, и отчёт
+   * диктору, и пейвол для тарифа без озвучки.
    *
    * «/» раскрывает поиск — как везде, где он есть. Правило «не перехватывать
    * набор текста» одно на все клавиши и живёт здесь же: вторая его копия
@@ -411,17 +423,10 @@ export function FeedTabs({
    */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // Пока открыт редактор обзора, лента за ним не слушает: j и k
+      // Пока открыт редактор обзора, лента за ним не слушает: стрелки
       // прокручивали бы её под окном, а x отмечал бы карточку мимо черновика.
       if (editing) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
-      ) {
-        return;
-      }
+      if (typingOrModified(event)) return;
       // «/» и по коду клавиши, и по символу: в кириллице та же клавиша
       // отдаёт «.», а «/» приезжает с другой.
       if (event.code === "Slash" || event.key === "/") {
@@ -429,31 +434,32 @@ export function FeedTabs({
         setSearching(true);
         return;
       }
-      if (!["KeyJ", "KeyK", "KeyO", "KeyX"].includes(event.code)) return;
+      if (!["ArrowDown", "ArrowUp", "KeyX", "KeyA"].includes(event.code)) return;
 
       const panel = document.querySelector('[data-slot="tabs-content"]:not([hidden])');
       const links = [...(panel?.querySelectorAll<HTMLAnchorElement>("article h3 a") ?? [])];
       if (links.length === 0) return;
       const current = links.indexOf(document.activeElement as HTMLAnchorElement);
 
-      if (event.code === "KeyO") {
-        if (current === -1) return;
+      // x отмечает материал, a озвучивает его — обе нажимают ту же кнопку
+      // карточки, что и палец: у неё уже есть и пейвол, и подпись диктору.
+      // Нет фокуса — берём карточку под курсором: подсказки на самих кнопках
+      // обещают клавишу тому, кто дотянулся до них мышью, а он до этого
+      // ничего не нажимал и фокуса в ленте не имеет.
+      const slot = event.code === "KeyX" ? "checkbox" : event.code === "KeyA" ? "listen" : null;
+      if (slot) {
+        const article =
+          current === -1
+            ? panel?.querySelector<HTMLElement>("article:hover")
+            : links[current].closest("article");
+        if (!article) return;
         event.preventDefault();
-        links[current].click();
-        return;
-      }
-      if (event.code === "KeyX") {
-        if (current === -1) return;
-        event.preventDefault();
-        links[current]
-          .closest("article")
-          ?.querySelector<HTMLElement>('[data-slot="checkbox"]')
-          ?.click();
+        article.querySelector<HTMLElement>(`[data-slot="${slot}"]`)?.click();
         return;
       }
 
       event.preventDefault();
-      const step = event.code === "KeyJ" ? 1 : -1;
+      const step = event.code === "ArrowDown" ? 1 : -1;
       const next =
         current === -1
           ? step > 0
@@ -670,15 +676,21 @@ export function FeedTabs({
             value={tab.slug}
             keepMounted={visited.has(tab.slug)}
             /* Наведённая карточка остаётся в полную силу, соседние гаснут:
-               глазу не нужно удерживать, на какой он строке. Только на мыши —
-               на тапе :hover залипает, и лента осталась бы приглушённой вся,
-               кроме последней тронутой карточки.
+               глазу не нужно удерживать, на какой он строке. Наведение только
+               на мыши — на тапе :hover залипает, и лента осталась бы
+               приглушённой вся, кроме последней тронутой карточки.
+               Фокус гасит соседей так же и без этой оговорки: это то же
+               «вот эта», сказанное клавиатурой, и второй способ показать
+               выбранное (рамка вокруг заголовка) читался бы как другое
+               состояние. Обе строки исключают и :hover, и :focus-within:
+               иначе наведение на одну карточку при фокусе на другой гасит
+               обе — каждая подходит под условие соседней.
                Пока идёт выбор — не гаснут: отмеченные карточки надо видеть
                все разом и сравнивать, а не по одной под курсором. */
             className={cn(
               "flex flex-col",
               !selecting &&
-                "[@media(hover:hover)]:[&:has(article:hover)>article:not(:hover)]:opacity-25",
+                "[&:has(article:focus-within)>article:not(:hover):not(:focus-within)]:opacity-25 [@media(hover:hover)]:[&:has(article:hover)>article:not(:hover):not(:focus-within)]:opacity-25",
             )}
           >
             {list.length === 0 ? (
@@ -721,29 +733,28 @@ export function FeedTabs({
                 </Fragment>
               ))
             )}
-
-            {/* Клавиши есть, а узнать о них было неоткуда. Строка стоит
-                в конце списка, а не в шапке: там она попадалась бы на глаза
-                каждый раз, а нужна ровно однажды. Только на указателе —
-                на телефоне клавиатуры под рукой нет. */}
-            {list.length > 0 ? (
-              <p className="hidden py-5 text-center text-xs text-muted-foreground [@media(hover:hover)]:block">
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">j</kbd>{" "}
-                {t.feed.tabs.kbdAnd}{" "}
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">k</kbd> —{" "}
-                {t.feed.tabs.kbdBetween},{" "}
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">o</kbd> —{" "}
-                {t.feed.tabs.kbdOpen},{" "}
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">x</kbd> —{" "}
-                {t.feed.tabs.kbdOverview},{" "}
-                <kbd className="rounded border px-1 py-0.5 font-mono text-[0.7rem]">/</kbd> —{" "}
-                {t.feed.tabs.kbdSearch}
-              </p>
-            ) : null}
           </TabsContent>
         );
       })}
         </div>
+        {/* Клавиши есть, а узнать о них было неоткуда. Строка стоит под
+            лентой, а не в шапке: там она попадалась бы на глаза каждый раз,
+            а нужна ровно однажды. И за карточкой, а не в ней: это подпись
+            к списку, а не его последняя строка. Только на указателе —
+            на телефоне клавиатуры под рукой нет. */}
+        {forTab(tab).length > 0 ? (
+          <p className="hidden pt-5 text-center text-xs text-muted-foreground [@media(hover:hover)]:block">
+            <Kbd>↑</Kbd> {t.feed.tabs.kbdAnd} <Kbd>↓</Kbd> {t.feed.tabs.kbdBetween},{" "}
+            <Kbd>Enter</Kbd> {t.feed.tabs.kbdOpen}, <Kbd>x</Kbd> {t.feed.tabs.kbdOverview},{" "}
+            <Kbd>a</Kbd> {t.feed.tabs.kbdListen}, <Kbd>/</Kbd> {t.feed.tabs.kbdSearch}
+          </p>
+        ) : null}
+        {/* Под выпуском, а не над ним: это итог прочитанного, и наверху
+            он был бы предложением вместо новостей. Одна на всю ленту,
+            а не в каждой вкладке: предел про весь выпуск, а панели вкладок
+            остаются смонтированными все — в каждой строка повторилась бы
+            столько раз, сколько тем. */}
+        {upgrade && items.length > 0 ? <UpgradeLine note={upgrade} plan={plan} /> : null}
       </div>
       <SelectionBar
         count={chosen.length}

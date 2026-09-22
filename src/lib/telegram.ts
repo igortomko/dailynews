@@ -7,6 +7,9 @@ import { formatMinutesLong, isShort, shortfallNote } from "./reading-time";
 // отсутствие. Русский назван вслух, чтобы тот, кто возьмётся переводить
 // бота, нашёл это место поиском, а не глазами на проде.
 import { feed as ruFeed } from "@/lib/i18n/ru/feed";
+import { plans as ruPlans } from "@/lib/i18n/ru/plans";
+import type { Plan } from "@/lib/plans";
+import { upgradeLines, type UpgradeNote } from "@/lib/upgrade";
 
 /**
  * Бот здесь делает две вещи: заводит читателя по /start и присылает ему
@@ -647,8 +650,17 @@ export function digestMessage(input: {
   size: string;
   /** Есть ли запись. Нет — нет ни блока аудио, ни меток времени. */
   podcast: boolean;
+  /**
+   * Предел, в который читатель упёрся, — одной строкой в самом конце.
+   *
+   * Не чаще раза в неделю и только тому, кто ленту читает (`upgradeReason`
+   * плюс `botMayUpsell`): сообщение приходит само каждую ночь, и строка
+   * про тариф в каждом — это спам, а не забота. Тот же довод, по которому
+   * спящих спрашивают один раз.
+   */
+  upsell?: string | null;
 }): { html: string; classic: string } {
-  const { day, headlines, appUrl, size, podcast } = input;
+  const { day, headlines, appUrl, size, podcast, upsell } = input;
 
   const byTopic = new Map<string, Headline[]>();
   for (const h of headlines) {
@@ -702,7 +714,33 @@ export function digestMessage(input: {
     classic.push("");
   }
 
+  // В самом конце, после всех тем: до первой новости здесь стоит только то,
+  // ради чего сообщение открыли. Предложение, поднятое выше, заняло бы
+  // строку в сгибе — там, где решают, читать ли дальше.
+  if (upsell) {
+    html.push("<hr>", `<p><i>${escapeHtml(upsell)}</i></p>`);
+    classic.push("", upsell);
+  }
+
   return { html: html.join("\n"), classic: classic.join("\n").trim() };
+}
+
+/**
+ * Строка про упёртый предел — для чата.
+ *
+ * Те же слова, что под выпуском в ленте (`t.feed.upgrade`), плюс адрес
+ * «Подписки»: в чате окна с предложением нет, и без ссылки строка была бы
+ * тупиком. Русские — как и всё остальное сообщение: половина на одном
+ * языке и половина на другом хуже, чем целиком на одном.
+ *
+ * Название тарифа звучит один раз — в предложении, вместе с ценой. В ленте
+ * оно стоит кнопкой под фразой, здесь идёт следующей фразой: кнопок в чате
+ * нет, а цена нужна до перехода — иначе за ней и переходят.
+ */
+export function botUpsellLine(plan: Plan, note: UpgradeNote, appUrl?: string): string {
+  const { fact, offer } = upgradeLines(ruFeed.upgrade, ruPlans.label, plan.id, note);
+  const where = appUrl ? ` ${appUrl.replace(/\/$/, "")}/settings/subscription` : "";
+  return `${fact} ${offer}.${where}`;
 }
 
 /**
@@ -741,6 +779,8 @@ export async function notify(
   reading: { minutes: number; target: number },
   /** Выпуск голосом. Едет тем же сообщением — отдельным блоком аудио. */
   podcast?: { audio: Buffer; seconds: number } | null,
+  /** Готовая строка про упёртый предел, или ничего. Решает прогон. */
+  upsell?: string | null,
 ): Promise<void> {
   // Недобор называется вслух, а не заметается добором слабого материала:
   // короткий выпуск без объяснения читается как поломка отбора.
@@ -749,7 +789,7 @@ export async function notify(
     : formatMinutesLong(reading.minutes, ruFeed.time);
 
   const { html, classic } = digestMessage({
-    day, headlines, appUrl, size, podcast: Boolean(podcast),
+    day, headlines, appUrl, size, podcast: Boolean(podcast), upsell,
   });
 
   // Кнопкой, а не строкой в конце: выпуск приходит с десятком заголовков,

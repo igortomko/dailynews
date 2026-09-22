@@ -368,21 +368,20 @@ async function writeTopics(
  * адрес на этом экране — строка, а не поле, в FormData он не приходит,
  * и прочитанный как пустой обнулил бы доставку при нажатии «Сохранить».
  */
-export async function saveKindleDigest(formData: FormData) {
+export async function saveKindleDigest(digest: boolean) {
   const denied = await denyBySection("delivery");
   if (denied) return denied;
 
   const readerId = await currentReaderId();
-  // Флажок приходит только когда включён: выключенный checkbox формы
-  // не отправляется вовсе, и `null` здесь значит «выключен», а не «не трогали».
-  const digest = formData.get("kindle_digest") !== null;
 
   await sql`
     update dailynews.readers
        set kindle_digest = ${digest}, updated_at = now()
      where id = ${readerId}
   `;
-  revalidatePath("/settings/delivery");
+  // Без `revalidatePath`, как и у подкаста: тумблер управляемый и уже стоит
+  // в новом положении, а перерисовка рождала бы соседний с новым начальным
+  // значением.
   return { ok: true as const };
 }
 

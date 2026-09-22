@@ -16,6 +16,7 @@ import {
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
+import { auditNeeded } from "./reading-gate";
 import { acquireAnalysis, finishAnalysis, getDocument, saveDocument, reserveCall, settleCall, recentBaselines, ReadingBudgetError, ReadingBusyError, type Baseline } from "./reading-store";
 
 export type ReadingOptions = { readerId: number; force?: boolean };
@@ -192,7 +193,74 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
  */
 export type Prominence = "lead" | "regular";
 export const LEAD_CARDS = 5;
-export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[], prominence: Prominence = "regular"): Promise<ReadingDocument> {
+
+/**
+ * Сколько верхних карточек выпуска получают разбор. Остальные пишутся
+ * обычным описанием.
+ *
+ * Ручка цены, поэтому переменной: карточка с разбором стоит в 55–70 раз
+ * дороже обычной (замер 22 сентября 2026, `docs/economics.md`), и сколько
+ * их себе позволить — это решение про тариф, а не про код. Ноль означал бы
+ * «разбора нет вовсе», и такое выключение делается флагом читателя,
+ * а не этим числом, — поэтому меньше единицы оно не опускается.
+ */
+/**
+ * Короче этого разбирать нечего: у такого материала текста примерно
+ * столько же, сколько в нашем же описании.
+ *
+ * Замер на выпуске 22 сентября 2026: у карточек с текстом до трёх тысяч
+ * знаков он длиннее анонса всего в 1,1–2,4 раза (1117 при 1010, 1984
+ * при 1086), а у остальных — в 5–21 раз. Разбор первого ничего не добавит
+ * к обычному описанию, но стоит как полный.
+ */
+export const READING_MIN_CHARS = 3000;
+
+/**
+ * Кому из выживших достанется разбор.
+ *
+ * Порядок остаётся важностью — это порядок отбора, и читают ленту сверху.
+ * Но короткие пропускаются: на том же выпуске вторая карточка имела 1984
+ * знака текста и получала полный разбор, а материал на 13 390 знаков
+ * стоял десятым и не получал ничего.
+ *
+ * Длинные наверх не поднимаются: пять самых длинных в том выпуске стояли
+ * на 1, 7, 15, 16 и 17 местах, и отдать разбор пятнадцатому значило бы
+ * заплатить за карточку, до которой читатель не долистает. Выбирается
+ * первое N подходящих по порядку, а не N лучших по длине.
+ *
+ * Не набралось N — берём сколько есть. Добрать короткими значило бы
+ * потратить полную цену на то, ради чего разбор и не нужен.
+ */
+export function readingPicks<T extends { id: number; body?: string | null; excerpt: string }>(
+  survivors: T[],
+  cards = readingCards(),
+  minChars = READING_MIN_CHARS,
+): { deep: T[]; plain: T[] } {
+  const deep: T[] = [];
+  const plain: T[] = [];
+  for (const item of survivors) {
+    const long = (item.body ?? "").length >= minChars;
+    if (long && deep.length < cards) deep.push(item);
+    else plain.push(item);
+  }
+  return { deep, plain };
+}
+
+export function readingCards(): number {
+  const asked = Math.trunc(Number(process.env.READING_CARDS));
+  // Ноль и минус читаются как «не задано», а не как «одна карточка»:
+  // поставивший ноль хотел выключить разбор, а выключается он флагом
+  // читателя. Молча оставить ему одну карточку с разбором значило бы
+  // сделать не то, о чём просили, и не сказать об этом.
+  return Number.isFinite(asked) && asked >= 1 ? asked : LEAD_CARDS;
+}
+/**
+ * Решает, звать ли дорогую сверку документа с источником. Параметром,
+ * а не импортом: так его подменяет проверка и отключает замер.
+ */
+export type AuditGate = (source: string, summary: string) => Promise<boolean>;
+
+export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[], prominence: Prominence = "regular", gate?: AuditGate): Promise<ReadingDocument> {
   const input = {
     language: voice.language, style: styleOf(voice.style).instruction,
     complexityPreference: voice.complexity,
@@ -211,6 +279,11 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
   const check = async (doc: ReadingDocument) => {
     const errors = [...validateCoverage(doc, analysis, readerContext, baselines.map((b) => b.id)), ...validateQuotes(doc, source)];
     if (errors.length) return errors;
+    // Дешёвый вопрос впереди дорогой сверки: у неё почти весь выход уходит
+    // в рассуждение, а у Jev выход не тарифицируется. Уверенное «всё
+    // подтверждается» отменяет дорогой вызов; всё остальное, включая отказ
+    // самого привратника, пропускает дальше — см. `reading-gate.ts`.
+    if (gate && !(await gate(source, `${doc.title.text}\n${documentText(doc)}`))) return errors;
     for (const section of splitSource(source, VERIFY_SOURCE_CHARS)) {
       const result = await ask("verify", VERIFY_RULES, { ...input, sourceSection: section, document: doc }, auditSchema);
       errors.push(...auditDefects(result));
@@ -310,7 +383,10 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       lease = shared.token;
       const analysis = shared.analysis ?? await analyzeSource(ask, source.text, item.title, sourceVersion, availability);
       if (lease) { await finishAnalysis(sql, analysisKey, lease, analysis); lease = null; }
-      const document = await composeDocument(ask, source.text, analysis, readerContext, voice, item.topic_label, baselines, prominence);
+      const document = await composeDocument(
+        ask, source.text, analysis, readerContext, voice, item.topic_label, baselines, prominence,
+        (text, summary) => auditNeeded(text, summary, options.readerId),
+      );
       const notice = availabilityNotice(availability);
       const reading: StoredReading = { version: 2, sourceVersion, availability, status: "verified", document, notice,
         seconds: Math.ceil(minutesOf(cardChars(document.title.text, documentText(document) + (notice ?? "")), voice) * 60) };

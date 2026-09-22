@@ -1,0 +1,50 @@
+"use client";
+
+import { ArrowRightIcon } from "lucide-react";
+import { featureOf, upgradeLines, type UpgradeNote } from "@/lib/upgrade";
+import { type Plan } from "@/lib/plans";
+import { usePaywall } from "@/components/paywall";
+import { useT } from "@/components/i18n-provider";
+
+/**
+ * Строка под выпуском: в какой предел ты упёрся сегодня.
+ *
+ * Стоит здесь, а не в «О проекте», где живёт та же арифметика: туда заходят
+ * один раз и по своей воле, а предел человек встречает в момент чтения —
+ * когда выпуск кончился раньше, чем он ожидал, или когда сегодня его нет
+ * вовсе. Числа те же самые, момент другой.
+ *
+ * Говорит о том, что произошло, а не о том, что купить: «за сутки у твоих
+ * источников вышло 106, в выпуск поместилось 8» — проверяемое утверждение
+ * про его же ленту. Название тарифа идёт следом и мелким, как ответ
+ * на вопрос, а не как заголовок.
+ *
+ * Открывает окно, а не уводит в «Подписку»: читатель пришёл читать выпуск,
+ * и увести его со страницы за ценой значит закончить чтение вместо того,
+ * чтобы дать вернуться к нему после.
+ */
+export function UpgradeLine({ note, plan }: { note: UpgradeNote; plan: Plan }) {
+  const t = useT();
+  const paywall = usePaywall(featureOf(note.reason), plan);
+  const { fact, offer } = upgradeLines(t.feed.upgrade, t.plans.label, plan.id, note);
+
+  return (
+    <div className="mt-4 flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
+      <span>{fact}</span>
+      {/* Кнопка-ссылка, а не Button: под лентой стоит подпись, а не панель
+          действий, и полноценная кнопка забирала бы внимание у выпуска,
+          который читают прямо над ней. Строкой ниже, а не в конце фразы:
+          предложение цены — это второе действие, и в одной строке с прозой
+          оно упиралось в её правый край, уводя всю пару влево. */}
+      <button
+        type="button"
+        onClick={paywall.open}
+        className="inline-flex cursor-pointer items-center gap-1 text-foreground underline decoration-muted-foreground/40 underline-offset-4 transition-colors hover:decoration-foreground"
+      >
+        {offer}
+        <ArrowRightIcon className="size-3.5" />
+      </button>
+      {paywall.dialog}
+    </div>
+  );
+}
