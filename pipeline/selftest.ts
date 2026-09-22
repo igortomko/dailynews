@@ -36,6 +36,7 @@ import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
+import * as bus from "../src/lib/audio-bus";
 import {
   applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
   spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
@@ -3795,6 +3796,74 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
     overviewMarkdown({ title: "", intro: "", blocks: [{ ...feed[0], source: "A]B[C", url: "https://s1.test/a b" }] })
       .endsWith("[A\\]B\\[C](https://s1.test/a%20b)"),
   );
+}
+
+// --- один звук на страницу и одна скорость на все карточки ------------------
+{
+  // Шина трогает только переданные ей элементы, поэтому проверяется
+  // подделкой: настоящий <audio> в node недоступен, а решение — чьё.
+  const made: { paused: boolean; rate: number; plays: number }[] = [];
+  const fake = () => {
+    const el = {
+      paused: true,
+      playbackRate: 1,
+      plays: 0,
+      play() {
+        this.paused = false;
+        this.plays++;
+        return Promise.resolve();
+      },
+      pause() {
+        this.paused = true;
+      },
+    };
+    made.push(el as never);
+    return el as unknown as HTMLAudioElement;
+  };
+
+  const first = fake();
+  const second = fake();
+  bus.playOnly(first);
+  assert.equal((first as unknown as { paused: boolean }).paused, false, "первый играет");
+
+  // Запуск второго останавливает первый: слух у читателя один.
+  bus.playOnly(second);
+  assert.equal((first as unknown as { paused: boolean }).paused, true, "первый остановлен");
+  assert.equal((second as unknown as { paused: boolean }).paused, false, "второй играет");
+
+  // Пауза, а не сброс: вернувшись, читатель продолжает с того же места,
+  // и перемотка в начало наказывала бы за нажатие на соседнюю карточку.
+  bus.playOnly(first);
+  bus.playOnly(second);
+  assert.equal(
+    (first as unknown as { plays: number }).plays, 2,
+    "возврат к карточке — это новый play, а не перезапуск с нуля",
+  );
+
+  // Скорость общая и применяется к тому, что уже играет.
+  const started = bus.currentRate();
+  const next = bus.nextRate();
+  assert.notEqual(next, started, "по кругу — это другая скорость");
+  assert.equal(
+    (second as unknown as { playbackRate: number }).playbackRate, next,
+    "играющий звук ускоряется сразу, а не со следующего запуска",
+  );
+
+  // Круг замыкается: с последней возвращаемся к единице.
+  const seen = [bus.currentRate()];
+  for (let i = 0; i < bus.RATES.length; i++) seen.push(bus.nextRate());
+  assert.equal(seen[0], seen[seen.length - 1], "круг возвращается туда, откуда начали");
+  assert.ok(bus.RATES.every((r) => seen.includes(r)), "по кругу проходятся все скорости");
+
+  // Подписчик узнаёт о смене: иначе карточка, уже стоящая на экране,
+  // показывала бы старую скорость до перезагрузки.
+  let told = 0;
+  const off = bus.onRate(() => told++);
+  bus.nextRate();
+  assert.equal(told, 1, "соседняя карточка узнаёт о смене скорости");
+  off();
+  bus.nextRate();
+  assert.equal(told, 1, "отписавшаяся — уже нет");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
