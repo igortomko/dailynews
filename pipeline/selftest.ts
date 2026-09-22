@@ -74,6 +74,7 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
+import { ru as ruDict } from "../src/lib/i18n/ru/index";
 import {
   anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG, TS_CONFIGS, tsConfigFor,
 } from "../src/lib/search";
@@ -2465,6 +2466,32 @@ assert.equal(countOf("49.3K"), 49_300, "сокращение тысяч разв
 assert.equal(countOf("1.74M"), 1_740_000, "сокращение миллионов разворачивается");
 assert.equal(countOf("812"), 812, "число без сокращения читается как есть");
 assert.equal(countOf(undefined), null, "нет просмотров — null, а не ноль");
+
+// --- тексты онбординга: числительные и несбывшееся обещание --------------------
+// Формы ломаются ровно на единице и на втором десятке, а тестируют обычно
+// на пятёрке: «прошло 1 секунда» мы уже выкатывали. И обещание, названное
+// в секундах, перестаёт быть правдой на сорок первой.
+{
+  const w = ruDict.onboarding.wizard;
+  // Сравнение по началу строки, а не regex: \b в JS считает границей слова
+  // только ASCII, и после кириллицы ведёт себя не так, как выглядит, — это
+  // ровно та ловушка, что уже стоит в таблице поломок.
+  const starts = (value: string, head: string) =>
+    assert.equal(value.slice(0, head.length), head, `«${value}» должно начинаться с «${head}»`);
+  starts(w.ready.elapsed(1), "1 секунда.");
+  starts(w.ready.elapsed(2), "2 секунды.");
+  starts(w.ready.elapsed(11), "11 секунд.");
+  starts(w.ready.elapsed(21), "21 секунда.");
+  assert.ok(w.ready.elapsed(12).includes("Обычно"), "до сорока обещание уместно");
+  assert.ok(
+    !w.ready.elapsed(41).includes("Обычно"),
+    "после сорока обещание не повторяется: оно уже не сбылось",
+  );
+  assert.equal(w.interests.more(1), "Ещё 1 интерес");
+  assert.equal(w.interests.more(15), "Ещё 15 интересов");
+  assert.equal(w.sources.addedWhy(1), "1 свежая запись");
+  assert.equal(w.sources.addedWhy(20), "20 свежих записей");
+}
 
 // --- число и слово рядом -------------------------------------------------------
 // «1 материалов» — не опечатка, а признак числа, подставленного в готовую

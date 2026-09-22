@@ -1244,7 +1244,7 @@ export async function addOnboardingSource(input: string) {
       label: result.found.label,
       // Доказательство, что источник ответил, а не просто открылся:
       // принятый пустым через неделю неотличим от заброшенного.
-      why: t.wizard.sources.addedWhy(result.found.fresh, result.found.entries),
+      why: t.wizard.sources.addedWhy(result.found.fresh),
     },
   };
 }

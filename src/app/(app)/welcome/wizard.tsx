@@ -217,7 +217,7 @@ export function InterestsStep({
             disabled={total === 0 || pending}
           >
             {pending ? <Spinner /> : null}
-            {t.onboarding.wizard.next}
+            {t.onboarding.wizard.toSources}
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         </div>
@@ -285,7 +285,7 @@ export function InterestsStep({
         </div>
 
         {full ? (
-          <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(t.plans.label[plan.id])}</p>
+          <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(t.plans.label[plan.id], plan.maxTopics)}</p>
         ) : null}
 
         {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
@@ -394,7 +394,7 @@ export function SourcesStep({
           <Counter picked={picked.length} limit={plan.maxSources} />
           <Button onClick={next} disabled={picked.length === 0 || pending}>
             {pending ? <Spinner /> : null}
-            {t.onboarding.wizard.next}
+            {t.onboarding.wizard.toFeed}
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         </div>
@@ -560,7 +560,6 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
           <div className="flex flex-col gap-2 text-sm text-muted-foreground">
             {added > 0 ? <p>{t.onboarding.wizard.ready.digestSummary(added, topics)}</p> : null}
             {note ? <p>{note}</p> : null}
-            <p>{t.onboarding.wizard.ready.footerNote}</p>
           </div>
         )}
       </div>
