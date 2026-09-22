@@ -86,7 +86,18 @@ assert.ok(kindle.includes('<p>First</p>') && kindle.includes('<p>Second</p>'));
 assert.ok(kindle.includes('&quot;'));
 
 assert.ok(blockText({ kind: 'steps', sequence: 'timeline', items: [{ label: 'Launch', content: evidence('Release', 's1-a'), state: 'planned' }, { label: 'Pilot', content: evidence('Trial', 's1-a'), state: 'current' }] }).includes('(предстоит)'));
-assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(221), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
+// Цель — 220 слов, отказ — на десятую часть позже: сверенная карточка,
+// выброшенная за десять лишних слов, стоит читателю новости целиком.
+assert.deepEqual(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(180), 's1-b') }] }, analysis, '', []), [], 'перебор в пределах десятой части не отказ');
+assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(260), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
+// Обязательных утверждений не больше семи на секцию: при восьми и больше
+// «все critical видимы» и «не длиннее 220 слов» перестают быть совместимы,
+// и карточка не собирается вовсе (замер на выпуске 22 сентября 2026).
+const claimOf = (id: string, importance: 'critical' | 'major') => ({ id, text: id, quote: id, importance, role: 'fact' as const });
+const sectionWith = (critical: number) => ({ subject: 'Test', genre: 'research' as const, excluded: [],
+  claims: [...Array.from({ length: critical }, (_, i) => claimOf(`c${i}`, 'critical')), claimOf('m1', 'major')] });
+assert.deepEqual(validateSection(sectionWith(7), 'c0 c1 c2 c3 c4 c5 c6 m1'), [], 'семь обязательных утверждений — ещё норма');
+assert.ok(validateSection(sectionWith(8), 'c0 c1 c2 c3 c4 c5 c6 c7 m1').some(e => e.includes('at most 7')), 'восьмое обязательное утверждение — дефект извлечения');
 assert.deepEqual(normalizeDocument({ ...valid, omitted: [{ claimId: 's1-a', reason: 'Accidental duplicate' }] }).omitted, []);
 
 async function main() {

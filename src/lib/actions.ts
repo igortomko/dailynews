@@ -887,10 +887,12 @@ async function fillDigest(reader: Reader) {
     let filled = minutesOf(chars, voice);
     for (const survivor of survivors) {
       if (filled >= target || taken + fitting.length >= plan.maxItems) break;
-      if (written.excludedIds?.includes(survivor.id)) continue;
+      // Дописывается только написанное: снятое правилами и то, для чего
+      // проверенной выжимки не вышло, карточкой не становится.
       const text = writtenById.get(String(survivor.id));
+      if (!text) continue;
       fitting.push(survivor);
-      filled += minutesOf(cardChars(text?.title_ru ?? survivor.title, text?.summary ?? ""), voice);
+      filled += minutesOf(cardChars(text.title_ru ?? survivor.title, text.summary ?? ""), voice);
     }
 
     // Дописываем только то, чего в выпуске ещё нет: два одновременных нажатия

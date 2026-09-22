@@ -316,7 +316,11 @@ async function runForReader(
 
   const readingStartedAt = new Date();
   const digest = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
-  const published = survivors.filter(item => !digest.excludedIds?.includes(item.id));
+  const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
+  // В выпуск идёт то, что написано. Материал выпадает по двум причинам:
+  // его снял личный запрет читателя или проверенной выжимки не вышло —
+  // и в обоих случаях карточке в ленте взяться неоткуда.
+  const published = survivors.filter(item => writtenById.has(String(item.id)));
   const digestCost = llmCost(digest.usage);
   const [readingAccounting] = await sql<{ cost: number; calls: number }[]>`
     select coalesce(sum(cost_usd), 0)::float as cost, count(*)::int as calls
@@ -326,7 +330,8 @@ async function runForReader(
        and status in ('settled', 'uncertain')
   `;
   const readingCost = readingAccounting?.cost ?? 0;
-  if (!published.length) { log(`  ${name}: полный текст исключён личными правилами; пустой выпуск не создаётся`); return digestCost + readingCost; }
+  if (!published.length) { log(`  ${name}: писать нечего — всё снято правилами или не прошло проверку; пустой выпуск не создаётся`); return digestCost + readingCost; }
+  if (digest.unavailableIds?.length) log(`  ${name}: без проверенной выжимки — ${digest.unavailableIds.length}, в выпуск они не попали`);
   if (!digest.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
     tokensIn: digest.usage.input, tokensOut: digest.usage.output, costUsd: digestCost,
@@ -362,8 +367,6 @@ async function runForReader(
   const meanQuality = quality?.scored.length
     ? quality.scored.reduce((sum, row) => sum + row.total, 0) / quality.scored.length
     : null;
-
-  const writtenById = new Map(digest.items.map((item) => [String(item.id), item]));
 
   /**
    * Сколько времени займёт выпуск. Считается по написанному тексту, а не
@@ -408,7 +411,7 @@ async function runForReader(
         digest_model: digest.model,
         reading_version: reader.reading_v2_enabled ? 2 : null,
         reading_verified: digest.items.filter(item => item.reading?.status === "verified").length,
-        reading_unavailable: digest.items.filter(item => item.reading?.status === "unavailable").length,
+        reading_unavailable: digest.unavailableIds?.length ?? 0,
         digest_input_tokens: digest.usage.input,
         digest_cached_tokens: digest.usage.cached,
         digest_output_tokens: digest.usage.output,

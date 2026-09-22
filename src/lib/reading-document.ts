@@ -87,7 +87,12 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   const issues: string[] = [];
   const words = `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
   const limit = ["narrative", "argument", "investigation"].includes(doc.genre) ? 320 : 220;
-  if (words > limit) issues.push(`Summary is ${words} words; maximum ${limit}. Merge related facts, remove repeated claims and omit minor setup, biography, names and examples. Keep the main mechanism, result and evidence limits.`);
+  // Цель называется точной, а отказ наступает на десятую часть позже.
+  // Лимит — редакционная мерка, а не обещание читателю: время выпуска
+  // считается по написанному тексту. Сверенная карточка, выброшенная
+  // за десять лишних слов, стоит читателю новости целиком — 21 сентября
+  // так ушёл «AMD briefly joins the $1T club» (230 слов при 220).
+  if (words > Math.round(limit * 1.1)) issues.push(`Summary is ${words} words; maximum ${limit}. Merge related facts, remove repeated claims and omit minor setup, biography, names and examples. Keep the main mechanism, result and evidence limits.`);
   if (!doc.lead) {
     issues.push("Missing a 35–60 word lead that answers the article's central question before the details.");
   } else {
@@ -121,8 +126,19 @@ export function validateQuotes(doc: ReadingDocument, source: string): string[] {
   }
   return issues;
 }
+/**
+ * Сколько утверждений секции обязаны попасть в карточку. Замер на живом
+ * выпуске 22 сентября 2026: при семи и меньше собрались все девятнадцать
+ * карточек, при восьми и больше треть не собралась вовсе — «все critical
+ * видимы» и «не длиннее 220 слов» несовместимы, когда обязательных
+ * утверждений двадцать пять. Отказ выглядел как разовая осечка модели,
+ * а был арифметикой.
+ */
+export const CRITICAL_PER_SECTION = 7;
 export function validateSection(section: z.infer<typeof sectionSchema>, source: string): string[] {
   const errors: string[] = [];
+  const critical = section.claims.filter((c) => c.importance === "critical").length;
+  if (critical > CRITICAL_PER_SECTION) errors.push(`${critical} critical claims; at most ${CRITICAL_PER_SECTION} per section. Keep only what a reader MUST remember to retell the central finding or story; demote the rest to major or detail.`);
   if (new Set(section.claims.map((c) => c.id)).size !== section.claims.length) errors.push("Duplicate claim IDs");
   for (const c of section.claims) if (!normalize(source).includes(normalize(c.quote))) errors.push(`Quote for ${c.id} was not found: ${JSON.stringify(c.quote)}. Replace it with a SHORT exact substring (3-15 words) of the supplied source supporting this claim.`);
   return errors;
