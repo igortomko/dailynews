@@ -50,14 +50,32 @@ The knob is an environment variable because it moves with the plan price,
 not with the code. Values below one read as unset: switching reading off is
 the reader flag, not a zero here.
 
-Two cost experiments are settled and recorded in `docs/economics.md`, so
-they do not need repeating. Turning reasoning off in the audits saves about
-a third and blinds them — the audit then answers 1031 output tokens over six
+Cost experiments are settled and recorded in `docs/economics.md`, so they
+do not need repeating. Turning reasoning off in the audits saves about a
+third and blinds them — the audit then answers 1031 output tokens over six
 calls and misses a real misattributed figure it caught with reasoning on.
-Putting Jev in front of the audits works for `verify` (18% false alarms at
-threshold 0.5, catching 93% of altered numbers and 100% of invented claims)
-but not for `source-audit`, where a list of dozens of restated claims draws
-93–100% false alarms under either question form.
+Jev in front of `verify` works with one question about the whole summary
+(18% false alarms at threshold 0.5, catching 93% of altered numbers and
+100% of invented claims). In front of `source-audit` the same question form
+fails — a list of dozens of restated claims draws 93–100% false alarms —
+so the gate there asks one question per claim ↔ span pair, one request per
+pair, with the neighbouring spans as context (`sectionAuditNeeded`): 4.9%
+false alarms per claim, a third of sections still audited, 98% of altered
+numbers and 100% of invented conclusions caught. Fifteen questions in one
+request were measured and rejected (57% of invented conclusions caught).
+The replay used to overstate `verify`: its second connection to the
+single-connection PGlite socket failed the gate's cost record, and the gate
+reads its own failure as "audit". The replay now shares `src/lib/db`.
+
+Replay, 14 cards × 2 rounds per version, versions of a pair run at the same
+time: HEAD $0.0163 per card-run and 26/28 verified against $0.0117 (of which
+$0.0008 is Jev) and 26/28 with the pair gate and a one-sentence word-budget
+clarification; length repairs fell from 11 to 3. A second pair an hour later
+met a different provider regime — median audit reasoning 618 tokens instead
+of 3,430, 21/28 verified for both versions — and measured $0.0067 against
+$0.0061. Savings are the share of audits not called (50–60% of sections);
+the dollar value is whatever the audit reasons that hour. Compare versions
+only within one simultaneous pair.
 
 ## Gate for new visual forms
 

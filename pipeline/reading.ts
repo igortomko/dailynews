@@ -16,7 +16,7 @@ import {
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
-import { auditNeeded } from "./reading-gate";
+import { auditNeeded, sectionAuditNeeded } from "./reading-gate";
 import { acquireAnalysis, finishAnalysis, getDocument, saveDocument, reserveCall, settleCall, recentBaselines, ReadingBudgetError, ReadingBusyError, type Baseline } from "./reading-store";
 
 export type ReadingOptions = { readerId: number; force?: boolean };
@@ -132,7 +132,13 @@ function caller(sql: Sql, readerId: number, usage: Usage): Ask {
 
 const extractionSchema = sectionSchema.extend({ claims: z.array(claimSchema.omit({ quote: true }).extend({ sourceSpan: z.number().int().positive() })).min(1).max(100) });
 
-export async function analyzeSource(ask: Ask, source: string, title: string, sourceVersion: string, availability: SourceAvailability): Promise<ArticleAnalysis> {
+/**
+ * Решает, звать ли дорогую сверку анализа с текстом. Параметром, как
+ * и у документа: проверка подменяет его, а замер отключает.
+ */
+export type SectionGate = (spans: { id: number; text: string }[], claims: { id: string; text: string; sourceSpan: number }[]) => Promise<boolean>;
+
+export async function analyzeSource(ask: Ask, source: string, title: string, sourceVersion: string, availability: SourceAvailability, gate?: SectionGate): Promise<ArticleAnalysis> {
   const sections: ArticleAnalysis['sections'] = [];
   for (const part of splitSource(source)) {
     const spans = splitSource(part.text, 1600).map((span, at) => ({ id: at + 1, text: span.text }));
@@ -143,7 +149,10 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
     const check = async () => {
       const errors = raw.claims.filter(c => !spans[c.sourceSpan - 1]).map(c => `Claim ${c.id} must reference an existing sourceSpan between 1 and ${spans.length}.`);
       errors.push(...validateSection(extracted, part.text));
-      if (!errors.length) errors.push(...auditDefects(await ask("source-audit", VERIFY_RULES, { ...input, analysis: raw }, auditSchema)));
+      // Дешёвый вопрос по каждой паре «утверждение ↔ отрывок» впереди
+      // дорогой сверки: только уверенное «подтверждается» по всем парам
+      // отменяет её — см. `sectionAuditNeeded` в `reading-gate.ts`.
+      if (!errors.length && (!gate || await gate(spans, raw.claims))) errors.push(...auditDefects(await ask("source-audit", VERIFY_RULES, { ...input, analysis: raw }, auditSchema)));
       return errors;
     };
     let errors = await check();
@@ -205,6 +214,11 @@ export const READING_MIN_CHARS = 3000;
  *
  * Не набралось N — берём сколько есть. Добрать короткими значило бы
  * потратить полную цену на то, ради чего разбор и не нужен.
+ *
+ * Меряется текст, а не тело с разметкой: разбор читает текст после
+ * `stripHtml`, и у материала из ленты тело бывает на треть тегами.
+ * На выпуске 21 сентября 2026 у ZetaChain было 3967 знаков сырого тела
+ * и 2961 после снятия разметки — сырое число пустило бы его в разбор.
  */
 export function readingPicks<T extends { id: number; body?: string | null; excerpt: string }>(
   survivors: T[],
@@ -214,7 +228,7 @@ export function readingPicks<T extends { id: number; body?: string | null; excer
   const deep: T[] = [];
   const plain: T[] = [];
   for (const item of survivors) {
-    const long = (item.body ?? "").length >= minChars;
+    const long = stripHtml(item.body ?? "").length >= minChars;
     if (long && deep.length < cards) deep.push(item);
     else plain.push(item);
   }
@@ -356,7 +370,8 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       analysisKey = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion]));
       const shared = await acquireAnalysis(sql, item.id, analysisKey, sourceVersion);
       lease = shared.token;
-      const analysis = shared.analysis ?? await analyzeSource(ask, source.text, item.title, sourceVersion, availability);
+      const analysis = shared.analysis ?? await analyzeSource(ask, source.text, item.title, sourceVersion, availability,
+        (spans, claims) => sectionAuditNeeded(spans, claims, options.readerId));
       if (lease) { await finishAnalysis(sql, analysisKey, lease, analysis); lease = null; }
       const document = await composeDocument(
         ask, source.text, analysis, readerContext, voice, item.topic_label, baselines, prominence,
