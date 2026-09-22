@@ -79,6 +79,12 @@ export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> 
  * правится, у остальных форма поля не показывает, а сервер решает сам,
  * не веря форме: `catalog` — из стартового набора, соседей спрашивает база.
  *
+ * Правится только тема, которую читатель уже держит. Повторно взятая
+ * ничья тема — не правка, а присоединение: новый чип приходит с пустой
+ * подсказкой, и без этого условия она стирала бы сохранённую — ту самую,
+ * которую читатель писал руками до того, как убрал тему. Новая тема
+ * заводится вставкой, и подсказка у неё своя с первой строки.
+ *
  * Отдаёт id темы в любом случае: связка читателя с темой заводится по нему.
  */
 export async function upsertTopic(
@@ -99,6 +105,10 @@ export async function upsertTopic(
          set label = ${topic.label}, hint = ${topic.hint}
        where t.id = ${row.id}
          and (t.label, t.hint) is distinct from (${topic.label}, ${topic.hint})
+         and exists (
+           select 1 from dailynews.reader_topics mine
+            where mine.topic_id = t.id and mine.reader_id = ${readerId}
+         )
          and not exists (
            select 1 from dailynews.reader_topics o
             where o.topic_id = t.id and o.reader_id <> ${readerId}

@@ -16,8 +16,17 @@ import { usePaywall } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
+import { rulesAnchor } from "@/lib/rules";
 import { queueRebuild } from "@/components/rebuild-queue";
 import { useT } from "@/components/i18n-provider";
+
+/**
+ * Чип в форме: `own` обязателен. Форма решает по нему, показывать ли поле
+ * подсказки, и необязательное поле молча делало бы каждую тему «только
+ * для чтения» у того, кто забыл его передать. Сервер этого поля не читает
+ * и решает сам (`upsertTopic`).
+ */
+export type FormChip = ChipInput & { own: boolean };
 
 export function TopicChips({
   initial,
@@ -27,7 +36,7 @@ export function TopicChips({
   onChange,
   plan,
 }: {
-  initial: ChipInput[];
+  initial: FormChip[];
   /** Заказ читателя: сколько минут чтения он просит. */
   initialMinutes: number;
   /**
@@ -58,7 +67,7 @@ export function TopicChips({
   const capped = places < Math.round(minutes / perCard);
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
   // и без приведения полоса показывала бы не тот выпуск, который придёт.
-  const [chips, setChipsState] = useState<ChipInput[]>(() =>
+  const [chips, setChipsState] = useState<FormChip[]>(() =>
     // `places` на первом проходе и есть места этого заказа: `minutes`
     // заведено из `initialMinutes`. Вторая запись той же формулы разошлась бы
     // с первой на первой же правке.
@@ -67,7 +76,7 @@ export function TopicChips({
 
   // Скрытые поля меняются без события формы, поэтому о правке сообщаем сами:
   // иначе автосохранение их не заметит.
-  const setChips = (next: ChipInput[]) => {
+  const setChips = (next: FormChip[]) => {
     setChipsState(next);
     onChange?.();
   };
@@ -147,7 +156,7 @@ export function TopicChips({
     });
   };
 
-  const patch = (index: number, fields: Partial<ChipInput>) =>
+  const patch = (index: number, fields: Partial<Pick<ChipInput, "label" | "hint">>) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, ...fields } : chip)));
 
   /** Добавить теме место можно только отняв у соседа: сумма — это весь выпуск. */
@@ -394,7 +403,7 @@ export function TopicChips({
                     // адрес, куда имена и идут: слежение личное и буквальное.
                     <p className="text-xs text-muted-foreground">
                       {tc.sharedNote}{" "}
-                      <a href="#rules-follow" className="underline underline-offset-4">
+                      <a href={`#${rulesAnchor("follow")}`} className="underline underline-offset-4">
                         {tc.sharedLink}
                       </a>
                       .
@@ -486,7 +495,7 @@ export function TopicChips({
   );
 }
 
-const withCounts = (chips: ChipInput[], counts: number[]): ChipInput[] =>
+const withCounts = <T extends ChipInput>(chips: T[], counts: number[]): T[] =>
   chips.map((chip, index) => ({ ...chip, count: counts[index] ?? MIN_PER_TOPIC }));
 
 /** У кого отнять место: у самой крупной темы, кроме той, что растёт. */

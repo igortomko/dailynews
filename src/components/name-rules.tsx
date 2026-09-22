@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useT } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
 import {
-  mergeDraft, RULE_LIMITS, splitNames, withVariants, type Names, type RuleKind,
+  mergeDraft, RULE_LIMITS, rulesAnchor, splitNames, withVariants, type Names, type RuleKind,
 } from "@/lib/rules";
 
 /**
@@ -132,7 +132,7 @@ export function NameRules({
 
   return (
     // Якорь: на него ведёт подсказка у общей темы в «Твоих темах».
-    <Field ref={box} id={`rules-${kind}`}>
+    <Field ref={box} id={rulesAnchor(kind)}>
       {name ? <input type="hidden" name={name} value={JSON.stringify(pending())} /> : null}
       <FieldLabel className="flex items-center gap-2">
         {area.label}

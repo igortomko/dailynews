@@ -2,8 +2,8 @@
 
 import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveInterests, type ChipInput } from "@/lib/actions";
-import { TopicChips } from "@/components/topic-chips";
+import { saveInterests } from "@/lib/actions";
+import { TopicChips, type FormChip } from "@/components/topic-chips";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import type { Plan } from "@/lib/plans";
@@ -24,7 +24,7 @@ export function InterestsForm({
   follow,
   exclude,
 }: {
-  chips: ChipInput[];
+  chips: FormChip[];
   /** Заказ: сколько минут чтения просит читатель. */
   minutes: number;
   /** Сколько минут занимает одна его карточка — мерка для деления на места. */

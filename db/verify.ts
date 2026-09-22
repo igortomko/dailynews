@@ -1399,11 +1399,15 @@ async function main() {
     // Подсказка темы — критерий классификации Jev, один на всех, кто тему
     // взял. Правка каталожной темы молча терялась: форма показывала новое
     // до перезагрузки, база хранила прежнее. Решает сервер, а не форма.
+    // Флаг назван, а не подставлен числом: `true` в хвосте вызова не говорит,
+    // что это «из каталога», и перепутанный случай прошёл бы проверку молча.
+    const CATALOG = true;
+    const OWN = false;
     const [designBefore] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where slug = 'design'
     `;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "design", label: "Дизайн", hint: "Figma", position: 1 }, true,
+      sql, owner.id, { slug: "design", label: "Дизайн", hint: "Figma", position: 1 }, CATALOG,
     );
     const [designAfter] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where slug = 'design'
@@ -1411,7 +1415,7 @@ async function main() {
     assert.deepEqual(designAfter, designBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
 
     const ownId = await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 }, false,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 }, OWN,
     );
     await sql`
       insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
@@ -1419,7 +1423,7 @@ async function main() {
     `;
     assert.equal(
       await readers.upsertTopic(
-        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, false,
+        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, OWN,
       ),
       ownId,
       "повторная запись отдаёт ту же тему",
@@ -1433,12 +1437,27 @@ async function main() {
       "тема, которую взял только я, не общая",
     );
 
+    // Убрал тему и взял снова: новый чип приходит с пустой подсказкой,
+    // и присоединение к ничьей теме не должно стирать сохранённую.
+    await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 }, OWN,
+    );
+    const [rejoined] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where id = ${ownId}
+    `;
+    assert.deepEqual(rejoined, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "повторное взятие не стирает подсказку");
+    await sql`
+      insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
+      values (${owner.id}, ${ownId}, 1, 9) on conflict do nothing
+    `;
+
     await sql`
       insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
       values (${second.id}, ${ownId}, 1, 1)
     `;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 }, false,
+      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 }, OWN,
     );
     const [sharedTopic] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where id = ${ownId}
