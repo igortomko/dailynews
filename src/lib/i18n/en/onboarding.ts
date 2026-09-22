@@ -30,7 +30,7 @@ export const onboarding = {
     sources: {
       title: "Where to read from",
       lead: (topics: string[]) =>
-        `Picked for your ${topics.length > 1 ? "interests" : "interest"}: ${topics.join(", ")}. Remove what you don't need, add your own — paste a link below.`,
+        `Picked for your ${topics.length > 1 ? "interests" : "interest"}: ${topics.join(", ")}. Remove what you don't need, add your own — paste a link above.`,
       full: (planLabel: string, maxSources: number) =>
         `I read ${maxSources} ${maxSources === 1 ? "source" : "sources"} — that's the whole ${planLabel} plan. Remove one to add another.`,
       addPlaceholder: "Link to a blog, channel or newsletter",

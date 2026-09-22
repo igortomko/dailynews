@@ -34,6 +34,7 @@ export function NameRules({
   kind,
   initial,
   optional,
+  raised,
   name,
   onChange,
 }: {
@@ -41,6 +42,14 @@ export function NameRules({
   initial: Names[];
   /** Пометка «необязательно» у подписи: на первом экране. */
   optional?: boolean;
+  /**
+   * Кнопка на светлой поверхности, а не обведённая.
+   *
+   * Вид решает место, а не компонент: в настройках блок лежит внутри белой
+   * карточки, и там обведённая кнопка видна; на первом экране карточки нет,
+   * фон страницы опущен с белого, и `outline` с ним сливается.
+   */
+  raised?: boolean;
   /** Имя скрытого поля формы. Пусто — список отдаётся только через onChange. */
   name?: string;
   onChange?: (next: Names[]) => void;
@@ -249,7 +258,7 @@ export function NameRules({
         />
         <Button
           type="button"
-          variant="outline"
+          variant={raised ? "raised" : "outline"}
           // Нажатие не уводит фокус из поля: после «Добавить» набирают
           // следующее, а не ищут поле заново.
           onMouseDown={(event) => event.preventDefault()}
