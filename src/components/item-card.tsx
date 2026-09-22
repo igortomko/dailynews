@@ -149,6 +149,22 @@ export function ItemCard({
   // Сработавшее удержание гасит нажатие, которое браузер шлёт следом
   // за отпусканием: иначе выбор карточки заодно открывал бы статью.
   const longPressed = useRef(false);
+  // Таймер читает состояние на момент срабатывания, а не на момент касания:
+  // за полсекунды выбор могли снять с клавиатуры или из редактора, и снимок
+  // из замыкания вернул бы его обратно.
+  const selectedNow = useRef(selected);
+  useEffect(() => {
+    selectedNow.current = selected;
+  }, [selected]);
+  // Карточка может уйти раньше, чем истекут полсекунды (смена вкладки,
+  // обновление ленты): без отмены таймер дёрнул бы выбор у карточки,
+  // которой на экране уже нет.
+  useEffect(
+    () => () => {
+      if (press.current) clearTimeout(press.current.timer);
+    },
+    [],
+  );
   const cancelPress = () => {
     if (!press.current) return;
     clearTimeout(press.current.timer);
@@ -166,7 +182,7 @@ export function ItemCard({
         press.current = null;
         longPressed.current = true;
         navigator.vibrate?.(15);
-        onSelectedChange(!selected);
+        onSelectedChange(!selectedNow.current);
       }, LONG_PRESS_MS),
     };
   };
