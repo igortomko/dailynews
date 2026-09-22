@@ -207,6 +207,7 @@ export const feed: typeof En = {
   },
   reading: {
     equals: "равно", then: "затем", step: "Шаг", stage: "Этап",
+    claimed: "принято считать", reality: "на деле", more: "Подробнее",
     planned: "предстоит", done: "завершён", current: "сейчас", unspecified: "",
   },
   time: {

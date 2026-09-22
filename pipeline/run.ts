@@ -19,6 +19,7 @@ import { enrichImages } from "./og";
 import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoIdOf } from "./youtube";
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
+import { formOf } from "../src/lib/reading-evaluation";
 import { jevCost, llmCost } from "./cost";
 import { FEATURES, issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
 import {
@@ -332,6 +333,20 @@ async function runForReader(
   const readingCost = readingAccounting?.cost ?? 0;
   if (!published.length) { log(`  ${name}: писать нечего — всё снято правилами или не прошло проверку; пустой выпуск не создаётся`); return digestCost + readingCost; }
   if (digest.unavailableIds?.length) log(`  ${name}: без проверенной выжимки — ${digest.unavailableIds.length}, в выпуск они не попали`);
+
+  // Доли форм в выпуске. Это мерка, а не принуждение: переписать карточку
+  // ради разнообразия значит заплатить за неё второй раз, а форма берётся
+  // из материала, которого у прозаической новости просто нет. Ряд по дням
+  // показывает, двигает ли правка промпта что-нибудь на самом деле —
+  // до него доля форм была 7 карточек из 35.
+  const forms = new Map<string, number>();
+  for (const item of digest.items) {
+    if (!item.reading) continue;
+    const form = formOf(item.reading);
+    forms.set(form, (forms.get(form) ?? 0) + 1);
+  }
+  const shaped = [...forms].filter(([form]) => form !== "brief" && form !== "story").reduce((sum, [, n]) => sum + n, 0);
+  if (forms.size) log(`  ${name}: формы — ${[...forms].sort((a, b) => b[1] - a[1]).map(([form, n]) => `${form} ${n}`).join(", ")}`);
   if (!digest.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: digest.model,
     tokensIn: digest.usage.input, tokensOut: digest.usage.output, costUsd: digestCost,
@@ -412,6 +427,8 @@ async function runForReader(
         reading_version: reader.reading_v2_enabled ? 2 : null,
         reading_verified: digest.items.filter(item => item.reading?.status === "verified").length,
         reading_unavailable: digest.unavailableIds?.length ?? 0,
+        reading_forms: Object.fromEntries(forms),
+        reading_shaped: shaped,
         digest_input_tokens: digest.usage.input,
         digest_cached_tokens: digest.usage.cached,
         digest_output_tokens: digest.usage.output,

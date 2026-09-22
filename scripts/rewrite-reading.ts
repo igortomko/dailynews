@@ -9,7 +9,7 @@ import { pooled } from '../pipeline/fetch';
 async function main() {
   const arg = (name: string) => process.argv[process.argv.indexOf(name) + 1];
   const readerId = Number(arg('--reader'));
-  if (!Number.isSafeInteger(readerId) || readerId <= 0 || !process.argv.includes('--apply')) throw new Error('Usage: rewrite-reading.ts --reader <id> --apply [--limit <n>]');
+  if (!Number.isSafeInteger(readerId) || readerId <= 0 || !process.argv.includes('--apply')) throw new Error('Usage: rewrite-reading.ts --reader <id> --apply [--limit <n>] [--all]');
   const reader = await getReader(readerId);
   if (!reader?.reading_v2_enabled) throw new Error('Reading v2 is not enabled for this reader');
   const [digest] = await sql<{ id: number; day: string }[]>`select id::int,day::text from dailynews.digests where reader_id=${readerId} order by day desc limit 1`;
@@ -25,7 +25,7 @@ async function main() {
     left join dailynews.scores sc on sc.item_id=coalesce(i.dup_of,i.id)
     left join dailynews.topics t on t.id=sc.topic_id
     where d.reader_id=${readerId} and d.id=${digest.id}
-      and coalesce(di.summary_document->>'status','') <> 'verified'
+      ${process.argv.includes('--all') ? sql`` : sql`and coalesce(di.summary_document->>'status','') <> 'verified'`}
     order by di.position`;
   const limit = process.argv.includes('--limit') ? Number(arg('--limit')) : rows.length;
   if (!rows.length) { console.log(JSON.stringify({ readerId, day: digest.day, rewritten: 0, failed: 0, backup: dir })); return; }
