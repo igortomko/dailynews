@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
-import { splitSource, composeDocument, analyzeSource, reasoningEffortFor, type Ask } from "./reading";
+import { splitSource, composeDocument, analyzeSource, reasoningEffortFor, VERIFY_SOURCE_CHARS, type Ask } from "./reading";
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
 import { DEFAULT_VOICE } from "../src/lib/voice";
@@ -146,6 +146,20 @@ async function main() {
   const repaired = await composeDocument(ask, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", []);
   assert.equal(repaired.blocks[0].kind, "paragraph");
   assert.deepEqual(phases, ["compose", "compose-repair", "verify"]);
+
+  // Проверка идёт по статье целиком, а не по кускам извлечения: иначе
+  // документ, разбор и правила оплачиваются столько раз, сколько у статьи
+  // кусков, а модель объявляет неподтверждённым то, что подтверждено
+  // страницей раньше.
+  const wholeArticle: string[] = [];
+  const counting: Ask = async (phase, _rules, data, schema) => {
+    if (phase === "verify") wholeArticle.push((data as { sourceSection: { text: string } }).sourceSection.text);
+    return schema.parse(phase.startsWith("compose") ? valid : { defects: [] });
+  };
+  const longSource = `${"Speed improved. No effect on accuracy. 24 participants. ".repeat(600)}`;
+  assert.ok(longSource.length > 30_000 && longSource.length < VERIFY_SOURCE_CHARS, 'источник замера длиннее трёх кусков извлечения');
+  await composeDocument(counting, longSource, analysis, "", DEFAULT_VOICE, "Research", []);
+  assert.equal(wholeArticle.length, 1, 'статья на тридцать тысяч знаков проверяется одним вызовом, а не тремя');
   const semanticPhases: string[] = [];
   const semanticRepair: Ask = async (phase, _rules, _data, schema) => {
     semanticPhases.push(phase);

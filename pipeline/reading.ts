@@ -12,7 +12,7 @@ import { styleOf, type Voice } from "../src/lib/voice";
 import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
-  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes,
+  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes, CRITICAL_PER_SECTION,
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
@@ -53,6 +53,20 @@ export function readingReasoningProfile(): string {
     || DEFAULT_REASONING_PROFILE;
 }
 export const MAX_SOURCE_CHARS = 160_000;
+/**
+ * Проверке источник режется втрое крупнее, чем извлечению. Двенадцать тысяч
+ * знаков — предел ответа на извлечении: сто утверждений в один ответ иначе
+ * не помещаются. Проверке отвечать нечем, кроме списка дефектов, и делить
+ * по тому же размеру значит платить за документ, разбор и правила столько
+ * раз, сколько у статьи кусков: на выпуске 22 сентября это 60 вызовов
+ * на 35 карточек, и 98% их выхода — рассуждение.
+ *
+ * Дело не только в деньгах. Проверяя документ против одного куска, модель
+ * не видит остальных и объявляет неподтверждённым то, что подтверждено
+ * страницей раньше; оговорка про «другие секции» в VERIFY_RULES стоит там
+ * ровно поэтому. Целая статья в одном вызове — проверка строже, а не мягче.
+ */
+export const VERIFY_SOURCE_CHARS = 40_000;
 
 export function splitSource(text: string, limit = 12_000): { id: string; start: number; end: number; text: string }[] {
   if (text.length > MAX_SOURCE_CHARS) throw new Error("Source exceeds processing limit; no partial summary is published");
@@ -149,6 +163,17 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
     if (errors.length) {
       raw = await ask("extract-repair", EXTRACT_RULES, { ...input, previous: raw, defects: errors }, extractionSchema);
       extracted = materialize(raw);
+      // Потолок обязательных утверждений — наше редакционное правило,
+      // и после ремонта оно применяется кодом, а не отказом. Модели дают
+      // один круг выбрать самой, что важнее; не уложилась — лишние
+      // помечаются major по порядку текста. Иначе правило, заведённое
+      // против отказов, само становится отказом: 22 сентября так ушла
+      // карточка, у которой извлечение второй раз вернуло восемь critical.
+      let critical = 0;
+      extracted = { ...extracted, claims: extracted.claims.map((claim) =>
+        claim.importance === "critical" && ++critical > CRITICAL_PER_SECTION
+          ? { ...claim, importance: "major" as const }
+          : claim) };
       errors = await check();
       if (errors.length) throw new Error(`Source analysis failed verification: ${errors[0]}`);
     }
@@ -186,7 +211,7 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
   const check = async (doc: ReadingDocument) => {
     const errors = [...validateCoverage(doc, analysis, readerContext, baselines.map((b) => b.id)), ...validateQuotes(doc, source)];
     if (errors.length) return errors;
-    for (const section of splitSource(source)) {
+    for (const section of splitSource(source, VERIFY_SOURCE_CHARS)) {
       const result = await ask("verify", VERIFY_RULES, { ...input, sourceSection: section, document: doc }, auditSchema);
       errors.push(...auditDefects(result));
     }
