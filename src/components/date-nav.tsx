@@ -80,6 +80,12 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             render={
               <Link
                 href={`/?day=${older}`}
+                // Соседний выпуск подгружается сразу, пока читают этот:
+                // переключение дня становится мгновенным, а не ждёт сервер.
+                // Цена — один-два фоновых рендера ленты на показ. Скрытая
+                // карточка меняет только выпуск своего дня, а его соседи
+                // подгружают заново уже после ухода с него.
+                prefetch={true}
                 aria-label={t.feed.dateNav.previous}
                 className={cn(arrow, "hover:bg-muted")}
               />
@@ -140,6 +146,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             render={
               <Link
                 href={`/?day=${newer}`}
+                prefetch={true}
                 aria-label={t.feed.dateNav.next}
                 className={cn(arrow, "hover:bg-muted")}
               />

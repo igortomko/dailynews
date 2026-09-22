@@ -75,7 +75,10 @@ async function main() {
        from pg_roles where rolname = 'dailynews_bot'`,
   )).rows;
   assert.ok(role.search_path.includes("dailynews"), "search_path роли должен быть прибит к схеме");
-  assert.equal(role.limit, 10, "лимит соединений роли должен быть 10");
+  // Пятнадцать с 0053: веб на сессионном пулере держит соединения тёплыми,
+  // прогон берёт ещё пять через транзакционный, и десяти на двоих хватало
+  // без запаса для скриптов.
+  assert.equal(role.limit, 15, "лимит соединений роли должен быть 15");
   console.log(`  роль: search_path прибит, лимит ${role.limit}`);
 
   // Метка проверяется после подключения: свободный порт успевает занять
