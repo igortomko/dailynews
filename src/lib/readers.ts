@@ -364,7 +364,10 @@ export type CallRecord = {
     | "dedup"
     // Карточка автора и пост — такие же оплаченные вызовы, и потолок
     // читателя считается по той же таблице.
-    | "voice" | "post" | "post-quality" | "spoken-terms";
+    | "voice" | "post" | "post-quality" | "spoken-terms"
+    // Привратник разбора: дешёвый вопрос к Jev, решающий, звать ли дорогую
+    // сверку документа с источником.
+    | "reading-gate";
   model: string;
   tokensIn: number;
   tokensOut?: number;

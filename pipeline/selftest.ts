@@ -2195,7 +2195,8 @@ import { splitBlocks, chunkBlocks, chunkProblem, alreadyIn } from "./translate";
 import { samplePairs } from "./translation-quality";
 import { articleBlocker } from "./kindle";
 import { iconHref, publicHost } from "../src/lib/favicon";
-import { LEAD_CARDS, readingCards } from "./reading";
+import { LEAD_CARDS, readingCards, readingPicks } from "./reading";
+import { AUDIT_ALARM } from "./reading-gate";
 import { JEV_BASELINE, jevVersionNote } from "../src/lib/jev-version";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
@@ -2258,6 +2259,48 @@ assert.match(
   articleBlocker(base, PLANS.free, 0), new RegExp(PLANS.plus.label),
   "на бесплатном тарифе отправка статьи отказывает тарифом",
 );
+
+// Привратник не заменяет сверку, а решает, звать ли её. Цена ошибки
+// несимметрична, как в дедупе: лишний дорогой вызов — цент, пропущенное
+// искажение — число под нашим именем, которого в источнике нет.
+{
+  assert.ok(AUDIT_ALARM > 0 && AUDIT_ALARM < 1, "порог тревоги — доля, а не число ответов");
+  // Замер 22 сентября 2026 на 28 карточках: на этом пороге тревога встаёт
+  // у 18% чистых, ловится 93% подменённых чисел и 100% дописанных выводов.
+  assert.equal(AUDIT_ALARM, 0.5, "порог взят замером, а не на глаз: ниже растут ложные тревоги, выше падает ловля чисел");
+}
+
+// Разбор достаётся тому, где есть что разбирать, но порядок остаётся
+// важностью. Замер на выпуске 22 сентября 2026: вторая карточка имела 1984
+// знака текста и получала полный разбор, а материал на 13 390 знаков стоял
+// десятым и не получал ничего.
+{
+  const item = (id: number, body: number) => ({ id, body: "я".repeat(body), excerpt: "анонс" });
+  // Числа взяты из того выпуска, по порядку отбора.
+  const edition = [22855, 1984, 6576, 7383, 9143, 2850, 317823, 2236, 1117, 13390]
+    .map((body, at) => item(at + 1, body));
+
+  const { deep, plain } = readingPicks(edition, 5);
+  assert.deepEqual(deep.map((one) => one.id), [1, 3, 4, 5, 7],
+    "короткие пропускаются, а не занимают место разбора");
+  assert.equal(deep.length + plain.length, edition.length, "ни один материал не теряется");
+  assert.ok(!plain.some((one) => deep.includes(one)), "и не попадает в оба списка");
+
+  // Длинные наверх не поднимаются: пять самых длинных в том выпуске стояли
+  // на 1, 7, 15, 16 и 17 местах, и разбор пятнадцатого — это плата
+  // за карточку, до которой не долистают.
+  const byLength = [...edition].sort((a, b) => b.body.length - a.body.length).slice(0, 5).map((one) => one.id);
+  assert.notDeepEqual(deep.map((one) => one.id), byLength, "выбор идёт по порядку, а не по длине");
+
+  // Совсем нечего разбирать — не добираем короткими: полная цена за то,
+  // ради чего разбор и не нужен.
+  const shorts = readingPicks([item(1, 500), item(2, 900)], 5);
+  assert.equal(shorts.deep.length, 0, "у коротких материалов разбора нет вовсе");
+  assert.equal(shorts.plain.length, 2, "и все они уходят обычным путём");
+
+  // Предел соблюдается даже когда подходящих больше.
+  assert.equal(readingPicks(edition, 2).deep.map((one) => one.id).join(","), "1,3", "берём столько, сколько разрешено");
+}
 
 // Версия Jev плавающая, а от неё зависят числа, которые сравниваются между
 // собой: порог дубля, корзины калибровки, ряды по дням. Смена версии — это
