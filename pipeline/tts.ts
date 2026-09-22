@@ -24,7 +24,7 @@ import { SOURCE_LANGUAGE } from "../src/lib/voice";
 import type { Plan } from "../src/lib/plans";
 import type { Reader } from "../src/lib/types";
 import { llmCost } from "./cost";
-import { GAP_MP3, GAP_SECONDS } from "./gap";
+import { STING_MP3 } from "./sting";
 import { resolve, type Usage } from "./digest";
 
 /**
@@ -216,6 +216,16 @@ if (!kbitrate) throw new Error(`не разобрал битрейт форма�
 const BYTES_PER_SECOND = (Number(kbitrate) * 1000) / 8;
 
 export const secondsOf = (audio: Buffer): number => Math.round(audio.length / BYTES_PER_SECOND);
+
+/**
+ * Длина отбивки — из её же байтов, а не числом рядом.
+ *
+ * Число рядом разъехалось бы с файлом при первой же замене звука,
+ * и разъехалось бы молча: расход квоты считается суммой, и лишние
+ * полсекунды на тридцати девяти стыках никто не заметит ни в одном
+ * отказе. Без округления по той же причине.
+ */
+const STING_SECONDS = STING_MP3.length / BYTES_PER_SECOND;
 
 
 /**
@@ -554,11 +564,11 @@ export async function buildPodcast(
       return null;
     });
     if (!piece) continue;
-    // Пауза между новостями, но не перед первой и не после последней:
-    // тишина в начале файла читается как «не загрузилось».
+    // Отбивка между новостями, но не перед первой и не после последней:
+    // запись, начатая не с речи, читается как «не загрузилось».
     if (parts.length > 0) {
-      parts.push(GAP_MP3);
-      seconds += GAP_SECONDS;
+      parts.push(STING_MP3);
+      seconds += STING_SECONDS;
     }
     at.set(itemId, Math.round(seconds));
     parts.push(piece.audio);
@@ -571,13 +581,13 @@ export async function buildPodcast(
   // синтеза вообще, но и не то, о чём стоит молчать.
   if (lost > 0) console.log(`  ~ в записи нет ${lost} из ${itemIds.length} карточек`);
 
-  // Вступление впереди и через ту же паузу, что между новостями: тишина
-  // в начале файла читается как «не загрузилось», а её отсутствие делает
-  // из «Reporta, двадцать первое сентября» первую фразу первой новости.
+  // Вступление впереди и через ту же отбивку, что между новостями: без неё
+  // «Reporta, двадцать первое сентября» читается первой фразой первой
+  // новости, а с ней — заставкой, после которой начинается выпуск.
   const intro = await introAudio(reader, first, usage);
   if (intro) {
-    const lead = secondsOf(intro) + GAP_SECONDS;
-    parts.unshift(intro, GAP_MP3);
+    const lead = secondsOf(intro) + STING_SECONDS;
+    parts.unshift(intro, STING_MP3);
     seconds += lead;
     // Метки времени сдвигаются вместе с новостями. Оставь их на месте —
     // и «слушать · 12:34» в сообщении указывало бы на соседнюю новость,

@@ -85,6 +85,7 @@ import {
 } from "../src/lib/source-health";
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
+import { STING_MP3 } from "./sting";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
 import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, langTagFor, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
@@ -3767,6 +3768,26 @@ for (const [name, table] of [
     if (language !== "русском") {
       assert.notEqual(said, ruDate, `${language} назвал число по-русски`);
     }
+  }
+
+  // Отбивка склеивается с речью встык, без перекодирования, — значит она
+  // обязана быть того же формата, которым просят синтез
+  // (`AUDIO_24KHZ_48KBITRATE_MONO_MP3`). Чужой формат не ломает подкаст
+  // заметно: файл соберётся и заиграет, а на каждом стыке будет треск.
+  // Поэтому разбирается заголовок первого кадра, а не сверяется длина.
+  {
+    const h = STING_MP3;
+    assert.equal(h[0], 0xff, "отбивка начинается не с кадра mp3 — ID3 или Xing вернулись");
+    assert.equal(h[1] & 0xe0, 0xe0, "нет синхробайтов кадра");
+    assert.equal((h[1] >> 3) & 0b11, 0b10, "не MPEG 2 — движок отдаёт 24 кГц именно им");
+    assert.equal((h[1] >> 1) & 0b11, 0b01, "не Layer III");
+    // Таблицы MPEG 2 Layer III: индекс 6 — 48 кбит/с, индекс 1 — 24000 Гц.
+    assert.equal(h[2] >> 4, 6, "битрейт не 48 кбит/с — кадры не стыкуются с речью");
+    assert.equal((h[2] >> 2) & 0b11, 1, "частота не 24 кГц");
+    assert.equal(h[3] >> 6, 0b11, "не моно");
+    // Длина берётся из байтов, а не числом рядом: 48 кбит/с — это ровно
+    // 6000 байт в секунде, и деление обязано быть целым.
+    assert.ok(STING_MP3.length % 6 === 0, "длина не делится на кадр — файл обрезан");
   }
 
   // День приходит строкой «ГГГГ-ММ-ДД», и пояс разбора не должен её сдвигать.
