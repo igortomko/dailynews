@@ -223,6 +223,20 @@
   background: #e6533f;
 }
 
+[data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][aria-pressed="true"],
+[data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][data-state="on"] {
+  background: #e5f3f5 !important;
+  border-color: #69b8c6 !important;
+  color: #2d6874 !important;
+}
+
+.dark [data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][aria-pressed="true"],
+.dark [data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][data-state="on"] {
+  background: #263c3f !important;
+  border-color: #69b8c6 !important;
+  color: #e5f3f5 !important;
+}
+
 @layer base {
   /*
     «Поменьше движения» — не вкус, а настройка здоровья: у части людей
