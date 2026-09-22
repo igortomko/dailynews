@@ -59,7 +59,7 @@ export const feed: typeof En = {
     remove: (title: string) => `Убрать из обзора: ${title}`,
     tooltipAdd: "В обзор",
     tooltipRemove: "Убрать из обзора",
-    podcast: "Подкаст",
+    podcast: "Записать подкаст",
     podcastWorking: "Собираю подкаст…",
     podcastQueued: (n: number) => `Подкаст из ${n} ${plural(n, "новости", "новостей", "новостей")} собирается`,
     podcastQueuedNote: "Придёт в Telegram одним файлом",
