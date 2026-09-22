@@ -16,8 +16,18 @@ import { usePaywall } from "@/components/paywall";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
+import { rulesAnchor } from "@/lib/rules";
+import { ownLabel, TOPIC_LIMITS } from "@/lib/starter-topics";
 import { queueRebuild } from "@/components/rebuild-queue";
 import { useT } from "@/components/i18n-provider";
+
+/**
+ * Чип в форме: `own` обязателен. Форма решает по нему, показывать ли поле
+ * подсказки, и необязательное поле молча делало бы каждую тему «только
+ * для чтения» у того, кто забыл его передать. Сервер этого поля не читает
+ * и решает сам (`upsertTopic`).
+ */
+export type FormChip = ChipInput & { own: boolean };
 
 export function TopicChips({
   initial,
@@ -27,7 +37,7 @@ export function TopicChips({
   onChange,
   plan,
 }: {
-  initial: ChipInput[];
+  initial: FormChip[];
   /** Заказ читателя: сколько минут чтения он просит. */
   initialMinutes: number;
   /**
@@ -58,7 +68,7 @@ export function TopicChips({
   const capped = places < Math.round(minutes / perCard);
   // Цели приводим к сумме сразу: в базе лежат цели от прошлого набора тем,
   // и без приведения полоса показывала бы не тот выпуск, который придёт.
-  const [chips, setChipsState] = useState<ChipInput[]>(() =>
+  const [chips, setChipsState] = useState<FormChip[]>(() =>
     // `places` на первом проходе и есть места этого заказа: `minutes`
     // заведено из `initialMinutes`. Вторая запись той же формулы разошлась бы
     // с первой на первой же правке.
@@ -67,7 +77,7 @@ export function TopicChips({
 
   // Скрытые поля меняются без события формы, поэтому о правке сообщаем сами:
   // иначе автосохранение их не заметит.
-  const setChips = (next: ChipInput[]) => {
+  const setChips = (next: FormChip[]) => {
     setChipsState(next);
     onChange?.();
   };
@@ -121,7 +131,15 @@ export function TopicChips({
     if (!trimmed) return;
     if (full) return;
     if (chips.some((chip) => chip.label.toLowerCase() === trimmed.toLowerCase())) return;
-    const next = [...chips, { slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC }];
+    // Заведённая руками тема — своя: подсказку и имя можно править сразу.
+    // Кроме имени, которое сводится к слагу каталожной темы («AI-инфра» —
+    // это `ai-infra`): сервер сочтёт её каталожной, и поле, чью правку он
+    // отбросит, здесь не показывается — тем же правилом, что и у него.
+    // Совпадёт со взятой соседом — сервер правку отбросит, а после
+    // перезагрузки чип придёт уже общим.
+    const next = [...chips, {
+      slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC, own: ownLabel(trimmed),
+    }];
     // Новая тема берёт место у самой крупной, а не растит выпуск:
     // сколько читать, читатель задал отдельно и сам.
     setChips(withCounts(next, normalize(next.map((chip) => chip.count), places)));
@@ -144,7 +162,24 @@ export function TopicChips({
     });
   };
 
-  const patch = (index: number, fields: Partial<ChipInput>) =>
+  /**
+   * Своя ли тема после правки имени. Только у чипа без слага: у него слаг
+   * выведет сервер из имени (`chip.slug || toSlug(chip.label)`), и совпадение
+   * с каталожным делает тему каталожной — тем же правилом, что и `add`.
+   * У темы со слагом имя на слаг не влияет.
+   */
+  const settleOwn = (index: number) => {
+    const chip = chips[index];
+    // У темы со слагом имя на слаг не влияет — пересчитывать нечего.
+    if (chip.slug) return;
+    const own = ownLabel(chip.label);
+    // Без изменений — без записи: setChips зовёт `touch`, и одно наведение
+    // на имя с уходом зажигало бы «Сохранить» и сторожа ухода впустую.
+    if (own === chip.own) return;
+    setChips(chips.map((current, i) => (i === index ? { ...current, own } : current)));
+  };
+
+  const patch = (index: number, fields: Partial<Pick<ChipInput, "label" | "hint">>) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, ...fields } : chip)));
 
   /** Добавить теме место можно только отняв у соседа: сумма — это весь выпуск. */
@@ -322,12 +357,21 @@ export function TopicChips({
                 />
 
                 {/* Имя правится прямо в чипе: отдельное поле «название темы»
-                    заставляло бы искать, где переименовать то, что уже видно. */}
-                {selected === index ? (
+                    заставляло бы искать, где переименовать то, что уже видно.
+                    Только у своей темы: название каталожной или взятой соседом
+                    общее, и поле, чья правка не сохраняется, — обман. */}
+                {selected === index && chip.own ? (
                   <input
                     value={chip.label}
+                    maxLength={TOPIC_LIMITS.label}
                     aria-label={tc.topicNameAria}
                     onChange={(event) => patch(index, { label: event.target.value })}
+                    // Сервер выводит слаг новой темы из имени при записи,
+                    // и новое имя может сделать её каталожной («Крипта» →
+                    // «Blockchain»). Признак пересчитывается, когда правка
+                    // закончена, а не на каждую букву: иначе поле исчезало бы
+                    // под пальцами на полуслове.
+                    onBlur={() => settleOwn(index)}
                     onClick={(event) => event.stopPropagation()}
                     size={Math.max(chip.label.length, 4)}
                     className="min-w-0 bg-transparent outline-none"
@@ -368,17 +412,40 @@ export function TopicChips({
                   и он оказывается ровно под своей строкой чипов. */}
               {selected === index ? (
                 <div className="w-full">
-                  <Textarea
-                    id={`hint-${index}`}
-                    rows={2}
-                    value={chip.hint}
-                    aria-label={tc.hintAria(chip.label)}
-                    placeholder={tc.hintPlaceholder}
-                    onChange={(event) => patch(index, { hint: event.target.value })}
-                  />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    {tc.hintHelp}
-                  </p>
+                  {chip.own ? (
+                    <>
+                      <Textarea
+                        id={`hint-${index}`}
+                        rows={2}
+                        value={chip.hint}
+                        maxLength={TOPIC_LIMITS.hint}
+                        aria-label={tc.hintAria(chip.label)}
+                        placeholder={tc.hintPlaceholder}
+                        onChange={(event) => patch(index, { hint: event.target.value })}
+                      />
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        {tc.hintHelp}
+                      </p>
+                    </>
+                  ) : (
+                    // Подсказка темы — критерий классификации Jev, один на всех,
+                    // кто её взял. Поле у общей темы приглашало вписать сюда
+                    // имена и продукты, а правка молча терялась. Вместо поля —
+                    // адрес, куда имена и идут: слежение личное и буквальное.
+                    <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+                      {/* Подсказка остаётся видимой, хоть и не правится: это
+                          критерий, по которому тема попадает в выпуск, и больше
+                          его негде прочитать. */}
+                      {chip.hint ? <p className="text-foreground/80">{chip.hint}</p> : null}
+                      <p>
+                        {tc.sharedNote}{" "}
+                        <a href={`#${rulesAnchor("follow")}`} className="underline underline-offset-4">
+                          {tc.sharedLink(t.rules.follow.label)}
+                        </a>
+                        .
+                      </p>
+                    </div>
+                  )}
 
                   {/* То же, что и полоса, но пальцем и с клавиатуры: на узком
                       экране границу шириной в четыре пиксела не поймать. */}
@@ -435,9 +502,16 @@ export function TopicChips({
             id="chip-draft"
             ref={draftInput}
             value={draft}
+            maxLength={TOPIC_LIMITS.label}
             aria-label={tc.newTopicAria}
             placeholder={tc.newTopicPlaceholder}
             onChange={(event) => setDraft(event.target.value)}
+            // Уход из поля добавляет набранное, как в «За чем следить»:
+            // «Сохранить» гасит фокус до снимка формы, и набранное, но
+            // не добавленное имя иначе стиралось бы пересевом молча.
+            // Кнопка рядом фокус на mousedown не забирает — иначе первый
+            // клик уходил бы в пустоту под съехавшим полем.
+            onBlur={() => add(draft)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -448,6 +522,7 @@ export function TopicChips({
           <Button
             type="button"
             variant="outline"
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => (full ? topicsPaywall.open() : add(draft))}
           >
             <PlusIcon data-icon="inline-start" />
@@ -465,7 +540,7 @@ export function TopicChips({
   );
 }
 
-const withCounts = (chips: ChipInput[], counts: number[]): ChipInput[] =>
+const withCounts = <T extends ChipInput>(chips: T[], counts: number[]): T[] =>
   chips.map((chip, index) => ({ ...chip, count: counts[index] ?? MIN_PER_TOPIC }));
 
 /** У кого отнять место: у самой крупной темы, кроме той, что растёт. */

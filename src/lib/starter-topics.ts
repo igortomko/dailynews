@@ -24,7 +24,8 @@
  * свежей записью сюда не попали: источник, принятый пустым, через неделю
  * неотличим от заброшенного.
  */
-import type { Source } from "./types";
+import type { ReaderTopic, Source } from "./types";
+import { toSlug } from "./slug";
 
 export type StarterFeed = { kind: Source["kind"]; url: string; label: string };
 
@@ -341,6 +342,52 @@ export const STARTER_TOPICS: StarterTopic[] = [
 ];
 
 export const starterBySlug = new Map(STARTER_TOPICS.map((topic) => [topic.slug, topic]));
+
+/**
+ * Пределы имени и подсказки темы. Оба уходят в общий справочник и в вопрос
+ * Jev на каждом материале потока — длина здесь стоит денег всем читателям.
+ * Поле режет по `maxLength`, сервер — по этим же числам (`saveInterests`,
+ * `saveOnboardingInterests`): форму рисует браузер.
+ */
+export const TOPIC_LIMITS = { label: 60, hint: 200 } as const;
+
+/**
+ * Имя или подсказка по пределу: обрезается, а не отвергается — поле дальше
+ * и не пускает, длиннее приходит только мимо формы. Нестроковое — пусто.
+ */
+export const clampTopicText = (text: unknown, limit: number): string =>
+  String(text ?? "").trim().slice(0, limit);
+
+/**
+ * Каталожная ли тема: её имя и подсказка — критерий классификации для всех,
+ * и править их читателю нельзя. Одно правило на сервер (`upsertTopic`
+ * через `writeTopics`), страницу интересов и форму чипов: три копии
+ * условия разошлись бы молча, и форма показывала бы поле, чью правку
+ * сервер отбросит. Проверяется в `npm test`.
+ */
+export const catalogTopic = (slug: string): StarterTopic | undefined => starterBySlug.get(slug);
+export const catalogSlug = (slug: string): boolean => catalogTopic(slug) !== undefined;
+
+/**
+ * Своя ли тема по имени, набранному руками: имя, сводящееся к каталожному
+ * слагу («AI-инфра» → `ai-infra`), — уже не своя. Слаг из имени выводится
+ * тем же `toSlug`, что и на сервере при записи.
+ */
+export const ownLabel = (label: string): boolean => !catalogSlug(toSlug(label));
+
+/**
+ * Тема читателя в том виде, в каком её рисует форма интересов: цель как
+ * число, признак «своя» — по тому же правилу, что и на сервере. Одна
+ * функция на страницу и на ответ действия после записи: форма после
+ * сохранения пересеивается тем, что сервер записал на самом деле.
+ */
+export const formChipOf = (topic: ReaderTopic) => ({
+  slug: topic.slug,
+  label: topic.label,
+  hint: topic.hint,
+  count: topic.weight,
+  own: !catalogSlug(topic.slug) && !topic.shared,
+});
 
 /**
  * Порядок показа: сначала то, что уже выбрано соседями по выбору, потом

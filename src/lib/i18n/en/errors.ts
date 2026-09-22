@@ -21,6 +21,7 @@ export const errors = {
   tooManyTopics: (plan: string, allowed: number, picked: number) =>
     `${plan} covers ${allowed} ${allowed === 1 ? "interest" : "interests"}, and you picked ${picked}`,
   duplicateTopic: "You already have that interest. Give it another name",
+  emptyTopicName: "One of the interests has no name — give it one",
 
   kindleAddressEmpty: "Enter your reader's address",
   kindleAddressSuffix: "The address has to end in @kindle.com",

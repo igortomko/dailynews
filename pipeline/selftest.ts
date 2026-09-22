@@ -83,7 +83,10 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, s
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
-import { STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
+import {
+  catalogSlug, clampTopicText, formChipOf, ownLabel, STARTER_TOPICS, starterBySlug, suggestOrder,
+  TOPIC_LIMITS,
+} from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { countOf, explain, parseTelegram } from "./fetch";
@@ -757,6 +760,30 @@ assert.equal(
   pickSurvivors(gloomy, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length, gloomy.length,
   "день целиком в минусе не должен оставлять читателя без выпуска",
 );
+
+// --- каталожная тема: одно правило на сервер и форму ---------------------------
+// Имя и подсказка каталожной темы — критерий классификации для всех, и три
+// копии условия (сервер, страница, форма) разошлись бы молча: форма показывала
+// бы поле, чью правку сервер отбросит.
+assert.equal(catalogSlug("design"), true, "тема из стартового набора — каталожная");
+assert.equal(catalogSlug(toSlug("AI-инфра")), true, "имя, сводящееся к каталожному слагу, — тоже каталожная");
+assert.equal(catalogSlug(toSlug("Финтех Бразилии")), false, "своя тема — не каталожная");
+assert.equal(catalogSlug(""), false, "пустой слаг — не каталожная");
+assert.equal(ownLabel("AI-инфра"), false, "имя каталожной темы, набранное руками, — не своя тема");
+assert.equal(ownLabel("Финтех Бразилии"), true, "своё имя — своя тема");
+// Флаг формы — оба слагаемых: без `!shared` взятая соседом тема снова стала бы
+// правимой в форме, а сервер молча отбрасывал бы правку.
+const fintech = { id: 1, slug: "fintech-brazil", label: "Финтех", hint: "", weight: 1, position: 1 };
+assert.equal(formChipOf({ ...fintech, shared: false }).own, true, "свою тему форма показывает с полем правки");
+assert.equal(formChipOf({ ...fintech, shared: true }).own, false, "взятую соседом — уже нет");
+assert.equal(formChipOf({ ...fintech, slug: "design", shared: false }).own, false, "каталожную — тоже нет, даже ничью");
+// Предел имени и подсказки — один на поле и оба пути записи: длиннее приходит
+// только мимо формы, и режется, а не отвергается.
+assert.equal(clampTopicText("  Финтех Бразилии  ", TOPIC_LIMITS.label), "Финтех Бразилии", "имя обрезается по краям");
+assert.equal(clampTopicText("x".repeat(TOPIC_LIMITS.label), TOPIC_LIMITS.label).length, TOPIC_LIMITS.label, "ровно в предел — целиком");
+assert.equal(clampTopicText("x".repeat(TOPIC_LIMITS.label + 1), TOPIC_LIMITS.label).length, TOPIC_LIMITS.label, "длиннее предела — по предел");
+assert.equal(clampTopicText("y".repeat(500), TOPIC_LIMITS.hint).length, TOPIC_LIMITS.hint, "подсказка режется своим пределом");
+assert.equal(clampTopicText(null, TOPIC_LIMITS.hint), "", "нестроковое — пустая строка, а не «null»");
 
 // --- личные правила: за чем следить и что исключать ----------------------------
 // Правило — список написаний одного и того же. Ищется буквально, с границей

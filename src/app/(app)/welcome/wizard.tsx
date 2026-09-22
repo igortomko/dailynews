@@ -9,7 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { type Plan } from "@/lib/plans";
 import { useT } from "@/components/i18n-provider";
-import { suggestOrder } from "@/lib/starter-topics";
+import { suggestOrder, TOPIC_LIMITS } from "@/lib/starter-topics";
 import type { Suggestion, TopicOption } from "@/lib/onboarding";
 import { finishOnboarding, saveOnboardingInterests, saveOnboardingSources } from "@/lib/actions";
 import { NameRules } from "@/components/name-rules";
@@ -265,6 +265,7 @@ export function InterestsStep({
         <div className="flex gap-2">
           <Input
             value={draft}
+            maxLength={TOPIC_LIMITS.label}
             aria-label={t.onboarding.wizard.interests.customLabel}
             placeholder={t.onboarding.wizard.interests.customPlaceholder}
             onChange={(event) => setDraft(event.target.value)}
