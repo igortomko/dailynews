@@ -44,7 +44,7 @@ const SEEN_MS = 1500;
 const LONG_PRESS_MS = 500;
 /** Сдвиг пальца, после которого это уже прокрутка, а не удержание. */
 const LONG_PRESS_SLOP = 10;
-/** Столько после сработавшего удержания нажатие считается его хвостом. */
+/** Столько после отпускания пальца нажатие считается хвостом удержания. */
 const LONG_PRESS_SUPPRESS_MS = 700;
 const DWELL_FLOOR_MS = 4000;
 
@@ -150,10 +150,13 @@ export function ItemCard({
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
   // Сработавшее удержание гасит нажатие, которое браузер шлёт следом
   // за отпусканием: иначе выбор карточки заодно открывал бы статью.
-  // Помнится момент, а не флаг: флаг переживал бы жест, если нажатие
-  // после него не пришло (палец ушёл в прокрутку), и глотал бы следующий
-  // Enter на заголовке. Окно в семьсот миллисекунд пережить нельзя.
-  const longPressedAt = useRef(0);
+  // Отсчёт идёт от отпускания пальца, а не от срабатывания таймера:
+  // палец держат сколько угодно, а хвостовое нажатие приходит сразу
+  // за отпусканием. Момент, а не флаг: флаг переживал бы жест без
+  // нажатия (палец ушёл в прокрутку) и глотал бы следующий Enter
+  // на заголовке — окно в семьсот миллисекунд пережить нельзя.
+  const fired = useRef(false);
+  const releasedAt = useRef(0);
   // Таймер читает состояние на момент срабатывания, а не на момент касания:
   // за полсекунды выбор могли снять с клавиатуры или из редактора, и снимок
   // из замыкания вернул бы его обратно.
@@ -175,7 +178,14 @@ export function ItemCard({
     clearTimeout(press.current.timer);
     press.current = null;
   };
+  const endPress = () => {
+    cancelPress();
+    if (!fired.current) return;
+    fired.current = false;
+    releasedAt.current = performance.now();
+  };
   const startPress = (event: React.PointerEvent) => {
+    fired.current = false;
     if (event.pointerType !== "touch" || event.button !== 0) return;
     cancelPress();
     const { clientX: x, clientY: y } = event;
@@ -184,7 +194,7 @@ export function ItemCard({
       y,
       timer: setTimeout(() => {
         press.current = null;
-        longPressedAt.current = performance.now();
+        fired.current = true;
         navigator.vibrate?.(15);
         onSelectedChange(!selectedNow.current);
       }, LONG_PRESS_MS),
@@ -411,18 +421,18 @@ export function ItemCard({
       data-selected={selected || undefined}
       onPointerDown={startPress}
       onPointerMove={movePress}
-      onPointerUp={cancelPress}
-      onPointerCancel={cancelPress}
+      onPointerUp={endPress}
+      onPointerCancel={endPress}
       // Системное меню по удержанию (Android) и выделение текста (iOS)
       // отбирали бы жест себе; на мыши правая кнопка работает как обычно.
       onContextMenu={(event) => {
-        if (press.current || event.timeStamp - longPressedAt.current < LONG_PRESS_SUPPRESS_MS) {
+        if (press.current || fired.current || event.timeStamp - releasedAt.current < LONG_PRESS_SUPPRESS_MS) {
           event.preventDefault();
         }
       }}
       onClickCapture={(event) => {
-        if (event.timeStamp - longPressedAt.current > LONG_PRESS_SUPPRESS_MS) return;
-        longPressedAt.current = 0;
+        if (event.timeStamp - releasedAt.current > LONG_PRESS_SUPPRESS_MS) return;
+        releasedAt.current = 0;
         event.preventDefault();
         event.stopPropagation();
       }}
