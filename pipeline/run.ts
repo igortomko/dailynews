@@ -33,6 +33,7 @@ import { botMayUpsell, upgradeNote, upgradeReason } from "../src/lib/upgrade";
 import { getUpgradeFacts } from "../src/lib/queries";
 import { SEARCH_CONFIG, tsConfigFor } from "../src/lib/search";
 import { sleepVerdict } from "../src/lib/sleep";
+import { jevVersionNote } from "../src/lib/jev-version";
 import { rulesOf } from "../src/lib/rules";
 
 const log = (msg: string) => console.log(msg);
@@ -802,6 +803,14 @@ async function main() {
   const { scored, usage, model } = await scoreAll(pending, topics, (done, total) => {
     if (done % 25 === 0 || done === total) log(`   ${done}/${total}`);
   });
+
+  // Версия Jev плавающая (`jev-latest`), а от неё зависят числа, которые
+  // сравниваются между собой: порог дубля, корзины калибровки, ряды по дням.
+  // Обновись она молча — выпуск придёт вовремя, и ни одна проверка
+  // не сработает. Поэтому смена называется вслух, а не ловится задним числом
+  // по расхождению рядов.
+  const jevNote = jevVersionNote(model);
+  if (jevNote) log(`  ! ${jevNote}`);
 
   const topicIdBySlug = new Map(topics.map((t) => [t.slug, t.id]));
   for (const row of scored) {

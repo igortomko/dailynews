@@ -2196,6 +2196,7 @@ import { samplePairs } from "./translation-quality";
 import { articleBlocker } from "./kindle";
 import { iconHref, publicHost } from "../src/lib/favicon";
 import { LEAD_CARDS, readingCards } from "./reading";
+import { JEV_BASELINE, jevVersionNote } from "../src/lib/jev-version";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
 
@@ -2257,6 +2258,30 @@ assert.match(
   articleBlocker(base, PLANS.free, 0), new RegExp(PLANS.plus.label),
   "на бесплатном тарифе отправка статьи отказывает тарифом",
 );
+
+// Версия Jev плавающая, а от неё зависят числа, которые сравниваются между
+// собой: порог дубля, корзины калибровки, ряды по дням. Смена версии — это
+// то же самое, что переписанная формулировка вопроса: выпуск приходит
+// вовремя, и ни одна проверка не срабатывает.
+{
+  const was = process.env.TYPESAFE_MODEL;
+  try {
+    process.env.TYPESAFE_MODEL = "";
+    assert.equal(jevVersionNote(JEV_BASELINE), null, "та же версия — говорить не о чем");
+    assert.equal(jevVersionNote(""), null, "пустой ответ версией не считается: о нём говорит расход, а не эта строка");
+    assert.equal(jevVersionNote(null), null, "и отсутствие тоже");
+    const note = jevVersionNote("jev-1.14.0");
+    assert.ok(note, "другая версия называется вслух");
+    assert.match(note!, /jev-1\.14\.0/, "в строке стоит та версия, что ответила");
+    assert.match(note!, new RegExp(JEV_BASELINE.replace(/\./g, "\\.")), "и та, на которой замерены пороги");
+    // Ронять прогон из-за чужого релиза нельзя: это не поломка,
+    // а повод перепроверить пороги.
+    assert.equal(typeof note, "string", "смена версии — строка в логе, а не исключение");
+  } finally {
+    if (was === undefined) delete process.env.TYPESAFE_MODEL;
+    else process.env.TYPESAFE_MODEL = was;
+  }
+}
 
 // Разбор получают только верхние карточки: он стоит в 55–70 раз дороже
 // обычного описания, и разбором всего выпуска Pro работал бы в минус
