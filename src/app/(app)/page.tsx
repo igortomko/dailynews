@@ -3,6 +3,7 @@ import { getDigestDays, getFeed, getStories } from "@/lib/queries";
 import { applyRules, rulesOf } from "@/lib/rules";
 import { isDay } from "@/lib/day";
 import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
+import { parseStoredReading } from "@/lib/reading-document";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
@@ -143,6 +144,12 @@ export default async function FeedPage({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- excerpt снимается с карточки, а не читается
   const items = visible.map(({ axes, excerpt, ...item }) => ({
     ...item,
+    // Описание едет в браузер только там, где карточке нечего показать
+    // вместо него: при разобранном документе чтения карточка рисует его,
+    // а описание не читает ни разу — сегодня это 19 КБ из ~150 на выпуск.
+    // Предикат тот же, что у карточки (`parseStoredReading`): разойдись они,
+    // карточка осталась бы без текста вовсе.
+    summary: parseStoredReading(item.summary_document) ? null : item.summary,
     clickbait: (axes?.clickbait?.noul ?? 0) > CLICKBAIT_LABEL_NOUL,
     story: stories.get(item.id) ?? [],
   }));
