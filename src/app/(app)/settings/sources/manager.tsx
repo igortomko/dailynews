@@ -451,6 +451,23 @@ export function SourcesManager({
           <CardDescription>
             {t.sources.list.count(sources.length, plan.maxSources, t.plans.label[plan.id])}
           </CardDescription>
+          {/* Полоска под числом: «16 из 100» читается за секунду, а «сколько
+              ещё осталось» — нет. Тот же приём, что у полос в «Калибровке».
+              Заполненная до края говорит «предел», не дожидаясь отказа при
+              добавлении. */}
+          <div
+            className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={plan.maxSources}
+            aria-valuenow={Math.min(sources.length, plan.maxSources)}
+            aria-label={t.sources.list.title}
+          >
+            <div
+              className="h-full rounded-full bg-primary transition-[width]"
+              style={{ width: `${Math.min(100, Math.round((sources.length / plan.maxSources) * 100))}%` }}
+            />
+          </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
           {sources.length === 0 ? (
