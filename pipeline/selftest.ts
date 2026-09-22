@@ -2072,7 +2072,7 @@ assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем
 import { splitBlocks, chunkBlocks, chunkProblem, alreadyIn } from "./translate";
 import { samplePairs } from "./translation-quality";
 import { articleBlocker } from "./kindle";
-import { iconHref } from "../src/lib/favicon";
+import { iconHref, publicHost } from "../src/lib/favicon";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
 
@@ -2191,6 +2191,16 @@ assert.match(
     "https://example.com/ok.png",
     "кривое объявление пропускается, годное берётся",
   );
+
+  // Адрес значка открыт запросу, поэтому хост в нём — чужой ввод. Тем же
+  // правилом проверяется каждый переход по редиректу: иначе публичный сайт
+  // одним «302» уводил бы наш сервер внутрь нашей же сети.
+  for (const inside of ["localhost", "app.localhost", "127.0.0.1", "10.0.0.5", "db.internal", "[::1]", "", "сайт.рф/../x"]) {
+    assert.ok(!publicHost(inside), `«${inside}» не публичный сайт`);
+  }
+  for (const outside of ["example.com", "www.nngroup.com", "news.crunchbase.com"]) {
+    assert.ok(publicHost(outside), `«${outside}» публичный сайт`);
+  }
 }
 
 // Нажатие кнопки приходит не сообщением, а callback_query. Без этой ветки
