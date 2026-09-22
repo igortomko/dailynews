@@ -34,7 +34,7 @@ import {
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { toSlug } from "./slug";
-import { starterBySlug } from "./starter-topics";
+import { catalogSlug, starterBySlug } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
 
 /**
@@ -272,7 +272,7 @@ async function writeTopics(
         tx,
         readerId,
         { slug: slugs[index], label: chip.label, hint: chip.hint ?? "", position: index + 1 },
-        starterBySlug.has(slugs[index]),
+        catalogSlug(slugs[index]),
       ));
     }
 

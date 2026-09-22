@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
 import { rulesAnchor } from "@/lib/rules";
 import { toSlug } from "@/lib/slug";
-import { starterBySlug } from "@/lib/starter-topics";
+import { catalogSlug } from "@/lib/starter-topics";
 import { queueRebuild } from "@/components/rebuild-queue";
 import { useT } from "@/components/i18n-provider";
 
@@ -140,7 +140,7 @@ export function TopicChips({
     // перезагрузки чип придёт уже общим.
     const next = [...chips, {
       slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC,
-      own: !starterBySlug.has(toSlug(trimmed)),
+      own: !catalogSlug(toSlug(trimmed)),
     }];
     // Новая тема берёт место у самой крупной, а не растит выпуск:
     // сколько читать, читатель задал отдельно и сам.
@@ -170,10 +170,16 @@ export function TopicChips({
    * с каталожным делает тему каталожной — тем же правилом, что и `add`.
    * У темы со слагом имя на слаг не влияет.
    */
-  const settleOwn = (index: number) =>
-    setChips(chips.map((chip, i) =>
-      i !== index || chip.slug ? chip : { ...chip, own: !starterBySlug.has(toSlug(chip.label)) },
-    ));
+  const settleOwn = (index: number) => {
+    const chip = chips[index];
+    // У темы со слагом имя на слаг не влияет — пересчитывать нечего.
+    if (!chip || chip.slug) return;
+    const own = !catalogSlug(toSlug(chip.label));
+    // Без изменений — без записи: setChips зовёт `touch`, и одно наведение
+    // на имя с уходом зажигало бы «Сохранить» и сторожа ухода впустую.
+    if (own === chip.own) return;
+    setChips(chips.map((current, i) => (i === index ? { ...current, own } : current)));
+  };
 
   const patch = (index: number, fields: Partial<Pick<ChipInput, "label" | "hint">>) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, ...fields } : chip)));

@@ -4,7 +4,7 @@ import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { minutesOf } from "@/lib/reading-time";
 import { asNames } from "@/lib/rules";
-import { starterBySlug } from "@/lib/starter-topics";
+import { catalogSlug } from "@/lib/starter-topics";
 import { InterestsForm } from "./form";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ export default async function InterestsPage() {
         count: topic.weight,
         // Править можно только свою тему: не из стартового набора и никем
         // больше не взятую. То же правило стоит на сервере.
-        own: !starterBySlug.has(topic.slug) && !topic.shared,
+        own: !catalogSlug(topic.slug) && !topic.shared,
       }))}
     />
   );

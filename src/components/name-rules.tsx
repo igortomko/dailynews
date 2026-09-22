@@ -131,8 +131,10 @@ export function NameRules({
   };
 
   return (
-    // Якорь: на него ведёт подсказка у общей темы в «Твоих темах».
-    <Field ref={box} id={rulesAnchor(kind)}>
+    // Якорь: на него ведёт подсказка у общей темы в «Твоих темах». Отступ
+    // сверху — под липкую шапку настроек: без него переход прятал бы за ней
+    // ровно ту подпись, ради которой нажали.
+    <Field ref={box} id={rulesAnchor(kind)} className="scroll-mt-16">
       {name ? <input type="hidden" name={name} value={JSON.stringify(pending())} /> : null}
       <FieldLabel className="flex items-center gap-2">
         {area.label}

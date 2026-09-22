@@ -79,11 +79,13 @@ export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> 
  * правится, у остальных форма поля не показывает, а сервер решает сам,
  * не веря форме: `catalog` — из стартового набора, соседей спрашивает база.
  *
- * Правится только тема, которую читатель уже держит. Повторно взятая
- * ничья тема — не правка, а присоединение: новый чип приходит с пустой
- * подсказкой, и без этого условия она стирала бы сохранённую — ту самую,
- * которую читатель писал руками до того, как убрал тему. Новая тема
- * заводится вставкой, и подсказка у неё своя с первой строки.
+ * Повторно взятая ничья тема — присоединение, и у него своё правило:
+ * имя и непустая подсказка применяются (читатель их только что набрал
+ * и ждёт, что они сохранятся), а пустая подсказка сохранённую не стирает —
+ * новый чип приходит без подсказки, и стирал бы ту, которую читатель
+ * писал руками до того, как убрал тему. У темы, которую читатель уже
+ * держит, пустая подсказка — это стёртая им самим: форма показывала
+ * сохранённую, и он её убрал.
  *
  * Отдаёт id темы в любом случае: связка читателя с темой заводится по нему.
  */
@@ -100,15 +102,19 @@ export async function upsertTopic(
     returning id::int as id
   `;
   if (!catalog) {
+    const [{ held }] = await db<{ held: boolean }[]>`
+      select exists (
+        select 1 from dailynews.reader_topics mine
+         where mine.topic_id = ${row.id} and mine.reader_id = ${readerId}
+      ) as held
+    `;
+    // null — оставить сохранённую: присоединение с пустой подсказкой.
+    const hint = topic.hint === "" && !held ? null : topic.hint;
     await db`
       update dailynews.topics t
-         set label = ${topic.label}, hint = ${topic.hint}
+         set label = ${topic.label}, hint = coalesce(${hint}::text, t.hint)
        where t.id = ${row.id}
-         and (t.label, t.hint) is distinct from (${topic.label}, ${topic.hint})
-         and exists (
-           select 1 from dailynews.reader_topics mine
-            where mine.topic_id = t.id and mine.reader_id = ${readerId}
-         )
+         and (t.label, t.hint) is distinct from (${topic.label}, coalesce(${hint}::text, t.hint))
          and not exists (
            select 1 from dailynews.reader_topics o
             where o.topic_id = t.id and o.reader_id <> ${readerId}

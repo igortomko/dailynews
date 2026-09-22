@@ -1455,10 +1455,27 @@ async function main() {
       select label, hint from dailynews.topics where id = ${ownId}
     `;
     assert.deepEqual(rejoined, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "повторное взятие не стирает подсказку");
+    // А набранное при повторном взятии сохраняется: читатель ждёт именно этого.
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "Nubank, Pix, Inter", position: 9 }, NOT_CATALOG,
+    );
+    const [rejoinedTyped] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where id = ${ownId}
+    `;
+    assert.deepEqual(rejoinedTyped, { label: "Финтех", hint: "Nubank, Pix, Inter" }, "набранное при повторном взятии применяется");
     await sql`
       insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
       values (${owner.id}, ${ownId}, 1, 9) on conflict do nothing
     `;
+    // Держащий тему читатель стирает подсказку осознанно: пустая — это стёртая.
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 }, NOT_CATALOG,
+    );
+    const [cleared] = await sql<{ hint: string }[]>`select hint from dailynews.topics where id = ${ownId}`;
+    assert.equal(cleared.hint, "", "у своей темы пустая подсказка — стёртая, а не пропущенная");
+    await readers.upsertTopic(
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, NOT_CATALOG,
+    );
 
     await sql`
       insert into dailynews.reader_topics (reader_id, topic_id, weight, position)

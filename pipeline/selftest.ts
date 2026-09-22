@@ -81,7 +81,7 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, s
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
-import { STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
+import { catalogSlug, STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { countOf, explain, parseTelegram } from "./fetch";
@@ -755,6 +755,15 @@ assert.equal(
   pickSurvivors(gloomy, DEFAULT_WEIGHTS, new Map([[1, 1]]), 20).length, gloomy.length,
   "день целиком в минусе не должен оставлять читателя без выпуска",
 );
+
+// --- каталожная тема: одно правило на сервер и форму ---------------------------
+// Имя и подсказка каталожной темы — критерий классификации для всех, и три
+// копии условия (сервер, страница, форма) разошлись бы молча: форма показывала
+// бы поле, чью правку сервер отбросит.
+assert.equal(catalogSlug("design"), true, "тема из стартового набора — каталожная");
+assert.equal(catalogSlug(toSlug("AI-инфра")), true, "имя, сводящееся к каталожному слагу, — тоже каталожная");
+assert.equal(catalogSlug(toSlug("Финтех Бразилии")), false, "своя тема — не каталожная");
+assert.equal(catalogSlug(""), false, "пустой слаг — не каталожная");
 
 // --- личные правила: за чем следить и что исключать ----------------------------
 // Правило — список написаний одного и того же. Ищется буквально, с границей
