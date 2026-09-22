@@ -4,14 +4,16 @@ import { resolve as pathResolve } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
-import postgres from 'postgres';
 import { startLocalPg, assertOwn } from '../db/free-port';
 import { pooled } from './fetch';
 import { writeReadingDigest, readingReasoningProfile } from './reading';
 import type { Survivor } from './digest';
 import type { Voice } from '../src/lib/voice';
 
-type Sample = { reader: Voice & { reader_context: string }; items: { id: number; title: string; url: string; excerpt: string; text: string; source_label: string; transcribed_at: string | null }[] };
+// `source_content_kind` из образца кладётся в базу как есть: с `article_text`
+// прогон читает сохранённый текст и не ходит за статьёй в сеть — два замера
+// одного образца сравнивают промпт, а не то, что сайт отдал сегодня.
+type Sample = { reader: Voice & { reader_context: string }; items: { id: number; title: string; url: string; excerpt: string; text: string; source_label: string; transcribed_at: string | null; source_content_kind?: string | null }[] };
 async function main() {
   const file = process.argv[2];
   if (!file) throw new Error('Usage: reading-replay.ts <sample.json> [item IDs] [output directory] [rounds]');
@@ -26,15 +28,21 @@ async function main() {
   await db.exec(readdirSync('db/migrations').filter(f => f.endsWith('.sql')).sort().map(f => readFileSync(`db/migrations/${f}`, 'utf8')).join('\n'));
   const local = await startLocalPg(db, port => new PGLiteSocketServer({ db, port, host: '127.0.0.1' }));
   process.env.DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${local.port}/postgres`;
-  const sql = postgres(process.env.DATABASE_URL, { max: 1, prepare: false });
+  // Тем же соединением, которым привратники пишут расход (`recordCall`):
+  // сокет PGlite обслуживает одно подключение, и второе получало ECONNRESET.
+  // Привратник перед `verify` читал это как свой отказ и звал сверку всегда,
+  // а замер отчитывался ценой, которой на проде нет. Импорт после
+  // DATABASE_URL: модуль db.ts читает его на загрузке.
+  process.env.DB_POOL_MAX = '1';
+  const { sql } = await import('../src/lib/db');
   try {
     await assertOwn(local, async q => (await sql.unsafe<{ token: string }[]>(q))[0]);
     const [reader] = await sql<{ id: number }[]>`update dailynews.readers set daily_cap_usd=2 where owner returning id::int`;
     const [source] = await sql<{ id: number }[]>`select id::int from dailynews.sources limit 1`;
     const survivors: Survivor[] = [];
     for (const item of sample.items.filter(i => ids.includes(i.id))) {
-      await sql`insert into dailynews.items(id,source_id,title,title_norm,url,url_canon,excerpt,body,transcribed_at) overriding system value values
-        (${item.id},${source.id},${item.title},${item.title.toLowerCase()},${item.url},${item.url},${item.excerpt},${item.text},${item.transcribed_at})`;
+      await sql`insert into dailynews.items(id,source_id,title,title_norm,url,url_canon,excerpt,body,transcribed_at,source_content_kind) overriding system value values
+        (${item.id},${source.id},${item.title},${item.title.toLowerCase()},${item.url},${item.url},${item.excerpt},${item.text},${item.transcribed_at},${item.source_content_kind ?? null})`;
       survivors.push({ ...item, body: item.text, topic_label: 'По теме статьи', axes: {}, total: 0 } as unknown as Survivor);
     }
     const runs: object[] = [];
@@ -65,6 +73,6 @@ async function main() {
     };
     writeFileSync(`${out}/report.json`, JSON.stringify(report, null, 2), { mode: 0o600 });
     console.log(JSON.stringify({ report: `${out}/report.json`, cost, phases }));
-  } finally { await sql.end(); await local.stop(); await db.close(); }
+  } finally { await sql.end({ timeout: 5 }).catch(() => {}); await local.stop(); await db.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode=1; });

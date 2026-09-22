@@ -138,6 +138,19 @@ async function main() {
   const grounded = await analyzeSource(extract, long, 'Story', 'v', 'article_text');
   assert.equal(visited.join(''), long, 'the extractor sees every character, including the end');
   assert.ok(grounded.sections.at(-1)!.claims[0].quote.endsWith('final section.'), 'source evidence is attached from the original span, not copied by the model');
+  // Привратник перед сверкой анализа: уверенное «подтверждается» по всем
+  // парам отменяет дорогой вызов, тревога зовёт его, а без привратника
+  // сверка идёт всегда — как и до него.
+  const audited: string[] = [];
+  const counting: Ask = async (phase, rules, data, schema) => { audited.push(phase); return extract(phase, rules, data, schema); };
+  await analyzeSource(counting, long, 'Story', 'v', 'article_text', async () => false);
+  assert.ok(!audited.includes('source-audit'), 'чистые пары отменяют сверку анализа');
+  audited.length = 0;
+  await analyzeSource(counting, long, 'Story', 'v', 'article_text', async () => true);
+  assert.ok(audited.includes('source-audit'), 'тревога привратника зовёт сверку');
+  audited.length = 0;
+  await analyzeSource(counting, long, 'Story', 'v', 'article_text');
+  assert.ok(audited.includes('source-audit'), 'без привратника сверка идёт всегда');
   const phases: string[] = [];
   const ask: Ask = async (phase, _rules, _data, schema) => {
     phases.push(phase);
