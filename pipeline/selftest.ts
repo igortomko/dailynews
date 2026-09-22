@@ -58,7 +58,7 @@ import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
-import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary } from "../src/lib/topic-budget";
+import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
   channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
@@ -484,17 +484,37 @@ assert.ok(normalize([5, 5, 5, 5], 3).every((count) => count === MIN_PER_TOPIC), 
 
 const moved = moveBoundary([10, 6, 4], 0, 7);
 assert.equal(sum(moved), 20, "перетаскивание границы не меняет размер дайджеста");
-assert.deepEqual(moved, [7, 9, 4], "сколько ушло слева, столько пришло справа");
+assert.deepEqual(moved, [7, 7, 6], "отданное место уходит самой тощей теме справа");
 assert.deepEqual(
   moveBoundary([10, 6, 4], 0, 99),
-  [15, 1, 4],
-  "граница не должна съедать соседа целиком",
+  [18, 1, 1],
+  "граница не должна съедать темы целиком",
 );
 assert.deepEqual(
   moveBoundary([10, 6, 4], 1, 0),
   [10, 1, 9],
   "граница не уходит за левого соседа",
 );
+
+// Ради чего всё: сосед с одной новостью больше не запирает границу, пока
+// рядом лежат темы по шесть. Платит самый крупный справа, сосед не трогается.
+const fat = [2, 2, 2, 6, 6];
+assert.deepEqual(moveBoundary(fat, 0, 5), [5, 2, 2, 4, 5], "граница ест самую жирную, а не соседнюю");
+assert.equal(sum(moveBoundary(fat, 0, 5)), sum(fat), "жирная платит, а сумма не меняется");
+assert.deepEqual(
+  moveBoundary(fat, 0, 7),
+  [7, 2, 2, 3, 4],
+  "соседняя тема с минимумом больше не запирает границу",
+);
+// Перетаскивание считается от снимка, поэтому гребок туда и обратно обязан
+// вернуть полосу как была: иначе она ползёт сама от дрожания руки.
+assert.deepEqual(moveBoundary(fat, 0, 2), fat, "возврат в исходное положение возвращает полосу как была");
+// Кнопки «+»/«−» на чипе — та же полоса пальцем, и правило обязано совпадать.
+assert.deepEqual(nudgeTopic(fat, 0, 1), [3, 2, 2, 5, 6], "«+» отнимает у самой жирной");
+assert.deepEqual(nudgeTopic(fat, 3, -1), [3, 2, 2, 5, 6], "«−» отдаёт место самой тощей");
+assert.deepEqual(nudgeTopic([1, 2, 2], 0, -1), [1, 2, 2], "ниже минимума не опускаемся, и полоса не меняется вовсе");
+assert.deepEqual(nudgeTopic([1, 1, 1], 0, 1), [1, 1, 1], "отнять не у кого — ничего не меняется");
+assert.deepEqual(nudgeTopic([5], 0, 1), [5], "у единственной темы счётчик не уезжает от суммы");
 
 // --- голос --------------------------------------------------------------------
 // Колонка complexity ограничена в базе значениями 1..5: разъедется список —
@@ -1235,7 +1255,7 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // которое заказано, — а узнаётся это от читателя через месяц.
 import {
   CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
-  formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+  flowSplit, formatMinutesLong, isShort, itemsForMinutes, minutesOf,
 } from "../src/lib/reading-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
 
@@ -1319,6 +1339,22 @@ assert.equal(
 assert.equal(
   cardMinutes(0, DEFAULT_VOICE), perCard,
   "у нового читателя мерки нет, и берётся общая",
+);
+
+// Картинка потока на «О проекте» обещает выпуск, а не заказ. В тихий день
+// мест больше, чем новостей, и «вышло 5, оставит ~18» — то же враньё,
+// что норма, добитая хвостом потока: выпуска из того, чего нет, не будет.
+assert.deepEqual(
+  flowSplit(89, 18), { kept: 18, dropped: 71 },
+  "обычный день: дошедшее и отброшенное считаются от потока",
+);
+assert.deepEqual(
+  flowSplit(5, 18), { kept: 5, dropped: 0 },
+  "тихий день: выпуск не больше потока, отбрасывать нечего",
+);
+assert.deepEqual(
+  flowSplit(0, 18), { kept: 0, dropped: 0 },
+  "пустые сутки: до читателя не дошло ничего, и отброшено тоже ничего",
 );
 
 // --- тарифы -----------------------------------------------------------------

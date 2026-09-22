@@ -6,7 +6,7 @@ import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { getCollectedLast24h, getSources } from "@/lib/queries";
 import { cardCharsOf } from "@/lib/readers";
-import { cardMinutes, itemsForMinutes } from "@/lib/reading-time";
+import { cardMinutes, flowSplit, itemsForMinutes } from "@/lib/reading-time";
 import { minutesCap, sourcesForPlan, PLAN_IDS, PLANS } from "@/lib/plans";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n";
@@ -26,9 +26,19 @@ export const dynamic = "force-dynamic";
  * как оборот речи, а клетками — как соотношение. Отношение настоящее,
  * числа приходят из базы.
  *
+ * Фраза стоит до сетки, а не подписью под ней. Пока объяснение лежало ниже,
+ * первые секунды на экране работала загадка: две строки точек, и разбор их
+ * значения там, куда глаз доходит последним. Картинка иллюстрирует
+ * утверждение, а не загадывает его.
+ *
+ * Названо при этом отброшенное, а не только дошедшее. «Вышло 89, заказал
+ * 10 минут, это ~18» — три факта и ни одного вывода; работа, ради которой
+ * карточка стоит на странице, — это ~71 прочитанная и отброшенная новость,
+ * и без своего числа её на экране просто нет.
+ *
  * Клеток рисуется не больше двухсот: триста точек по четыре пикселя — это
  * уже шум, в котором двенадцать ярких не найти. Масштаб при этом честный —
- * доля сохраняется, и подпись называет оба числа полностью.
+ * доля сохраняется, и фраза называет оба числа полностью.
  */
 function FlowGrid({
   collected,
@@ -46,42 +56,85 @@ function FlowGrid({
   // из двух чисел значило рисовать сто клеток на пять новостей в тихий день:
   // сетка показывала бы размер выпуска, выдавая его за размер потока.
   const cells = Math.min(CELLS, Math.max(collected, 1));
+  // Деление считает общая функция, а не страница: ту же арифметику проверяет
+  // `npm test`, и вторая её копия здесь разошлась бы с проверенной молча.
+  const { kept, dropped } = flowSplit(collected, digest);
   // Зажжённых не больше, чем всего: когда выпуск вмещает больше, чем вышло,
   // доля переваливает за единицу — и это значит «помещается всё», то есть
   // сетка горит целиком, а не больше, чем целиком.
   let lit = 0;
   if (collected > 0) {
-    lit = Math.min(cells, Math.round((digest / collected) * cells));
-    if (digest > 0) lit = Math.max(1, lit);
+    lit = Math.min(cells, Math.round((kept / collected) * cells));
+    if (kept > 0) lit = Math.max(1, lit);
   }
 
+  const minutesText = `${minutes} ${t.minutesWord(minutes)}`;
+
   return (
-    <div className="flex flex-col gap-3">
-      <div
-        className="grid grid-cols-[repeat(auto-fill,minmax(8px,1fr))] gap-[3px]"
-        aria-hidden
-      >
-        {Array.from({ length: cells }, (_, index) => (
-          <span
-            key={index}
-            className={
-              index < lit
-                ? "aspect-square rounded-[2px] bg-primary"
-                : "aspect-square rounded-[2px] bg-foreground/[0.07]"
-            }
-          />
-        ))}
-      </div>
-      <p className="text-sm text-muted-foreground">
-        <b className="font-medium text-foreground">
-          {collected} {t.newsWord(collected)}
-        </b>{" "}
-        {t.flowIntro}{" "}
-        <b className="font-medium text-foreground">
-          {minutes} {t.minutesWord(minutes)}
-        </b>{" "}
-        {t.flowMiddle}{digest} {t.newsWord(digest)}.
+    <div className="flex flex-col gap-4">
+      <p className="text-sm">
+        {collected > 0
+          // Второй раз единица не называется: «вышло 89 новостей ... оставит
+          // ~18 новостей» повторяет слово в одном предложении, а названа она
+          // строкой раньше и тем же числом.
+          ? t.flowLead(`${collected} ${t.newsWord(collected)}`, String(kept), minutesText)
+          // Пустые сутки — не ноль в той же фразе: «вышло 0, оставит ~18»
+          // обещает выпуск из того, чего нет.
+          : t.flowLeadEmpty(`${digest} ${t.newsWord(digest)}`, minutesText)}
       </p>
+      {/* В пустые сутки сетки нет совсем, а не сетка из одной серой клетки:
+          рисовать нечего, и пустая группа оставила бы на её месте двойной
+          зазор — пробел, который читается поломкой вёрстки. */}
+      {collected > 0 ? (
+        <div className="flex flex-col gap-2">
+          <div
+            className="grid grid-cols-[repeat(auto-fill,minmax(8px,1fr))] gap-[3px]"
+            aria-hidden
+          >
+            {Array.from({ length: cells }, (_, index) => (
+              <span
+                key={index}
+                className={
+                  index < lit
+                    ? "aspect-square rounded-[2px] bg-primary"
+                    : "aspect-square rounded-[2px] bg-foreground/[0.07]"
+                }
+              />
+            ))}
+          </div>
+          {/* Легенда клетками того же вида, что в сетке: сказать «тёмные —
+              это твой выпуск» словами значит попросить читателя сопоставить
+              цвет с описанием цвета. Стоит она под сеткой, потому что
+              переводит уже увиденное, а не готовит к нему.
+
+              Контур — только у легендной клетки. В сетке тусклая клетка
+              видна массой соседей, а поодиночке тот же фон на карточке
+              неразличим: подпись «~71 отброшено» стояла бы рядом с пустым
+              местом. */}
+          {dropped > 0 ? (
+            <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 shrink-0 rounded-[2px] bg-primary" />
+                <b className="font-medium tabular-nums text-foreground">{kept}</b> {t.flowKept}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 shrink-0 rounded-[2px] bg-foreground/[0.07] ring-1 ring-inset ring-foreground/15" />
+                <b className="font-medium tabular-nums text-foreground">~{dropped}</b>{" "}
+                {t.flowDropped}
+              </span>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {/* Ручка рядом с числом, а не в памяти читателя: время чтения живёт
+          в «Интересах», и без ссылки «мало» или «много» упирается в то,
+          что менять его надо вспомнить куда пойти. */}
+      <Link
+        href="/settings/interests"
+        className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      >
+        {t.flowTune}
+      </Link>
     </div>
   );
 }
@@ -114,8 +167,11 @@ export default async function AboutPage() {
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader>
+          {/* Описания у карточки нет: «лента читает всё и оставляет столько,
+              сколько ты просил» — это ровно фраза ниже, только без чисел.
+              Два написания одной мысли подряд читаются как заминка перед
+              тем, что сказано по делу. */}
           <CardTitle>{t.plans.about.heroTitle}</CardTitle>
-          <CardDescription>{t.plans.about.heroDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           <FlowGrid collected={collected} digest={inDigest} minutes={minutes} t={t.plans.about} />
