@@ -199,12 +199,12 @@ export async function writeDigest(
   voice: Voice = DEFAULT_VOICE,
   options?: ReadingOptions,
 ): Promise<DigestResult> {
-  if (options) {
+  reading: if (options) {
     const { sql } = await import("../src/lib/db");
     const [reader] = await sql<{ reading_v2_enabled: boolean }[]>`select reading_v2_enabled from dailynews.readers where id=${options.readerId}`;
     if (!reader) throw new Error("Reader unavailable");
     if (reader.reading_v2_enabled) {
-      const { writeReadingDigest, readingCards } = await import("./reading");
+      const { writeReadingDigest, readingPicks } = await import("./reading");
       /**
        * Разбор получают только верхние карточки выпуска, остальные пишутся
        * как обычно.
@@ -223,19 +223,23 @@ export async function writeDigest(
        * Число — переменной, а не константой: это ручка цены, и крутить её
        * придётся вместе с ценой тарифа, а не правкой кода.
        */
-      const cards = readingCards();
-      const deep = survivors.slice(0, cards);
-      const plain = survivors.slice(cards);
+      const { deep, plain } = readingPicks(survivors);
+      if (!deep.length) break reading;
       const read = await writeReadingDigest(sql, deep, readerContext, voice, options);
       if (!plain.length) return read;
       // Хвост идёт обычным путём — тем же вызовом, но уже без разбора:
       // `options` не передаётся, иначе он снова ушёл бы в ветку выше.
       const rest = await writeDigest(plain, readerContext, voice);
+      const written = new Map([...read.items, ...rest.items].map((item) => [String(item.id), item]));
       return {
         ...read,
         // Вступление пишется по верхним карточкам и остаётся от них:
         // второе, собранное по хвосту, спорило бы с первым.
-        items: [...read.items, ...rest.items],
+        //
+        // Порядок — исходный, а не «сначала разобранные»: выборка качества
+        // (`qualitySample`) берёт описания равномерно и рассчитывает
+        // на порядок отбора, иначе она мерила бы один только разбор.
+        items: survivors.map((one) => written.get(String(one.id))).filter((one) => one !== undefined),
         flagged: (read.flagged ?? 0) + (rest.flagged ?? 0),
         usage: {
           input: read.usage.input + rest.usage.input,
