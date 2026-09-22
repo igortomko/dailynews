@@ -93,15 +93,25 @@ export const feed = {
   /** src/components/item-card.tsx */
   /** src/components/upgrade-note.tsx — the line under the digest. */
   upgrade: {
-    cadence: (to: string) =>
-      `No digest today: on Free it arrives every other day. On ${to} — every morning.`,
-    sources: (now: number, plan: string, up: number, to: string) =>
-      `The feed watches ${now} sources — that is all of ${plan}. On ${to} — ${up}.`,
-    topics: (now: number, plan: string, up: number, to: string) =>
-      `${now} ${now === 1 ? "interest" : "interests"} — that is all of ${plan}. On ${to} — ${up}.`,
-    minutes: (collected: number, kept: number, now: number, up: number, to: string) =>
-      `Your sources published ${collected} ${collected === 1 ? "story" : "stories"} in the last day; ${kept} made the digest — that is what fits in ${now} ${now === 1 ? "minute" : "minutes"}. On ${to} — ${up}.`,
-    see: (to: string, price: number) => `See ${to} for $${price}`,
+    // What happened to his feed, never what to buy: every number here can be
+    // checked by eye on the same screen. The plan being offered is named once,
+    // in `offer`, next to its price — said twice, a sentence and the button
+    // under it read as the same line printed by mistake.
+    cadence: "No digest today: on Free it arrives every other day.",
+    sources: (now: number, plan: string) =>
+      `The feed watches ${now} sources — that is all of ${plan}.`,
+    topics: (now: number, plan: string) =>
+      `${now} ${now === 1 ? "interest" : "interests"} — that is all of ${plan}.`,
+    minutes: (collected: number, kept: number, now: number) =>
+      `Your sources published ${collected} ${collected === 1 ? "story" : "stories"} in the last day; ${kept} made the digest — that is what fits in ${now} ${now === 1 ? "minute" : "minutes"}.`,
+    /** What the other plan gives — the same unit the sentence above counts in. */
+    gain: {
+      cadence: "Every morning",
+      sources: (up: number) => `${up} sources`,
+      topics: (up: number) => `${up} interests`,
+      minutes: (up: number) => `${up} minutes of digest`,
+    },
+    offer: (gain: string, to: string, price: number) => `${gain} on ${to} — $${price}`,
   },
 
   item: {

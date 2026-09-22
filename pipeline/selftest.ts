@@ -73,6 +73,7 @@ import { digestHtml, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
+import { upgradeLines, type UpgradeNote } from "../src/lib/upgrade";
 import { plural } from "../src/lib/plural";
 import { ru as ruDict } from "../src/lib/i18n/ru/index";
 import { en as enDict } from "../src/lib/i18n/en/index";
@@ -4557,6 +4558,27 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   assert.match(line, /106/, "строка называет поток: без первого числа второе ничего не значит");
   assert.match(line, /Plus/, "и тариф, куда зовём");
   assert.match(line, new RegExp(`${APP}/settings/subscription`), "в чате нет окна пейвола — нужна ссылка");
+  assert.equal(line.match(/Plus/g)?.length, 1, "и ровно один раз: в чате фраза и предложение идут подряд");
+
+  // Фраза говорит про здесь, предложение — про там, и тариф назван только
+  // во втором. Пока он стоял в обоих, «На «Plus» — каждое утро» и кнопка
+  // «Посмотреть «Plus» за $3.99» читались одной строкой, напечатанной дважды.
+  for (const [reason, note] of [
+    ["cadence", { reason: "cadence", plan: "plus", from: 2, to: 1, collected: 0, kept: 0 }],
+    ["sources", { reason: "sources", plan: "plus", from: 5, to: 40, collected: 0, kept: 0 }],
+    ["topics", { reason: "topics", plan: "plus", from: 5, to: 15, collected: 0, kept: 0 }],
+    ["minutes", { reason: "minutes", plan: "plus", from: 5, to: 20, collected: 106, kept: 8 }],
+  ] as [string, UpgradeNote][]) {
+    for (const [lang, words, labels] of [
+      ["ru", ruDict.feed.upgrade, ruDict.plans.label],
+      ["en", enDict.feed.upgrade, enDict.plans.label],
+    ] as const) {
+      const { fact, offer } = upgradeLines(words, labels, "free", note);
+      assert.ok(!fact.includes(labels.plus), `${lang}/${reason}: фраза не называет тариф — его называет предложение`);
+      assert.ok(offer.includes(labels.plus), `${lang}/${reason}: предложение называет тариф`);
+      assert.match(offer, /3\.99/, `${lang}/${reason}: и цену — без неё за ней и переходят`);
+    }
+  }
 
   const sold = digestMessage({
     day: "2026-09-21", headlines: heads, appUrl: APP, size: "19 мин", podcast: false, upsell: line,

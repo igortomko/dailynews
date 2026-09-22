@@ -9,7 +9,7 @@ import { formatMinutesLong, isShort, shortfallNote } from "./reading-time";
 import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 import { plans as ruPlans } from "@/lib/i18n/ru/plans";
 import type { Plan } from "@/lib/plans";
-import type { UpgradeNote } from "@/lib/upgrade";
+import { upgradeLines, type UpgradeNote } from "@/lib/upgrade";
 
 /**
  * Бот здесь делает две вещи: заводит читателя по /start и присылает ему
@@ -733,17 +733,14 @@ export function digestMessage(input: {
  * тупиком. Русские — как и всё остальное сообщение: половина на одном
  * языке и половина на другом хуже, чем целиком на одном.
  *
- * Название тарифа не повторяется дважды: словарная фраза его уже назвала.
+ * Название тарифа звучит один раз — в предложении, вместе с ценой. В ленте
+ * оно стоит кнопкой под фразой, здесь идёт следующей фразой: кнопок в чате
+ * нет, а цена нужна до перехода — иначе за ней и переходят.
  */
 export function botUpsellLine(plan: Plan, note: UpgradeNote, appUrl?: string): string {
-  const words = ruFeed.upgrade;
-  const to = ruPlans.label[note.plan];
-  const text = note.reason === "cadence" ? words.cadence(to)
-    : note.reason === "sources" ? words.sources(note.from, ruPlans.label[plan.id], note.to, to)
-    : note.reason === "topics" ? words.topics(note.from, ruPlans.label[plan.id], note.to, to)
-    : words.minutes(note.collected, note.kept, note.from, note.to, to);
+  const { fact, offer } = upgradeLines(ruFeed.upgrade, ruPlans.label, plan.id, note);
   const where = appUrl ? ` ${appUrl.replace(/\/$/, "")}/settings/subscription` : "";
-  return `${text}${where}`;
+  return `${fact} ${offer}.${where}`;
 }
 
 /**
