@@ -1,3 +1,4 @@
+import { clearInterval, setInterval } from "node:timers";
 import postgres from "postgres";
 
 /**
@@ -43,3 +44,24 @@ export const sql = postgres(url, {
   idle_timeout: process.env.NEXT_RUNTIME ? 1800 : 20,
   connect_timeout: 15,
 });
+
+// Раз в пять минут веб трогает пул. Соединение, которое не простаивает,
+// не закрывается по idle_timeout, а переоткрытие по max_lifetime (час)
+// приходится на этот тик, а не на первый заход читателя после долгой
+// паузы — он платил за DNS, TCP, TLS и SCRAM 150–500 мс. unref: таймер
+// не держит процесс, и сборка образа (у неё DATABASE_URL — заглушка)
+// его не ждёт; отказ заглушки глотается — это не запрос читателя.
+// setInterval взят из node:timers явно: с `lib: dom` в tsconfig глобальный
+// мог бы разрешиться в браузерную сигнатуру без unref, смотря по порядку
+// подключения типов.
+// Ручка лежит на globalThis: в dev HMR перечитывает модуль и заводит новый
+// пул, и без этого каждая перечитка добавляла бы ещё один таймер, держащий
+// свой старый пул открытым до конца процесса.
+if (process.env.NEXT_RUNTIME) {
+  const held = globalThis as { __dbKeepalive?: ReturnType<typeof setInterval> };
+  clearInterval(held.__dbKeepalive);
+  held.__dbKeepalive = setInterval(() => {
+    sql`select 1`.catch(() => {});
+  }, 5 * 60 * 1000);
+  held.__dbKeepalive.unref();
+}

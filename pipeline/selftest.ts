@@ -67,7 +67,9 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
-import { anyOf, highlight, HL_END, HL_START, TS_CONFIGS, tsConfigFor } from "../src/lib/search";
+import {
+  anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG, TS_CONFIGS, tsConfigFor,
+} from "../src/lib/search";
 import { recentFrom, remember } from "../src/lib/search-history";
 import { blockOf, move, overviewMarkdown, overviewText, reconcile } from "../src/lib/overview";
 import { formatDay } from "../src/lib/relative-time";
@@ -1188,19 +1190,19 @@ assert.ok(
   );
 }
 
-// --- расположение middleware ------------------------------------------------
-// Проект использует srcDirectory, и Next подключает middleware только из src/.
+// --- расположение proxy (бывшего middleware) ------------------------------------------------
+// Проект использует srcDirectory, и Next подключает proxy только из src/.
 // Лежащий в корне файл не вызывает ни ошибки, ни предупреждения: страницы
 // просто отдаются всем. Один раз так и было.
 import { existsSync } from "node:fs";
-assert.ok(existsSync("src/middleware.ts"), "middleware должен лежать в src/");
+assert.ok(existsSync("src/proxy.ts"), "proxy должен лежать в src/");
 
 // Вебхук за проверкой сессии отвечает редиректом на логин, а отправитель
 // читает 307 как успех и не повторяет доставку. Платёж при этом проходит,
 // а тариф не выдаётся — отказ, который виден только по жалобе.
-const middleware = readFileSync("src/middleware.ts", "utf8");
+const proxy = readFileSync("src/proxy.ts", "utf8");
 for (const hook of ["/api/telegram", "/api/lemon"]) {
-  assert.ok(middleware.includes(`"${hook}"`), `${hook} должен быть открыт в middleware`);
+  assert.ok(proxy.includes(`"${hook}"`), `${hook} должен быть открыт в proxy`);
   assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
 }
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
@@ -3201,11 +3203,45 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
   // Осиротевшая кавычка открыла бы фразу, которая ничем не кончается.
   assert.equal(anyOf('"дата центры" уран'), "дата or центры or уран");
 
-  // Словарь решает, сводятся ли словоформы, и заметно это только
-  // по ненайденному.
+  // Словарь выпуска пишется при письме и живёт в строке выпуска (0050):
+  // вектор описания и запрос к нему разбираются им же. Общий словарь —
+  // у источника (0048) и по умолчанию; совпадение проверяется по самим
+  // файлам миграций, а не по памяти: две копии одного решения расходятся молча.
   assert.equal(tsConfigFor("русском"), "russian");
   assert.equal(tsConfigFor("английском"), "english");
   assert.equal(tsConfigFor("португальском (бразильский)"), "portuguese");
+  assert.equal(
+    tsConfigFor(SOURCE_LANGUAGE),
+    SEARCH_CONFIG,
+    "язык источника заранее неизвестен: общий словарь разбирает и латиницу",
+  );
+  assert.equal(
+    tsConfigFor("японском"),
+    SEARCH_CONFIG,
+    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
+  );
+  assert.equal(tsConfigFor(""), SEARCH_CONFIG, "пустое значение колонки не роняет поиск");
+  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
+  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
+  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
+  // в списке обязан получить словарь или попасть сюда осознанно, иначе
+  // он молча уедет на общий.
+  assert.deepEqual(
+    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
+    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
+    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
+  );
+  assert.equal(SEARCH_CONFIG, "russian", "латиницу разбирает тем же стеммером, кириллицу сводит только он");
+  const shared = readFileSync("db/migrations/0048_search_vectors.sql", "utf8");
+  assert.ok(
+    shared.includes(`to_tsvector('${SEARCH_CONFIG}'::regconfig`),
+    "вектор источника считается общим словарём",
+  );
+  const perDigest = readFileSync("db/migrations/0050_search_config_per_digest.sql", "utf8");
+  assert.ok(
+    perDigest.includes(`default '${SEARCH_CONFIG}'::regconfig`),
+    "словарь выпуска по умолчанию — тот же общий",
+  );
 
 // --- два языка интерфейса ---------------------------------------------------
 // Пропущенный ключ ловит типизация: `ru` объявлен как `Dict`, и собраться
@@ -3256,27 +3292,6 @@ for (const [name, table] of [
   const orphans = Object.keys(table).filter((key) => !LANGUAGES.includes(key));
   assert.deepEqual(orphans, [], `${name}: ключи разъехались со списком языков`);
 }
-  assert.equal(
-    tsConfigFor(SOURCE_LANGUAGE),
-    "russian",
-    "язык источника заранее неизвестен: русская конфигурация разбирает и латиницу",
-  );
-  assert.equal(
-    tsConfigFor("японском"),
-    "russian",
-    "языка, которого у Postgres нет, заменяет не `simple`: тот не сводит вообще ничего",
-  );
-  assert.equal(tsConfigFor(""), "russian", "пустое значение колонки не роняет поиск");
-  // Список языков один на промпт и на поиск, а словарь есть не у каждого.
-  // Проверяется не «что-то вернулось» — вернётся всегда, — а что без
-  // словаря остались ровно те, у кого его у Postgres и нет. Новый язык
-  // в списке обязан получить словарь или попасть сюда осознанно, иначе
-  // он молча уедет на русский.
-  assert.deepEqual(
-    LANGUAGES.filter((language) => !(language in TS_CONFIGS)),
-    [SOURCE_LANGUAGE, "польском", "украинском", "японском", "китайском", "корейском"],
-    "язык без словаря должен быть назван здесь, а не обнаружен на выдаче",
-  );
 
   // Недавние запросы лежат в браузере, и что там лежит — знает не наш код:
   // ключ переживает наши правки и правится из консоли. Разбор обязан
@@ -3417,6 +3432,15 @@ for (const [name, table] of [
   assert.ok(!skippable.has("0041_story_index.sql"), "и пропускать его по молчанию сверки нельзя");
   assert.ok(silent.has("0003_seed.sql"), "сид — это данные, и сверка формы схемы про них не знает");
   assert.ok(silent.has("0031_sources_only_added_or_removed.sql"), "update — тоже данные");
+  // Снятие сверке доказать нечем: снятого нет и там, где миграция прошла,
+  // и там, где её не было. Файл из одного drop записывался бы в журнал
+  // «по молчанию» — так 0049 ушла в журнал, не сняв колонку.
+  assert.ok(silent.has("0049_drop_item_body_chars.sql"), "файл из одного drop выполняется как тихий");
+  assert.ok(!skippable.has("0049_drop_item_body_chars.sql"), "и по молчанию сверки не пропускается");
+  assert.ok(
+    skippable.has("0050_search_config_per_digest.sql"),
+    "drop рядом с add column доказывается добавлением",
+  );
 
   // Файл, который делает и то и другое: колонка есть, индекса может не быть,
   // и «обещанное уже есть» пропустило бы половину файла. Но и в отчёт
