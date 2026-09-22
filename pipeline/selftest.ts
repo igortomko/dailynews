@@ -94,6 +94,7 @@ import {
 } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
+import { tweetLink } from "./fetch";
 import { countOf, explain, parseTelegram } from "./fetch";
 import {
   NETWORK_IDS, NETWORKS, overLimit, postLength, readableOf, tabsOf,
@@ -1750,6 +1751,12 @@ assert.equal(first("@eugene_rid")?.url, "eugene_rid", "собачка в имя 
 assert.ok(refusal("LocalLLaMA"), "слово без ссылки и операторов — отказ, а не платный запрос");
 assert.ok(refusal("@ab"), "слишком короткое имя каналом быть не может");
 assert.ok(refusal("https://x.com/home"), "служебный путь X не аккаунт");
+// Список X — готовая лента выбранных авторов. Это самый дешёвый фильтр шлака:
+// отобраны люди, а не реакции, и оператор `list:` берёт её тем же
+// advanced_search, что и `from:`.
+assert.equal(first("https://x.com/i/lists/1234567890")?.url, "list:1234567890", "ссылка на список X даёт оператор list:");
+assert.equal(first("https://twitter.com/i/lists/42")?.kind, "x", "старый домен тоже");
+assert.ok(refusal("https://x.com/i/lists/notanid"), "список без номера — отказ, а не платный запрос");
 assert.equal(first("https://t.me/durov")?.url, "durov", "канал Telegram — имя, а не адрес");
 assert.equal(first("https://t.me/s/durov")?.url, "durov", "ссылка на веб-просмотр даёт тот же канал");
 assert.equal(first("https://t.me/durov/123")?.url, "durov", "ссылка на пост даёт канал целиком");
@@ -3991,5 +3998,43 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   bus.nextRate();
   assert.equal(told, 1, "отписавшаяся — уже нет");
 }
+
+// ---------------------------------------------------------------------------
+// Твит с внешней ссылкой — это анонс статьи, и материалом должна стать статья.
+// По адресу твита `enrich` не получит ничего, и оценка встала бы по 280 знакам;
+// а адрес статьи заодно сводит твит с той же публикацией из RSS первым слоем
+// дедупа — бесплатно и без вопроса к Jev, чьи заголовки тут не сходятся.
+// ---------------------------------------------------------------------------
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://example.com/story" }] } }),
+  "https://example.com/story",
+  "внешняя ссылка из твита становится адресом материала",
+);
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://x.com/b/status/2" }] } }),
+  null,
+  "цитата другого твита материалом не является",
+);
+// t.co — сокращатель, за которым неизвестно что. Разворачивать его в сборе
+// значит платить отдельным запросом за каждую ссылку в каждом твите.
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://t.co/abc" }] } }),
+  null,
+  "сокращатель t.co за материал не считается",
+);
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+    entities: { urls: [{ expanded_url: "https://twitter.com/c" }, { expanded_url: "https://news.site/a" }] } }),
+  "https://news.site/a",
+  "своя ссылка пропускается, внешняя берётся",
+);
+assert.equal(
+  tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "мнение без ссылки", createdAt: "" }),
+  null,
+  "твит без ссылок остаётся твитом",
+);
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
