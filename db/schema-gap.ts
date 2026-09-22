@@ -303,6 +303,13 @@ const SETTLED = new Set([
   "0042_ui_language.sql",
   "0047_audio_one_in_flight.sql",
   "0047_item_body_chars.sql",
+  // 22 сентября 2026, две параллельные сессии: одна завела периодичность
+  // Kindle, другая — повтор привратника разбора. Обе применены, оба имени
+  // стоят в журнале, и переименовать теперь нечего: файл под новым именем
+  // завёл бы третью запись, а прежняя осталась бы записью без файла.
+  // Таблицы у них разные (readers и model_calls), пересечься им нечем.
+  "0057_kindle_period.sql",
+  "0057_model_calls_reading_repeat.sql",
 ]);
 
 export function catalogCollisions(
