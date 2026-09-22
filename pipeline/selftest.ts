@@ -39,7 +39,8 @@ import { appOrigin } from "../src/lib/auth";
 import * as bus from "../src/lib/audio-bus";
 import {
   applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
-  spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
+  localeOfVoice, podcastIntro, spelledOut, spokenMap, unabbreviate, unknownRuns,
+  voiceFor, voiceForText,
 } from "../src/lib/speech";
 import { catalogCollisions, fileCoverage, numberCollisions } from "../db/schema-gap";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
@@ -3689,6 +3690,65 @@ for (const [name, table] of [
     "длинная статья не начинается наполовину",
   );
   assert.equal(audioBlocker(reader, { audioSecondsPerDay: 2700 }, 0, 600, t, "Pro"), "");
+}
+
+// --- сокращения и вступление подкаста -------------------------------------------
+{
+  // Точка сокращения обрывает фразу на 1,3 секунды: движок читает её
+  // как конец предложения. Замер стоит в `CLIPPED`.
+  assert.equal(
+    unabbreviate("Раунд закрыт на 50 тыс. долларов и это рекорд.", "русском"),
+    "Раунд закрыт на 50 тыс долларов и это рекорд.",
+  );
+  // А `г.` движок читает правильно, и снятие точки его ломает: список
+  // перечисляет только измеренное, а не всё похожее.
+  assert.equal(
+    unabbreviate("Отчёт за 2025 г. показал спад.", "русском"),
+    "Отчёт за 2025 г. показал спад.",
+    "работающее сокращение не трогается",
+  );
+  // Настоящий конец предложения остаётся концом: на живом потоке
+  // «чат. llm-keys-ui» и «судьи-модели. jevals» — это две фразы,
+  // и склей их правило, пауза между ними исчезла бы незаметно.
+  assert.equal(
+    unabbreviate("ключи на машину без вставки в чат. llm-keys-ui поднимает веб", "русском"),
+    "ключи на машину без вставки в чат. llm-keys-ui поднимает веб",
+    "точка в конце фразы не снимается",
+  );
+  // Конец текста — это конец: пауза там по делу.
+  assert.equal(unabbreviate("Осталось 20 тыс.", "русском"), "Осталось 20 тыс.");
+  // Ряд на язык: немецкому голосу русское сокращение подставлять нечего.
+  assert.equal(
+    unabbreviate("Runde bei 50 тыс. Dollar", "немецком"),
+    "Runde bei 50 тыс. Dollar",
+    "чужому языку ряд не применяется",
+  );
+
+  // Локаль вступления — из голоса, а не из второго списка: разъедься они,
+  // немецкий выпуск назвал бы число по-русски.
+  assert.equal(localeOfVoice("de-DE-KatjaNeural"), "de-DE");
+  assert.equal(podcastIntro("2026-09-21", "ru-RU-SvetlanaNeural"), "Reporta, 21 сентября.");
+  assert.equal(podcastIntro("2026-09-21", "de-DE-KatjaNeural"), "Reporta, 21. September.");
+  assert.equal(podcastIntro("2026-09-21", "ja-JP-NanamiNeural"), "Reporta, 9月21日.");
+
+  // Каждый язык выпуска называет число своим языком. Незнакомая `Intl`
+  // локаль молча откатывается на язык среды — и выпуск, прочитанный
+  // корейским голосом, назвал бы дату по-английски.
+  const ruDate = podcastIntro("2026-09-21", voiceFor("русском")!);
+  for (const language of LANGUAGES) {
+    if (language === SOURCE_LANGUAGE) continue;
+    const voice = voiceFor(language)!;
+    const said = podcastIntro("2026-09-21", voice);
+    assert.ok(said.startsWith("Reporta, "), `вступление без имени продукта: ${language}`);
+    assert.ok(said.length > "Reporta, ".length + 3, `вступление без даты: ${language}`);
+    if (language !== "русском") {
+      assert.notEqual(said, ruDate, `${language} назвал число по-русски`);
+    }
+  }
+
+  // День приходит строкой «ГГГГ-ММ-ДД», и пояс разбора не должен её сдвигать.
+  assert.equal(podcastIntro("2026-01-01", "ru-RU-SvetlanaNeural"), "Reporta, 1 января.");
+  assert.equal(podcastIntro("2026-12-31", "ru-RU-SvetlanaNeural"), "Reporta, 31 декабря.");
 }
 
 // --- какие миграции сверка формы схемы вообще может проверить ------------------
