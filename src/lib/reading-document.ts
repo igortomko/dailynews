@@ -138,6 +138,30 @@ export function normalizeDocument(doc: ReadingDocument): ReadingDocument {
   return { ...doc, omitted: doc.omitted.filter(o => !visible.has(o.claimId)) };
 }
 
+/**
+ * Обороты, которые ничего не сообщают и стоят строки.
+ *
+ * Запрет в промпте протекает — это уже проверено на словаре дайджеста
+ * (`pipeline/lexicon.ts`), — поэтому самые частые ловятся счётчиком.
+ * Список только русский и только из виденного в живых карточках: для
+ * непроверенных языков перечня нет, там остаются принципы в промпте.
+ * Общие слова вроде «в целом» сюда не идут: на них ложные срабатывания
+ * дороже пользы.
+ */
+const EDGE = { before: "(?<![\\p{L}\\p{N}_])", after: "(?![\\p{L}\\p{N}_])" };
+const FILLER = [
+  "(?:стоит|следует|нельзя не|важно|необходимо)\\s+(?:отметить|понимать|заметить|подчеркнуть)",
+  "как известно",
+  "среди прочего",
+  "в\\s+(?:статье|материале|публикации|тексте)\\s+(?:говорится|сказано|отмечается|рассказывается)",
+  "автор\\s+(?:пишет|отмечает|рассказывает|утверждает),?\\s+(?:что|о)",
+  "своего рода",
+  // Граница слова здесь не `\b`: тот знает только латиницу, и «Стоит
+  // отметить» не находился вовсе (урок `lexicon.ts` и `rules.ts`).
+].map((body) => new RegExp(`${EDGE.before}${body}${EDGE.after}`, "giu"));
+export const fillers = (text: string): string[] =>
+  FILLER.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0]));
+
 export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis, context: string, baselineIds: number[]): string[] {
   const issues: string[] = [];
   const words = `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
@@ -169,17 +193,23 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   // Каждый слой добавляет своё. Проверяется кодом, потому что запрет
   // в промпте протекает: на карточке про Grok 4.7 лид обещал проверку работы
   // и цену, а абзацы ниже повторяли и то и другое.
-  const layers: { name: string; text: string }[] = [
-    ...(opener ? [{ name: "answer", text: opener.text }] : []),
-    ...(doc.answer && doc.lead ? [{ name: "lead", text: doc.lead.text }] : []),
-    ...doc.blocks.map((b, at) => ({ name: `block ${at + 1} (${b.kind})`, text: blockText(b) })),
-    ...(doc.evidence ? [{ name: "evidence", text: doc.evidence.text }] : []),
+  const layers: { name: string; text: string; accent: boolean }[] = [
+    ...(opener ? [{ name: "answer", text: opener.text, accent: false }] : []),
+    ...(doc.answer && doc.lead ? [{ name: "lead", text: doc.lead.text, accent: false }] : []),
+    ...doc.blocks.map((b, at) => ({ name: `block ${at + 1} (${b.kind})`, text: blockText(b), accent: isAccent(b) })),
+    ...(doc.evidence ? [{ name: "evidence", text: doc.evidence.text, accent: false }] : []),
   ];
   for (let i = 0; i < layers.length; i++) {
     for (let j = i + 1; j < layers.length; j++) {
-      if (restates(layers[i].text, layers[j].text)) {
-        issues.push(`The ${layers[j].name} restates the ${layers[i].name}: same facts and numbers said twice. Keep one of them and spend the other on what the article says next, or drop it.`);
-      }
+      if (!restates(layers[i].text, layers[j].text)) continue;
+      // Рецепт зависит от того, что с чем совпало. «Уберите повтор» модель
+      // отрабатывала перестановкой слов, и карточка не собиралась вовсе:
+      // на выпуске 22 сентября так и осталась прежней RoboHarm.
+      const accent = layers[i].accent ? layers[i] : layers[j].accent ? layers[j] : null;
+      const prose = accent === layers[i] ? layers[j] : layers[i];
+      issues.push(accent
+        ? `The ${accent.name} and the ${prose.name} carry the same figures. The form keeps the measured values; rewrite the ${prose.name} to state what changed and the condition that bounds it, naming no number the form already shows.`
+        : `The ${layers[j].name} restates the ${layers[i].name}: same facts and numbers said twice. Keep one of them and spend the other on what the article says next, or drop it.`);
     }
   }
   const claims = analysis.sections.flatMap((s) => s.claims);
@@ -202,6 +232,10 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
     if (required && !doc.blocks.some((b) => b.kind === required)) {
       issues.push(`Format ${doc.formatPlan.format} requires a ${required} block. Build it from the cited claims, or set the plan to your fallback form and write that one.`);
     }
+  }
+  const padding = [...new Set(layers.flatMap((layer) => fillers(layer.text)))];
+  if (padding.length) {
+    issues.push(`Remove throat-clearing that carries no fact: ${padding.join(", ")}. Start the sentence at what happened.`);
   }
   if (doc.application && !normalize(context).includes(normalize(doc.application.contextQuote))) issues.push("Application must cite an exact relevant statement from the reader context, or be null.");
   if (doc.baselineId !== null && !baselineIds.includes(doc.baselineId)) issues.push("Unknown previous article.");
@@ -260,6 +294,14 @@ export function validateQuotes(doc: ReadingDocument, source: string): string[] {
  * а был арифметикой.
  */
 export const CRITICAL_PER_SECTION = 7;
+/**
+ * И сколько их может быть на всю статью. Потолок по секциям не спасает
+ * многосекционную: две секции дают четырнадцать обязательных утверждений,
+ * а карточке на сто семьдесят слов их не вместить — 22 сентября 2026 так
+ * перестала собираться RoboHarm, хотя каждая секция потолок соблюдала.
+ * «То, что читатель обязан помнить», не бывает четырнадцатью пунктами.
+ */
+export const CRITICAL_PER_DOCUMENT = 8;
 export function validateSection(section: z.infer<typeof sectionSchema>, source: string): string[] {
   const errors: string[] = [];
   const critical = section.claims.filter((c) => c.importance === "critical").length;
