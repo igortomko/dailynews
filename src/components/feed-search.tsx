@@ -74,8 +74,35 @@ export function SearchField({ open, onClose }: { open: boolean; onClose: () => v
   // запрос, пряча за ним подсказку, — а вернуться к прошлому поиску есть
   // чем, недавние стоят строкой ниже.
   useEffect(() => {
-    if (open) field.current?.focus();
-    else if (field.current) field.current.value = "";
+    if (open) {
+      // Слой раскрывается кроссфейдом, и `visibility` едет в переходе
+      // вместе с прозрачностью (см. `layerClass` в `feed-tabs.tsx`):
+      // фокус на ещё `visibility: hidden` элементе браузер тихо
+      // игнорирует, без ошибки. Замер показал, что видимость
+      // разрешается не в первом кадре и не мгновенно, а около середины
+      // 150-миллисекундного перехода — число зависит от браузера
+      // и нагрузки, и держать его константой значит однажды снова
+      // словить молчаливый промах. Поэтому не ждём кадр и не гадаем
+      // задержку, а пробуем каждый кадр, пока фокус не встанет —
+      // как только видимость разрешится, первая же попытка сработает.
+      // Ограничение — не про случай из замера (там хватает и одного кадра
+      // с запасом), а про случай, где фокус не встанет никогда: поле
+      // убрали из разметки, вкладка так и не получила фокус ОС. Без
+      // потолка это крутилось бы кадр за кадром, пока открыт поиск.
+      const deadline = performance.now() + 1000;
+      let frame = 0;
+      const tryFocus = () => {
+        const input = field.current;
+        if (!input || document.activeElement === input) return;
+        input.focus();
+        if (document.activeElement !== input && performance.now() < deadline) {
+          frame = requestAnimationFrame(tryFocus);
+        }
+      };
+      frame = requestAnimationFrame(tryFocus);
+      return () => cancelAnimationFrame(frame);
+    }
+    if (field.current) field.current.value = "";
   }, [open]);
 
   return (
