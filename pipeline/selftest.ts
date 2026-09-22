@@ -58,7 +58,7 @@ import { matchWritten, parseDigest, textFor, type Survivor } from "./digest";
 import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
-import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
+import { articleHtml, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
   channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
@@ -2751,6 +2751,19 @@ assert.equal(pickTrack({}), null, "дорожек нет — читать неч
 // что и полный текст статьи из фида, — а он ждёт HTML. Markdown как есть
 // потерялся бы в defuddle, и отправка пошла бы качать страницу ролика,
 // где текста нет вовсе.
+// Пересказ теряется не из-за ролика, а из-за модели: на одной и той же
+// расшифровке в 5415 знаков первый ответ дал 236 токенов выхода и только
+// конспект, второй — 950 токенов и пересказ на 2365 знаков. Разбор обязан
+// отличать «пересказа нет» от «ответ сломан»: первое лечится повтором,
+// второе — нет.
+const withoutArticle = parseWriteup('{"summary": "что сказано"}', "модель");
+assert.equal(withoutArticle.summary, "что сказано", "конспект берётся и без пересказа");
+assert.equal(withoutArticle.article, "", "пересказа нет — это пустая строка, а не отказ");
+const fenced = parseWriteup('```json\n{"summary": "с", "article": "## Раздел\\n\\nтекст"}\n```', "модель");
+assert.ok(fenced.article.includes("## Раздел"), "пересказ в разметке доезжает через ограду кода");
+assert.throws(() => parseWriteup('{"article": "есть"}', "модель"), /summary/, "ответ без конспекта — это отказ");
+assert.throws(() => parseWriteup("не json", "модель"), /не JSON/, "ответ не JSON — тоже отказ");
+
 const html = articleHtml("## Раздел\n\nАбзац с числом 42.");
 assert.ok(html.includes("<h2>") && html.includes("<p>"), "разметка пересказа превращается в HTML");
 assert.equal(articleHtml(""), "", "пустой пересказ остаётся пустым, а не <article></article>");

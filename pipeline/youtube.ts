@@ -226,6 +226,47 @@ ${transcript}`;
 
 /** Сжать расшифровку. Один вызов на ролик, два текста в ответе: вход тут
  *  дорогой (расшифровка целиком), и платить за него дважды незачем. */
+/**
+ * Разбор ответа модели. Отдельно от запроса, потому что проверяется тестом:
+ * пустой пересказ — не исключение, а частый случай, и распознавать его надо
+ * по содержимому, а не по тому, упал запрос или нет.
+ */
+export function parseWriteup(text: string, fallbackModel: string, payload: {
+  model?: string;
+  usage?: Record<string, unknown>;
+} = {}): VideoWriteup {
+  const match = text.replace(/```(?:json)?/g, "").match(/\{[\s\S]*\}/);
+  if (!match) throw new Error(`модель вернула не JSON: ${text.slice(0, 200)}`);
+
+  const parsed = JSON.parse(match[0]) as { summary?: unknown; article?: unknown };
+  const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+  const article = typeof parsed.article === "string" ? parsed.article.trim() : "";
+  if (!summary) throw new Error("в ответе нет summary");
+
+  const usage = (payload.usage ?? {}) as Record<string, any>;
+  return {
+    summary: summary.slice(0, 1200),
+    article,
+    model: payload.model ?? fallbackModel,
+    usage: {
+      input: usage.prompt_tokens ?? 0,
+      output: usage.completion_tokens ?? 0,
+      cached: usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0,
+      reasoning: usage.completion_tokens_details?.reasoning_tokens ?? 0,
+      requests: 1,
+    },
+  };
+}
+
+/** Сложить расход двух попыток: платим за обе, и в журнале это одна строка. */
+const addUsage = (a: Usage, b: Usage): Usage => ({
+  input: a.input + b.input,
+  output: a.output + b.output,
+  cached: a.cached + b.cached,
+  reasoning: a.reasoning + b.reasoning,
+  requests: a.requests + b.requests,
+});
+
 export async function describeVideo(
   title: string,
   channel: string,
@@ -235,48 +276,48 @@ export async function describeVideo(
   const { baseUrl, model, apiKey } = resolve();
   if (!apiKey) throw new Error("нет LLM_API_KEY");
 
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      max_tokens: 16000,
-      // Выключено по замеру, а не по вере: на восемнадцати тысячах знаков
-      // расшифровки рассуждение съело 6709 токенов выхода из 8500 и дало
-      // тот же конспект — 37 секунд и $0.0030 против 8 секунд и $0.0010.
-      // Обдумывать здесь нечего: что сказано в ролике, в расшифровке
-      // уже написано, работа — сжать, а не решить.
-      reasoning_effort: "none",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt(title, channel, transcript, lang) }],
-    }),
-    signal: AbortSignal.timeout(300_000),
-  });
-  if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const ask = async (): Promise<VideoWriteup> => {
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16000,
+        // Выключено по замеру, а не по вере: на восемнадцати тысячах знаков
+        // расшифровки рассуждение съело 6709 токенов выхода из 8500 и дало
+        // тот же конспект — 37 секунд и $0.0030 против 8 секунд и $0.0010.
+        // Обдумывать здесь нечего: что сказано в ролике, в расшифровке
+        // уже написано, работа — сжать, а не решить.
+        reasoning_effort: "none",
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: prompt(title, channel, transcript, lang) }],
+      }),
+      signal: AbortSignal.timeout(300_000),
+    });
+    if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
 
-  const payload = await res.json();
-  const text: string = payload.choices?.[0]?.message?.content ?? "";
-  const match = text.replace(/```(?:json)?/g, "").match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`модель вернула не JSON: ${text.slice(0, 200)}`);
-
-  const parsed = JSON.parse(match[0]) as { summary?: unknown; article?: unknown };
-  const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
-  const article = typeof parsed.article === "string" ? parsed.article.trim() : "";
-  if (!summary) throw new Error("в ответе нет summary");
-
-  const usage = payload.usage ?? {};
-  return {
-    summary: summary.slice(0, 1200),
-    article,
-    model: payload.model ?? model,
-    usage: {
-      input: usage.prompt_tokens ?? 0,
-      output: usage.completion_tokens ?? 0,
-      cached: usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0,
-      reasoning: usage.completion_tokens_details?.reasoning_tokens ?? 0,
-      requests: 1,
-    },
+    const payload = await res.json();
+    return parseWriteup(payload.choices?.[0]?.message?.content ?? "", model, payload);
   };
+
+  const first = await ask();
+  if (first.article) return first;
+
+  // Пересказ теряется не из-за ролика, а из-за модели: на одной и той же
+  // расшифровке в 5415 знаков первый ответ дал 236 токенов выхода и только
+  // конспект, второй — 950 токенов и пересказ на 2365 знаков. Отказ при этом
+  // выглядел успехом: лента получала описание, а книга уходила качать
+  // страницу ролика, где текста нет вовсе.
+  console.error(`  ~ ролик «${title.slice(0, 40)}»: пересказ не пришёл, спрашиваю второй раз`);
+  const second = await ask().catch(() => null);
+  if (!second) return first;
+
+  const usage = addUsage(first.usage, second.usage);
+  if (!second.article) {
+    console.error(`  ~ ролик «${title.slice(0, 40)}»: пересказа нет и со второго раза — в ленту пойдёт только конспект`);
+    return { ...second, usage };
+  }
+  return { ...second, usage };
 }
 
 /**
