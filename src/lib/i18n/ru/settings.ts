@@ -162,7 +162,10 @@ export const settings: typeof En = {
       notSet: "не задан",
       approvedSuffix: "разрешён в Amazon.",
       sendToKindle: "Присылать выпуск на читалку",
-      sendToKindleHint: "Выключено — адрес остаётся для отправки отдельных статей.",
+      sendToKindleHint: (on: boolean): string =>
+        on
+          ? "Включено — выпуск уходит книгой каждое утро."
+          : "Выключено — адрес остаётся для отправки отдельных статей.",
       resetLink: "Настроить заново",
       resetTooltip: "Стереть адрес читалки и пройти настройку с начала",
       copyAddress: "Скопировать адрес",

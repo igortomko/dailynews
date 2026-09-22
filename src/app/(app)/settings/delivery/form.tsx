@@ -124,6 +124,7 @@ export function DeliveryForm({
   // значение уже после того, как родился, — Base UI говорит об этом
   // в консоль, а стоит за этим настоящая возможность разойтись с базой.
   const [podcastOn, setPodcastOn] = useState(podcast);
+  const [digestOn, setDigestOn] = useState(kindleDigest);
 
   /**
    * На каком шаге настройка Kindle. Начальное значение приходит из базы:
@@ -165,7 +166,10 @@ export function DeliveryForm({
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>Telegram</CardTitle>
+          {/* Имя раздела, а не «Telegram»: экран открывается тем, куда
+              пришли, — как «Интересы», «Мои площадки» и «Подписка». Канал
+              называет первая же фраза описания. */}
+          <CardTitle>{t.nav.delivery}</CardTitle>
           <CardDescription>{t.settings.delivery.telegram.description}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 text-sm text-muted-foreground">
@@ -177,6 +181,13 @@ export function DeliveryForm({
               каждую ночь, и такое включают сами. Корона стоит по той же
               проверке, по которой работает предел. */}
           <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor="podcast" className="items-center gap-1.5 text-foreground">
+                {t.settings.delivery.telegram.podcast}
+                {noAudio ? <PaywallCrown feature="audio" plan={plan} /> : null}
+              </FieldLabel>
+              <FieldDescription>{t.settings.delivery.telegram.podcastHint}</FieldDescription>
+            </FieldContent>
             <Switch
               id="podcast"
               checked={podcastOn}
@@ -191,13 +202,6 @@ export function DeliveryForm({
                 );
               }}
             />
-            <FieldContent>
-              <FieldLabel htmlFor="podcast" className="items-center gap-1.5 text-foreground">
-                {t.settings.delivery.telegram.podcast}
-                {noAudio ? <PaywallCrown feature="audio" plan={plan} /> : null}
-              </FieldLabel>
-              <FieldDescription>{t.settings.delivery.telegram.podcastHint}</FieldDescription>
-            </FieldContent>
           </Field>
         </CardContent>
       </Card>
@@ -289,8 +293,7 @@ export function DeliveryForm({
 
           {/* Настроено: обычные настройки. */}
           {step === "done" ? (
-            <form action={(fd) => run(saveKindleDigest(fd), k.saved)}>
-              <FieldGroup>
+            <FieldGroup>
                 <div className="flex flex-col gap-1">
                   <span className="text-sm font-medium">{k.addressLabel}</span>
                   <span className="text-sm text-muted-foreground">
@@ -305,18 +308,28 @@ export function DeliveryForm({
                   </span>
                 </div>
 
+                {/* Сохраняется сам, как тумблер подкаста выше: два тумблера
+                    на одном экране, один по кнопке, другой без, читались бы
+                    как «этот сохранился, а тот, наверное, нет». */}
                 <Field orientation="horizontal">
-                  <Switch id="kindle_digest" name="kindle_digest" defaultChecked={kindleDigest} disabled={locked} />
                   <FieldContent>
                     <FieldLabel htmlFor="kindle_digest">
                       {k.sendToKindle}
                     </FieldLabel>
-                    <FieldDescription>{k.sendToKindleHint}</FieldDescription>
+                    <FieldDescription>{k.sendToKindleHint(digestOn)}</FieldDescription>
                   </FieldContent>
+                  <Switch
+                    id="kindle_digest"
+                    checked={digestOn}
+                    disabled={pending || locked}
+                    onCheckedChange={(next: boolean) => {
+                      setDigestOn(next);
+                      run(saveKindleDigest(next), k.saved, undefined, () => setDigestOn(!next));
+                    }}
+                  />
                 </Field>
 
                 <div className="flex flex-wrap items-center gap-4">
-                  <Button type="submit" disabled={pending || locked}>{t.settings.common.save}</Button>
                   {/* Красный по наведению: сброс стирает адрес читалки
                       и снимает отметку об одобрении отправителя — до конца
                       повторной настройки выпуски не доходят вовсе. */}
@@ -338,8 +351,7 @@ export function DeliveryForm({
                     <TooltipContent>{k.resetTooltip}</TooltipContent>
                   </Tooltip>
                 </div>
-              </FieldGroup>
-            </form>
+            </FieldGroup>
           ) : null}
         </CardContent>
       </Card>

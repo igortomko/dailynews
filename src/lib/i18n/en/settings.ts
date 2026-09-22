@@ -166,7 +166,10 @@ export const settings = {
       notSet: "not set",
       approvedSuffix: "is approved on Amazon.",
       sendToKindle: "Send the digest to my Kindle",
-      sendToKindleHint: "Off — the address still works for sending individual articles.",
+      sendToKindleHint: (on: boolean): string =>
+        on
+          ? "On — the digest arrives as a book every morning."
+          : "Off — the address still works for sending individual articles.",
       resetLink: "Start over",
       resetTooltip: "Erase the Kindle address and set it up again",
       copyAddress: "Copy address",

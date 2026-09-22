@@ -22,7 +22,7 @@ export const sources = {
   },
   /** Карточка «Добавить источник» — поле ссылки до разбора. */
   addForm: {
-    title: "Add a source",
+    title: "Sources",
     linkLabel: "Link to a source",
     placeholder: "https://www.youtube.com/@channel",
     hint: "Paste a link to a site, blog, YouTube channel, or Telegram channel",
@@ -57,7 +57,7 @@ export const sources = {
   },
   /** Основной список источников. */
   list: {
-    title: "Sources",
+    title: "Your sources",
     count: (used: number, max: number, planLabel: string) =>
       `${used} of ${max} on the ${planLabel} plan`,
     emptyTitle: "No sources yet",
