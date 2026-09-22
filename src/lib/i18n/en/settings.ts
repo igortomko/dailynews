@@ -166,10 +166,14 @@ export const settings = {
       notSet: "not set",
       approvedSuffix: "is approved on Amazon.",
       sendToKindle: "Send the digest to my Kindle",
-      sendToKindleHint: (on: boolean): string =>
-        on
-          ? "On — the digest arrives as a book every morning."
-          : "Off — the address still works for sending individual articles.",
+      sendToKindleHint: (on: boolean, period: "daily" | "weekly"): string =>
+        !on
+          ? "Off — the address still works for sending individual articles."
+          : period === "weekly"
+            ? "Every Saturday — the whole week in one book."
+            : "Every morning — that day's digest as a book.",
+      periodLabel: "How often to send",
+      period: { daily: "Daily", weekly: "Saturdays" },
       resetLink: "Start over",
       resetTooltip: "Erase the Kindle address and set it up again",
       copyAddress: "Copy address",

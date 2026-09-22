@@ -25,7 +25,7 @@ import { asCard, buildVoiceCard, cardFromVoice, readOwnPosts } from "../../pipel
 import { writePost } from "../../pipeline/post";
 import { NETWORK_IDS, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
-import type { Reader, Source } from "./types";
+import { KINDLE_PERIODS, type KindlePeriod, type Reader, type Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestFor, cheapestWith, FEATURES, kindDenial, MIN_READING_MINUTES, minutesCap,
@@ -382,6 +382,37 @@ export async function saveKindleDigest(digest: boolean) {
   // Без `revalidatePath`, как и у подкаста: тумблер управляемый и уже стоит
   // в новом положении, а перерисовка рождала бы соседний с новым начальным
   // значением.
+  return { ok: true as const };
+}
+
+/**
+ * Как часто выпуск уходит книгой: каждое утро или в субботу за неделю.
+ *
+ * Своим действием, а не полем при тумблере: переключатель уже сохраняется
+ * сам, и «частота, которая ждёт кнопку» рядом с «тумблером, который
+ * не ждёт», читалась бы как забытое сохранение.
+ *
+ * Незнакомое значение отвергается здесь, а не поправляется молча:
+ * ограничение в базе всё равно его не пустит, а упасть на своей проверке
+ * понятнее, чем на чужой. Предел тарифа проверяет `denyBySection` — ровно
+ * тот же, что у самого тумблера: закрытая доставка не должна настраиваться
+ * в обход формы.
+ */
+export async function saveKindlePeriod(period: string) {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
+  if (!KINDLE_PERIODS.includes(period as KindlePeriod)) {
+    return { error: "неизвестная периодичность" };
+  }
+
+  const readerId = await currentReaderId();
+
+  await sql`
+    update dailynews.readers
+       set kindle_period = ${period}, updated_at = now()
+     where id = ${readerId}
+  `;
   return { ok: true as const };
 }
 

@@ -6,6 +6,7 @@ import {
   approveKindleSender,
   resetKindleSetup,
   saveKindleDigest,
+  saveKindlePeriod,
   saveKindleAddress,
   savePodcast,
 } from "@/lib/actions";
@@ -14,6 +15,8 @@ import { PaywallCrown } from "@/components/paywall";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { KINDLE_PERIODS, type KindlePeriod } from "@/lib/types";
 import { kindleSetupStep, type KindleStep } from "@/lib/kindle-setup";
 import {
   Field,
@@ -90,6 +93,7 @@ export function DeliveryForm({
   username,
   kindleAddress,
   kindleDigest,
+  kindlePeriod,
   kindleApproved,
   podcast,
   sender,
@@ -101,6 +105,8 @@ export function DeliveryForm({
   username: string | null;
   kindleAddress: string;
   kindleDigest: boolean;
+  /** Как часто уходит книга: каждое утро или в субботу за неделю. */
+  kindlePeriod: KindlePeriod;
   kindleApproved: boolean;
   /** Присылать ли выпуск голосом вместе с сообщением. Только Pro. */
   podcast: boolean;
@@ -125,6 +131,10 @@ export function DeliveryForm({
   // в консоль, а стоит за этим настоящая возможность разойтись с базой.
   const [podcastOn, setPodcastOn] = useState(podcast);
   const [digestOn, setDigestOn] = useState(kindleDigest);
+  // Управляемая, как и тумблер рядом: выбор перекидывается сразу, а при
+  // отказе возвращается на прежний — иначе на экране стоит одно, в базе
+  // другое, и узнает читатель об этом только в субботу.
+  const [period, setPeriod] = useState<KindlePeriod>(kindlePeriod);
 
   /**
    * На каком шаге настройка Kindle. Начальное значение приходит из базы:
@@ -311,7 +321,12 @@ export function DeliveryForm({
                 {/* Сохраняется сам, как тумблер подкаста выше: два тумблера
                     на одном экране, один по кнопке, другой без, читались бы
                     как «этот сохранился, а тот, наверное, нет». */}
-                <Field orientation="horizontal">
+                {/* Перенос обязателен: на узком экране выбор частоты
+                    не помещается рядом с подписью тумблера и уезжает
+                    за край — кнопка «По субботам» становится «По субб».
+                    Переносится именно она, а не подпись: тумблер со своим
+                    текстом — одна вещь, и разрывать их нечем. */}
+                <Field orientation="horizontal" className="flex-wrap">
                   <Switch
                     id="kindle_digest"
                     checked={digestOn}
@@ -325,8 +340,39 @@ export function DeliveryForm({
                     <FieldLabel htmlFor="kindle_digest">
                       {k.sendToKindle}
                     </FieldLabel>
-                    <FieldDescription>{k.sendToKindleHint(digestOn)}</FieldDescription>
+                    <FieldDescription>{k.sendToKindleHint(digestOn, period)}</FieldDescription>
                   </FieldContent>
+                  {/* Частота — рядом с тумблером, и только при включённом:
+                      выбор, как часто присылать то, что не присылается,
+                      предлагал бы настроить несуществующее. Сохраняется сам,
+                      как и тумблер: две соседние настройки, одна по кнопке,
+                      другая без, читались бы как «эта сохранилась, а та,
+                      наверное, нет». */}
+                  {digestOn ? (
+                    <ToggleGroup
+                      aria-label={k.periodLabel}
+                      value={[period]}
+                      onValueChange={(value: string[]) => {
+                        const next = value[0] as KindlePeriod | undefined;
+                        // Повторное нажатие на выбранную кнопку приходит
+                        // пустым списком: у группы это «снять выбор»,
+                        // а периодичности без значения не бывает.
+                        if (!next || next === period) return;
+                        const prev = period;
+                        setPeriod(next);
+                        run(saveKindlePeriod(next), k.saved, undefined, () => setPeriod(prev));
+                      }}
+                      variant="outline"
+                      disabled={pending || locked}
+                      className="ml-auto shrink-0 max-sm:mt-1 max-sm:ml-0 max-sm:basis-full"
+                    >
+                      {KINDLE_PERIODS.map((id) => (
+                        <ToggleGroupItem key={id} value={id} className="px-3">
+                          {k.period[id]}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
+                  ) : null}
                 </Field>
 
                 <div className="flex flex-wrap items-center gap-4">
