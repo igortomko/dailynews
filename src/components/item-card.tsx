@@ -46,6 +46,8 @@ const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
 /** Столько после отпускания пальца нажатие считается хвостом удержания. */
 const LONG_PRESS_SUPPRESS_MS = 700;
+/** Отклик под пальцем там, где он есть (Android); iOS его не даёт. */
+const LONG_PRESS_VIBRATE_MS = 15;
 const DWELL_FLOOR_MS = 4000;
 
 /**
@@ -184,11 +186,12 @@ export function ItemCard({
   // Окно взводится только на pointerup: после pointercancel (палец ушёл
   // в прокрутку уже после срабатывания) хвостового нажатия не бывает,
   // и взведённое окно глотало бы следующий настоящий тап.
-  const endPress = () => {
+  // Часы одни — timeStamp события: с ним же сравнивается хвостовое нажатие.
+  const endPress = (event: React.PointerEvent) => {
     cancelPress();
     if (!fired.current) return;
     fired.current = false;
-    releasedAt.current = performance.now();
+    releasedAt.current = event.timeStamp;
   };
   const dropPress = () => {
     cancelPress();
@@ -207,7 +210,7 @@ export function ItemCard({
       timer: setTimeout(() => {
         press.current = null;
         fired.current = true;
-        navigator.vibrate?.(15);
+        navigator.vibrate?.(LONG_PRESS_VIBRATE_MS);
         onSelectedChange(!selectedNow.current);
       }, LONG_PRESS_MS),
     };

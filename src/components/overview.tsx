@@ -100,7 +100,7 @@ function Bar({
         role="toolbar"
         aria-label={t.toolbarLabel}
         className={cn(
-          "pointer-events-auto flex w-full items-center gap-1 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]",
+          "pointer-events-auto flex w-full flex-wrap items-center gap-1 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]",
           "sm:w-auto sm:max-w-page sm:rounded-2xl sm:p-1.5",
           "bg-foreground text-background shadow-lg shadow-black/20",
           "animate-in fade-in-0 slide-in-from-bottom-2 duration-200 motion-reduce:animate-none",
