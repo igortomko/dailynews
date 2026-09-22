@@ -181,13 +181,6 @@ export function DeliveryForm({
               каждую ночь, и такое включают сами. Корона стоит по той же
               проверке, по которой работает предел. */}
           <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel htmlFor="podcast" className="items-center gap-1.5 text-foreground">
-                {t.settings.delivery.telegram.podcast}
-                {noAudio ? <PaywallCrown feature="audio" plan={plan} /> : null}
-              </FieldLabel>
-              <FieldDescription>{t.settings.delivery.telegram.podcastHint}</FieldDescription>
-            </FieldContent>
             <Switch
               id="podcast"
               checked={podcastOn}
@@ -202,6 +195,13 @@ export function DeliveryForm({
                 );
               }}
             />
+            <FieldContent>
+              <FieldLabel htmlFor="podcast" className="items-center gap-1.5 text-foreground">
+                {t.settings.delivery.telegram.podcast}
+                {noAudio ? <PaywallCrown feature="audio" plan={plan} /> : null}
+              </FieldLabel>
+              <FieldDescription>{t.settings.delivery.telegram.podcastHint}</FieldDescription>
+            </FieldContent>
           </Field>
         </CardContent>
       </Card>
@@ -312,12 +312,6 @@ export function DeliveryForm({
                     на одном экране, один по кнопке, другой без, читались бы
                     как «этот сохранился, а тот, наверное, нет». */}
                 <Field orientation="horizontal">
-                  <FieldContent>
-                    <FieldLabel htmlFor="kindle_digest">
-                      {k.sendToKindle}
-                    </FieldLabel>
-                    <FieldDescription>{k.sendToKindleHint(digestOn)}</FieldDescription>
-                  </FieldContent>
                   <Switch
                     id="kindle_digest"
                     checked={digestOn}
@@ -327,6 +321,12 @@ export function DeliveryForm({
                       run(saveKindleDigest(next), k.saved, undefined, () => setDigestOn(!next));
                     }}
                   />
+                  <FieldContent>
+                    <FieldLabel htmlFor="kindle_digest">
+                      {k.sendToKindle}
+                    </FieldLabel>
+                    <FieldDescription>{k.sendToKindleHint(digestOn)}</FieldDescription>
+                  </FieldContent>
                 </Field>
 
                 <div className="flex flex-wrap items-center gap-4">
