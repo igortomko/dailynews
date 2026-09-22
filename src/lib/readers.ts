@@ -696,6 +696,34 @@ const readerTitle = (readerId: unknown, itemId: unknown) => sql`
 `;
 
 /**
+ * Карточка этого читателя: что он видит в ленте и что слышит в озвучке.
+ *
+ * Описание персонально и живёт в `digest_items`, поэтому и озвучка
+ * ключуется парой «выпуск + материал», а не «материал + язык»: два
+ * читателя на русском получают разные описания одной новости, и общий
+ * ключ отдал бы второму текст первого.
+ */
+export async function cardForReader(
+  readerId: number,
+  itemId: number,
+): Promise<{ digestId: number; title: string; summary: string; url: string } | null> {
+  const [row] = await sql<
+    { digest_id: number; title: string; summary: string; url: string }[]
+  >`
+    select d.id as digest_id, di.title, coalesce(di.summary, '') as summary, i.url
+      from dailynews.digest_items di
+      join dailynews.digests d on d.id = di.digest_id
+      join dailynews.items i on i.id = di.item_id
+     where di.item_id = ${itemId} and d.reader_id = ${readerId}
+     order by d.day desc
+     limit 1
+  `;
+  return row
+    ? { digestId: Number(row.digest_id), title: row.title, summary: row.summary, url: row.url }
+    : null;
+}
+
+/**
  * Заголовок материала так, как его видит этот читатель.
  *
  * Перевод заголовка живёт в `digest_items.title` и персонален: в `items`

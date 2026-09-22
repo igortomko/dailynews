@@ -324,6 +324,21 @@ export async function sendAudio(
  */
 const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
 
+/**
+ * Откуда скачать уже отправленное.
+ *
+ * Адрес несёт токен бота, поэтому наружу он не уходит никогда: страница
+ * просит наш адрес, а мы переливаем поток. Ссылка живёт около часа
+ * и берётся заново на каждое воспроизведение — хранить её негде и незачем.
+ */
+export async function audioUrl(fileId: string): Promise<string> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
+  const file = await call<{ file_path?: string }>("getFile", { file_id: fileId });
+  if (!file?.file_path) throw new Error("Telegram не отдал путь к файлу");
+  return `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+}
+
 /** Имя файла для Telegram: кириллицу он принимает, а служебные знаки — нет. */
 const slugOf = (title: string) =>
   title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 60) || "audio";

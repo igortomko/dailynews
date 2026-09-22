@@ -1758,23 +1758,38 @@ async function main() {
     const [firstItem] = await sql<{ id: number }[]>`
       select id from dailynews.items order by id limit 1
     `;
+    const [audioDigest] = await sql<{ id: number }[]>`
+      select id from dailynews.digests where reader_id = ${owner.id} order by day desc limit 1
+    `;
     await sql`
-      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
-      values (${firstItem.id}, 'русском', 'AgADfake', 600, 'ru-RU-SvetlanaNeural')
+      insert into dailynews.card_audio (digest_id, item_id, file_id, seconds, voice)
+      values (${audioDigest.id}, ${firstItem.id}, 'AgADfake', 600, 'ru-RU-SvetlanaNeural')
     `;
     // Доказывается ключом, а не счётом строк: «строка одна» верно и тогда,
     // когда ключ включает читателя, — просто вставляли один раз.
+    // Ключ — карточка, а не «материал + язык»: описание персонально,
+    // и общий ключ отдал бы второму читателю текст первого.
     await rejects(
-      `insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
-       values (${firstItem.id}, 'русском', 'AgADother', 700, 'ru-RU-SvetlanaNeural')`,
-      /item_audio_pkey/,
-      "вторая озвучка на тот же язык отвергается ключом: она общая, а не на читателя",
+      `insert into dailynews.card_audio (digest_id, item_id, file_id, seconds, voice)
+       values (${audioDigest.id}, ${firstItem.id}, 'AgADother', 700, 'ru-RU-SvetlanaNeural')`,
+      /card_audio_pkey/,
+      "вторая озвучка той же карточки отвергается ключом",
     );
-    // А другой язык — это другая озвучка, и он проходит.
-    await sql`
-      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
-      values (${firstItem.id}, 'английском', 'AgADen', 500, 'en-US-AriaNeural')
+    // Карточка соседа на тот же материал — другая озвучка: у него своё
+    // описание, и общая строка звучала бы его новостью чужими словами.
+    const [otherDigest] = await sql<{ id: number }[]>`
+      select id from dailynews.digests where reader_id = ${second.id} order by day desc limit 1
     `;
+    if (otherDigest) {
+      await sql`
+        insert into dailynews.card_audio (digest_id, item_id, file_id, seconds, voice)
+        values (${otherDigest.id}, ${firstItem.id}, 'AgADsecond', 500, 'ru-RU-SvetlanaNeural')
+      `;
+      const [both2] = await sql<{ n: number }[]>`
+        select count(*)::int as n from dailynews.card_audio where item_id = ${firstItem.id}
+      `;
+      assert.equal(both2.n, 2, "у каждого читателя своя озвучка своей карточки");
+    }
 
     await sql`
       insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
@@ -1861,7 +1876,7 @@ async function main() {
       /audio_sends_status_check/,
       "выдуманный шаг озвучки отвергается",
     );
-    console.log("  озвучка: аудио общее по языку, квота и шаги — по читателю");
+    console.log("  озвучка: карточка у каждого своя, квота и шаги — по читателю");
 
     // --- список колонок читателя не должен отставать от таблицы ------------
     //

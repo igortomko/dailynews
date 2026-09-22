@@ -12,6 +12,8 @@ import {
   CheckIcon,
   EllipsisIcon,
   PenLineIcon,
+  PlayIcon,
+  PauseIcon,
   CrownIcon,
   ChevronDownIcon,
   HeadphonesIcon,
@@ -113,7 +115,7 @@ function siteOf(url: string): string | null {
  * означать одно и то же, а два вложенных тернарника рядом расходятся
  * молча и читаются глазом одинаково.
  */
-type AudioState = "idle" | "working" | "sent";
+type AudioState = "idle" | "working" | "sent" | "playing";
 
 /** Как часто спрашиваем шаг и сколько всего ждём: пять минут. */
 const AUDIO_POLL_MS = 2000;
@@ -125,13 +127,17 @@ const AUDIO_POLL_TIMES = 150;
 const AUDIO_ICON: Record<AudioState, ReactNode> = {
   idle: <HeadphonesIcon className="size-3.5" />,
   working: <Spinner className="size-3.5" />,
-  sent: <CheckIcon className="size-3.5" />,
+  // Готовое — это не «сделано», а «можно слушать»: галочка сообщала бы
+  // о конце работы там, где начинается то, ради чего её просили.
+  sent: <PlayIcon className="size-3.5" />,
+  playing: <PauseIcon className="size-3.5" />,
 };
 
 const AUDIO_LABEL = (t: ReturnType<typeof useT>): Record<AudioState, string> => ({
   idle: t.feed.item.audioSpeak,
   working: t.feed.item.audioWorking,
-  sent: t.feed.item.audioSent,
+  sent: t.feed.item.audioPlay,
+  playing: t.feed.item.audioPause,
 });
 
 /**
@@ -210,6 +216,13 @@ export function ItemCard({
   // Живость карточки — ref, а не состояние: цикл опроса читает её между
   // запросами, и перерисовка ему для этого не нужна.
   const aliveRef = useRef(true);
+  // Плеер заводится по первому нажатию, а не на каждой карточке выпуска:
+  // пятьдесят <audio> в разметке качают метаданные и ничего не играют.
+  const player = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => {
+    player.current?.pause();
+    player.current = null;
+  }, []);
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -402,9 +415,34 @@ export function ItemCard({
    * Проценты рисовать нечем: перевод занимает минуту, синтез — десятки
    * секунд, и «43%» о них не говорит ничего, а «перевожу» говорит всё.
    */
+  /**
+   * Слушать здесь же. Файл лежит в Telegram, и адрес скачивания несёт
+   * токен бота — поэтому поток идёт через наш адрес, а не напрямую.
+   */
+  const play = () => {
+    if (!player.current) {
+      const audioEl = new Audio(`/api/audio/play?item_id=${item.id}`);
+      audioEl.addEventListener("ended", () => setAudio("sent"));
+      audioEl.addEventListener("pause", () => setAudio("sent"));
+      audioEl.addEventListener("play", () => setAudio("playing"));
+      audioEl.addEventListener("error", () => {
+        setAudio("sent");
+        toast.error(t.feed.item.audioPlayError);
+      });
+      player.current = audioEl;
+    }
+    if (player.current.paused) void player.current.play().catch(() => {});
+    else player.current.pause();
+  };
+
   const speak = async () => {
     if (!canListen) {
       audioPaywall.open();
+      return;
+    }
+    // Готовое играется, а не озвучивается заново.
+    if (audio === "sent" || audio === "playing") {
+      play();
       return;
     }
     setAudio("working");
@@ -916,7 +954,13 @@ export function ItemCard({
 
           <Hint
             live={hot}
-            tip={canListen ? t.feed.item.audioTooltipReady : t.feed.item.audioTooltipLocked}
+            tip={
+              !canListen
+                ? t.feed.item.audioTooltipLocked
+                : audio === "idle"
+                  ? t.feed.item.audioTooltipReady
+                  : AUDIO_LABEL(t)[audio]
+            }
             button={
               <button
                 type="button"

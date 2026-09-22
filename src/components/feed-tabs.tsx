@@ -11,6 +11,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { ItemCard } from "@/components/item-card";
 import { SearchButton, SearchField } from "@/components/feed-search";
 import { SearchHints } from "@/components/search-memory";
+import { toast } from "sonner";
 import { OverviewDialog, SelectionBar } from "@/components/overview";
 import { useLocale, useT } from "@/components/i18n-provider";
 import { blockOf, reconcile, type Overview } from "@/lib/overview";
@@ -244,6 +245,46 @@ export function FeedTabs({
     setPicked((prev) => ({ ...prev, ids: draft.blocks.map((block) => block.id), draft }));
 
   const selecting = chosen.length > 0;
+
+  const [podcasting, setPodcasting] = useState(false);
+
+  /**
+   * Подкаст из отмеченных карточек.
+   *
+   * Отвечаем сразу и сообщаем словами, а не процентами: карточка, которую
+   * уже слушали, достаётся даром, а новая синтезируется десятки секунд, —
+   * доля готового о времени не говорит ничего.
+   */
+  const buildPodcast = async () => {
+    setPodcasting(true);
+    const toastId = toast.loading(t.feed.overview.podcastWorking, { duration: Infinity });
+    try {
+      const res = await fetch("/api/audio/podcast", {
+        method: "POST",
+        body: JSON.stringify({ item_ids: chosen.map((item) => item.id) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? t.feed.item.audioError);
+      // Частичный сбор называется вслух: отметил пять, услышит три —
+      // узнать об этом надо сейчас, а не по длине файла.
+      if (body.partial) {
+        toast.warning(t.feed.overview.podcastPartial(body.included, body.asked), {
+          id: toastId,
+          description: body.partial,
+        });
+      } else {
+        toast.success(t.feed.overview.podcastQueued(body.included), {
+          id: toastId,
+          description: t.feed.overview.podcastQueuedNote,
+        });
+      }
+      clear();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t.feed.item.audioError, { id: toastId });
+    } finally {
+      setPodcasting(false);
+    }
+  };
 
   // Закрытое поле возвращает фокус туда, откуда его открыли. Иначе Escape
   // роняет фокус в начало страницы, и клавиатурный читатель начинает путь
@@ -603,7 +644,13 @@ export function FeedTabs({
       })}
         </div>
       </div>
-      <SelectionBar count={chosen.length} onClear={clear} onOpen={openEditor} />
+      <SelectionBar
+        count={chosen.length}
+        onClear={clear}
+        onOpen={openEditor}
+        onPodcast={buildPodcast}
+        podcasting={podcasting}
+      />
       {/* Монтируется только с черновиком: до первого «Собрать» ему нечего
           показывать, а состояние копирования не должно жить зря. */}
       {picked.draft ? (
