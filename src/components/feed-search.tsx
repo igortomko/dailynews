@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Kbd } from "@/components/ui/kbd";
 import { SearchForm } from "@/components/search-form";
 import { useT } from "@/components/i18n-provider";
 
@@ -42,7 +43,10 @@ export function SearchButton({
       >
         <SearchIcon />
       </TooltipTrigger>
-      <TooltipContent>{t.feed.search.openHint}</TooltipContent>
+      <TooltipContent>
+        {t.feed.search.openHint}
+        <Kbd>/</Kbd>
+      </TooltipContent>
     </Tooltip>
   );
 }

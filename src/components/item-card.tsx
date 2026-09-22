@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Kbd } from "@/components/ui/kbd";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -904,8 +905,11 @@ export function ItemCard({
               )}
             />
           </TooltipTrigger>
+          {/* Клавиша названа там же, где кнопка: строка под лентой говорит
+              о ней один раз внизу, а рука в этот момент на отметке. */}
           <TooltipContent>
             {selected ? t.feed.overview.tooltipRemove : t.feed.overview.tooltipAdd}
+            <Kbd>x</Kbd>
           </TooltipContent>
         </Tooltip>
         {/* Разделитель между кусками, а не пробел: «Hacker News ~7 мин
@@ -1099,16 +1103,23 @@ export function ItemCard({
           <Hint
             live={hot}
             tip={
-              !canListen
-                ? t.feed.item.audioTooltipLocked(cheapestFor("audio").label)
-                : // Шаг важнее состояния: «Читаю вслух» отвечает на вопрос,
-                  // который задают, глядя на спиннер, а «Озвучиваю…» — нет.
-                  (busyStep ? AUDIO_STEP(t)[busyStep] : undefined) ??
-                  (busy === "idle" ? t.feed.item.audioTooltipReady : AUDIO_LABEL(t)[busy])
+              <>
+                {!canListen
+                  ? t.feed.item.audioTooltipLocked(cheapestFor("audio").label)
+                  : // Шаг важнее состояния: «Читаю вслух» отвечает на вопрос,
+                    // который задают, глядя на спиннер, а «Озвучиваю…» — нет.
+                    ((busyStep ? AUDIO_STEP(t)[busyStep] : undefined) ??
+                    (busy === "idle" ? t.feed.item.audioTooltipReady : AUDIO_LABEL(t)[busy]))}
+                <Kbd>a</Kbd>
+              </>
             }
             button={
               <button
                 type="button"
+                // Клавише «a» нужно за что-то взяться: по подписи её не найти —
+                // подпись переводится, а селектор молча перестал бы совпадать
+                // у того, кто читает ленту не по-русски.
+                data-slot="listen"
                 aria-label={t.feed.item.audioAria}
                 aria-disabled={busy === "working"}
                 onClick={busy === "working" ? undefined : speak}
@@ -1277,7 +1288,11 @@ export function ItemCard({
               href={item.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="decoration-muted-foreground/40 underline-offset-4 hover:underline"
+              // Своей рамки у заголовка нет: фокус на карточке уже виден тем,
+              // что гаснут соседние — то же самое, чем лента отвечает на
+              // наведение. Рамка поверх этого была бы вторым знаком одного
+              // состояния, и два знака читаются как два разных.
+              className="decoration-muted-foreground/40 underline-offset-4 outline-none hover:underline"
               onClick={() => report({ item_id: item.id, event: "outbound" })}
             >
               {typography(title)}
