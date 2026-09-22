@@ -36,7 +36,8 @@ export const errors = {
   digestEmpty: "The issue has no stories in it",
   capReachedRewrite: "That's it for today. The limit resets tomorrow",
   capReachedTopUp: "Nothing more to add today. The limit resets tomorrow",
-  dailyCap: (usd: number) => `You've used today's $${usd}. Back tomorrow`,
+  dailyCap: (usd: number, spent: number, resetIn: string) =>
+    `Spent $${spent.toFixed(2)} of today's $${usd}. The cap resets in ${resetIn}`,
 
   notANewsletter:
     "That looks like a newsletter, not your own channel: we need a Telegram channel, an X account or a blog",

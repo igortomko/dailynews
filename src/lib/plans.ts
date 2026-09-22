@@ -294,6 +294,20 @@ export const cheapestWith = (section: Gated): Plan =>
  * работающей кнопкой и работающая кнопка без короны — одинаково стыдно,
  * и оба случая на глаз незаметны.
  */
+/**
+ * Через сколько отпустит дневной потолок.
+ *
+ * «До завтра» у потолка наступает в полночь UTC (`date_trunc('day', now())`
+ * в `spentToday`), а не в полночь читателя: в Сан-Паулу это девять вечера,
+ * и обещание «завтра» ошибается на три часа в одну сторону, а где-нибудь
+ * в Токио — на девять в другую. Считается в часах и минутах, а показывается
+ * словарём: строка у каждого языка своя.
+ */
+export function capResetsInMinutes(now = new Date()): number {
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(1, Math.round((midnight - now.getTime()) / 60000));
+}
+
 export type FeatureId =
   | "personalization" | "delivery" | "x" | "posts"
   | "topics" | "digest" | "sources" | "cadence" | "audio" | "rich";

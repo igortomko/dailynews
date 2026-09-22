@@ -30,6 +30,7 @@ import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestFor, cheapestWith, FEATURES, kindDenial, MIN_READING_MINUTES, minutesCap,
   READING_MINUTES, sourcesForPlan, targetMinutes, type FeatureId, type Gated,
+  capResetsInMinutes,
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
@@ -44,6 +45,15 @@ import { resolveSuggestions } from "./onboarding";
  * на случай, когда Telegram недоступен, и пускает ровно в ту строку, которая
  * была перенесена из profile.
  */
+/** Остаток до полуночи UTC словами того языка, которым говорит читатель. */
+function resetIn(dict: Awaited<ReturnType<typeof getDict>>): string {
+  const minutes = capResetsInMinutes();
+  const hours = Math.floor(minutes / 60);
+  return hours > 0
+    ? dict.feed.time.hoursLong(hours, minutes % 60)
+    : dict.feed.time.minutesLong(minutes);
+}
+
 export async function login(_prev: unknown, formData: FormData) {
   const password = String(formData.get("password") ?? "");
   // Словарь по умолчанию: на этом экране читатель ещё не опознан,
@@ -1028,7 +1038,7 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
 
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd) };
+    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd, spent, resetIn(await getDict())) };
   }
 
   const channels = await getChannels(reader.id);
@@ -1078,7 +1088,7 @@ export async function writeOpinion(itemId: number): Promise<
 
   const spent = await spentToday(reader.id);
   if (spent >= reader.daily_cap_usd) {
-    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd) };
+    return { error: (await getDict()).errors.dailyCap(reader.daily_cap_usd, spent, resetIn(await getDict())) };
   }
 
   const item = await postSourceFor(reader.id, itemId);

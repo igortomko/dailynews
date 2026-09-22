@@ -1424,7 +1424,7 @@ assert.equal(formatDuration(0.4, timeRu), "~1 минута", "меньше ми�
 // им нельзя: понижение тарифа не гасит лишние источники в каталоге, поэтому
 // решает именно прогон. X платный, и ошибка здесь стоит денег, а не вида.
 import {
-  PLAN_IDS, PLANS, kindDenial, planOf, sourcesForPlan, targetMinutes,
+  PLAN_IDS, PLANS, kindDenial, planOf, sourcesForPlan, targetMinutes, capResetsInMinutes,
 } from "../src/lib/plans";
 import type { Source } from "../src/lib/types";
 
@@ -4725,6 +4725,15 @@ assert.equal(
   for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
     assert.ok(plan.richCards <= plan.maxItems, `разборов не больше, чем карточек: ${plan.id}`);
   }
+}
+
+// «До завтра» у дневного потолка наступает в полночь UTC, а не в полночь
+// читателя: в Сан-Паулу это девять вечера, в Токио — девять утра.
+{
+  const at = (iso: string) => capResetsInMinutes(new Date(iso));
+  assert.equal(at("2026-09-22T23:00:00Z"), 60, "за час до полуночи остаётся час");
+  assert.equal(at("2026-09-22T00:30:00Z"), 1410, "сразу после сброса — почти сутки");
+  assert.ok(at("2026-09-22T23:59:59Z") >= 1, "остаток не бывает нулевым: «через 0 минут» читается как поломка");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
