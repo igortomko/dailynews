@@ -353,7 +353,7 @@ export function TopicChips({
                           event.stopPropagation();
                           remove(index);
                         }}
-                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors touch:size-9 hover:bg-destructive/10 hover:text-destructive"
                       />
                     }
                   >

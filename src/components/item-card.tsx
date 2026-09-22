@@ -497,8 +497,6 @@ export function ItemCard({
               aria-label={selected ? t.feed.overview.remove(title) : t.feed.overview.add(title)}
               className={cn(
                 "size-4 bg-card transition-[opacity,background-color,border-color] duration-150",
-                // На тапе цель под палец — сорок пикселей вокруг.
-                "[@media(hover:none)]:after:-inset-3",
                 selected || selecting ? "opacity-100" : QUIET,
               )}
             />
@@ -565,7 +563,7 @@ export function ItemCard({
                 <button
                   type="button"
                   aria-label={t.feed.item.actionsLabel}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex"
                 />
               }
             >

@@ -91,7 +91,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
             <button
               type="button"
               aria-label={t.feed.dateNav.pickDate}
-              className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-2 tabular-nums transition-colors hover:bg-muted sm:px-1.5 sm:py-0.5"
+              className="flex min-h-10 cursor-pointer items-center gap-1.5 rounded-md px-2 py-2 tabular-nums transition-colors hover:bg-muted sm:min-h-0 sm:px-1.5 sm:py-0.5"
             />
           }
         >
