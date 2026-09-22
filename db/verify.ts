@@ -1396,6 +1396,14 @@ async function main() {
     `;
     await sql`delete from dailynews.sources where id = ${ruleSource.id}`;
 
+    // Индекс из 0045 смотрится в pg_indexes, а не по ответу migrate:
+    // миграцию из одного индекса сверка формы схемы не видит (урок 0041).
+    const [{ topicIdx }] = await sql<{ topicIdx: number }[]>`
+      select count(*)::int as "topicIdx" from pg_indexes
+       where schemaname = 'dailynews' and indexname = 'reader_topics_topic_idx'
+    `;
+    assert.equal(topicIdx, 1, "индекс reader_topics(topic_id) из 0045 должен стоять");
+
     // --- своя тема правится, каталожная и общая — нет ----------------------
     // Подсказка темы — критерий классификации Jev, один на всех, кто тему
     // взял. Правка каталожной темы молча терялась: форма показывала новое

@@ -34,7 +34,7 @@ import {
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { toSlug } from "./slug";
-import { starterBySlug } from "./starter-topics";
+import { formChipOf, starterBySlug } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
 
 /**
@@ -148,8 +148,15 @@ export async function savePersonalization(formData: FormData) {
  */
 export async function saveInterests(formData: FormData) {
   const readerId = await currentReaderId();
-  const chips = JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[];
+  const chips = (JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[])
+    .map((chip) => ({ ...chip, label: String(chip.label ?? "").trim() }));
   if (chips.length === 0) return { error: (await getDict()).errors.pickOneTopic };
+  // Имя уходит в общий справочник и в вопрос Jev как вариант ответа:
+  // пустое там бесполезно всем. Поле добавления пустое отвергает, а имя
+  // прямо в чипе можно стереть — отказ здесь, до записи.
+  if (chips.some((chip) => chip.label === "")) {
+    return { error: (await getDict()).errors.emptyTopicName };
+  }
 
   // Предел проверяется на сервере, а не только в форме: форму рисует
   // браузер, а платит за лишние темы владелец ключа.
@@ -198,7 +205,14 @@ export async function saveInterests(formData: FormData) {
   await writeTopics(readerId, chips, slugs, counts, minutes, true, rules);
 
   revalidatePath("/", "layout");
-  return { ok: true as const };
+  // Форме возвращается то, что записано на самом деле, а не то, что она
+  // прислала: каталожная тема и тема, взятая соседом, остаются прежними,
+  // и без пересева форма показывала бы «сохранённое», которого нет.
+  return {
+    ok: true as const,
+    minutes,
+    chips: (await getReaderTopics(readerId)).map(formChipOf),
+  };
 }
 
 /**

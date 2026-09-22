@@ -41,6 +41,14 @@ export function InterestsForm({
   const [error, setError] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
   const router = useRouter();
+  /**
+   * Чем засеяны чипы. После удачной записи — тем, что сервер записал
+   * на самом деле, а не тем, что прислала форма: каталожная тема и тема,
+   * взятая соседом, остаются прежними, и без пересева форма показывала бы
+   * «сохранённое», которого нет. `version` перемонтирует чипы: их состояние
+   * живёт внутри и на новые props само не откликается.
+   */
+  const [seed, setSeed] = useState({ chips, minutes, version: 0 });
 
   /**
    * Запись. Промисом, а не колбэком: её ждут двое — кнопка и окно
@@ -57,10 +65,11 @@ export function InterestsForm({
           // из серверного действия. Молчать нельзя ни о том, ни о другом.
           try {
             const result = await saveInterests(new FormData(node));
-            if (result?.error) {
-              setError(result.error);
+            if ("error" in result) {
+              setError(result.error ?? t.settings.common.saveError);
               return resolve(false);
             }
+            setSeed((prev) => ({ chips: result.chips, minutes: result.minutes, version: prev.version + 1 }));
           } catch {
             setError(t.settings.common.saveError);
             return resolve(false);
@@ -105,8 +114,9 @@ export function InterestsForm({
         <form ref={form} onChange={touch} onSubmit={(event) => event.preventDefault()}>
           <FieldGroup>
             <TopicChips
-              initial={chips}
-              initialMinutes={minutes}
+              key={seed.version}
+              initial={seed.chips}
+              initialMinutes={seed.minutes}
               perCard={perCard}
               inToday={inToday}
               plan={plan}

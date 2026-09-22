@@ -24,7 +24,7 @@
  * свежей записью сюда не попали: источник, принятый пустым, через неделю
  * неотличим от заброшенного.
  */
-import type { Source } from "./types";
+import type { ReaderTopic, Source } from "./types";
 import { toSlug } from "./slug";
 
 export type StarterFeed = { kind: Source["kind"]; url: string; label: string };
@@ -350,7 +350,8 @@ export const starterBySlug = new Map(STARTER_TOPICS.map((topic) => [topic.slug, 
  * условия разошлись бы молча, и форма показывала бы поле, чью правку
  * сервер отбросит. Проверяется в `npm test`.
  */
-export const catalogSlug = (slug: string): boolean => starterBySlug.has(slug);
+export const catalogTopic = (slug: string): StarterTopic | undefined => starterBySlug.get(slug);
+export const catalogSlug = (slug: string): boolean => catalogTopic(slug) !== undefined;
 
 /**
  * Своя ли тема по имени, набранному руками: имя, сводящееся к каталожному
@@ -358,6 +359,20 @@ export const catalogSlug = (slug: string): boolean => starterBySlug.has(slug);
  * тем же `toSlug`, что и на сервере при записи.
  */
 export const ownLabel = (label: string): boolean => !catalogSlug(toSlug(label));
+
+/**
+ * Тема читателя в том виде, в каком её рисует форма интересов: цель как
+ * число, признак «своя» — по тому же правилу, что и на сервере. Одна
+ * функция на страницу и на ответ действия после записи: форма после
+ * сохранения пересеивается тем, что сервер записал на самом деле.
+ */
+export const formChipOf = (topic: ReaderTopic) => ({
+  slug: topic.slug,
+  label: topic.label,
+  hint: topic.hint,
+  count: topic.weight,
+  own: !catalogSlug(topic.slug) && !topic.shared,
+});
 
 /**
  * Порядок показа: сначала то, что уже выбрано соседями по выбору, потом

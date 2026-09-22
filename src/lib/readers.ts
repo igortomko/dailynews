@@ -5,7 +5,7 @@ import { DEFAULT_LOCALE, type Locale } from "./i18n/locale";
 import { effectiveVoice } from "./lemon";
 import { cardMinutes } from "./reading-time";
 import type { Rules } from "./rules";
-import { starterBySlug } from "./starter-topics";
+import { catalogTopic } from "./starter-topics";
 import type { Sql, TransactionSql } from "postgres";
 
 /**
@@ -104,7 +104,7 @@ export async function upsertTopic(
   readerId: number,
   topic: { slug: string; label: string; hint: string; position: number },
 ): Promise<number> {
-  const starter = starterBySlug.get(topic.slug);
+  const starter = catalogTopic(topic.slug);
   const [row] = await db<{ id: number }[]>`
     insert into dailynews.topics (slug, label, hint, position)
     values (
