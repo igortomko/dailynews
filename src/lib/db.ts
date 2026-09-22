@@ -1,4 +1,4 @@
-import { setInterval } from "node:timers";
+import { clearInterval, setInterval } from "node:timers";
 import postgres from "postgres";
 
 /**
@@ -54,8 +54,14 @@ export const sql = postgres(url, {
 // setInterval взят из node:timers явно: с `lib: dom` в tsconfig глобальный
 // мог бы разрешиться в браузерную сигнатуру без unref, смотря по порядку
 // подключения типов.
+// Ручка лежит на globalThis: в dev HMR перечитывает модуль и заводит новый
+// пул, и без этого каждая перечитка добавляла бы ещё один таймер, держащий
+// свой старый пул открытым до конца процесса.
 if (process.env.NEXT_RUNTIME) {
-  setInterval(() => {
+  const held = globalThis as { __dbKeepalive?: ReturnType<typeof setInterval> };
+  clearInterval(held.__dbKeepalive);
+  held.__dbKeepalive = setInterval(() => {
     sql`select 1`.catch(() => {});
-  }, 5 * 60 * 1000).unref();
+  }, 5 * 60 * 1000);
+  held.__dbKeepalive.unref();
 }

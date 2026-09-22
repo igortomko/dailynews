@@ -27,7 +27,7 @@ import {
 // Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
 import { feed as ruFeed } from "../src/lib/i18n/ru/feed";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
-import { tsConfigFor } from "../src/lib/search";
+import { SEARCH_CONFIG, tsConfigFor } from "../src/lib/search";
 import { sleepVerdict } from "../src/lib/sleep";
 import { rulesOf } from "../src/lib/rules";
 
@@ -438,7 +438,13 @@ async function runForReader(
         ${written?.reading ? sql.json(written.reading) : null},
         ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
         ${scored?.total ?? null},
-        ${tsConfigFor(voice.language)}::regconfig
+        -- Имя словаря сверяется с каталогом, а не приводится к regconfig
+        -- напрямую: неизвестное имя роняло бы вставку уже оплаченного
+        -- выпуска. Нет такого словаря — общий, как у строк по умолчанию.
+        coalesce(
+          (select oid from pg_ts_config where cfgname = ${tsConfigFor(voice.language)}),
+          ${SEARCH_CONFIG}::regconfig::oid
+        )::regconfig
       )
       on conflict (digest_id, item_id) do update
         set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document,

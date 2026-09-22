@@ -33,7 +33,7 @@ import {
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
-import { tsConfigFor } from "./search";
+import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
 import { starterBySlug } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
@@ -600,7 +600,10 @@ async function rewriteFor(reader: Reader) {
       update dailynews.digest_items
          set title = ${item.title_ru}, summary = ${item.summary ?? ""},
              summary_document = ${item.reading ? sql.json(item.reading) : null},
-             ts_config = ${tsConfigFor(voice.language)}::regconfig
+             ts_config = coalesce(
+               (select oid from pg_ts_config where cfgname = ${tsConfigFor(voice.language)}),
+               ${SEARCH_CONFIG}::regconfig::oid
+             )::regconfig
        where digest_id = ${digest.id} and item_id = ${survivor.id}
        returning item_id
     `;
@@ -824,7 +827,12 @@ async function fillDigest(reader: Reader) {
           ${text?.reading ? tx.json(text.reading) : null},
           ${scored ? sql.json(scored.axes as unknown as Parameters<typeof sql.json>[0]) : null},
           ${scored?.total ?? null},
-          ${tsConfigFor(voice.language)}::regconfig
+          -- Имя словаря через каталог, с откатом на общий: неизвестное имя
+          -- роняло бы вставку уже оплаченного выпуска (см. pipeline/run.ts).
+          coalesce(
+            (select oid from pg_ts_config where cfgname = ${tsConfigFor(voice.language)}),
+            ${SEARCH_CONFIG}::regconfig::oid
+          )::regconfig
         )
         on conflict (digest_id, item_id) do update
         set title=excluded.title, summary=excluded.summary, summary_document=excluded.summary_document,

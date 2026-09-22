@@ -38,7 +38,7 @@ function Arrow({ icon: Icon }: { icon: typeof ChevronLeftIcon }) {
 const DayPicker = dynamic(() => import("@/components/day-picker").then((m) => m.DayPicker), {
   ssr: false,
   loading: () => (
-    <div className="flex h-72 w-64 items-center justify-center">
+    <div className="flex h-72 w-[13.25rem] items-center justify-center">
       <Spinner />
     </div>
   ),

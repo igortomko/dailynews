@@ -18,6 +18,7 @@
  */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { TS_CONFIGS } from "../src/lib/search";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
@@ -646,11 +647,31 @@ async function main() {
       // Словарь выпуска пишется при письме; у посеянных строк — общий
       // по умолчанию, и вектор описания считается им.
       const [dictionary] = await sql<{ ts_config: string; ready: boolean }[]>`
-        select ts_config::text as ts_config, tsv is not null as ready
+        select ts_config::text as ts_config, length(tsv) > 0 as ready
           from dailynews.digest_items where item_id = ${ids[2]} limit 1
       `;
       assert.equal(dictionary.ts_config, "russian", "словарь выпуска по умолчанию — общий");
-      assert.ok(dictionary.ready, "вектор описания считается при записи");
+      assert.ok(dictionary.ready, "вектор описания не пустой: текст разобран при записи");
+
+      // Каждое имя из TS_CONFIGS обязано быть словарём этого Postgres: писатели
+      // выпуска приводят его к regconfig, и незнакомое имя роняло бы вставку
+      // уже оплаченного выпуска. PGlite несёт тот же набор, что сервер.
+      const known = new Set(
+        (await sql<{ cfgname: string }[]>`select cfgname from pg_ts_config`).map((row) => row.cfgname),
+      );
+      assert.deepEqual(
+        Object.values(TS_CONFIGS).filter((name) => !known.has(name)),
+        [],
+        "словарь из TS_CONFIGS, которого нет у Postgres",
+      );
+      // А на случай чужого имени у писателей стоит откат на общий словарь.
+      const [{ fallback }] = await sql<{ fallback: string }[]>`
+        select coalesce(
+                 (select oid from pg_ts_config where cfgname = ${"нет-такого"}),
+                 ${"russian"}::regconfig::oid
+               )::regconfig::text as fallback
+      `;
+      assert.equal(fallback, "russian", "неизвестное имя словаря уходит в общий, а не в ошибку");
 
       const archive = await queries.archiveSize(owner.id);
       assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
@@ -729,6 +750,40 @@ async function main() {
         (await queries.searchArchive(owner.id, "prices")).hits.length,
         1,
         "словоформа английского заголовка обязана сводиться тем же словарём",
+      );
+
+      // Словарь выпуска — свой у каждой строки, и запрос к описанию
+      // разбирается им же. Выпуск, помеченный английским словарём, теряет
+      // русские склонения: «шахта» из описания «…строятся шахты» не сводится,
+      // а точная форма «шахты» находится по-прежнему — своим вектором
+      // и своим запросом. Заголовок источника при этом ищется общим словарём
+      // независимо от словаря выпуска. Сравни вектор выпуска с общим запросом
+      // (или наоборот) — и точная форма перестанет находиться.
+      await sql`
+        update dailynews.digest_items set ts_config = 'english'::regconfig where item_id = ${ids[2]}
+      `;
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахта")).hits.length,
+        0,
+        "английский словарь выпуска русских склонений не сводит",
+      );
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахты")).hits.length,
+        1,
+        "точная форма находится своим словарём выпуска",
+      );
+      assert.equal(
+        (await queries.searchArchive(owner.id, "price")).hits.length,
+        1,
+        "заголовок источника ищется общим словарём при любом словаре выпуска",
+      );
+      await sql`
+        update dailynews.digest_items set ts_config = 'russian'::regconfig where item_id = ${ids[2]}
+      `;
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахта")).hits.length,
+        1,
+        "вектор пересчитывается вместе со словарём: склонение снова сводится",
       );
 
       // Самое дорогое здесь — чужой архив: он приходит вовремя и не твой.

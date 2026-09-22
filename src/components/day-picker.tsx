@@ -3,6 +3,7 @@
 import { ru, enUS } from "react-day-picker/locale";
 import { Calendar } from "@/components/ui/calendar";
 import { toDay } from "@/lib/day";
+import type { Locale } from "@/lib/i18n/locale";
 
 /**
  * Календарь выбора дня — отдельным модулем, чтобы шапка ленты грузила его
@@ -21,7 +22,7 @@ export function DayPicker({
 }: {
   day: string;
   available: Set<string>;
-  locale: string;
+  locale: Locale;
   onPick: (day: string) => void;
 }) {
   return (
