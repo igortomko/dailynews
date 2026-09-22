@@ -1,4 +1,5 @@
 import { currentReader } from "@/lib/session";
+import { kindlePeriodOf } from "@/lib/types";
 import { effectivePlan } from "@/lib/lemon";
 import { DeliveryForm } from "./form";
 
@@ -12,6 +13,7 @@ export default async function DeliveryPage() {
       username={reader.username}
       kindleAddress={reader.kindle_address ?? ""}
       kindleDigest={reader.kindle_digest}
+      kindlePeriod={kindlePeriodOf(reader.kindle_period)}
       podcast={reader.podcast}
       kindleApproved={reader.kindle_approved}
       sender={reader.kindle_sender}

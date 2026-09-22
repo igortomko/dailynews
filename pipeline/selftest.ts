@@ -69,7 +69,7 @@ import {
   applyRules, asNames, cleanRules, compile, mentionText, mergeDraft, NO_RULES, RULE_LIMITS, rulesOf,
   splitNames, withVariants,
 } from "../src/lib/rules";
-import { digestHtml, kindleDigestVerdict } from "./kindle";
+import { digestHtml, isWeeklyDay, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
@@ -89,7 +89,7 @@ import {
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { STING_MP3 } from "./sting";
-import { DEFAULT_WEIGHTS } from "../src/lib/types";
+import { DEFAULT_WEIGHTS, kindlePeriodOf } from "../src/lib/types";
 import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, langTagFor, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
@@ -1060,14 +1060,53 @@ assert.equal(
 );
 
 // --- выпуск для Kindle ----------------------------------------------------------
-const book = digestHtml("2026-09-19", "интро", [
-  { title: "Заголовок & <тег>", summary: "описание", url: "https://example.com/a", source_label: "И", topic_label: "Т" },
-]);
+const article = (title: string) => ({
+  title, summary: "описание", url: "https://example.com/a", source_label: "И", topic_label: "Т",
+});
+const book = digestHtml([{ day: "2026-09-19", intro: "интро", articles: [article("Заголовок & <тег>")] }]);
 // Без объявленной кодировки Kindle читает кириллицу как мусор,
 // и выпуск приходит целым на вид.
 assert.ok(book.includes('<meta charset="utf-8">'), "кодировка должна быть объявлена");
 assert.ok(book.includes("Заголовок &amp; &lt;тег&gt;"), "разметка из заголовка должна экранироваться");
 assert.ok(!book.includes("<тег>"), "сырой тег из источника не должен попасть в книгу");
+assert.ok(book.includes("<h2>Заголовок"), "в книге одного дня глава — это статья");
+assert.ok(!book.includes("<h3>"), "второго уровня в дневной книге нет: делить нечего");
+
+// Недельная книга: те же выпуски, что пришли бы письмами, в одном файле.
+// День становится главой, статья — разделом внутри неё: оглавление читалки
+// строится по заголовкам, и статья на уровне дня развалила бы семь дней
+// в плоский список из сотни строк.
+const week = digestHtml([
+  { day: "2026-09-16", intro: "вступление среды", articles: [article("Среда")] },
+  { day: "2026-09-22", intro: "вступление вторника", articles: [article("Вторник")] },
+]);
+assert.ok(week.includes("<h1>Reporta, 2026-09-16 — 2026-09-22</h1>"), "заголовок книги — диапазон дат");
+assert.ok(week.includes("<h2>2026-09-16</h2>") && week.includes("<h2>2026-09-22</h2>"), "каждый день — своя глава");
+assert.ok(week.includes("<h3>Среда</h3>"), "статья внутри дня уходит уровнем ниже");
+assert.ok(
+  week.indexOf("вступление среды") < week.indexOf("Среда"),
+  "вступление дня стоит при своём дне, а не вынесено наверх книги",
+);
+assert.ok(
+  week.indexOf("2026-09-16") < week.indexOf("2026-09-22"),
+  "дни идут от старого к новому: книгу читают подряд",
+);
+// Разрыв страницы на обоих уровнях: без него день начинался бы посреди
+// страницы предыдущего, и в читалке это видно только на живом файле.
+assert.ok(week.includes("h2,h3{page-break-before:always}"), "разрыв страницы у дня и у статьи");
+
+// Суббота выбрана днём недельной книги, и считается она в полдень UTC:
+// у полуночи в отрицательном поясе суббота становится пятницей.
+assert.equal(isWeeklyDay("2026-09-19"), true, "19 сентября 2026 — суббота");
+assert.equal(isWeeklyDay("2026-09-20"), false, "воскресенье — не день недельной книги");
+assert.equal(isWeeklyDay("2026-09-22"), false, "вторник — не день недельной книги");
+
+// Незнакомое значение колонки читается как «каждый день»: не слать ничего
+// из-за нечитаемой строки значит подарить читателю неделю тишины.
+assert.equal(kindlePeriodOf("weekly"), "weekly");
+assert.equal(kindlePeriodOf("daily"), "daily");
+assert.equal(kindlePeriodOf(null), "daily", "пустая колонка — это ежедневная доставка");
+assert.equal(kindlePeriodOf("еженедельно"), "daily", "незнакомое значение не выключает доставку");
 
 // --- цена вызова --------------------------------------------------------------
 // Без верной цены событие о расходе — выдумка, а дневной потолок читателя
@@ -1793,37 +1832,73 @@ for (const file of ["0019_plan", "0020_readers"]) {
 {
   const full = {
     kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true,
+    kindle_period: "daily", kindle_weekly_at: null,
     plan: "pro", subscription_id: "sub_1", subscription_status: "active", plan_ends_at: null,
   };
-  const ok = kindleDigestVerdict(full);
+  // Вторник: у ежедневной доставки день ничего не решает, у недельной решает всё.
+  const TUE = "2026-09-22";
+  const SAT = "2026-09-19";
+  const ok = kindleDigestVerdict(full, TUE);
   assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
   assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_digest: false }),
+    kindleDigestVerdict({ ...full, kindle_digest: false }, TUE),
     { send: false, reason: "switched-off" },
     "выключенный переключатель отменяет выпуск, хотя адрес на месте",
   );
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_address: null }),
+    kindleDigestVerdict({ ...full, kindle_address: null }, TUE),
     { send: false, reason: "no-address" },
     "без адреса слать некуда, и говорить об этом не о чем",
   );
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_sender: null }),
+    kindleDigestVerdict({ ...full, kindle_sender: null }, TUE),
     { send: false, reason: "no-sender" },
     "вписанный адрес без обратного — сбой, о нём сообщают в лог",
   );
   // Переключатель мог остаться включённым с прежнего тарифа, а письмо —
   // это чужой лимит у Amazon и счёт у Resend.
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, plan: "free" }),
+    kindleDigestVerdict({ ...full, plan: "free" }, TUE),
     { send: false, reason: "plan" },
     "на тарифе без читалки выпуск книгой не уходит",
   );
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, subscription_status: "expired", plan_ends_at: null }),
+    kindleDigestVerdict({ ...full, subscription_status: "expired", plan_ends_at: null }, TUE),
     { send: false, reason: "plan" },
     "истёкшая подписка перестаёт слать на читалку в ту же секунду",
+  );
+
+  // Недельная: шесть дней из семи прогон не шлёт ничего и молчит об этом,
+  // в субботу шлёт книгу за неделю.
+  const weekly = { ...full, kindle_period: "weekly" };
+  assert.deepEqual(
+    kindleDigestVerdict(weekly, TUE),
+    { send: false, reason: "weekly-other-day" },
+    "в будний день недельная книга не уходит",
+  );
+  const sat = kindleDigestVerdict(weekly, SAT);
+  assert.equal(sat.send && sat.period, "weekly", "в субботу уходит именно недельная");
+  // Прогон запускают дважды за сутки, а Amazon считает объём по адресу
+  // отправителя и гасит его без предупреждения читателю.
+  assert.deepEqual(
+    kindleDigestVerdict({ ...weekly, kindle_weekly_at: SAT }, SAT),
+    { send: false, reason: "weekly-sent" },
+    "вторая книга за те же сутки не уходит",
+  );
+  assert.equal(
+    kindleDigestVerdict({ ...weekly, kindle_weekly_at: "2026-09-12" }, SAT).send,
+    true,
+    "отметка прошлой субботы этой не мешает",
+  );
+  // Ежедневная от дня не зависит: она приходит и в субботу тоже.
+  assert.equal(kindleDigestVerdict(full, SAT).send, true, "дневная книга уходит и в субботу");
+  // Незнакомое значение колонки — это «каждый день»: не слать ничего
+  // из-за нечитаемой строки хуже, чем прислать привычное.
+  assert.equal(
+    kindleDigestVerdict({ ...full, kindle_period: "раз в месяц" }, TUE).send,
+    true,
+    "незнакомая периодичность не выключает доставку",
   );
 }
 

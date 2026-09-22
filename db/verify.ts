@@ -488,6 +488,44 @@ async function main() {
       !secondFeed.some((item) => String(item.id) === String(ids[0])),
       "второй читатель не должен видеть выпуск владельца",
     );
+    // --- недельная книга: те же выпуски, что пришли бы письмами ------------------
+    // Запрос про содержимое, значит читатель первым аргументом: без него книга
+    // приходит вовремя, целой и с чужими выпусками.
+    const ownerWeek = await queries.weekIssues(owner.id, today);
+    const secondWeek = await queries.weekIssues(second.id, today);
+    assert.equal(ownerWeek.length, 1, "выпуск сегодняшнего дня — одна глава книги");
+    assert.equal(
+      ownerWeek[0].articles.length, ownerFeed.length,
+      "в книге ровно то, что читатель видел в ленте",
+    );
+    assert.equal(ownerWeek[0].day, today, "глава подписана своим днём");
+    assert.ok(
+      !secondWeek.some((issue) => issue.articles.some((a) => a.title.startsWith("Владелец:"))),
+      "второй читатель не должен получить книгой выпуск владельца",
+    );
+    // Окно считается вычитанием дней из даты, и без каста Postgres выбирает
+    // date - date -> integer: запрос упал бы на разборе, а не отдал бы не то.
+    assert.deepEqual(
+      await queries.weekIssues(owner.id, "1999-01-01"), [],
+      "за неделю без выпусков книга пустая, а не чужая",
+    );
+    // Палец вниз убирает материал и из книги: «убрать из ленты» не может
+    // означать «убрать с одного экрана из двух». След не остаётся — проверка,
+    // оставляющая его, однажды объяснит чужой провал.
+    await sql`
+      insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+      values (${owner.id}, ${ids[0]}, 'down', 95, 0.8)
+    `;
+    const afterHide = await queries.weekIssues(owner.id, today);
+    assert.equal(
+      afterHide[0].articles.length, ownerWeek[0].articles.length - 1,
+      "скрытое пальцем вниз в книгу не едет",
+    );
+    await sql`
+      delete from dailynews.reads
+       where reader_id = ${owner.id} and item_id = ${ids[0]} and event = 'down'
+    `;
+
     assert.equal(typeof ownerFeed[0].axes, "object", "axes должны прийти объектом, а не строкой");
     // Двойное кодирование не видно на чтении, но ломает извлечение осей в SQL.
     const [stored] = await sql<{ kind: string | null; shape: string }[]>`

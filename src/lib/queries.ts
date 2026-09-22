@@ -3,6 +3,8 @@ import { sql } from "./db";
 import { anyOf, HL_END, HL_OPTIONS, HL_START, SEARCH_CONFIG } from "./search";
 import { isDay } from "./day";
 import { stripHtml } from "../../pipeline/fetch";
+import { WEEK_DAYS, type Issue } from "../../pipeline/kindle";
+import { parseStoredReading } from "./reading-document";
 import type { SourceYield } from "./source-health";
 import type { Axes, Source } from "./types";
 import type { Publication } from "./story";
@@ -731,3 +733,64 @@ export async function archiveSize(readerId: number): Promise<{ items: number; da
   return row ?? { items: 0, days: 0 };
 }
 
+/**
+ * Выпуски недели для книги: семь дней по сегодняшний включительно.
+ *
+ * Читателем первым аргументом, как всякий запрос о содержимом: без него
+ * книга придёт вовремя, целой и с чужими выпусками. Дни — от старого
+ * к новому, карточки внутри дня — в порядке отбора, тем же `total desc`,
+ * что и в ленте: книга обязана совпадать с тем, что читатель видел.
+ *
+ * Скрытое пальцем вниз в книгу не едет: «убрать из ленты» не может означать
+ * «убрать с одного экрана из двух». Заглушки несобравшихся карточек — тоже,
+ * по той же причине, по которой их не показывает лента.
+ */
+export async function weekIssues(readerId: number, endDay: string): Promise<Issue[]> {
+  const rows = await sql<{
+    day: string;
+    intro: string;
+    title: string;
+    summary: string;
+    summary_document: unknown;
+    url: string;
+    source_label: string;
+    topic_label: string;
+  }[]>`
+    select d.day::text as day, d.intro,
+           di.title, di.summary, di.summary_document,
+           i.url, s.label as source_label,
+           coalesce(t.label, '') as topic_label
+      from dailynews.digests d
+      join dailynews.digest_items di on di.digest_id = d.id
+      join dailynews.items i on i.id = di.item_id
+      join dailynews.sources s on s.id = i.source_id
+ left join dailynews.scores sc on sc.item_id = i.id
+ left join dailynews.topics t on t.id = sc.topic_id
+     -- Каст обязателен: у нетипизированного параметра Postgres выбирает
+     -- date - date -> integer вместо date - integer -> date.
+     where d.reader_id = ${readerId}
+       and d.day <= ${endDay}::date
+       and d.day > ${endDay}::date - ${WEEK_DAYS}::int
+       and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.item_id = i.id and r.reader_id = ${readerId} and r.event = 'down'
+       )
+     order by d.day asc, di.total desc
+  `;
+
+  const byDay = new Map<string, Issue>();
+  for (const row of rows) {
+    const issue = byDay.get(row.day) ?? { day: row.day, intro: row.intro, articles: [] };
+    issue.articles.push({
+      title: row.title,
+      summary: row.summary,
+      reading: parseStoredReading(row.summary_document) ?? undefined,
+      url: row.url,
+      source_label: row.source_label,
+      topic_label: row.topic_label,
+    });
+    byDay.set(row.day, issue);
+  }
+  return [...byDay.values()];
+}

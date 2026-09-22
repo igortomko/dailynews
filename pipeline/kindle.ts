@@ -16,6 +16,7 @@ import { typography } from "../src/lib/typography";
 import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { cheapestFor, FEATURES, type Plan } from "../src/lib/plans";
+import { kindlePeriodOf, type KindlePeriod } from "../src/lib/types";
 import { effectivePlan } from "../src/lib/lemon";
 /** Домен отправителя. Переменная старше константы: она уже есть
  *  в окружении, и константа рядом с ней — настройка, которой никто
@@ -34,14 +35,62 @@ export type Article = {
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-export function digestHtml(day: string, intro: string, articles: Article[]): string {
-  const body = articles
-    .map((a) =>
+/**
+ * Один выпуск внутри книги. Их бывает семь: недельная книга — это те же
+ * выпуски, что пришли бы семью письмами, собранные в один файл.
+ */
+export type Issue = { day: string; intro: string; articles: Article[] };
+
+/**
+ * Заголовок книги и тема письма. Диапазон, а не «за неделю»: дата отвечает
+ * на вопрос «что я пропустил», а слово «неделя» — нет, и в библиотеке
+ * читалки семь таких книг подряд неразличимы.
+ *
+ * Даты сырые, как и у дневной: книга уезжает читателю с любым языком
+ * интерфейса, а ISO-дата читается одинаково у всех — в отличие от
+ * «16 сентября», которое пришлось бы переводить на шестнадцать языков
+ * ради строки в заголовке файла.
+ */
+export const bookTitle = (issues: Issue[]): string =>
+  issues.length > 1
+    ? `Reporta, ${issues[0].day} — ${issues[issues.length - 1].day}`
+    : `Reporta за ${issues[0]?.day ?? ""}`;
+
+/**
+ * Книга: один выпуск или несколько.
+ *
+ * Дни идут от старого к новому — это книга, а не лента: читают её подряд,
+ * и обратный порядок означал бы, что понедельник объясняется после среды.
+ *
+ * Уровень заголовка статьи зависит от числа дней, и это не украшение:
+ * оглавление читалки строится по заголовкам, и в недельной книге день
+ * обязан быть главой, а статья внутри неё. Оставь статью на h2 — и семь
+ * дней встанут в оглавлении вперемешку с сотней заголовков.
+ */
+export function digestHtml(issues: Issue[]): string {
+  const week = issues.length > 1;
+  const title = bookTitle(issues);
+
+  const articleHtml = (a: Article) =>
+    [
+      `<p class="meta"><a href="${escapeHtml(/^https?:\/\//i.test(a.url) ? a.url : "#")}">${escapeHtml(a.source_label)}</a> · ${escapeHtml(a.topic_label)}</p>`,
+      `<${week ? "h3" : "h2"}>${escapeHtml(typography(a.title))}</${week ? "h3" : "h2"}>`,
+      ...(a.reading?.document ? [a.reading.notice, documentText(a.reading.document)] : [a.summary]).filter(Boolean).join("\n\n").split(/\n\n+/).map((p) => `<p>${escapeHtml(typography(p)).replace(/\n/g, "<br>")}</p>`),
+    ].join("\n");
+
+  const body = issues
+    .map((issue) =>
       [
-        `<p class="meta"><a href="${escapeHtml(/^https?:\/\//i.test(a.url) ? a.url : "#")}">${escapeHtml(a.source_label)}</a> · ${escapeHtml(a.topic_label)}</p>`,
-        `<h2>${escapeHtml(typography(a.title))}</h2>`,
-        ...(a.reading?.document ? [a.reading.notice, documentText(a.reading.document)] : [a.summary]).filter(Boolean).join("\n\n").split(/\n\n+/).map((p) => `<p>${escapeHtml(typography(p)).replace(/\n/g, "<br>")}</p>`),
-      ].join("\n"),
+        // Вступление дня остаётся при своём дне: оно написано про этот
+        // выпуск, и вынесенное наверх книги объясняло бы вторник словами
+        // субботы. Нового текста для книги не пишется — это был бы вызов
+        // модели за то, что уже написано семь раз.
+        week ? `<h2>${escapeHtml(issue.day)}</h2>` : "",
+        issue.intro ? `<p>${escapeHtml(issue.intro)}</p>` : "",
+        issue.articles.map(articleHtml).join("\n\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     )
     .join("\n\n");
 
@@ -50,11 +99,10 @@ export function digestHtml(day: string, intro: string, articles: Article[]): str
   return [
     "<!doctype html>",
     '<html lang="ru"><head><meta charset="utf-8">',
-    `<title>Reporta за ${escapeHtml(day)}</title>`,
-    "<style>body{font-family:serif}h2{page-break-before:always}.meta{color:#555;font-size:.85em}</style>",
+    `<title>${escapeHtml(title)}</title>`,
+    `<style>body{font-family:serif}${week ? "h2,h3" : "h2"}{page-break-before:always}.meta{color:#555;font-size:.85em}</style>`,
     "</head><body>",
-    `<h1>Reporta за ${escapeHtml(day)}</h1>`,
-    intro ? `<p>${escapeHtml(intro)}</p>` : "",
+    `<h1>${escapeHtml(title)}</h1>`,
     body,
     "</body></html>",
   ].join("\n");
@@ -69,25 +117,29 @@ export const senderAddress = (local: string) => `${local}@${DOMAIN}`;
 export async function sendToKindle(options: {
   to: string;
   sender: string;
-  day: string;
-  intro: string;
-  articles: Article[];
+  issues: Issue[];
 }): Promise<boolean> {
   const key = process.env.RESEND_API_KEY;
   if (!key) return false;
+  // Пустая книга письмом не уходит: Amazon примет её и положит в библиотеку
+  // пустой файл, а читатель прочитает это как «за неделю не было ничего»,
+  // хотя означать это может отпуск, паузу или сбой прогона.
+  if (options.issues.length === 0) return false;
 
-  const html = digestHtml(options.day, options.intro, options.articles);
+  const html = digestHtml(options.issues);
+  const title = bookTitle(options.issues);
+  const name = `reporta-${options.issues[0].day}${options.issues.length > 1 ? `-${options.issues[options.issues.length - 1].day}` : ""}`;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
       from: `Reporta <${senderAddress(options.sender)}>`,
       to: [options.to],
-      subject: `Reporta за ${options.day}`,
-      text: `Выпуск за ${options.day} — во вложении.`,
+      subject: title,
+      text: `${title} — во вложении.`,
       attachments: [
         {
-          filename: `reporta-${options.day}.html`,
+          filename: `${name}.html`,
           content: Buffer.from(html, "utf8").toString("base64"),
         },
       ],
@@ -113,6 +165,10 @@ type KindleTarget = {
   kindle_address: string | null;
   kindle_sender: string | null;
   kindle_digest: boolean;
+  /** 'daily' или 'weekly'; свободный текст читается как 'daily'. */
+  kindle_period: string;
+  /** День последней недельной отправки, 'YYYY-MM-DD' или null. */
+  kindle_weekly_at: string | null;
   // Тариф целиком, а не признак: действующий считается из статуса и даты,
   // и второй способ его вычислить разошёлся бы с первым.
   plan: string;
@@ -136,10 +192,39 @@ type KindleTarget = {
  * ручную отправку.
  */
 export type KindleVerdict =
-  | { send: true; to: string; sender: string }
-  | { send: false; reason: "no-address" | "no-sender" | "switched-off" | "plan" };
+  | { send: true; to: string; sender: string; period: KindlePeriod }
+  | {
+      send: false;
+      reason:
+        | "no-address"
+        | "no-sender"
+        | "switched-off"
+        | "plan"
+        | "weekly-other-day"
+        | "weekly-sent";
+    };
 
-export function kindleDigestVerdict(reader: KindleTarget): KindleVerdict {
+/**
+ * Сколько выпусков входит в недельную книгу. Семь, включая сегодняшний:
+ * читатель заказал не «неделю», а то, что пришло бы ему письмами, — и день,
+ * выпавший из окна, не вернётся уже никогда.
+ */
+export const WEEK_DAYS = 7;
+
+/**
+ * Суббота. День недели у недельной книги выбран, а не настраивается: книга
+ * на семь выпусков — это чтение на выходных, а пришедшая в среду она
+ * читается с телефона по частям, то есть ровно как лента, только позже.
+ *
+ * Полдень в UTC, а не полночь: день приходит датой без времени, и `T00:00`
+ * в отрицательном поясе означал бы предыдущие сутки — суббота стала бы
+ * пятницей у всех, кто западнее Гринвича.
+ */
+export const WEEKLY_DOW = 6;
+export const isWeeklyDay = (day: string): boolean =>
+  new Date(`${day}T12:00:00Z`).getUTCDay() === WEEKLY_DOW;
+
+export function kindleDigestVerdict(reader: KindleTarget, day: string): KindleVerdict {
   // Тариф проверяется и здесь, а не только в форме: переключатель мог
   // остаться включённым с прежнего тарифа, а письмо — это чужой лимит
   // у Amazon и счёт у Resend.
@@ -147,7 +232,17 @@ export function kindleDigestVerdict(reader: KindleTarget): KindleVerdict {
   if (!reader.kindle_address) return { send: false, reason: "no-address" };
   if (!reader.kindle_sender) return { send: false, reason: "no-sender" };
   if (!reader.kindle_digest) return { send: false, reason: "switched-off" };
-  return { send: true, to: reader.kindle_address, sender: reader.kindle_sender };
+
+  const period = kindlePeriodOf(reader.kindle_period);
+  if (period === "weekly") {
+    // Не суббота — молчим: это не отказ, а шесть дней из семи.
+    if (!isWeeklyDay(day)) return { send: false, reason: "weekly-other-day" };
+    // Второй прогон за те же сутки не шлёт вторую книгу. Amazon считает
+    // объём по адресу отправителя и гасит его без предупреждения читателю.
+    if (reader.kindle_weekly_at === day) return { send: false, reason: "weekly-sent" };
+  }
+
+  return { send: true, to: reader.kindle_address, sender: reader.kindle_sender, period };
 }
 
 /**
