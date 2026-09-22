@@ -14,7 +14,8 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { sql } from "../src/lib/db";
 import {
   applySpoken, audioBlocker, chunks, estimateSeconds, latinRuns, NON_LATIN,
-  spokenMap, unknownRuns, voiceFor, voiceForText, type AudioErrors,
+  podcastIntro, spokenMap, unabbreviate, unknownRuns, voiceFor, voiceForText,
+  type AudioErrors,
 } from "../src/lib/speech";
 import { audioUrl, sendAudio } from "../src/lib/telegram";
 import { cardForReader, recordCall } from "../src/lib/readers";
@@ -132,20 +133,25 @@ ${terms.join("\n")}`;
 }
 
 /**
- * Текст, готовый к озвучке: латиница заменена произношением.
+ * Текст, готовый к озвучке: сокращения без точки, латиница —
+ * произношением.
  *
- * Для языков на латинице возвращается как есть — там менять нечего
- * и нельзя.
+ * Произношение подставляется только там, где латиница чужая письменность:
+ * английской статье оно противопоказано. Сокращения снимаются всем.
  */
 export async function spokenText(
   text: string,
   language: string,
   usage: Usage,
 ): Promise<string> {
-  if (!NON_LATIN.has(language)) return text;
+  // Сокращения снимаются раньше и независимо от письменности: точка
+  // в «50 тыс.» обрывает фразу на любом языке, а произношение латиницы
+  // нужно только тем, кому латиница чужая.
+  const plain = unabbreviate(text, language);
+  if (!NON_LATIN.has(language)) return plain;
 
-  const known = spokenMap(text, language, await learnedTerms(latinRuns(text), language));
-  const unknown = unknownRuns(text, known);
+  const known = spokenMap(plain, language, await learnedTerms(latinRuns(plain), language));
+  const unknown = unknownRuns(plain, known);
   if (unknown.length > 0) {
     const asked = await askSpoken(unknown, language, usage);
     const rows = Object.entries(asked);
@@ -165,7 +171,7 @@ export async function spokenText(
       console.log(`  ~ без произношения остались: ${left.join(", ")}`);
     }
   }
-  return applySpoken(text, known);
+  return applySpoken(plain, known);
 }
 
 /**
@@ -416,12 +422,18 @@ async function cardAudio(
   reader: Reader,
   itemId: number,
   usage: Usage,
-): Promise<{ audio: Buffer; seconds: number; title: string } | null> {
+): Promise<
+  { audio: Buffer; seconds: number; title: string; voice: string; day: string } | null
+> {
   const card = await cardForReader(reader.id, itemId);
   if (!card) return null;
 
-  const [ready] = await sql<{ file_id: string; seconds: number }[]>`
-    select file_id, seconds from dailynews.card_audio
+  // Голос лежит в строке готовой озвучки, и берётся он оттуда, а не
+  // вычисляется заново: вступление обязано звучать тем же голосом, что
+  // первая карточка, а у языка оригинала он выбирается по её тексту —
+  // которого при готовой озвучке мы не синтезируем вовсе.
+  const [ready] = await sql<{ file_id: string; seconds: number; voice: string }[]>`
+    select file_id, seconds, voice from dailynews.card_audio
      where digest_id = ${card.digestId} and item_id = ${itemId}
   `;
   if (ready) {
@@ -431,6 +443,8 @@ async function cardAudio(
         audio: Buffer.from(await res.arrayBuffer()),
         seconds: ready.seconds,
         title: card.title,
+        voice: ready.voice,
+        day: card.day,
       };
     }
     // Ссылка Telegram живёт около часа, а строка у нас вечно. Не скачалось —
@@ -457,7 +471,35 @@ async function cardAudio(
     values (${card.digestId}, ${itemId}, ${sent.fileId}, ${seconds}, ${voice})
     on conflict (digest_id, item_id) do nothing
   `;
-  return { audio, seconds, title: card.title };
+  return { audio, seconds, title: card.title, voice, day: card.day };
+}
+
+/**
+ * Вступление перед первой новостью: имя продукта и число.
+ *
+ * Синтезируется последним, а встаёт первым: голос и день берутся
+ * у первой карточки — при языке оригинала голос выбирается по её тексту,
+ * и до синтеза карточки его попросту нет.
+ *
+ * Не получилось — подкаст уходит без вступления, а причина идёт в лог.
+ * Вступление это подпись на файле; ронять из-за неё три минуты работы
+ * и потраченную квоту нельзя, а молчать о пропаже — тем более: без строки
+ * «вступление не вышло» отличить это от «так и задумано» нечем.
+ */
+async function introAudio(
+  reader: Reader,
+  first: { voice: string; day: string },
+  usage: Usage,
+): Promise<Buffer | null> {
+  try {
+    const text = await spokenText(podcastIntro(first.day, first.voice), reader.language, usage);
+    return await synthesize(text, first.voice);
+  } catch (error) {
+    console.log(
+      `  ~ вступление не вышло: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
 }
 
 /**
@@ -485,12 +527,12 @@ export async function runPodcast(
     await mark("speaking");
     const parts: Buffer[] = [];
     const titles: string[] = [];
+    let first: { voice: string; day: string } | null = null;
     let seconds = 0;
     for (const itemId of itemIds) {
       const piece = await cardAudio(reader, itemId, usage);
       if (!piece) continue;
-      // Пауза между новостями, но не перед первой и не после последней:
-      // тишина в начале файла читается как «не загрузилось».
+      // Пауза между новостями, но не после последней.
       if (parts.length > 0) {
         parts.push(GAP_MP3);
         seconds += GAP_SECONDS;
@@ -498,8 +540,18 @@ export async function runPodcast(
       parts.push(piece.audio);
       titles.push(piece.title);
       seconds += piece.seconds;
+      first ??= { voice: piece.voice, day: piece.day };
     }
-    if (parts.length === 0) throw new Error("ни одной карточки озвучить не вышло");
+    if (parts.length === 0 || !first) throw new Error("ни одной карточки озвучить не вышло");
+
+    // Вступление впереди и через ту же паузу, что между новостями: тишина
+    // в начале файла читается как «не загрузилось», а её отсутствие делает
+    // из «Reporta, двадцать первое сентября» первую фразу первой новости.
+    const intro = await introAudio(reader, first, usage);
+    if (intro) {
+      parts.unshift(intro, GAP_MP3);
+      seconds += secondsOf(intro) + GAP_SECONDS;
+    }
 
     if (usage.requests > 0) {
       await recordCall({
