@@ -99,9 +99,12 @@ export default async function SettingsLayout({ children }: { children: React.Rea
           экрана, и «Выйти» с ним уезжало вниз страницы — на месте оставалась
           пустая колонка. Высота считается от окна за вычетом шапки (3rem)
           и полей (по 1.5rem), поэтому «Выйти» стоит внизу экрана, а не внизу
-          документа. На узком экране разделы идут лентой поверху, и прибивать
-          там нечего. */}
-      <aside className="flex shrink-0 flex-col gap-1 sm:sticky sm:top-[4.5rem] sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start">
+          документа. На узком экране разделы идут лентой поверху и липнут
+          под шапку (её высота там 3.5rem): раздел «Источники» — это два
+          экрана списка, и перейти в соседний без прокрутки наверх иначе
+          нельзя. Полоса выходит за поля страницы, чтобы под ней не
+          просвечивал текст, и закрывается снизу тем же бордюром, что шапка. */}
+      <aside className="sticky top-14 z-10 -mx-4 -mt-6 flex shrink-0 flex-col gap-1 border-b bg-background/85 px-4 py-2 backdrop-blur sm:top-[4.5rem] sm:mx-0 sm:mt-0 sm:h-[calc(100dvh-6rem)] sm:w-44 sm:self-start sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
         <SettingsNav plan={plan} />
         <form action={logout} className="mt-4 hidden sm:mt-auto sm:block">
           <Button variant="ghost" size="sm" type="submit" className="w-full justify-start px-2">

@@ -35,10 +35,11 @@ import { move, overviewMarkdown, overviewText, type Overview } from "@/lib/overv
  * ленты, здесь выглядит одинаково. Живёт только пока есть выбор — плашка
  * с нулём была бы предметом на экране без единого действия.
  *
- * Ширина — по колонке ленты, а не по экрану: на широком экране полоса
- * от края до края читалась бы как панель приложения, а это подсказка
- * к трём карточкам. На узком экране переносится: «Выбрано: 12» и кнопка
- * не обязаны стоять в одну строку.
+ * На широком экране — по содержимому, а не по колонке: полоса от края
+ * до края читалась бы как панель приложения, а это подсказка к трём
+ * карточкам. На телефоне наоборот, во всю ширину и вплотную к нижнему
+ * краю, с запасом под полосу жеста: плавающая таблетка там ложилась
+ * на текст с обеих сторон и ничего не выигрывала.
  *
  * Тосты живут там же, внизу по центру, и пока плашка на экране, они
  * поднимаются над ней на её измеренную высоту (см. `Bar`).
@@ -93,13 +94,14 @@ function Bar({
     <div
       ref={bar}
       data-slot="selection-bar"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center sm:px-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]"
     >
       <div
         role="toolbar"
         aria-label={t.toolbarLabel}
         className={cn(
-          "pointer-events-auto flex max-w-page flex-wrap items-center justify-end gap-1 rounded-2xl p-1.5",
+          "pointer-events-auto flex w-full flex-wrap items-center gap-1 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]",
+          "sm:w-auto sm:max-w-page sm:rounded-2xl sm:p-1.5",
           "bg-foreground text-background shadow-lg shadow-black/20",
           "animate-in fade-in-0 slide-in-from-bottom-2 duration-200 motion-reduce:animate-none",
         )}
@@ -124,7 +126,9 @@ function Bar({
         </Tooltip>
         {/* Живая область: число меняется от каждого нажатия, и диктору
             об этом надо сказать без перевода фокуса на плашку. */}
-        <span aria-live="polite" className="mx-1.5 text-sm font-medium tabular-nums">
+        {/* На телефоне число прижато к крестику, кнопка — к правому краю:
+            mr-auto растягивает промежуток, а на таблетке промежутка нет. */}
+        <span aria-live="polite" className="mx-1.5 mr-auto text-sm font-medium tabular-nums sm:mr-1.5">
           {t.selected(selected)}
         </span>
         {/* «Собрать», а не «написать»: текст уже готов, модель здесь
