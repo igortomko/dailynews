@@ -5,6 +5,12 @@ import { ru } from "@/lib/i18n/ru/index";
 import { typography as t } from "@/lib/typography";
 
 type Labels = Dict["feed"]["reading"];
+// Крупнее заголовка карточки (20 px) в документе нет ничего: значение
+// metric на 24 px читалось раньше заголовка, и карточка начиналась
+// с числа, а не с новости. Акцент — 18 px, как цитата; подложка 40 %,
+// как у списка публикаций сюжета: плашка тянет глаз следом за кеглем.
+// Табличные цифры — ряд чисел в flow и comparison держит ширину.
+const VALUE = "text-lg font-semibold tracking-tight tabular-nums";
 function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
   switch (b.kind) {
     case "paragraph": return <p>{t(b.content.text)}</p>;
@@ -21,34 +27,34 @@ function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
     case "qa": return <div className="space-y-4">{b.items.map((item,i) => <div key={i}>
       <p className="font-medium">{t(item.question.text)}</p><p className="mt-1">{t(item.answer.text)}</p>
     </div>)}</div>;
-    case "flow": return <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-muted/60 p-4">
+    case "flow": return <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-muted/40 p-4">
       {b.nodes.map((node,i) => <div key={i} className="flex min-w-0 items-center gap-4">
         {i > 0 ? <span className="text-muted-foreground" aria-label={b.relations[i-1] === "equivalent" ? labels.equals : labels.then}>{relationText[b.relations[i-1]]}</span> : null}
-        <div className="min-w-0"><p className="text-xl font-semibold tracking-tight">{t(node.value)}</p><p className="text-sm text-muted-foreground">{t(node.label)}</p></div>
+        <div className="min-w-0"><p className={VALUE}>{t(node.value)}</p><p className="text-sm text-muted-foreground">{t(node.label)}</p></div>
       </div>)}
     </div>;
-    case "comparison": return <div className="rounded-xl bg-muted/60 p-4">
+    case "comparison": return <div className="rounded-xl bg-muted/40 p-4">
       <p className="mb-3 text-sm text-muted-foreground">{t(b.commonBasis.text)}</p>
       <div className="grid grid-cols-1 gap-4 min-[440px]:grid-cols-2">{b.items.map((item,i) => <div key={i} className="min-w-0">
-        <p className={b.emphasis === "label" ? "text-xl font-semibold tracking-tight" : "text-sm text-muted-foreground"}>{t(item.label)}</p>
-        <p className={b.emphasis === "content" ? "mt-1 text-xl font-semibold tracking-tight" : "mt-1"}>{t(item.content.text)}</p>
+        <p className={b.emphasis === "label" ? VALUE : "text-sm text-muted-foreground"}>{t(item.label)}</p>
+        <p className={b.emphasis === "content" ? `mt-1 ${VALUE}` : "mt-1"}>{t(item.content.text)}</p>
       </div>)}</div>
     </div>;
-    case "metric": return <div className="rounded-xl bg-muted/60 p-4">
-      <p className="text-2xl font-semibold tracking-tight">{t(b.value)}</p>
-      <p className="mt-1 font-medium">{t(b.label)}</p><p className="mt-2 text-sm text-muted-foreground">{t(b.context.text)}</p>
+    case "metric": return <div className="rounded-xl bg-muted/40 p-4">
+      <p className={VALUE}>{t(b.value)}</p>
+      <p className="mt-1 text-sm font-medium">{t(b.label)}</p><p className="mt-2 text-sm text-muted-foreground">{t(b.context.text)}</p>
     </div>;
     case "steps": return <ol className="space-y-3">{b.items.map((item,i) => <li key={i}>
       <p className="text-sm text-muted-foreground">{b.sequence === "procedure" ? labels.step : labels.stage}{'\u00a0'}{i+1}{labels[item.state] ? ` · ${labels[item.state]}` : ""}</p>
       <p className="font-medium">{t(item.label)}</p><p>{t(item.content.text)}</p>
     </li>)}</ol>;
-    case "takeaway": return <div className="rounded-xl bg-muted/60 p-4"><p className="font-medium">{t(b.content.text)}</p><p className="mt-2 text-sm text-muted-foreground">{t(b.attribution)}</p></div>;
+    case "takeaway": return <div className="rounded-xl bg-muted/40 p-4"><p className="font-medium">{t(b.content.text)}</p><p className="mt-2 text-sm text-muted-foreground">{t(b.attribution)}</p></div>;
   }
 }
 
 export function ReadingSummary({ reading, labels = ru.feed.reading }: { reading: StoredReading; labels?: Labels }) {
   const doc = reading.document;
-  return <div className="mt-3 max-w-[68ch] space-y-4 break-words text-pretty text-base leading-[1.6] text-foreground [overflow-wrap:anywhere]">
+  return <div className="mt-3 max-w-[60ch] space-y-4 break-words text-pretty text-base leading-[1.6] text-foreground [overflow-wrap:anywhere]">
     {reading.notice ? <p className="text-sm text-muted-foreground">{t(reading.notice)}</p> : null}
     {doc ? <>
       {doc.lead ? <p>{t(doc.lead.text)}</p> : null}
