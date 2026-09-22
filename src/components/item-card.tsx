@@ -246,7 +246,7 @@ export function ItemCard({
   // перерисовку на каждой карточке выпуска. Расхождения с сервером тут
   // быть не может — кнопка скорости появляется только на играющем звуке,
   // а на первой отрисовке ничего не играет.
-  const [rate, setRate] = useState<number>(() => (typeof window === "undefined" ? 1 : currentRate()));
+  const [rate, setRate] = useState<number>(() => currentRate());
   // Скорость общая: сменил на одной карточке — соседние узнают сразу,
   // а не после перезагрузки.
   useEffect(() => onRate(setRate), []);
