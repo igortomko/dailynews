@@ -18,6 +18,7 @@
  */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { TS_CONFIGS } from "../src/lib/search";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
@@ -643,11 +644,34 @@ async function main() {
          where item_id = ${ids[2]}
       `;
 
-      // Словарь поиска выбирается по языку выпуска, а его решает тариф:
-      // у платного перевод есть, у бесплатного текст остаётся языком
-      // источника. Читатели ниже заявлены явно — иначе проверка меряла бы
-      // тариф из фикстуры, а не поиск.
-      const ru = { ...owner, plan: "pro", language: "русском" };
+      // Словарь выпуска пишется при письме; у посеянных строк — общий
+      // по умолчанию, и вектор описания считается им.
+      const [dictionary] = await sql<{ ts_config: string; ready: boolean }[]>`
+        select ts_config::text as ts_config, length(tsv) > 0 as ready
+          from dailynews.digest_items where item_id = ${ids[2]} limit 1
+      `;
+      assert.equal(dictionary.ts_config, "russian", "словарь выпуска по умолчанию — общий");
+      assert.ok(dictionary.ready, "вектор описания не пустой: текст разобран при записи");
+
+      // Каждое имя из TS_CONFIGS обязано быть словарём этого Postgres: писатели
+      // выпуска приводят его к regconfig, и незнакомое имя роняло бы вставку
+      // уже оплаченного выпуска. PGlite несёт тот же набор, что сервер.
+      const known = new Set(
+        (await sql<{ cfgname: string }[]>`select cfgname from pg_ts_config`).map((row) => row.cfgname),
+      );
+      assert.deepEqual(
+        Object.values(TS_CONFIGS).filter((name) => !known.has(name)),
+        [],
+        "словарь из TS_CONFIGS, которого нет у Postgres",
+      );
+      // А на случай чужого имени у писателей стоит откат на общий словарь.
+      const [{ fallback }] = await sql<{ fallback: string }[]>`
+        select coalesce(
+                 (select oid from pg_ts_config where cfgname = ${"нет-такого"}),
+                 ${"russian"}::regconfig::oid
+               )::regconfig::text as fallback
+      `;
+      assert.equal(fallback, "russian", "неизвестное имя словаря уходит в общий, а не в ошибку");
 
       const archive = await queries.archiveSize(owner.id);
       assert.deepEqual(archive, { items: 2, days: 1 }, "архив считается по своим выпускам");
@@ -657,7 +681,7 @@ async function main() {
         "в чужой архив соседние выпуски не попадают",
       );
 
-      const byRussian = await queries.searchArchive(ru, "уран");
+      const byRussian = await queries.searchArchive(owner.id, "уран");
       assert.equal(byRussian.hits.length, 1, "слово из описания выпуска обязано находиться");
       assert.equal(String(byRussian.hits[0].item_id), String(ids[2]));
       assert.equal(byRussian.loose, false, "по одному слову ослаблять нечего");
@@ -690,7 +714,7 @@ async function main() {
         update dailynews.digest_items set summary = 'Модель умеет больше контекста'
          where item_id = ${ids[0]}
       `;
-      const [shortHit] = (await queries.searchArchive(ru, "контекста")).hits;
+      const [shortHit] = (await queries.searchArchive(owner.id, "контекста")).hits;
       // Именно изменённое описание, а не первая попавшаяся находка: иначе
       // следующая строка фикстуры однажды превратит проверку в пустую.
       assert.equal(String(shortHit?.item_id), String(ids[0]), "мерим отрывок своего материала");
@@ -708,13 +732,13 @@ async function main() {
 
       // Ищут тем словом, которое запомнили: «уран» стоит в описании выпуска,
       // «uranium» — в заголовке источника. Одно без другого — половина поиска.
-      const byEnglish = await queries.searchArchive(ru, "uranium");
+      const byEnglish = await queries.searchArchive(owner.id, "uranium");
       assert.equal(byEnglish.hits.length, 1, "исходный заголовок обязан искаться наравне");
       assert.equal(String(byEnglish.hits[0].item_id), String(ids[2]));
 
       // Словоформа, а не подстрока: «цены» и «цена» — одно слово.
       assert.equal(
-        (await queries.searchArchive(ru, "цены")).hits.length,
+        (await queries.searchArchive(owner.id, "цены")).hits.length,
         1,
         "поиск обязан сводить словоформы, иначе он работает только точным попаданием",
       );
@@ -723,26 +747,60 @@ async function main() {
       // «цены» находит «цена» в описании выпуска, «prices» — «price»
       // в заголовке источника, и это один и тот же поиск.
       assert.equal(
-        (await queries.searchArchive(ru, "prices")).hits.length,
+        (await queries.searchArchive(owner.id, "prices")).hits.length,
         1,
         "словоформа английского заголовка обязана сводиться тем же словарём",
       );
 
+      // Словарь выпуска — свой у каждой строки, и запрос к описанию
+      // разбирается им же. Выпуск, помеченный английским словарём, теряет
+      // русские склонения: «шахта» из описания «…строятся шахты» не сводится,
+      // а точная форма «шахты» находится по-прежнему — своим вектором
+      // и своим запросом. Заголовок источника при этом ищется общим словарём
+      // независимо от словаря выпуска. Сравни вектор выпуска с общим запросом
+      // (или наоборот) — и точная форма перестанет находиться.
+      await sql`
+        update dailynews.digest_items set ts_config = 'english'::regconfig where item_id = ${ids[2]}
+      `;
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахта")).hits.length,
+        0,
+        "английский словарь выпуска русских склонений не сводит",
+      );
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахты")).hits.length,
+        1,
+        "точная форма находится своим словарём выпуска",
+      );
+      assert.equal(
+        (await queries.searchArchive(owner.id, "price")).hits.length,
+        1,
+        "заголовок источника ищется общим словарём при любом словаре выпуска",
+      );
+      await sql`
+        update dailynews.digest_items set ts_config = 'russian'::regconfig where item_id = ${ids[2]}
+      `;
+      assert.equal(
+        (await queries.searchArchive(owner.id, "шахта")).hits.length,
+        1,
+        "вектор пересчитывается вместе со словарём: склонение снова сводится",
+      );
+
       // Самое дорогое здесь — чужой архив: он приходит вовремя и не твой.
-      const stranger = await queries.searchArchive(second, "уран");
+      const stranger = await queries.searchArchive(second.id, "уран");
       assert.equal(stranger.hits.length, 0, "выпуск соседа в своём поиске не находится");
       assert.equal(
-        (await queries.searchArchive(ru, "CBT")).hits.length,
+        (await queries.searchArchive(owner.id, "CBT")).hits.length,
         0,
         "и в обратную сторону тоже: владелец не ищет по выпуску второго",
       );
 
       // Ищут вопросом: все слова разом дают ноль, хотя ответ лежит в архиве.
-      const asked = await queries.searchArchive(ru, "где я видел про uranium");
+      const asked = await queries.searchArchive(owner.id, "где я видел про uranium");
       assert.equal(asked.loose, true, "ослабление обязано называться вслух");
       assert.equal(String(asked.hits[0].item_id), String(ids[2]));
       assert.equal(
-        (await queries.searchArchive(ru, "кварки бозоны")).loose,
+        (await queries.searchArchive(owner.id, "кварки бозоны")).loose,
         false,
         "ослабление, не нашедшее ничего, ослаблением не объявляется",
       );
@@ -754,7 +812,7 @@ async function main() {
         values (${owner.id}, ${ids[2]}, 'down', 95, 0.8)
       `;
       assert.equal(
-        (await queries.searchArchive(ru, "уран")).hits.length,
+        (await queries.searchArchive(owner.id, "уран")).hits.length,
         0,
         "скрытое пальцем вниз в поиске не всплывает",
       );

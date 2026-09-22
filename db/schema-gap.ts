@@ -127,9 +127,16 @@ function parseDir(dir: string) {
 const INVISIBLE =
   /create\s+(unique\s+)?index|update\s+dailynews\.|delete\s+from\s+dailynews\.|comment\s+on|insert\s+into\s+dailynews\.(?!migrations)/i;
 
-/** Операторы, которые сверка формы схемы умеет проверить. */
-const DECLARING =
-  /create\s+table\s+if\s+not\s+exists\s+dailynews\.|drop\s+table\s+if\s+exists\s+dailynews\.|add\s+column\s+if\s+not\s+exists|drop\s+column\s+if\s+exists|add\s+constraint\s/i;
+/**
+ * Операторы, по которым сверка формы схемы может доказать, что файл
+ * применён: только добавления. Снятие (`drop column`, `drop table`) сверке
+ * доказать нечем — снятого «уже нет» и в базе, где миграция прошла,
+ * и в базе, где её не было. Файл из одних снятий поэтому считается тихим
+ * и выполняется, а не записывается по молчанию сверки: так 0049 ушла
+ * в журнал, не сняв колонку, — «обещанное в базе уже есть».
+ */
+const PROMISING =
+  /create\s+table\s+if\s+not\s+exists\s+dailynews\.|add\s+column\s+if\s+not\s+exists|add\s+constraint\s/i;
 
 /**
  * Что сверка формы схемы может сказать о каждом файле.
@@ -164,7 +171,7 @@ export function fileCoverage(dir = "db/migrations"): {
   const silent = new Set<string>();
   for (const file of readdirSync(dir).filter((name) => name.endsWith(".sql")).sort()) {
     const text = readFileSync(`${dir}/${file}`, "utf8");
-    if (!DECLARING.test(text)) silent.add(file);
+    if (!PROMISING.test(text)) silent.add(file);
     else if (!INVISIBLE.test(text)) skippable.add(file);
   }
   return { skippable, silent };

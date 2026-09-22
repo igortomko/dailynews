@@ -1,6 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  cloneElement, Fragment, useEffect, useLayoutEffect, useRef, useState,
+  type ReactElement, type ReactNode,
+} from "react";
 import {
   ThumbsUpIcon,
   ThumbsDownIcon,
@@ -102,6 +105,42 @@ function siteOf(url: string): string | null {
   }
 }
 
+/**
+ * Кнопка действия с подсказкой — или та же кнопка без неё, пока карточку
+ * не тронули. Tooltip от base-ui стоит своих хуков и слушателей на каждой
+ * из двухсот кнопок ленты, а нужен только той карточке, над которой курсор
+ * или фокус. Кнопка при этом одна и та же: `render` получает её целиком,
+ * поэтому классы и aria-label не расходятся между двумя состояниями.
+ * `HINT` — метка на кнопке в обоих состояниях: по ней карточка узнаёт, что
+ * фокус пришёл прямо на кнопку действия, и возвращает его после пересборки.
+ * Одна константа на оба места, иначе имя атрибута разъехалось бы молча,
+ * и проверка фокуса перестала бы срабатывать без единой ошибки компилятора.
+ */
+const HINT = { "data-hint": "" };
+type HintButton = ReactElement<React.ButtonHTMLAttributes<HTMLButtonElement> & Partial<typeof HINT>>;
+
+function Hint({
+  live,
+  tip,
+  button,
+  children,
+}: {
+  live: boolean;
+  tip: ReactNode;
+  button: HintButton;
+  children: ReactNode;
+}) {
+  if (!live) return cloneElement(button, HINT, children);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={button} {...HINT}>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function ItemCard({
   item,
   showTopic,
@@ -141,9 +180,33 @@ export function ItemCard({
   const [kindle, setKindle] = useState<"idle" | "sending" | "sent">(
     item.kindled ? "sent" : "idle",
   );
+  // Меню и подсказки собираются по первому касанию, а не вместе с карточкой.
+  // Пятьдесят карточек — это пятьдесят Menu и двести Tooltip от base-ui,
+  // каждый со своими хуками и слушателями, и браузер собирал их при каждом
+  // показе выпуска ради кнопок, которых в покое даже не видно. Подсказки
+  // нужны тому, кто навёл курсор или дошёл до карточки клавишами, меню —
+  // тому, кто по нему тапнул. До этого момента стоят те же кнопки без обвязки.
+  const [hot, setHot] = useState(false);
+  const [menuLive, setMenuLive] = useState(false);
   const article = useRef<HTMLElement>(null);
   const openedAt = useRef<number | null>(null);
   const reportedSeen = useRef(false);
+  // Подпись кнопки, на которую пришёл фокус до того, как подсказки включились:
+  // её пересобирают под фокусом, и фокус пропадает. После пересборки кнопка
+  // с той же подписью получает его обратно — до отрисовки, чтобы обход
+  // клавиатурой не заметил подмены.
+  const refocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!hot || refocus.current === null) return;
+    const label = refocus.current;
+    refocus.current = null;
+    for (const button of article.current?.querySelectorAll<HTMLElement>("[data-hint]") ?? []) {
+      if (button.getAttribute("aria-label") === label) {
+        button.focus({ preventScroll: true });
+        break;
+      }
+    }
+  }, [hot]);
 
   // Долгий тап отмечает карточку для обзора. На телефоне чекбокс виден,
   // но удержание — жест, которым выбирают строки в почте и мессенджерах,
@@ -299,6 +362,11 @@ export function ItemCard({
     setVote("down");
     report({ item_id: item.id, event: "down" });
     if (selected) onSelectedChange(false);
+    // Меню собирается заново после «Вернуть»: плашка скрытой карточки
+    // размонтирует его, и `defaultOpen` при следующем монтаже открыл бы
+    // меню сам, без нажатия — ровно там, где читатель только что вернул
+    // карточку.
+    setMenuLive(false);
   };
 
   // Считаются источники, а не публикации: источник, повторивший сам себя,
@@ -322,6 +390,12 @@ export function ItemCard({
   // там значения стоят рядом друг с другом и сравниваются. В строке
   // остаётся метка, которая сообщает об отклонении, — «кликбейт» выше.
   const topic = showTopic ? item.topic_label : null;
+  // Поднятый палец виден и с закрытым меню: оценка, которую видно только
+  // внутри меню, — это оценка, которую нечем проверить, не открыв его.
+  const menuIcon =
+    vote === "up" ? <ThumbsUpIcon className="size-4 text-foreground" /> : <EllipsisIcon className="size-4" />;
+  const menuButton =
+    "flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
 
   if (vote === "down") {
     return (
@@ -433,6 +507,20 @@ export function ItemCard({
   return (
     <article
       ref={article}
+      // Только курсор: на тапе ряд с подсказками скрыт, и собирать их
+      // значило бы платить за то, чего на экране не бывает.
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") setHot(true);
+      }}
+      onFocus={(event) => {
+        // Фокус, пришедший прямо на кнопку действия (у карточки без ссылки
+        // на издание она первая в обходе), включает подсказки как и любой
+        // другой. Пересборка кнопки под фокусом его теряет — кнопка
+        // запоминается по подписи и получает фокус обратно в эффекте выше.
+        const target = event.target as HTMLElement;
+        if (!hot && target.closest("[data-hint]")) refocus.current = target.getAttribute("aria-label");
+        setHot(true);
+      }}
       data-selected={selected || undefined}
       onPointerDown={startPress}
       onPointerMove={movePress}
@@ -452,7 +540,14 @@ export function ItemCard({
         event.stopPropagation();
       }}
       className={cn(
-        "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0",
+        // content-visibility: браузер не раскладывает и не рисует карточки
+        // за пределами экрана, пока до них не докрутили. React их всё равно
+        // собирает, но стиль и раскладка полусотни карточек — заметная доля
+        // времени переключения дня. Размер-заготовка — под обычную карточку;
+        // после первого показа браузер помнит настоящий.
+        "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0 [content-visibility:auto] [contain-intrinsic-size:auto_220px]",
+        // Долгое нажатие на телефоне не выделяет текст и не зовёт системное
+        // меню: у карточки свои действия по тапу.
         "[@media(hover:none)]:select-none [@media(hover:none)]:[-webkit-touch-callout:none]",
         // Отмеченная карточка подсвечена всей строкой до краёв контейнера,
         // а не рамкой вокруг текста: рамка внутри полей читалась бы как
@@ -559,24 +654,12 @@ export function ItemCard({
               голые иконки на узком экране нечем объяснить, а строка меню
               называет себя словами. На мыши меню было бы лишним щелчком —
               там ряд по-прежнему появляется под курсором. */}
-          <DropdownMenu>
+          {menuLive ? (
+          <DropdownMenu defaultOpen>
             <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t.feed.item.actionsLabel}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex"
-                />
-              }
+              render={<button type="button" aria-label={t.feed.item.actionsLabel} className={menuButton} />}
             >
-              {/* Поднятый палец виден и с закрытым меню: оценка, которую
-                  видно только внутри меню, — это оценка, которую нечем
-                  проверить, не открыв его. */}
-              {vote === "up" ? (
-                <ThumbsUpIcon className="size-4 text-foreground" />
-              ) : (
-                <EllipsisIcon className="size-4" />
-              )}
+              {menuIcon}
             </DropdownMenuTrigger>
             {/* Ширина по самой длинной строке: иначе меню жмётся к кнопке
                 и пункты переносятся — список из трёх строк читается
@@ -639,6 +722,20 @@ export function ItemCard({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          ) : (
+            // Та же кнопка до первого нажатия: нажатие собирает настоящее меню
+            // уже открытым (`defaultOpen`), дальше оно живёт как обычно.
+            <button
+              type="button"
+              aria-label={t.feed.item.actionsLabel}
+              aria-haspopup="menu"
+              aria-expanded={false}
+              onClick={() => setMenuLive(true)}
+              className={menuButton}
+            >
+              {menuIcon}
+            </button>
+          )}
         <div
           className={cn(
             "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity",
@@ -655,107 +752,101 @@ export function ItemCard({
               и берут деньги, и искать его в конце ряда пришлось бы глазами.
               Не положено тарифом — та же иконка с короной, а не спрятанная
               кнопка: спрятанное не даёт понять, за что предлагают платить. */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t.feed.item.opinionAria}
-                  onClick={() => {
-                    if (!canPost) {
-                      paywall.open();
-                      return;
-                    }
-                    if (networks.length === 0) {
-                      toast.info(t.feed.item.pickNetworksFirst, {
-                        description: `${t.nav.settings} → ${t.nav.channels}`,
-                      });
-                      return;
-                    }
-                    setOpinion(true);
-                  }}
-                  className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
-                />
-              }
-            >
-              <PenLineIcon className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>
-              {canPost ? t.feed.item.opinionTooltipReady : t.feed.item.opinionTooltipLocked}
-            </TooltipContent>
-          </Tooltip>
+          <Hint
+            live={hot}
+            tip={canPost ? t.feed.item.opinionTooltipReady : t.feed.item.opinionTooltipLocked}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.opinionAria}
+                onClick={() => {
+                  if (!canPost) {
+                    paywall.open();
+                    return;
+                  }
+                  if (networks.length === 0) {
+                    toast.info(t.feed.item.pickNetworksFirst, {
+                      description: `${t.nav.settings} → ${t.nav.channels}`,
+                    });
+                    return;
+                  }
+                  setOpinion(true);
+                }}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+              />
+            }
+          >
+            <PenLineIcon className="size-3.5" />
+          </Hint>
 
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t.feed.item.kindleAria}
-                  // aria-disabled, а не disabled: браузер снимает фокус
-                  // с выключенной кнопки, и с клавиатуры место в списке
-                  // теряется ровно в момент нажатия. Заодно остаётся
-                  // подсказка — на disabled она не показывается никогда.
-                  aria-disabled={kindle !== "idle"}
-                  onClick={kindle === "idle" ? sendToKindle : undefined}
-                  className={cn(
-                    "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
-                    kindle === "idle"
-                      ? "cursor-pointer text-muted-foreground/50"
-                      : "text-foreground",
-                  )}
-                />
-              }
-            >
-              <span className="relative flex size-3.5 items-center justify-center">
-                <Spinner className={cn("absolute", swap(kindle === "sending"))} />
-                <CheckIcon className={cn("absolute", swap(kindle === "sent"))} />
-                <BookOpenIcon className={swap(kindle === "idle")} />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{t.feed.item.kindleTooltip}</TooltipContent>
-          </Tooltip>
+          <Hint
+            live={hot}
+            tip={t.feed.item.kindleTooltip}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.kindleAria}
+                // aria-disabled, а не disabled: браузер снимает фокус
+                // с выключенной кнопки, и с клавиатуры место в списке
+                // теряется ровно в момент нажатия. Заодно остаётся
+                // подсказка — на disabled она не показывается никогда.
+                aria-disabled={kindle !== "idle"}
+                onClick={kindle === "idle" ? sendToKindle : undefined}
+                className={cn(
+                  "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
+                  kindle === "idle"
+                    ? "cursor-pointer text-muted-foreground/50"
+                    : "text-foreground",
+                )}
+              />
+            }
+          >
+            <span className="relative flex size-3.5 items-center justify-center">
+              <Spinner className={cn("absolute", swap(kindle === "sending"))} />
+              <CheckIcon className={cn("absolute", swap(kindle === "sent"))} />
+              <BookOpenIcon className={swap(kindle === "idle")} />
+            </span>
+          </Hint>
 
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t.feed.item.upvoteLabel}
-                  aria-pressed={vote === "up"}
-                  onClick={() => {
-                    setVote(vote === "up" ? null : "up");
-                    if (vote !== "up") report({ item_id: item.id, event: "up" });
-                  }}
-                  className={cn(
-                    "flex size-7 cursor-pointer items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
-                    vote === "up" ? "text-foreground" : "text-muted-foreground/50",
-                  )}
-                />
-              }
-            >
-              <ThumbsUpIcon className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>{t.feed.item.upvoteTooltip}</TooltipContent>
-          </Tooltip>
+          <Hint
+            live={hot}
+            tip={t.feed.item.upvoteTooltip}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.upvoteLabel}
+                aria-pressed={vote === "up"}
+                onClick={() => {
+                  setVote(vote === "up" ? null : "up");
+                  if (vote !== "up") report({ item_id: item.id, event: "up" });
+                }}
+                className={cn(
+                  "flex size-7 cursor-pointer items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
+                  vote === "up" ? "text-foreground" : "text-muted-foreground/50",
+                )}
+              />
+            }
+          >
+            <ThumbsUpIcon className="size-3.5" />
+          </Hint>
 
           {/* Палец вниз убирает материал из ленты — единственное здесь
               действие, которое что-то отнимает. Красный по наведению
               отличает его от соседних двух до нажатия, а не после. */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t.feed.item.downvoteLabel}
-                  onClick={hide}
-                  className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
-                />
-              }
-            >
-              <ThumbsDownIcon className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>{t.feed.item.downvoteLabel}</TooltipContent>
-          </Tooltip>
+          <Hint
+            live={hot}
+            tip={t.feed.item.downvoteLabel}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.downvoteLabel}
+                onClick={hide}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
+              />
+            }
+          >
+            <ThumbsDownIcon className="size-3.5" />
+          </Hint>
         </div>
         </div>
       </div>
