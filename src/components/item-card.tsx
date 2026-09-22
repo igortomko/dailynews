@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { currentRate, forget, nextRate, onRate, pauseIfPlaying, playOnly } from "@/lib/audio-bus";
 import { QUIET } from "@/lib/quiet";
 import { parseStoredReading } from "@/lib/reading-document";
 import { ReadingSummary } from "@/components/reading-summary";
@@ -132,41 +133,6 @@ export const AUDIO_STEP = (
   speaking: t.feed.item.audioSpeaking,
   sending: t.feed.item.audioSending,
 });
-
-/**
- * Скорость воспроизведения по кругу.
- *
- * Кнопка, а не список: выбор из четырёх значений на карточке — это меню
- * ради одного нажатия, а по кругу нужное находится за три тапа в худшем
- * случае. Порядок возрастающий и замыкается на единице: с ×2 возвращаются
- * к обычной чаще, чем идут дальше.
- */
-const RATES = [1, 1.25, 1.5, 2] as const;
-
-/**
- * Выбранная скорость переживает и карточку, и перезагрузку: слушают
- * подряд, и переставлять её на каждой новости значит не дать ею
- * пользоваться. Хранится у читателя в браузере — это его привычка,
- * а не настройка ленты, и общей базе о ней знать незачем.
- */
-/**
- * Подпись скорости. Запятая или точка — по языку интерфейса: «×1.25»
- * в русской ленте выглядит чужим форматом рядом со своим текстом,
- * ровно как дата.
- */
-const rateLabel = (rate: number, locale: string) =>
-  `×${rate.toLocaleString(locale === "ru" ? "ru-RU" : "en-US")}`;
-
-const RATE_KEY = "reporta:audio-rate";
-const storedRate = (): number => {
-  try {
-    const saved = Number(localStorage.getItem(RATE_KEY));
-    return RATES.includes(saved as (typeof RATES)[number]) ? saved : 1;
-  } catch {
-    // Приватное окно и запрещённые куки отвечают исключением, а не пустотой.
-    return 1;
-  }
-};
 
 /** Как часто спрашиваем шаг и сколько всего ждём: пять минут. */
 export const AUDIO_POLL_MS = 2000;
@@ -280,7 +246,10 @@ export function ItemCard({
   // перерисовку на каждой карточке выпуска. Расхождения с сервером тут
   // быть не может — кнопка скорости появляется только на играющем звуке,
   // а на первой отрисовке ничего не играет.
-  const [rate, setRate] = useState(() => (typeof window === "undefined" ? 1 : storedRate()));
+  const [rate, setRate] = useState<number>(() => (typeof window === "undefined" ? 1 : currentRate()));
+  // Скорость общая: сменил на одной карточке — соседние узнают сразу,
+  // а не после перезагрузки.
+  useEffect(() => onRate(setRate), []);
   // Живость карточки — ref, а не состояние: цикл опроса читает её между
   // запросами, и перерисовка ему для этого не нужна.
   const aliveRef = useRef(true);
@@ -288,7 +257,10 @@ export function ItemCard({
   // пятьдесят <audio> в разметке качают метаданные и ничего не играют.
   const player = useRef<HTMLAudioElement | null>(null);
   useEffect(() => () => {
-    player.current?.pause();
+    if (player.current) {
+      player.current.pause();
+      forget(player.current);
+    }
     player.current = null;
   }, []);
   useEffect(() => {
@@ -502,21 +474,11 @@ export function ItemCard({
       });
       player.current = audioEl;
     }
-    player.current.playbackRate = rate;
-    if (player.current.paused) void player.current.play().catch(() => {});
-    else player.current.pause();
-  };
-
-  /** Следующая скорость по кругу — и сразу же на играющем звуке. */
-  const cycleRate = () => {
-    const next = RATES[(RATES.indexOf(rate as (typeof RATES)[number]) + 1) % RATES.length];
-    setRate(next);
-    if (player.current) player.current.playbackRate = next;
-    try {
-      localStorage.setItem(RATE_KEY, String(next));
-    } catch {
-      // Не сохранилось — скорость всё равно применена к текущему звуку.
-    }
+    // Запуск останавливает всё остальное: слух у читателя один, а плееров
+    // на странице пятьдесят, и второй запускают не нарочно — нажимают
+    // на соседнюю карточку, думая, что первая остановится сама.
+    if (player.current.paused) playOnly(player.current);
+    else pauseIfPlaying(player.current);
   };
 
   const speak = async () => {
@@ -1037,12 +999,12 @@ export function ItemCard({
                 <button
                   type="button"
                   aria-label={t.feed.item.audioRateAria}
-                  onClick={cycleRate}
+                  onClick={() => nextRate()}
                   className="flex h-7 cursor-pointer items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground"
                 />
               }
             >
-              {rateLabel(rate, locale)}
+              {`×${rate.toLocaleString(locale === "ru" ? "ru-RU" : "en-US")}`}
             </Hint>
           ) : null}
 
