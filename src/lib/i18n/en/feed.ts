@@ -35,8 +35,10 @@ export const feed = {
     all: "All of it",
     // Named, not swept under the rug: showing six cards out of forty in
     // silence passes a slice of the digest off as the digest.
-    cut: (n: number) => `${n} more ${n === 1 ? "card" : "cards"} didn't fit the time —`,
-    cutLink: "show everything",
+    cut: (n: number) => `${n} more ${n === 1 ? "card" : "cards"} didn't fit the time`,
+    // The count sits on the button itself: it stands below the feed, and
+    // the line that named the count is above the first card.
+    showAll: (n: number) => `Show all (${n})`,
   },
 
   /** src/components/feed-tabs.tsx */

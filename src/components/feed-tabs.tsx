@@ -689,27 +689,30 @@ export function FeedTabs({
           selecting ? "pb-24" : "pb-4 sm:pb-6",
         )}
       >
+        <div className="sm:rounded-xl sm:bg-card sm:px-6 sm:shadow-(--shadow-border)">
+        {/* Строки про выпуск живут внутри белой панели, а не над ней:
+            снаружи они выровнены по краю страницы, а карточки — по своей
+            колонке, и два разных левых края на одном экране читаются
+            как две разные страницы. Внутри панели строка стоит там же,
+            где начинается текст, о котором говорит. */}
         {/* Недобор объясняется, а не заметается добором слабого материала.
             Короткий выпуск без единого слова читается как поломка отбора —
             и чинить его читатель пойдёт в настройки, где всё исправно.
             Строка появляется только при настоящем недоборе: тревога,
             горящая каждый день, ничем не отличается от выключенной. */}
         {reading.target !== null && isShort(reading.minutes, reading.target) ? (
-          <p className="mb-3 text-sm text-muted-foreground">
+          <p className="pt-4 text-sm text-muted-foreground sm:pt-5">
             {shortfallNote(reading.minutes, reading.target, t.feed.time)}.
           </p>
         ) : null}
         {/* Отрезанное заказом названо так же, как скрытое правилами: молча
             показать шесть карточек из сорока — значит выдать часть выпуска
-            за выпуск. Выход стоит тут же: «Всё» снимает предел, не уводя
-            со страницы. */}
+            за выпуск. Сама строка только называет — выход стоит под лентой,
+            кнопкой: решение «хочу ещё» принимают, дочитав заказанное,
+            а не глядя на первую карточку сверху. */}
         {reading.cut > 0 ? (
-          <p className="mb-3 text-sm text-muted-foreground">
-            {t.feed.minutes.cut(reading.cut)}{" "}
-            <Link href={feedHref(day, days, null)} className="underline underline-offset-4">
-              {t.feed.minutes.cutLink}
-            </Link>
-            .
+          <p className="pt-4 text-sm text-muted-foreground sm:pt-5">
+            {t.feed.minutes.cut(reading.cut)}.
           </p>
         ) : null}
         {/* Скрытое исключениями названо, а не заметено: правило работает
@@ -717,7 +720,7 @@ export function FeedTabs({
             и шёл бы чинить отбор, где всё исправно. Только когда есть что
             называть — строка на каждом выпуске перестала бы что-либо значить. */}
         {hidden > 0 && items.length > 0 ? (
-          <p className="mb-3 text-sm text-muted-foreground">
+          <p className="pt-4 text-sm text-muted-foreground sm:pt-5">
             {t.feed.rules.hiddenBefore(hidden)}{" "}
             <Link href="/settings/interests" className="underline underline-offset-4">
               {t.feed.rules.hiddenLink}
@@ -725,7 +728,6 @@ export function FeedTabs({
             .
           </p>
         ) : null}
-        <div className="sm:rounded-xl sm:bg-card sm:px-6 sm:shadow-(--shadow-border)">
       {items.length === 0 && hidden > 0 ? (
         // Выпуск есть, но исключения закрыли его целиком. Спокойно и с выходом:
         // пустая лента без причины и без ссылки — тупик, и чинить её пошли бы
@@ -810,6 +812,24 @@ export function FeedTabs({
         );
       })}
         </div>
+        {/* Выход из заказа — под лентой и кнопкой, а не ссылкой в строке
+            сверху. «Хочу ещё» решают, дочитав заказанные десять минут,
+            а не увидев первую карточку: наверху это предложение уйти
+            из выпуска, не начав его. Число на самой кнопке — чтобы
+            не возвращаться глазами к строке над лентой за ответом
+            на вопрос «сколько ещё». */}
+        {reading.cut > 0 && items.length > 0 ? (
+          <div className="flex justify-center pt-5">
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link href={feedHref(day, days, null)} />}
+            >
+              {t.feed.minutes.showAll(reading.cut)}
+            </Button>
+          </div>
+        ) : null}
         {/* Клавиши есть, а узнать о них было неоткуда. Строка стоит под
             лентой, а не в шапке: там она попадалась бы на глаза каждый раз,
             а нужна ровно однажды. И за карточкой, а не в ней: это подпись
