@@ -52,9 +52,15 @@ function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
   }
 }
 
-export function ReadingSummary({ reading, labels = ru.feed.reading }: { reading: StoredReading; labels?: Labels }) {
+/**
+ * `lang` — язык, которым написан документ. Он же включает переносы: правила
+ * у каждого языка свои, и неизвестный язык лучше не переносить вовсе,
+ * чем рвать его чужими. Стоит на самом тексте, а не на странице: интерфейс
+ * может быть английским при русском выпуске.
+ */
+export function ReadingSummary({ reading, labels = ru.feed.reading, lang }: { reading: StoredReading; labels?: Labels; lang?: string | null }) {
   const doc = reading.document;
-  return <div className="mt-3 max-w-[60ch] space-y-4 break-words text-pretty text-base leading-[1.6] text-foreground [overflow-wrap:anywhere]">
+  return <div lang={lang ?? undefined} className={`mt-3 max-w-[60ch] space-y-4 break-words text-pretty text-base leading-[1.6] text-foreground [overflow-wrap:anywhere]${lang ? " hyphens-auto" : ""}`}>
     {reading.notice ? <p className="text-sm text-muted-foreground">{t(reading.notice)}</p> : null}
     {doc ? <>
       {doc.lead ? <p>{t(doc.lead.text)}</p> : null}
