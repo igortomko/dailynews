@@ -70,7 +70,6 @@ export const feed = {
     clearTooltip: "Clear selection",
     build: "Build overview",
     dialogTitle: "Overview for your team",
-    issueOf: (date: string, n: number) => `Digest of ${date} · ${story(n)}`,
     defaultTitle: (date: string) => `Overview for ${date}`,
     titleLabel: "Title",
     introLabel: "Introduction",

@@ -14,20 +14,16 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { QUIET } from "@/lib/quiet";
-import { useLocale, useT } from "@/components/i18n-provider";
-import { formatDay } from "@/lib/relative-time";
+import { useT } from "@/components/i18n-provider";
 import { move, overviewMarkdown, overviewText, type Overview } from "@/lib/overview";
 
 /**
@@ -188,13 +184,22 @@ function Bar({
  * Отрицательные поля — чтобы текст поля стоял вровень со строкой над ним,
  * а серая подложка выходила за него на восемь пикселей в обе стороны.
  *
+ * Кегль задаётся парой `text-* md:text-*`: в основе поля стоит
+ * `text-base md:text-sm`, и одиночный `text-xl` работал бы только
+ * на телефоне — на экране шире 768 пикселей заголовок оставался бы
+ * четырнадцатым кеглем, а класс в разметке обещал бы двадцатый.
+ *
+ * Ручка растягивания снята: поле и так растёт по тексту
+ * (`field-sizing: content`), а треугольник в углу каждого абзаца — это
+ * та же рамка, только в правом нижнем углу.
+ *
  * `shrink-0` обязателен: тело окна — флекс-колонка с прокруткой, и без него
  * поля сжимаются под её высоту раньше, чем она начинает прокручиваться.
  * Заголовок обзора так становился высотой в 30 пикселей вместо сорока —
  * ровно там, где под палец и нужны сорок.
  */
 const FIELD =
-  "-mx-2 w-[calc(100%+1rem)] shrink-0 rounded-md border-transparent bg-transparent px-2 shadow-none transition-colors hover:bg-muted focus-visible:border-transparent focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent dark:hover:bg-muted dark:focus-visible:bg-muted";
+  "-mx-2 w-[calc(100%+1rem)] shrink-0 resize-none rounded-md border-transparent bg-transparent px-2 shadow-none transition-colors hover:bg-muted focus-visible:border-transparent focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent dark:hover:bg-muted dark:focus-visible:bg-muted";
 
 /**
  * Кнопка в строке блока: стрелка или крестик, с подсказкой.
@@ -259,20 +264,17 @@ function BlockAction({
  * чтобы на телефоне окно ужималось вместе с клавиатурой.
  */
 export function OverviewDialog({
-  day,
   overview,
   open,
   onOpenChange,
   onChange,
 }: {
-  day: string;
   overview: Overview;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChange: (next: Overview) => void;
 }) {
   const t = useT().feed.overview;
-  const locale = useLocale();
   const [copied, setCopied] = useState<"text" | "markdown" | null>(null);
   // Текст, который не удалось положить в буфер: остаётся на экране
   // выделенным, чтобы его можно было скопировать руками.
@@ -330,17 +332,33 @@ export function OverviewDialog({
         initialFocus={(type) => (type === "touch" ? popup.current : true)}
         className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 p-0 sm:max-w-2xl"
       >
-        <DialogHeader className="px-4 pt-4 pb-3">
-          <DialogTitle>{t.dialogTitle}</DialogTitle>
-          <DialogDescription>{t.issueOf(formatDay(day, locale), blocks.length)}</DialogDescription>
-        </DialogHeader>
+        {/* Заголовок окна — само поле названия: строка «Обзор для коллег»
+            над «Обзором за 21 сентября» называла одно и то же дважды, причём
+            неправимой копией. Диктору она нужна по-прежнему — окно без имени
+            объявляется как «диалог», — поэтому остаётся, но только ему.
+            Строка «Выпуск за … · 4 новости» ушла туда же: дата стоит
+            в названии, а число новостей — это длина списка под ним. */}
+        <DialogTitle className="sr-only">{t.dialogTitle}</DialogTitle>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
-          <Input
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-4 pb-4">
+          {/* Поле названия держит кегль заголовка: это первая строка того,
+              что уйдёт в чат, и читаться она должна как заголовок, а не как
+              первая графа анкеты. Отступ справа — под крестик закрытия:
+              без него название уезжало бы под кнопку.
+
+              Поле текста, а не поле ввода: однострочное поле прячет конец
+              названия за своим краем, и «Обзор за 21 сентября 2026 г.»
+              не помещался в него уже на телефоне (331 пиксель текста
+              в 325 пикселях поля) — название пряталось ровно то, которое
+              подставлено по умолчанию. Enter при этом перехвачен: название
+              стоит в тексте одной строкой, и перенос в нём означал бы
+              пустую строку посреди заголовка. */}
+          <Textarea
             aria-label={t.titleLabel}
             value={overview.title}
             onChange={(event) => update({ title: event.target.value })}
-            className={cn(FIELD, "font-medium")}
+            onKeyDown={(event) => event.key === "Enter" && event.preventDefault()}
+            className={cn(FIELD, "min-h-0 pr-10 text-xl font-semibold leading-snug tracking-[-0.011em] md:text-xl")}
           />
           {/* Вступление пишет человек. Дописать его за него — значит
               вложить в его уста вывод, которого он не делал. */}
@@ -351,15 +369,19 @@ export function OverviewDialog({
             onChange={(event) => update({ intro: event.target.value })}
             // Свой минимум у каждого поля: с field-sizing: content пустое
             // поле сжимается до одних полей ввода, и `rows` ему не указ.
-            className={cn(FIELD, "min-h-14 leading-relaxed")}
+            className={cn(FIELD, "min-h-14 leading-[1.6] md:text-base")}
           />
 
+          {/* Рамки у блоков сняты: обзор — это текст, который сейчас уйдёт
+              в чат, а десять обведённых прямоугольников читались формой
+              из десяти анкет. Блоки разделяет промежуток и номер строки —
+              ровно то, чем они разделены в скопированном тексте. */}
           {blocks.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">{t.empty}</p>
           ) : (
-            <ol className="flex flex-col gap-3">
+            <ol className="flex flex-col gap-5">
               {blocks.map((block, index) => (
-                <li key={block.id} className="group flex flex-col gap-2 rounded-lg border p-3">
+                <li key={block.id} className="group flex flex-col gap-1">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="tabular-nums">{index + 1}.</span>
                     <span className="shrink-0 font-medium text-foreground/75">{block.source}</span>
@@ -398,17 +420,24 @@ export function OverviewDialog({
                       />
                     </div>
                   </div>
+                  {/* Заголовок крупнее и жирнее описания, как в карточке
+                      ленты: в обзоре его читают первым и по нему решают,
+                      оставлять новость или убрать. */}
                   <Textarea
                     aria-label={t.blockTitleLabel}
                     value={block.title}
                     onChange={(event) => patchBlock(block.id, { title: event.target.value })}
-                    className={cn(FIELD, "min-h-9 font-medium")}
+                    className={cn(FIELD, "min-h-0 text-lg font-semibold leading-snug tracking-[-0.011em] md:text-lg")}
                   />
+                  {/* Без своего минимума: у материала описания может не быть
+                      вовсе, и пустое поле в четыре строки выглядело бы
+                      потерянным текстом. Кегль как у карточки — это тот же
+                      сплошной текст, и уменьшать его тут не за чем. */}
                   <Textarea
                     aria-label={t.blockSummaryLabel}
                     value={block.summary}
                     onChange={(event) => patchBlock(block.id, { summary: event.target.value })}
-                    className={cn(FIELD, "leading-relaxed")}
+                    className={cn(FIELD, "min-h-0 leading-[1.6] md:text-base")}
                   />
                 </li>
               ))}
