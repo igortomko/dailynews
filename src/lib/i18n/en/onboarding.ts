@@ -2,50 +2,57 @@
  * Строки области «onboarding»: мастер первого захода, вход, «Мои площадки»
  * и «Своё мнение». Английский задаёт форму, русский её повторяет.
  */
+/** Сколько сборка занимает обычно: замер, а не осторожная оценка.
+ *  По нему решается, повторять ли обещание, которое уже не сбылось. */
+const USUAL_SECONDS = 40;
+
 export const onboarding = {
   wizard: {
     sourceWhyItems: (n: number): string => `${n} ${n === 1 ? "story" : "stories"} a month`,
     steps: ["Interests", "Sources", "Feed"],
     counter: (picked: number, limit: number) => `${picked} of ${limit}`,
-    next: "Next",
-    saveError: "Couldn't save — try again",
+    // Кнопка называет, куда ведёт: «Next» трижды подряд не говорит ничего,
+    // а читается она отдельно от заголовка, уже забытого.
+    toSources: "To sources",
+    toFeed: "To the feed",
+    saveError: "Your setup didn't save. Try again.",
     interests: {
       title: "What to follow",
       lead: (maxTopics: number) =>
-        `Pick up to ${maxTopics} ${maxTopics === 1 ? "interest" : "interests"} — the feed splits the digest by them, so no single topic takes it over. Change anytime.`,
+        `Pick up to ${maxTopics} — that's what I'll collect by. Change your mind any day.`,
       customLabel: "Custom interest",
       customPlaceholder: "In your own words: e.g. fintech in Brazil",
       add: "Add",
-      more: (n: number) => `${n} more`,
-      full: (planLabel: string) =>
-        `That's the full set on the ${planLabel} plan. More interests are available on a paid plan, under Subscription.`,
+      more: (n: number) => `${n} more ${n === 1 ? "interest" : "interests"}`,
+      full: (planLabel: string, maxTopics: number) =>
+        `${maxTopics} is the whole ${planLabel} set. More interests are in Subscription.`,
     },
     sources: {
       title: "Where to read from",
       lead: (topics: string[]) =>
         `Picked for your ${topics.length > 1 ? "interests" : "interest"}: ${topics.join(", ")}. Remove what you don't need, add your own — paste a link below.`,
       full: (planLabel: string, maxSources: number) =>
-        `The ${planLabel} plan checks ${maxSources} ${maxSources === 1 ? "source" : "sources"}. Remove one to add another.`,
+        `I read ${maxSources} ${maxSources === 1 ? "source" : "sources"} — that's the whole ${planLabel} plan. Remove one to add another.`,
       addPlaceholder: "Link to a blog, channel or newsletter",
       add: "Add",
       checking: "Checking the link…",
-      addedWhy: (fresh: number, entries: number) => `${fresh} fresh of ${entries}`,
+      addedWhy: (fresh: number) => `${fresh} fresh ${fresh === 1 ? "entry" : "entries"}`,
       displaced: (label: string) => `Unchecked “${label}” to make room for yours`,
     },
     ready: {
       buildingTitle: "Building your first digest",
       readyTitle: "Your feed is ready",
-      buildingLead: "Selecting from what's already collected and writing summaries. A minute or two.",
+      buildingLead: "Picking from what came in overnight and writing the summaries.",
       readyLead: (everyOtherDay: boolean) =>
-        `From now on, your digest arrives ${everyOtherDay ? "every other day" : "every night"}; the link is in the bot. Thanks for reading.`,
+        `From now on, your digest arrives ${everyOtherDay ? "every other day" : "every night"}; the link is in the bot.`,
       openFeed: "Open feed",
       dontClose: "Don't close this tab.",
-      elapsed: (seconds: number) => `${seconds}s so far, usually about a minute`,
+      elapsed: (seconds: number) =>
+        seconds > USUAL_SECONDS ? `${seconds}s. Longer than usual, still going.` : `${seconds}s. Usually under forty.`,
       noFreshItems: "No fresh stories for your topics yet — I'll build one tonight.",
       buildFailed: "Couldn't build the first digest — I'll try again tonight.",
       digestSummary: (added: number, topics: number) =>
         `Your first digest has ${added} ${added === 1 ? "story" : "stories"} across ${topics} ${topics === 1 ? "interest" : "interests"}.`,
-      footerNote: "What to read and what's missing — it's all in settings: interests, sources, voice.",
     },
   },
   login: {
