@@ -12,5 +12,6 @@ Use proportional scaling, preferably at least 240px wide for complex scenes.
 one simple metaphor, not an actual news event. All scenes are AI-generated.
 
 In the repository, `sources/` holds generated source PNGs, `preview/` contains
-640px lossless WebP files, and `generation.json` records generation prompts.
+640px lossless WebP files, `web/` holds 384px lossy WebP copies for the product
+interface, and `generation.json` records generation prompts.
 Rebuild exports with `node scripts/export-brand-illustrations.mjs`.

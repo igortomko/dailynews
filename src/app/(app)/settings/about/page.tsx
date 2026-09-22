@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ArrowRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card, CardContent, CardDescription, CardHeader, CardTitle,
+} from "@/components/ui/card";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { getCollectedLast24h, getSources } from "@/lib/queries";
@@ -192,29 +194,70 @@ export default async function AboutPage() {
   return (
     <div className="flex flex-col gap-6">
       <Card>
-        <CardHeader>
-          {/* Заголовок называет сегодняшнее число, а не тему раздела:
-              «~1 час 16 минут ты сэкономил сегодня» отвечает на вопрос,
-              с которым сюда заходят, прямо в самой крупной строке экрана.
-              Описания у карточки нет по той же причине — оно пересказывало
-              бы заголовок без чисел. */}
-          <CardTitle>
-            {saved >= 1
-              ? t.plans.about.heroSaved(formatDuration(saved, t.feed.time))
-              : t.plans.about.heroTitle}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <FlowGrid
-            collected={collected}
-            chars={streamChars}
-            digest={inDigest}
-            minutes={minutes}
-            saved={saved}
-            t={t.plans.about}
-            time={t.feed.time}
-          />
-        </CardContent>
+        {/* Карточка идёт в две колонки, а не заголовком с картинкой в углу:
+            сложная гравюра при 64 пикселях превращается в кляксу — бренд
+            просит для таких сцен ширину от 240, — а поставленная крупной
+            в шапку, она растягивала строку заголовка и оставляла под ним
+            полосу пустоты в полсотни пикселей.
+
+            На узком экране колонки складываются, и гравюра уходит вниз:
+            первым на экране отвечает число, ради которого сюда заходят,
+            а не украшение над ним. */}
+        <div className="flex flex-col gap-(--card-spacing) sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-1 flex-col gap-(--card-spacing)">
+            <CardHeader>
+              {/* Заголовок называет сегодняшнее число, а не тему раздела:
+                  «~1 час 16 минут ты сэкономил сегодня» отвечает на вопрос,
+                  с которым сюда заходят, прямо в самой крупной строке экрана.
+                  Описания у карточки нет по той же причине — оно пересказывало
+                  бы заголовок без чисел. */}
+              <CardTitle>
+                {saved >= 1
+                  ? t.plans.about.heroSaved(formatDuration(saved, t.feed.time))
+                  : t.plans.about.heroTitle}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FlowGrid
+                collected={collected}
+                chars={streamChars}
+                digest={inDigest}
+                minutes={minutes}
+                saved={saved}
+                t={t.plans.about}
+                time={t.feed.time}
+              />
+            </CardContent>
+          </div>
+          {/* Гравюра «Коротко о главном» из бренд-серии: поток газет
+              пересыпается в песочных часах в одну. Она ничего не добавляет
+              к числам, поэтому `alt` пуст — всё, что она говорит, уже сказано
+              заголовком и сеткой, и озвучивать её второй раз значит читать
+              вслух украшение.
+
+              Пара файлов, а не инверсия одной картинки: тушь в тёмной теме
+              белая, а красный в обеих один и тот же — так серия и
+              экспортируется. Переключает их класс темы, как у логотипа
+              в шапке: сервер темы не знает, её ставит скрипт next-themes. */}
+          <div className="shrink-0 self-center px-(--card-spacing) sm:pl-0">
+            {/* eslint-disable @next/next/no-img-element */}
+            <img
+              src="/brand/illustrations/web/time-light.webp"
+              alt=""
+              width="384"
+              height="384"
+              className="block size-40 dark:hidden sm:size-44"
+            />
+            <img
+              src="/brand/illustrations/web/time-dark.webp"
+              alt=""
+              width="384"
+              height="384"
+              className="hidden size-40 dark:block sm:size-44"
+            />
+            {/* eslint-enable @next/next/no-img-element */}
+          </div>
+        </div>
       </Card>
 
       <Card>
