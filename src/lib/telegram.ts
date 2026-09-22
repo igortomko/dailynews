@@ -614,13 +614,9 @@ export type Headline = {
 export const dayUrl = (appUrl: string, day: string) =>
   `${appUrl.replace(/\/$/, "")}/?day=${encodeURIComponent(day)}`;
 
-/**
- * Адрес карточки. Якорь ставит ей же карточка в ленте (`item-<id>`),
- * а `play` просит ленту нажать её кнопку воспроизведения: озвучка карточки
- * уже лежит в Telegram, и слушать её второй раз нечем, кроме потока.
- */
-export const itemUrl = (appUrl: string, day: string, id: number, play = false) =>
-  `${dayUrl(appUrl, day)}${play ? `&play=${id}` : ""}#item-${id}`;
+/** Адрес карточки. Якорь ставит ей же карточка в ленте (`item-<id>`). */
+export const itemUrl = (appUrl: string, day: string, id: number) =>
+  `${dayUrl(appUrl, day)}#item-${id}`;
 
 /** Место в записи: «12:30», а за часом — «1:02:30». */
 export function stamp(seconds: number): string {
@@ -645,15 +641,14 @@ export function stamp(seconds: number): string {
  */
 export function digestMessage(input: {
   day: string;
-  intro: string;
   headlines: Headline[];
   appUrl: string;
   /** Уже собранная фраза про время: «19 мин» или объяснение недобора. */
   size: string;
-  /** Длина подкаста в секундах. Нет подкаста — нет ни блока, ни меток. */
-  podcast: number | null;
+  /** Есть ли запись. Нет — нет ни блока аудио, ни меток времени. */
+  podcast: boolean;
 }): { html: string; classic: string } {
-  const { day, intro, headlines, appUrl, size, podcast } = input;
+  const { day, headlines, appUrl, size, podcast } = input;
 
   const byTopic = new Map<string, Headline[]>();
   for (const h of headlines) {
@@ -663,47 +658,45 @@ export function digestMessage(input: {
   const title = `Выпуск за ${dayInWords(day)} — ${size}`;
 
   // Порядок решает сгиб, а не предел: клиент прячет всё после примерно
-  // восьми тысяч знаков за «Показать ещё». Поэтому заголовок, время,
-  // вступление и подкаст стоят до тем — это то, ради чего сообщение
-  // открывают, и то, по чему решают, читать ли дальше.
+  // восьми тысяч знаков за «Показать ещё». Поэтому заголовок, время
+  // и запись стоят до тем — это то, ради чего сообщение открывают,
+  // и то, по чему решают, читать ли дальше.
+  //
+  // Вступления выпуска здесь нет намеренно. Оно пересказывает, о чём будут
+  // заголовки, а заголовки идут следом и говорят это сами; в сообщении
+  // на шестьдесят строк его цена — пять строк до первой новости.
+  // В ленте и в книге на читалке оно остаётся: там его читают перед
+  // текстом, а не перед списком.
   const html: string[] = [`<h2>${escapeHtml(title)}</h2>`];
   const classic: string[] = [`<b>${escapeHtml(title)}</b>`];
-  if (intro) {
-    html.push(`<p>${escapeHtml(intro)}</p>`);
-    classic.push(escapeHtml(intro));
-  }
-  if (podcast !== null) {
-    // Подпись объясняет метки времени один раз, а не подписывает каждую
-    // строку словом «в записи»: пятьдесят одинаковых пояснений перестают
-    // что-либо пояснять и съедают тот самый сгиб.
-    html.push(
-      `<figure><audio src="tg://audio?id=${PODCAST_MEDIA_ID}"></audio>` +
-      `<figcaption>${escapeHtml(
-        `Весь выпуск голосом — ${formatMinutesLong(podcast / 60, ruFeed.time)}. ` +
-        "Время у заголовка — его место в записи.",
-      )}</figcaption></figure>`,
-    );
-  }
+  // Плеер без подписи: Telegram сам пишет на нём имя и длину записи,
+  // а «время у заголовка — его место в записи» объясняет то, что видно
+  // и так, — и стоит это строки над первой новостью.
+  if (podcast) html.push(`<audio src="tg://audio?id=${PODCAST_MEDIA_ID}"></audio>`);
 
   for (const [topic, list] of byTopic) {
-    html.push("<hr>", `<h3>${escapeHtml(topic)}</h3>`);
+    // Разделитель между темами, а не перед каждой: первой он достался бы
+    // сразу под заголовком, отделяя его от пустоты.
+    if (html.length > 1 + (podcast ? 1 : 0)) html.push("<hr>");
+    html.push(`<h3>${escapeHtml(topic)}</h3>`);
     classic.push(`<b>${escapeHtml(topic)}</b>`);
     const items: string[] = [];
     for (const h of list) {
       const link = `<a href="${escapeAttr(itemUrl(appUrl, day, h.id))}">${escapeHtml(h.title)}</a>`;
-      // «Слушать» печатается только у карточки, которая в записи есть:
-      // ссылка на озвучку, которой не собрали, ведёт к кнопке «озвучить» —
-      // то есть обещает готовое, а отдаёт минуту ожидания.
-      // Место в записи решает та же величина, что и сам блок аудио. Разведи
-      // их — и сообщение без подкаста печатало бы «слушать · 12:34», ведя
-      // к кнопке «озвучить»: обещание готового, за которым минута ожидания.
-      const listen =
-        podcast === null || h.at === null || h.at === undefined
-          ? ""
-          : ` <i>(<a href="${escapeAttr(itemUrl(appUrl, day, h.id, true))}">слушать</a>` +
-            ` · ${escapeHtml(stamp(h.at))})</i>`;
-      items.push(`<li>${link}${listen}</li>`);
-      classic.push(`· ${link}${listen}`);
+      // Место в записи решает та же величина, что и сам блок аудио: без него
+      // число у заголовка не значит ничего. Слова «слушать» рядом нет —
+      // оно вело бы туда же, куда и сам заголовок, а нажать на него надо
+      // было бы точнее.
+      //
+      // Точка, а не скобки: отделить число от заголовка достаточно одного
+      // знака, а скобки — два знака ради того же на каждой из шестидесяти
+      // строк.
+      const at =
+        podcast && h.at !== null && h.at !== undefined
+          ? ` <i>· ${escapeHtml(stamp(h.at))}</i>`
+          : "";
+      items.push(`<li>${link}${at}</li>`);
+      classic.push(`· ${link}${at}`);
     }
     html.push(`<ul>${items.join("")}</ul>`);
     classic.push("");
@@ -733,12 +726,12 @@ const PODCAST_MEDIA_ID = "podcast";
  *
  * Заголовки ведут в веб, а не на источник: открытие материала должно
  * происходить в ленте, иначе калибровке неоткуда узнать, что прочитано,
- * а что пролистано.
+ * а что пролистано. Вступление выпуска сюда не едет — оно пересказывает
+ * заголовки, которые идут следом.
  */
 export async function notify(
   chatId: number,
   day: string,
-  intro: string,
   headlines: Headline[],
   appUrl: string,
   /**
@@ -756,8 +749,7 @@ export async function notify(
     : formatMinutesLong(reading.minutes, ruFeed.time);
 
   const { html, classic } = digestMessage({
-    day, intro, headlines, appUrl, size,
-    podcast: podcast ? podcast.seconds : null,
+    day, headlines, appUrl, size, podcast: Boolean(podcast),
   });
 
   // Кнопкой, а не строкой в конце: выпуск приходит с десятком заголовков,

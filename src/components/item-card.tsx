@@ -201,7 +201,6 @@ export function ItemCard({
   networks,
   selected,
   selecting,
-  asked,
   onSelectedChange,
   textLang,
 }: {
@@ -220,15 +219,6 @@ export function ItemCard({
   selected: boolean;
   /** Идёт ли выбор: пока в выпуске есть хоть одна отметка, чекбоксы видны у всех. */
   selecting: boolean;
-  /**
-   * Пришли именно за этой карточкой: `?play=<id>` из «слушать» в Telegram.
-   *
-   * Воспроизведение пробуется, но не обещается: браузер имеет право
-   * отказать звуку без жеста, и отказ здесь молчит — карточка всё равно
-   * под курсором, а её кнопка на месте. Обещать в сообщении то, что
-   * решает политика автозапуска, нельзя.
-   */
-  asked?: boolean;
   onSelectedChange: (next: boolean) => void;
   /**
    * Язык текста выпуска — заголовка и описания, а не подписей вокруг них.
@@ -497,24 +487,6 @@ export function ItemCard({
     if (player.current.paused) playOnly(player.current);
     else pauseIfPlaying(player.current);
   };
-
-  /**
-   * Пришли по «слушать» из сообщения бота (`?play=<id>`).
-   *
-   * Один раз за жизнь карточки и только если озвучка уже лежит: синтез
-   * по переходу означал бы минуту ожидания там, где обещано готовое.
-   * Отказ браузера в звуке без жеста здесь молчит (`playOnly` его гасит) —
-   * карточка всё равно прокручена к себе, и кнопка под рукой.
-   */
-  const autoplayed = useRef(false);
-  useEffect(() => {
-    if (!asked || autoplayed.current || !item.voiced) return;
-    autoplayed.current = true;
-    play();
-    // play пересобирается каждым рендером, а запуск нужен ровно один:
-    // в зависимости он превратил бы эффект в цикл.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asked, item.voiced]);
 
   const speak = async () => {
     if (!canListen) {
