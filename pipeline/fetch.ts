@@ -420,6 +420,12 @@ export async function fetchReddit(source: Source): Promise<RawItem[]> {
 const X_ENDPOINT = "https://api.twitterapi.io/twitter/tweet/advanced_search";
 /** Страница выдачи — 20 постов. Потолок держит счёт предсказуемым. */
 const X_MAX_PAGES = 2;
+/**
+ * Окно свежести. Шире, чем у фидов, потому что автор пишет реже издания:
+ * замер на живом аккаунте — 14 активных дней из 30, своих постов 12 из 47
+ * (остальное реплаи). Трое суток отдавали ноль у обоих заведённых авторов.
+ */
+const X_MAX_AGE_DAYS = 7;
 
 type XTweet = {
   id: string;
@@ -485,7 +491,15 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
   const apiKey = process.env.X_API_KEY;
   if (!apiKey) throw new Error("нужен X_API_KEY (twitterapi.io)");
 
-  const maxAgeDays = Number(source.config?.max_age_days ?? 3);
+  // Неделя, а не трое суток, и это замер, а не осторожность: автор в X
+  // активен примерно половину дней месяца (14 из 30 у замеренного аккаунта),
+  // и пауза в четыре дня у него обычное дело. В трёхдневное окно живой автор
+  // попадает через раз — оба заведённых источника отдавали ноль при том, что
+  // писали пять дней назад, — а первый пустой прогон ставит `silent_since`
+  // и зовёт убрать источник, который работает. Счёт от окна не зависит:
+  // `since_time` уходит в сам запрос, и платим мы за то, что вернулось,
+  // а у автора это два-три поста, а не архив.
+  const maxAgeDays = Number(source.config?.max_age_days ?? X_MAX_AGE_DAYS);
   const maxPages = Number(source.config?.max_pages ?? X_MAX_PAGES);
   const queryType = String(source.config?.query_type ?? "Latest");
 
