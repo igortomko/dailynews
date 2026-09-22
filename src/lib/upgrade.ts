@@ -1,4 +1,8 @@
 import { PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "./plans";
+import type { feed } from "./i18n/en/feed";
+
+/** Слова предложения. Английский словарь задаёт форму обоим — см. `i18n/en/index`. */
+type UpgradeWords = typeof feed.upgrade;
 
 /**
  * Когда стоит сказать про тариф — и, главное, когда не стоит.
@@ -180,4 +184,35 @@ export function botMayUpsell(lastAt: Date | string | null, now = new Date()): bo
   const was = new Date(lastAt).getTime();
   if (!Number.isFinite(was)) return true;
   return now.getTime() - was >= UPSELL_QUIET_DAYS * 86_400_000;
+}
+
+/**
+ * Две строки предложения: что происходит сейчас и что даёт тариф.
+ *
+ * Собираются здесь, а не по месту показа, потому что мест два — строка
+ * под выпуском и блок в сообщении бота, — и лестница по причинам, написанная
+ * дважды, расходится на первой же правке одной из копий. Ту же роль играет
+ * `upgradeReason` этажом выше: одно правило решает, говорить ли вообще.
+ *
+ * Разделены по тому, где читателю их читать: `fact` он может проверить
+ * глазами на этом же экране, `offer` — нет, поэтому в нём и название тарифа,
+ * и цена. В ленте `offer` стоит кнопкой строкой ниже, в чате — следующей
+ * фразой: окна с ценой там нет, и без неё строка была бы тупиком.
+ */
+export function upgradeLines(
+  words: UpgradeWords,
+  label: Record<PlanId, string>,
+  plan: PlanId,
+  note: UpgradeNote,
+): { fact: string; offer: string } {
+  const to = label[note.plan];
+  const fact = note.reason === "cadence" ? words.cadence
+    : note.reason === "sources" ? words.sources(note.from, label[plan])
+    : note.reason === "topics" ? words.topics(note.from, label[plan])
+    : words.minutes(note.collected, note.kept, note.from);
+  const gain = note.reason === "cadence" ? words.gain.cadence
+    : note.reason === "sources" ? words.gain.sources(note.to)
+    : note.reason === "topics" ? words.gain.topics(note.to)
+    : words.gain.minutes(note.to);
+  return { fact, offer: words.offer(gain, to, PLANS[note.plan].price) };
 }

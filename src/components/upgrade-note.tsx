@@ -1,8 +1,8 @@
 "use client";
 
 import { ArrowRightIcon } from "lucide-react";
-import { featureOf, type UpgradeNote } from "@/lib/upgrade";
-import { PLANS, type Plan } from "@/lib/plans";
+import { featureOf, upgradeLines, type UpgradeNote } from "@/lib/upgrade";
+import { type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { useT } from "@/components/i18n-provider";
 
@@ -26,17 +26,11 @@ import { useT } from "@/components/i18n-provider";
 export function UpgradeLine({ note, plan }: { note: UpgradeNote; plan: Plan }) {
   const t = useT();
   const paywall = usePaywall(featureOf(note.reason), plan);
-  const words = t.feed.upgrade;
-  const to = t.plans.label[note.plan];
-
-  const text = note.reason === "cadence" ? words.cadence(to)
-    : note.reason === "sources" ? words.sources(note.from, t.plans.label[plan.id], note.to, to)
-    : note.reason === "topics" ? words.topics(note.from, t.plans.label[plan.id], note.to, to)
-    : words.minutes(note.collected, note.kept, note.from, note.to, to);
+  const { fact, offer } = upgradeLines(t.feed.upgrade, t.plans.label, plan.id, note);
 
   return (
     <div className="mt-4 flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
-      <span>{text}</span>
+      <span>{fact}</span>
       {/* Кнопка-ссылка, а не Button: под лентой стоит подпись, а не панель
           действий, и полноценная кнопка забирала бы внимание у выпуска,
           который читают прямо над ней. Строкой ниже, а не в конце фразы:
@@ -47,7 +41,7 @@ export function UpgradeLine({ note, plan }: { note: UpgradeNote; plan: Plan }) {
         onClick={paywall.open}
         className="inline-flex cursor-pointer items-center gap-1 text-foreground underline decoration-muted-foreground/40 underline-offset-4 transition-colors hover:decoration-foreground"
       >
-        {words.see(to, PLANS[note.plan].price)}
+        {offer}
         <ArrowRightIcon className="size-3.5" />
       </button>
       {paywall.dialog}
