@@ -59,7 +59,7 @@ export const settings = {
     // Заголовок обычного экрана не заводится отдельно: он совпадает
     // с nav.personalization, и это тот же самый текст, а не совпадение.
     description: "The language and style your digest is written in. What it covers is set in Interests.",
-    languageLabel: "Language",
+    languageLabel: "Translate into",
     translatedHint: "Sources stay in their original language — we translate and adapt.",
     notTranslatedHint: "The digest arrives in the source language. Translation is available on Plus and Pro.",
     complexityLabel: "Language complexity",
