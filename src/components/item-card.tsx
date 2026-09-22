@@ -156,7 +156,10 @@ export function ItemCard({
   // нажатия (палец ушёл в прокрутку) и глотал бы следующий Enter
   // на заголовке — окно в семьсот миллисекунд пережить нельзя.
   const fired = useRef(false);
-  const releasedAt = useRef(0);
+  // Минус бесконечность, а не ноль: нажатие в первые семьсот миллисекунд
+  // жизни страницы имеет timeStamp меньше окна, и ноль читался бы как
+  // «только что отпустили».
+  const releasedAt = useRef(Number.NEGATIVE_INFINITY);
   // Таймер читает состояние на момент срабатывания, а не на момент касания:
   // за полсекунды выбор могли снять с клавиатуры или из редактора, и снимок
   // из замыкания вернул бы его обратно.
@@ -178,14 +181,23 @@ export function ItemCard({
     clearTimeout(press.current.timer);
     press.current = null;
   };
+  // Окно взводится только на pointerup: после pointercancel (палец ушёл
+  // в прокрутку уже после срабатывания) хвостового нажатия не бывает,
+  // и взведённое окно глотало бы следующий настоящий тап.
   const endPress = () => {
     cancelPress();
     if (!fired.current) return;
     fired.current = false;
     releasedAt.current = performance.now();
   };
-  const startPress = (event: React.PointerEvent) => {
+  const dropPress = () => {
+    cancelPress();
     fired.current = false;
+  };
+  const startPress = (event: React.PointerEvent) => {
+    // Новый жест закрывает чужое окно, если оно почему-то осталось.
+    fired.current = false;
+    releasedAt.current = Number.NEGATIVE_INFINITY;
     if (event.pointerType !== "touch" || event.button !== 0) return;
     cancelPress();
     const { clientX: x, clientY: y } = event;
@@ -422,7 +434,7 @@ export function ItemCard({
       onPointerDown={startPress}
       onPointerMove={movePress}
       onPointerUp={endPress}
-      onPointerCancel={endPress}
+      onPointerCancel={dropPress}
       // Системное меню по удержанию (Android) и выделение текста (iOS)
       // отбирали бы жест себе; на мыши правая кнопка работает как обычно.
       onContextMenu={(event) => {
@@ -432,7 +444,7 @@ export function ItemCard({
       }}
       onClickCapture={(event) => {
         if (event.timeStamp - releasedAt.current > LONG_PRESS_SUPPRESS_MS) return;
-        releasedAt.current = 0;
+        releasedAt.current = Number.NEGATIVE_INFINITY;
         event.preventDefault();
         event.stopPropagation();
       }}

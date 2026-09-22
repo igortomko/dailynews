@@ -339,7 +339,12 @@ export function FeedTabs({
         : items.filter((item) => item.topic_slug === slug);
 
   return (
-    <Tabs value={tab} onValueChange={setTab}>
+    // На телефоне белым становится весь корень ленты на высоту экрана,
+    // а не колонка текста: у короткой вкладки колонка кончалась бы
+    // посреди экрана, и под ней лежал серый край страницы — та же рамка,
+    // только снизу. На широком экране корень прозрачный: там белая
+    // колонка на сером и есть место для чтения.
+    <Tabs value={tab} onValueChange={setTab} className="max-sm:min-h-svh max-sm:bg-card">
       {/* Шапка живёт внутри Tabs: полоса вкладок и содержимое должны быть
           в одном корне, иначе переключение их не связывает.
           Дата и настройки — по краям экрана, а не по колонке текста:
@@ -476,7 +481,7 @@ export function FeedTabs({
           а текст идёт от края до края с обычным полем. */}
       <div
         className={cn(
-          "mx-auto w-full max-w-page bg-card px-4 pt-4 sm:bg-transparent sm:pt-6",
+          "mx-auto w-full max-w-page px-4 pt-4 sm:pt-6",
           selecting ? "pb-24" : "pb-4 sm:pb-6",
         )}
       >
