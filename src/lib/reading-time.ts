@@ -149,6 +149,19 @@ export function itemsForMinutes(minutes: number, perCard: number, maxItems: numb
 export const formatMinutes = (minutes: number, t: TimeLabels): string =>
   t.readingMinutes(Math.max(1, Math.round(minutes)));
 
+/**
+ * Длительность, которая может перевалить за час: «~45 минут», «~1 час 26 минут».
+ *
+ * Время выпуска в час не упирается — он заказан минутами, и `formatMinutes`
+ * ему хватает. А сутки потока у твоих источников — это 86 и 120 минут
+ * на живом замере: «~86 минут» верно, но делить их на часы читатель будет
+ * в уме, ровно в той строке, ради которой всё и считалось.
+ */
+export const formatDuration = (minutes: number, t: TimeLabels): string => {
+  const total = Math.max(1, Math.round(minutes));
+  return total < 60 ? t.minutesLong(total) : t.hoursLong(Math.floor(total / 60), total % 60);
+};
+
 /** Та же волна, но словом: в Telegram и в подписях «мин» читается обрубком. */
 export const formatMinutesLong = (minutes: number, t: TimeLabels): string =>
   t.minutesLong(Math.max(1, Math.round(minutes)));
@@ -197,3 +210,29 @@ export const flowSplit = (
   const kept = Math.max(0, Math.min(places, collected));
   return { kept, dropped: Math.max(0, collected - kept) };
 };
+
+/**
+ * Сутки потока в минутах: столько заняло бы просмотреть заголовки и анонсы
+ * всего, что вышло у твоих источников.
+ *
+ * Меряется наш же текст в том виде, в каком он лежит в `items`, а не статьи
+ * за ссылками: длина оригинала гуляет от абзаца до лонгрида на час,
+ * и «сэкономили», собранное из неё, обещало бы чужой размер — та же причина,
+ * по которой время выпуска считается по описаниям, а не по источникам.
+ *
+ * Скорость — исходного языка, а не читателя: поток лежит на языке источников,
+ * почти всегда английском, и поправка на сложность нашего письма к чужим
+ * заголовкам не относится.
+ */
+export const streamMinutes = (chars: number): number =>
+  chars / (CHARS_PER_MINUTE[SOURCE_LANGUAGE] ?? DEFAULT_CHARS_PER_MINUTE);
+
+/**
+ * Сколько времени лента сняла за сутки: просмотр всего потока минус выпуск.
+ *
+ * Ноль, а не отрицательное число: в тихий день вышло меньше, чем заказано,
+ * и «сэкономила −7 минут» — это не экономия, о которой надо молчать,
+ * а число, которое нельзя показывать. Решает здесь, а не каждый показ.
+ */
+export const savedMinutes = (streamChars: number, digestMinutes: number): number =>
+  Math.max(0, streamMinutes(streamChars) - digestMinutes);

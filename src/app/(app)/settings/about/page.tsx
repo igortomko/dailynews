@@ -6,7 +6,9 @@ import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { getCollectedLast24h, getSources } from "@/lib/queries";
 import { cardCharsOf } from "@/lib/readers";
-import { cardMinutes, flowSplit, itemsForMinutes } from "@/lib/reading-time";
+import {
+  cardMinutes, flowSplit, formatDuration, itemsForMinutes, savedMinutes, streamMinutes,
+} from "@/lib/reading-time";
 import { minutesCap, sourcesForPlan, PLAN_IDS, PLANS } from "@/lib/plans";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n";
@@ -42,14 +44,18 @@ export const dynamic = "force-dynamic";
  */
 function FlowGrid({
   collected,
+  chars,
   digest,
   minutes,
   t,
+  time,
 }: {
   collected: number;
+  chars: number;
   digest: number;
   minutes: number;
   t: Dict["plans"]["about"];
+  time: Dict["feed"]["time"];
 }) {
   const CELLS = 200;
   // Клетки — это то, что вышло, и только оно. Считать их от максимума
@@ -69,19 +75,36 @@ function FlowGrid({
   }
 
   const minutesText = `${minutes} ${t.minutesWord(minutes)}`;
+  // Выигрыш дня одним числом — то, ради чего карточка стоит на странице.
+  // Ниже он разложен на слагаемые: «сэкономили час» без «из чего» — это
+  // обещание, которое нечем проверить.
+  const saved = savedMinutes(chars, minutes);
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm">
-        {collected > 0
-          // Второй раз единица не называется: «вышло 89 новостей ... оставит
-          // ~18 новостей» повторяет слово в одном предложении, а названа она
-          // строкой раньше и тем же числом.
-          ? t.flowLead(`${collected} ${t.newsWord(collected)}`, String(kept), minutesText)
-          // Пустые сутки — не ноль в той же фразе: «вышло 0, оставит ~18»
-          // обещает выпуск из того, чего нет.
-          : t.flowLeadEmpty(`${digest} ${t.newsWord(digest)}`, minutesText)}
-      </p>
+      <div className="flex flex-col gap-1">
+        {/* Меньше минуты экономии вслух не называется: в тихий день поток
+            короче заказа, и «сэкономила ~0» — это отчёт о работе, которой
+            не было. Остаётся один разбор, и он верен в любой день. */}
+        {saved >= 1 ? (
+          // Полужирным отличается утверждение от своего доказательства:
+          // строкой ниже стоит такая же величина («~1 час 26 минут»), и в один
+          // кегль обе читаются как одна мысль, повторённая дважды.
+          <p className="text-sm font-medium">{t.flowSaved(formatDuration(saved, time))}</p>
+        ) : null}
+        <p className={saved >= 1 ? "text-sm text-muted-foreground" : "text-sm"}>
+          {collected > 0
+            ? t.flowBasis(
+                `${collected} ${t.newsWord(collected)}`,
+                formatDuration(streamMinutes(chars), time),
+                minutesText,
+              )
+            // Пустые сутки — не ноль в той же фразе: «вышло 0, заняло бы ~0»
+            // отчитывается о работе, которой не было, там, где сказать надо
+            // ровно это.
+            : t.flowLeadEmpty(`${digest} ${t.newsWord(digest)}`, minutesText)}
+        </p>
+      </div>
       {/* В пустые сутки сетки нет совсем, а не сетка из одной серой клетки:
           рисовать нечего, и пустая группа оставила бы на её месте двойной
           зазор — пробел, который читается поломкой вёрстки. */}
@@ -148,7 +171,7 @@ export default async function AboutPage() {
   // Те же источники, что опрашивает прогон: картинка обязана считать
   // по тому, что читателю на его тарифе и правда собирают.
   const mine = sourcesForPlan(catalog, plan).map((source) => source.id);
-  const collected = await getCollectedLast24h(mine);
+  const { count: collected, chars: streamChars } = await getCollectedLast24h(mine);
   // Потолок тарифа, а не сохранённое число: после понижения `digest_minutes`
   // остаётся от прежнего тарифа, и картинка обещала бы час там, где доходит
   // пять минут — споря с карточкой ниже на этом же экране.
@@ -174,7 +197,14 @@ export default async function AboutPage() {
           <CardTitle>{t.plans.about.heroTitle}</CardTitle>
         </CardHeader>
         <CardContent>
-          <FlowGrid collected={collected} digest={inDigest} minutes={minutes} t={t.plans.about} />
+          <FlowGrid
+            collected={collected}
+            chars={streamChars}
+            digest={inDigest}
+            minutes={minutes}
+            t={t.plans.about}
+            time={t.feed.time}
+          />
         </CardContent>
       </Card>
 

@@ -125,8 +125,9 @@ export const plans: typeof En = {
     heroTitle: "Каждое утро только то, что стоит прочитать",
     newsWord: (n) => plural(n, "новость", "новости", "новостей"),
     minutesWord: (n) => plural(n, "минута", "минуты", "минут"),
-    flowLead: (collected, kept, minutes) =>
-      `За сутки у твоих источников вышло ${collected}. Лента прочитает все и оставит ~${kept} — твои ${minutes}.`,
+    flowSaved: (saved) => `За сутки лента сэкономила тебе ${saved}.`,
+    flowBasis: (collected, stream, minutes) =>
+      `У твоих источников вышло ${collected} — просмотреть всё это ${stream}. Твой выпуск — ${minutes}.`,
     flowLeadEmpty: (kept, minutes) =>
       `За сутки у твоих источников не вышло ничего. Когда выйдет — лента оставит ~${kept} на твои ${minutes}.`,
     flowKept: "дошло до тебя",
