@@ -445,10 +445,25 @@ type XTweet = {
  * адресом из RSS первым слоем, без вопроса к Jev по заголовкам, которые
  * у твита и у издания не сходятся никогда.
  *
- * Свои адреса X не считаются: цитата другого твита — не материал. `t.co`
- * тоже не годится — это сокращатель, за которым неизвестно что, а тянуть
- * его в сборе значит платить запросом за каждую ссылку в каждом твите.
+ * Свои адреса X не считаются: цитата другого твита — не материал.
+ * Сокращатели тоже, и это замер, а не осторожность: в живой выдаче
+ * `dlvr.it/TVb9jh` ведёт на datacenterdynamics.com, а `shorturl.at/hjOyJ`
+ * не отвечает вовсе. Взять адрес сокращателя значит записать в `url_canon`
+ * то, что не сойдётся с той же статьёй из RSS, — то есть отдать ровно ту
+ * выгоду, ради которой ссылка из твита и берётся. Разворачивать их в сборе
+ * нельзя: это запрос на каждую ссылку в каждом твите, оплаченный временем
+ * прогона. Такой твит остаётся твитом.
+ *
+ * Список, а не правило: у сокращателя нет признака. `dlvr.it` и `reut.rs`
+ * снаружи одинаковы, и всякий короткий хост в сокращатели записать —
+ * значит выбросить половину изданий.
  */
+const SHORTENERS = new Set([
+  "t.co", "bit.ly", "dlvr.it", "shorturl.at", "buff.ly", "ow.ly", "lnkd.in",
+  "trib.al", "ift.tt", "tinyurl.com", "is.gd", "cutt.ly", "rb.gy", "hubs.ly",
+  "spr.ly", "zurl.co", "shr.lc",
+]);
+
 export function tweetLink(tweet: XTweet): string | null {
   for (const entry of tweet.entities?.urls ?? []) {
     const raw = entry.expanded_url;
@@ -459,7 +474,8 @@ export function tweetLink(tweet: XTweet): string | null {
     } catch {
       continue;
     }
-    if (host === "x.com" || host === "twitter.com" || host === "t.co") continue;
+    if (host === "x.com" || host === "twitter.com") continue;
+    if (SHORTENERS.has(host)) continue;
     return raw;
   }
   return null;
