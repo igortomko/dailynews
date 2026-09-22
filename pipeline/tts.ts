@@ -23,6 +23,7 @@ import { SOURCE_LANGUAGE } from "../src/lib/voice";
 import type { Plan } from "../src/lib/plans";
 import type { Reader } from "../src/lib/types";
 import { llmCost } from "./cost";
+import { GAP_MP3, GAP_SECONDS } from "./gap";
 import { resolve, type Usage } from "./digest";
 
 /**
@@ -488,6 +489,12 @@ export async function runPodcast(
     for (const itemId of itemIds) {
       const piece = await cardAudio(reader, itemId, usage);
       if (!piece) continue;
+      // Пауза между новостями, но не перед первой и не после последней:
+      // тишина в начале файла читается как «не загрузилось».
+      if (parts.length > 0) {
+        parts.push(GAP_MP3);
+        seconds += GAP_SECONDS;
+      }
       parts.push(piece.audio);
       titles.push(piece.title);
       seconds += piece.seconds;
