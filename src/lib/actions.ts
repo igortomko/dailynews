@@ -36,6 +36,7 @@ import { effectivePlan, effectiveVoice } from "./lemon";
 import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
 import { clampTopicText, formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
+import { addByLink } from "./sources";
 import { resolveSuggestions } from "./onboarding";
 
 /**
@@ -1209,6 +1210,45 @@ export async function saveOnboardingInterests(
  * где читатель всего лишь нажимает на названия. Вставленная руками ссылка
  * проверяется по-прежнему (addSource).
  */
+/**
+ * Своя ссылка прямо на шаге источников.
+ *
+ * Раньше её тут не было, и подпись шага отправляла читателя в настройки
+ * или в бота — «добавишь потом». Момент был выбран худший: именно здесь
+ * человек готов назвать то, что читает сам, и именно здесь ему отвечали
+ * «не сейчас». Экран при этом предлагает ровно столько, сколько вмещает
+ * тариф, и читается как «бери или не бери».
+ *
+ * Путь тот же, что у бота и у формы в настройках: `addByLink` спрашивает
+ * тариф до сети (разбор ссылки X — уже платный запрос), разбирает, проверяет
+ * пробой и сохраняет. Своего разбора здесь нет намеренно: три копии одних
+ * правил разойдутся молча, и первым разойдётся тот, которым реже пользуются.
+ */
+export async function addOnboardingSource(input: string) {
+  const reader = await currentReader();
+  const result = await addByLink(reader, input);
+  if (!result.ok) return { error: result.error };
+
+  const t = dictOf(reader.ui_language).onboarding;
+  // Перерисовки здесь нет намеренно, и это тот же урок, что у finishOnboarding.
+  // Источник уже связан с читателем, поэтому после revalidatePath шаг мастера
+  // пересчитывается по данным, видит «источники есть» и уводит на последний
+  // экран — прямо из-под пальца, вставившего ссылку. Список на экране клиент
+  // и так обновляет сам.
+  return {
+    ok: true as const,
+    suggestion: {
+      key: `${result.found.kind}|${result.found.url}`,
+      kind: result.found.kind,
+      url: result.found.url,
+      label: result.found.label,
+      // Доказательство, что источник ответил, а не просто открылся:
+      // принятый пустым через неделю неотличим от заброшенного.
+      why: t.wizard.sources.addedWhy(result.found.fresh, result.found.entries),
+    },
+  };
+}
+
 export async function saveOnboardingSources(keys: string[]) {
   const reader = await currentReader();
   const plan = effectivePlan(reader);
