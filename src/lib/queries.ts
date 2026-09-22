@@ -469,6 +469,46 @@ export async function getCalibration(readerId: number): Promise<{
  * (`cardChars`), — заголовок и анонс, всё, что читатель прошёл бы глазами
  * в своей читалке.
  */
+/**
+ * Два числа, без которых предложение тарифа врёт: сколько собрали его
+ * источники за сутки и читает ли он ленту вообще.
+ *
+ * Одним запросом и вместе с сюжетами карточек, а не своим кругом до базы:
+ * соединений в пуле пять, а лента и так спрашивает шесть раз. Оба числа
+ * нужны одному и тому же решению (`upgradeReason`), и разъехаться они
+ * не должны.
+ *
+ * Активность — открытия, а не показы. Показ значит «пролистал мимо»:
+ * у единственного внешнего читателя на 22 сентября 2026 было восемь показов
+ * и ноль открытий, и предлагать ему платный тариф значило бы продавать то,
+ * чего он ещё не читал.
+ */
+export async function getUpgradeFacts(
+  readerId: number,
+  sourceIds: number[],
+): Promise<{ collected: number; active: boolean; sources: number; topics: number }> {
+  const [row] = await sql<{ collected: number; active: boolean; sources: number; topics: number }[]>`
+    select
+      (select count(*)::int from dailynews.items
+        where collected_at >= now() - interval '24 hours'
+          and source_id = any(${sourceIds.length ? sourceIds : [0]}::bigint[])) as collected,
+      exists (select 1 from dailynews.reads
+               where reader_id = ${readerId}
+                 and event in ('opened', 'outbound')
+                 and at > now() - interval '7 days') as active,
+      (select count(*)::int from dailynews.reader_sources rs
+         join dailynews.sources s on s.id = rs.source_id
+        where rs.reader_id = ${readerId} and s.deleted_at is null) as sources,
+      (select count(*)::int from dailynews.reader_topics where reader_id = ${readerId}) as topics
+  `;
+  return {
+    collected: row?.collected ?? 0,
+    active: row?.active ?? false,
+    sources: row?.sources ?? 0,
+    topics: row?.topics ?? 0,
+  };
+}
+
 export async function getCollectedLast24h(
   sourceIds: number[],
 ): Promise<{ count: number; chars: number }> {

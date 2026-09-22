@@ -88,6 +88,24 @@ export const feed: typeof En = {
     clipboardDeniedDescription: "Текст уже выделен ниже — нажми ⌘C или Ctrl+C",
   },
 
+  /** src/components/upgrade-note.tsx — строка под выпуском. */
+  upgrade: {
+    // Говорится о том, что произошло с его лентой, а не о том, что купить:
+    // числа в первой половине фразы читатель может проверить глазами
+    // на этом же экране, название тарифа — нет.
+    cadence: (to: string) =>
+      `Сегодня выпуска нет: на бесплатном он приходит через день. На «${to}» — каждое утро.`,
+    sources: (now: number, plan: string, up: number, to: string) =>
+      `Лента следит за ${now} источниками — это весь тариф «${plan}». На «${to}» — ${up}.`,
+    topics: (now: number, plan: string, up: number, to: string) =>
+      `${now} ${plural(now, "интерес", "интереса", "интересов")} — это весь тариф «${plan}». На «${to}» — ${up}.`,
+    // Сначала поток, потом выпуск: работа ленты — это отброшенное,
+    // и без первого числа второе ничего не значит.
+    minutes: (collected: number, kept: number, now: number, up: number, to: string) =>
+      `За сутки у твоих источников вышло ${collected} ${plural(collected, "новость", "новости", "новостей")}, в выпуск поместилось ${kept} — столько влезает в ${now} ${plural(now, "минуту", "минуты", "минут")}. На «${to}» — ${up}.`,
+    see: (to: string, price: number) => `Посмотреть «${to}» за $${price}`,
+  },
+
   item: {
     hidden: (title: string) => `Скрыто: ${title}`,
     undo: "Вернуть",

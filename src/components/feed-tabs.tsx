@@ -20,6 +20,8 @@ import { formatDay } from "@/lib/relative-time";
 import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
+import type { UpgradeNote } from "@/lib/upgrade";
+import { UpgradeLine } from "@/components/upgrade-note";
 import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
 import type { NetworkId } from "@/lib/networks";
 
@@ -138,6 +140,7 @@ export function FeedTabs({
   plan,
   networks,
   reading,
+  upgrade,
   textLang,
   left,
   right,
@@ -164,6 +167,11 @@ export function FeedTabs({
    * по сегодняшней настройке.
    */
   reading: { minutes: number; target: number | null };
+  /**
+   * Предел, в который читатель упёрся сегодня, или null. Считает сервер
+   * (`upgradeReason`) — тем же правилом, каким про тариф говорит бот.
+   */
+  upgrade: UpgradeNote | null;
   /** Тег языка текста выпуска, null — если выпуск не переводится. */
   textLang: string | null;
   left: React.ReactNode;
@@ -744,6 +752,12 @@ export function FeedTabs({
         );
       })}
         </div>
+        {/* Под выпуском, а не над ним: это итог прочитанного, и наверху
+            он был бы предложением вместо новостей. Одна на всю ленту,
+            а не в каждой вкладке: предел про весь выпуск, а панели вкладок
+            остаются смонтированными все — в каждой строка повторилась бы
+            столько раз, сколько тем. */}
+        {upgrade && items.length > 0 ? <UpgradeLine note={upgrade} plan={plan} /> : null}
       </div>
       <SelectionBar
         count={chosen.length}

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getDigestDays, getFeed, getStories } from "@/lib/queries";
+import { getDigestDays, getFeed, getStories, getUpgradeFacts } from "@/lib/queries";
 import { applyRules, rulesOf } from "@/lib/rules";
 import { isDay } from "@/lib/day";
 import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
@@ -8,7 +8,8 @@ import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/l
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { langTagFor } from "@/lib/voice";
-import { sourcesForPlan } from "@/lib/plans";
+import { issuesToday, sourcesForPlan } from "@/lib/plans";
+import { upgradeNote, upgradeReason } from "@/lib/upgrade";
 import { minutesOf } from "@/lib/reading-time";
 import { tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
@@ -139,7 +140,30 @@ export default async function FeedPage({
 
   const mine = sourcesForPlan(sources, plan).map((source) => Number(source.id));
   const shown = visible.map((item) => item.source_id);
-  const stories = await getStories([...new Set([...mine, ...shown])], visible.map((item) => item.id));
+  // Рядом с сюжетами, а не своим кругом: оба запроса всё равно ждут первый
+  // круг (им нужен список источников по тарифу), и второй здесь бесплатен
+  // по времени.
+  const [stories, facts] = await Promise.all([
+    getStories([...new Set([...mine, ...shown])], visible.map((item) => item.id)),
+    getUpgradeFacts(reader.id, mine),
+  ]);
+
+  /**
+   * Предел, в который читатель упёрся сегодня, — строкой под выпуском.
+   *
+   * Считается только для последнего выпуска: «сегодня отобрано 8 из 106»
+   * на позавчерашней ленте рассказывало бы про сегодня, глядя на позавчера,
+   * — ровно как фраза недобора рядом.
+   */
+  const upgradeFacts = {
+    sources: facts.sources,
+    topics: facts.topics,
+    collected: facts.collected,
+    kept: feed.length,
+    active: facts.active,
+    issuesToday: issuesToday(plan, reader.id, day),
+  };
+  const upgrade = day === days[0] ? upgradeReason(plan, upgradeFacts) : null;
   // Оси остаются на сервере: карточке нужен один ответ — кликбейт ли это.
   // Описание из фида тоже: оно нужно было правилам, а правила уже применены.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- excerpt снимается с карточки, а не читается
@@ -167,6 +191,10 @@ export default async function FeedPage({
       // «сегодня больше действительно важного нет», и на выпуске недельной
       // давности она рассказывала бы про сегодня, глядя на позавчера.
       reading={{ minutes, target: day === days[0] ? digest.target : null }}
+      // Предел считает сервер: числа тарифов и поток за сутки в браузер
+      // не едут, туда уходит готовый ответ — та же причина, по которой оси
+      // материала остаются здесь.
+      upgrade={upgrade ? upgradeNote(plan, upgrade, upgradeFacts) : null}
       // Язык, которым написан текст карточек. Берётся у действующего тарифа,
       // а не из колонки: без перевода выпуск остаётся на языке источника,
       // и там тега нет — переносить чужой язык русскими правилами хуже,
