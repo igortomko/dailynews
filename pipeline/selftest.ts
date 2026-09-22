@@ -4231,13 +4231,25 @@ assert.equal(
   null,
   "цитата другого твита материалом не является",
 );
-// t.co — сокращатель, за которым неизвестно что. Разворачивать его в сборе
-// значит платить отдельным запросом за каждую ссылку в каждом твите.
+// Сокращатели — по замеру на живой выдаче: `dlvr.it/TVb9jh` ведёт
+// на datacenterdynamics.com, `shorturl.at/hjOyJ` не отвечает вовсе. Взять их
+// адресом значит записать в `url_canon` то, что не сойдётся с той же статьёй
+// из RSS, — то есть отдать выгоду, ради которой ссылка и берётся.
+for (const short of ["https://t.co/abc", "https://dlvr.it/TVb9jh", "https://shorturl.at/hjOyJ", "https://bit.ly/x"]) {
+  assert.equal(
+    tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+      entities: { urls: [{ expanded_url: short }] } }),
+    null,
+    `сокращатель ${short} за материал не считается`,
+  );
+}
+// Собственный домен издания короток так же, как сокращатель, и выбрасывать
+// его нельзя: признака у сокращателя нет, поэтому список, а не правило.
 assert.equal(
   tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
-    entities: { urls: [{ expanded_url: "https://t.co/abc" }] } }),
-  null,
-  "сокращатель t.co за материал не считается",
+    entities: { urls: [{ expanded_url: "https://reut.rs/3abc" }] } }),
+  "https://reut.rs/3abc",
+  "короткий хост издания сокращателем не считается",
 );
 assert.equal(
   tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
