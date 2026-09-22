@@ -8,9 +8,10 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { ItemCard } from "@/components/item-card";
+import { AUDIO_POLL_MS, AUDIO_POLL_TIMES, ItemCard } from "@/components/item-card";
 import { SearchButton, SearchField } from "@/components/feed-search";
 import { SearchHints } from "@/components/search-memory";
+import { HeadphonesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { OverviewDialog, SelectionBar } from "@/components/overview";
 import { useLocale, useT } from "@/components/i18n-provider";
@@ -256,6 +257,14 @@ export function FeedTabs({
   const selecting = chosen.length > 0;
 
   const [podcasting, setPodcasting] = useState(false);
+  /**
+   * Какие карточки сейчас озвучивает подкаст и на каком они шаге.
+   *
+   * Работа идёт после ответа сервера, в `after()`, поэтому «собираю»
+   * на кнопке гаснет через секунду, а озвучка ещё минуту. Без этой карты
+   * кнопка на карточке выглядела бы бездействующей ровно пока работает.
+   */
+  const [voicing, setVoicing] = useState<Map<number, string>>(new Map());
 
   /**
    * Подкаст из отмеченных карточек.
@@ -264,9 +273,37 @@ export function FeedTabs({
    * уже слушали, достаётся даром, а новая синтезируется десятки секунд, —
    * доля готового о времени не говорит ничего.
    */
+  /**
+   * Следить за озвучкой подкаста и гасить загрузку по карточкам.
+   *
+   * Спрашивается пачкой: десять карточек иначе означали бы десять
+   * запросов каждые две секунды ради десяти слов.
+   */
+  const followPodcast = async (sendIds: number[]) => {
+    if (sendIds.length === 0) return;
+    for (let i = 0; i < AUDIO_POLL_TIMES; i++) {
+      await new Promise((done) => setTimeout(done, AUDIO_POLL_MS));
+      const res = await fetch(`/api/audio?send_ids=${sendIds.join(",")}`).catch(() => null);
+      if (!res?.ok) break;
+      const body = await res.json().catch(() => ({}));
+      const live = new Map<number, string>();
+      for (const send of body.sends ?? []) {
+        if (send.status !== "sent" && send.status !== "failed") live.set(send.item_id, send.status);
+      }
+      setVoicing(live);
+      if (live.size === 0) return;
+    }
+    // Перестали ждать — гасим загрузку: вечный спиннер читается поломкой,
+    // а работа при этом идёт и придёт в Telegram.
+    setVoicing(new Map());
+  };
+
   const buildPodcast = async () => {
     setPodcasting(true);
-    const toastId = toast.loading(t.feed.overview.podcastWorking, { duration: Infinity });
+    const toastId = toast.loading(t.feed.overview.podcastWorking, {
+      duration: Infinity,
+      icon: <HeadphonesIcon className="size-4" />,
+    });
     try {
       const res = await fetch("/api/audio/podcast", {
         method: "POST",
@@ -276,20 +313,36 @@ export function FeedTabs({
       if (!res.ok) throw new Error(body?.error ?? t.feed.item.audioError);
       // Частичный сбор называется вслух: отметил пять, услышит три —
       // узнать об этом надо сейчас, а не по длине файла.
+      // Карточки уходят в работу до того, как мы о ней узнаем из опроса:
+      // первый шаг ставится сразу, иначе между ответом и первым тиком
+      // кнопка успевает мигнуть покоем.
+      setVoicing(new Map(body.included_ids?.map((id: number) => [id, "queued"]) ?? []));
+      void followPodcast(body.send_ids ?? []);
+
       if (body.partial) {
         toast.warning(t.feed.overview.podcastPartial(body.included, body.asked), {
           id: toastId,
+          duration: 8000,
+          closeButton: true,
+          icon: <HeadphonesIcon className="size-4" />,
           description: body.partial,
         });
       } else {
         toast.success(t.feed.overview.podcastQueued(body.included), {
           id: toastId,
+          duration: 8000,
+          closeButton: true,
+          icon: <HeadphonesIcon className="size-4" />,
           description: t.feed.overview.podcastQueuedNote,
         });
       }
       clear();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.feed.item.audioError, { id: toastId });
+      toast.error(error instanceof Error ? error.message : t.feed.item.audioError, {
+        id: toastId,
+        duration: 8000,
+        closeButton: true,
+      });
     } finally {
       setPodcasting(false);
     }
@@ -613,6 +666,7 @@ export function FeedTabs({
                     plan={plan}
                     networks={networks}
                     selected={selectedIds.has(item.id)}
+                    voicing={voicing.get(item.id)}
                     selecting={selecting}
                     onSelectedChange={(next) => pick(item.id, next)}
                   />
