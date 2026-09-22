@@ -49,6 +49,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-signal: var(--signal);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -84,6 +85,13 @@
   --popover-foreground: oklch(0.15 0.01 80);
   --primary: oklch(0.21 0.012 80);
   --primary-foreground: oklch(0.985 0.004 80);
+  /* Красный бренда — тот самый, которым напечатана газета на гравюрах
+     (`public/brand/tokens.css`, `--reporta-signal`). Он один на обе темы:
+     в серии тушь в тёмной теме становится белой, а красный не меняется,
+     и второе его значение в интерфейсе разошлось бы с картинкой, стоящей
+     на том же экране. Это сигнал, а не опасность: `--destructive` рядом
+     означает «удалить» и в другом тоне. */
+  --signal: #ff462a;
   --secondary: oklch(0.938 0.006 80);
   --secondary-foreground: oklch(0.21 0.012 80);
   --muted: oklch(0.938 0.006 80);

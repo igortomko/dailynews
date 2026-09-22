@@ -58,7 +58,7 @@ import { matchWritten, parseDigest, textFor, type Survivor } from "./digest";
 import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
-import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
+import { articleHtml, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
   channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
@@ -74,6 +74,8 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
 import { plural } from "../src/lib/plural";
+import { ru as ruDict } from "../src/lib/i18n/ru/index";
+import { en as enDict } from "../src/lib/i18n/en/index";
 import {
   anyOf, highlight, HL_END, HL_START, SEARCH_CONFIG, TS_CONFIGS, tsConfigFor,
 } from "../src/lib/search";
@@ -2483,6 +2485,32 @@ assert.equal(countOf("1.74M"), 1_740_000, "сокращение миллионо
 assert.equal(countOf("812"), 812, "число без сокращения читается как есть");
 assert.equal(countOf(undefined), null, "нет просмотров — null, а не ноль");
 
+// --- тексты онбординга: числительные и несбывшееся обещание --------------------
+// Формы ломаются ровно на единице и на втором десятке, а тестируют обычно
+// на пятёрке: «прошло 1 секунда» мы уже выкатывали. И обещание, названное
+// в секундах, перестаёт быть правдой на сорок первой.
+{
+  const w = ruDict.onboarding.wizard;
+  // Сравнение по началу строки, а не regex: \b в JS считает границей слова
+  // только ASCII, и после кириллицы ведёт себя не так, как выглядит, — это
+  // ровно та ловушка, что уже стоит в таблице поломок.
+  const starts = (value: string, head: string) =>
+    assert.equal(value.slice(0, head.length), head, `«${value}» должно начинаться с «${head}»`);
+  starts(w.ready.elapsed(1), "1 секунда.");
+  starts(w.ready.elapsed(2), "2 секунды.");
+  starts(w.ready.elapsed(11), "11 секунд.");
+  starts(w.ready.elapsed(21), "21 секунда.");
+  assert.ok(w.ready.elapsed(12).includes("Обычно"), "до сорока обещание уместно");
+  assert.ok(
+    !w.ready.elapsed(41).includes("Обычно"),
+    "после сорока обещание не повторяется: оно уже не сбылось",
+  );
+  assert.equal(w.interests.more(1), "Ещё 1 интерес");
+  assert.equal(w.interests.more(15), "Ещё 15 интересов");
+  assert.equal(w.sources.addedWhy(1), "1 свежая запись");
+  assert.equal(w.sources.addedWhy(20), "20 свежих записей");
+}
+
 // --- число и слово рядом -------------------------------------------------------
 // «1 материалов» — не опечатка, а признак числа, подставленного в готовую
 // строку. Читается как машинный текст, и виден он только на единице.
@@ -2631,6 +2659,24 @@ assert.deepEqual(
 {
   const slugs = new Set(STARTER_TOPICS.map((topic) => topic.slug));
   assert.equal(slugs.size, STARTER_TOPICS.length, "слаги стартовых интересов не повторяются");
+
+  // Подпись живёт в двух словарях, и каждая обязана быть в обоих: интерес
+  // без перевода показывается читателю слагом из файла — по-английски тому,
+  // кто выбрал русский, и наоборот.
+  for (const topic of STARTER_TOPICS) {
+    assert.ok(ruDict.onboarding.starterTopics[topic.slug], `«${topic.slug}» нет в русском словаре`);
+    assert.ok(enDict.onboarding.starterTopics[topic.slug], `«${topic.slug}» нет в английском словаре`);
+  }
+
+  // Два алфавита в одной подписи читаются как недоделанное: «Психотерапия
+  // и mental health» год стояла первой на первом экране продукта.
+  for (const topic of STARTER_TOPICS) {
+    const label = ruDict.onboarding.starterTopics[topic.slug].label;
+    assert.ok(
+      !(/[А-Яа-яЁё]/.test(label) && /[A-Za-z]/.test(label)),
+      `русская подпись «${label}» смешивает кириллицу с латиницей`,
+    );
+  }
   for (const topic of STARTER_TOPICS) {
     assert.ok(topic.hint.length > 10, `у «${topic.label}» должна быть подсказка: она уходит в вопрос Jev`);
     assert.ok(topic.feeds.length > 0, `у «${topic.label}» должен быть хоть один источник`);
@@ -2768,6 +2814,19 @@ assert.equal(pickTrack({}), null, "дорожек нет — читать неч
 // что и полный текст статьи из фида, — а он ждёт HTML. Markdown как есть
 // потерялся бы в defuddle, и отправка пошла бы качать страницу ролика,
 // где текста нет вовсе.
+// Пересказ теряется не из-за ролика, а из-за модели: на одной и той же
+// расшифровке в 5415 знаков первый ответ дал 236 токенов выхода и только
+// конспект, второй — 950 токенов и пересказ на 2365 знаков. Разбор обязан
+// отличать «пересказа нет» от «ответ сломан»: первое лечится повтором,
+// второе — нет.
+const withoutArticle = parseWriteup('{"summary": "что сказано"}', "модель");
+assert.equal(withoutArticle.summary, "что сказано", "конспект берётся и без пересказа");
+assert.equal(withoutArticle.article, "", "пересказа нет — это пустая строка, а не отказ");
+const fenced = parseWriteup('```json\n{"summary": "с", "article": "## Раздел\\n\\nтекст"}\n```', "модель");
+assert.ok(fenced.article.includes("## Раздел"), "пересказ в разметке доезжает через ограду кода");
+assert.throws(() => parseWriteup('{"article": "есть"}', "модель"), /summary/, "ответ без конспекта — это отказ");
+assert.throws(() => parseWriteup("не json", "модель"), /не JSON/, "ответ не JSON — тоже отказ");
+
 const html = articleHtml("## Раздел\n\nАбзац с числом 42.");
 assert.ok(html.includes("<h2>") && html.includes("<p>"), "разметка пересказа превращается в HTML");
 assert.equal(articleHtml(""), "", "пустой пересказ остаётся пустым, а не <article></article>");
@@ -4248,13 +4307,25 @@ assert.equal(
   null,
   "цитата другого твита материалом не является",
 );
-// t.co — сокращатель, за которым неизвестно что. Разворачивать его в сборе
-// значит платить отдельным запросом за каждую ссылку в каждом твите.
+// Сокращатели — по замеру на живой выдаче: `dlvr.it/TVb9jh` ведёт
+// на datacenterdynamics.com, `shorturl.at/hjOyJ` не отвечает вовсе. Взять их
+// адресом значит записать в `url_canon` то, что не сойдётся с той же статьёй
+// из RSS, — то есть отдать выгоду, ради которой ссылка и берётся.
+for (const short of ["https://t.co/abc", "https://dlvr.it/TVb9jh", "https://shorturl.at/hjOyJ", "https://bit.ly/x"]) {
+  assert.equal(
+    tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
+      entities: { urls: [{ expanded_url: short }] } }),
+    null,
+    `сокращатель ${short} за материал не считается`,
+  );
+}
+// Собственный домен издания короток так же, как сокращатель, и выбрасывать
+// его нельзя: признака у сокращателя нет, поэтому список, а не правило.
 assert.equal(
   tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
-    entities: { urls: [{ expanded_url: "https://t.co/abc" }] } }),
-  null,
-  "сокращатель t.co за материал не считается",
+    entities: { urls: [{ expanded_url: "https://reut.rs/3abc" }] } }),
+  "https://reut.rs/3abc",
+  "короткий хост издания сокращателем не считается",
 );
 assert.equal(
   tweetLink({ id: "1", url: "https://x.com/a/status/1", text: "t", createdAt: "",
