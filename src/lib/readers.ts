@@ -123,19 +123,21 @@ export async function upsertTopic(
   `;
   if (starter) return row.id;
 
-  const [{ held }] = await db<{ held: boolean }[]>`
-    select exists (
-      select 1 from dailynews.reader_topics mine
-       where mine.topic_id = ${row.id} and mine.reader_id = ${readerId}
-    ) as held
-  `;
-  // null — оставить сохранённую: присоединение с пустой подсказкой.
-  const hint = topic.hint === "" && !held ? null : topic.hint;
+  // Пустая подсказка — стёртая, если тему держу я, и не присланная, если
+  // присоединяюсь к ничьей: новый чип приходит без неё. Решается в самом
+  // запросе: отдельная проба «держу ли» стоила третий круг до базы на каждую
+  // свою тему при записи формы.
   await db`
     update dailynews.topics t
-       set label = ${topic.label}, hint = coalesce(${hint}::text, t.hint)
+       set label = ${topic.label},
+           hint = case
+             when ${topic.hint} = '' and not exists (
+               select 1 from dailynews.reader_topics mine
+                where mine.topic_id = t.id and mine.reader_id = ${readerId}
+             ) then t.hint
+             else ${topic.hint}
+           end
      where t.id = ${row.id}
-       and (t.label, t.hint) is distinct from (${topic.label}, coalesce(${hint}::text, t.hint))
        and not exists (
          select 1 from dailynews.reader_topics o
           where o.topic_id = t.id and o.reader_id <> ${readerId}

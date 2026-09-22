@@ -17,7 +17,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
 import { rulesAnchor } from "@/lib/rules";
-import { ownLabel } from "@/lib/starter-topics";
+import { ownLabel, TOPIC_LIMITS } from "@/lib/starter-topics";
 import { queueRebuild } from "@/components/rebuild-queue";
 import { useT } from "@/components/i18n-provider";
 
@@ -363,6 +363,7 @@ export function TopicChips({
                 {selected === index && chip.own ? (
                   <input
                     value={chip.label}
+                    maxLength={TOPIC_LIMITS.label}
                     aria-label={tc.topicNameAria}
                     onChange={(event) => patch(index, { label: event.target.value })}
                     // Сервер выводит слаг новой темы из имени при записи,
@@ -417,6 +418,7 @@ export function TopicChips({
                         id={`hint-${index}`}
                         rows={2}
                         value={chip.hint}
+                        maxLength={TOPIC_LIMITS.hint}
                         aria-label={tc.hintAria(chip.label)}
                         placeholder={tc.hintPlaceholder}
                         onChange={(event) => patch(index, { hint: event.target.value })}
@@ -500,6 +502,7 @@ export function TopicChips({
             id="chip-draft"
             ref={draftInput}
             value={draft}
+            maxLength={TOPIC_LIMITS.label}
             aria-label={tc.newTopicAria}
             placeholder={tc.newTopicPlaceholder}
             onChange={(event) => setDraft(event.target.value)}

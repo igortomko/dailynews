@@ -35,7 +35,7 @@ import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
-import { formChipOf, starterBySlug } from "./starter-topics";
+import { formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
 
 /**
@@ -158,12 +158,24 @@ export async function saveInterests(
   formData: FormData,
 ): Promise<{ error: string } | SavedInterests> {
   const readerId = await currentReaderId();
-  const chips = (JSON.parse(String(formData.get("chips") ?? "[]")) as ChipInput[])
-    .map((chip) => ({
-      ...chip,
-      label: String(chip.label ?? "").trim(),
-      hint: String(chip.hint ?? "").trim(),
-    }));
+  // Не разобралось или разобралось не списком объектов — отказ словами,
+  // как у правил: иначе `[null]` или `{}` роняли бы действие исключением.
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(formData.get("chips") ?? "[]"));
+  } catch {
+    raw = null;
+  }
+  if (!Array.isArray(raw) || raw.some((chip) => typeof chip !== "object" || chip === null)) {
+    return { error: (await getDict()).errors.badRequest };
+  }
+  const chips = (raw as ChipInput[]).map((chip) => ({
+    ...chip,
+    // Имя и подсказка уходят в общий справочник и в промпт всем читателям:
+    // режется тем же пределом, что и поле, — форму рисует браузер.
+    label: String(chip.label ?? "").trim().slice(0, TOPIC_LIMITS.label),
+    hint: String(chip.hint ?? "").trim().slice(0, TOPIC_LIMITS.hint),
+  }));
   if (chips.length === 0) return { error: (await getDict()).errors.pickOneTopic };
   // Имя уходит в общий справочник и в вопрос Jev как вариант ответа:
   // пустое там бесполезно всем. Поле добавления пустое отвергает, а имя
@@ -1106,7 +1118,7 @@ export async function saveOnboardingInterests(
   // Вписанное руками: подсказки у него нет, и это нормально — Jev получит
   // само название. Пустая тема в справочник не уезжает.
   const mine = custom
-    .map((label) => label.trim().slice(0, 60))
+    .map((label) => label.trim().slice(0, TOPIC_LIMITS.label))
     .filter(Boolean)
     .map((label) => ({ slug: toSlug(label), label, hint: "", count: MIN_PER_TOPIC }));
 

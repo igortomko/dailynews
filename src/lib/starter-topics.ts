@@ -344,6 +344,14 @@ export const STARTER_TOPICS: StarterTopic[] = [
 export const starterBySlug = new Map(STARTER_TOPICS.map((topic) => [topic.slug, topic]));
 
 /**
+ * Пределы имени и подсказки темы. Оба уходят в общий справочник и в вопрос
+ * Jev на каждом материале потока — длина здесь стоит денег всем читателям.
+ * Поле режет по `maxLength`, сервер — по этим же числам (`saveInterests`,
+ * `saveOnboardingInterests`): форму рисует браузер.
+ */
+export const TOPIC_LIMITS = { label: 60, hint: 200 } as const;
+
+/**
  * Каталожная ли тема: её имя и подсказка — критерий классификации для всех,
  * и править их читателю нельзя. Одно правило на сервер (`upsertTopic`
  * через `writeTopics`), страницу интересов и форму чипов: три копии
