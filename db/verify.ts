@@ -511,11 +511,41 @@ async function main() {
           on conflict (item_id) do nothing
         `;
       }
+      // Материал своего сюжета: у ids[1] оригинал лежит в сегодняшнем
+      // выпуске, и окно их сводит — а без этой строки вчерашнему дню
+      // было бы нечем встать между двумя сегодняшними карточками, то есть
+      // проверка на смешивание выпусков доказывала бы смешивание
+      // на списке, где смешивать нечего.
+      const soloUrl = "https://f.example.com/chips";
+      const soloTitle = "Chip export rules ease for Brazil";
+      const [soloRow] = await sql<{ id: number }[]>`
+        insert into dailynews.items (source_id, url, url_canon, title, title_norm, excerpt, points, comments, published_at)
+        values (
+          ${source.id}, ${soloUrl}, ${canonUrl(soloUrl)}, ${soloTitle},
+          ${normalizeTitle(soloTitle)}, '', 10, 5, now()
+        )
+        returning id
+      `;
+      const solo = soloRow.id;
+      await sql`
+        insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+        values (
+          ${solo}, ${topicBy("ai-infra").id}, 110, 0.8,
+          ${sql.json(axes("ai-infra", "fact") as unknown as Parameters<typeof sql.json>[0])}, 'jev-latest'
+        )
+        on conflict (item_id) do nothing
+      `;
       await makeDigest(owner.id, before, [
-        { id: ids[1], total: 110, title: "Владелец: вчера" },
+        { id: solo, total: 110, title: "Владелец: вчера" },
+        { id: ids[1], total: 105, title: "Владелец: вчера, повтор сегодняшнего" },
         { id: ids[4], total: 40, title: "Владелец: вчера, слабое" },
       ]);
-      await makeDigest(second.id, before, [{ id: ids[3], total: 200, title: "Vera: вчера" }]);
+      // Соседу — другой материал, а не вчерашняя копия сегодняшней карточки:
+      // тот же id в двух днях — это тот же сюжет, и окно его сводит. Проверка
+      // здесь про изоляцию читателей, и держаться она должна на ней, а не
+      // на повторе, которого в живом выпуске не бывает (отбор исключает
+      // уже уходившее).
+      await makeDigest(second.id, before, [{ id: ids[4], total: 200, title: "Vera: вчера" }]);
 
       const oneDay = await queries.getFeed(owner.id, today, { days: 1 });
       assert.equal(oneDay.items.length, 2, "окно в один день — это тот же выпуск, что и был");
@@ -526,6 +556,21 @@ async function main() {
         ["Владелец: GPT-6", "Владелец: вчера", "Владелец: уран", "Владелец: вчера, слабое"],
         "окно смешивает выпуски по скору, а не по дням",
       );
+      // Один сюжет — одна карточка, и решается это при показе. Отбор
+      // исключает уже уходившее по сюжету, но по тому, что знал на момент
+      // отбора: связь dup_of ставится позже выпуска — на живой базе
+      // 22 сентября 2026 четыре пары получили её через сутки после того,
+      // как обе карточки ушли читателю. Здесь ровно этот случай: ids[1]
+      // повторяет сегодняшний ids[0], и в окне их двое.
+      assert.ok(
+        !window.items.some((card) => String(card.id) === String(ids[1])),
+        "повтор сегодняшнего сюжета не приходит вчерашней карточкой",
+      );
+      // Сводится до отсечки, а не после. Иначе повтор съедал бы чужое место
+      // в заказанных минутах, а «ещё N не влезло» считало бы его карточкой:
+      // без заказа отрезать нечего, и число обязано быть нулём при лишней
+      // строке в digest_items.
+      assert.equal(window.cut, 0, "сведённый повтор не считается отрезанной карточкой");
       assert.deepEqual(
         [...new Set(window.items.map((card) => card.day))].sort(),
         [before, today],
@@ -542,24 +587,34 @@ async function main() {
       // Якорь — конец окна: день перед окном в него не попадает.
       assert.deepEqual(
         (await queries.getFeed(owner.id, before, { days: 1 })).items.map((card) => card.day),
-        [before, before],
+        [before, before, before],
         "якорь позавчера отдаёт позавчерашний выпуск, а не сегодняшний",
+      );
+      // Сюжет сводится внутри окна, а не по всему архиву: ids[1] повторяет
+      // сегодняшний ids[0], но сегодняшнего дня в этом окне нет — и вчерашняя
+      // карточка остаётся тем, чем она была для читателя вчера. Сведи её
+      // и здесь — позавчерашняя лента начала бы худеть от того, что вышло
+      // после неё.
+      assert.ok(
+        (await queries.getFeed(owner.id, before, { days: 1 })).items
+          .some((card) => String(card.id) === String(ids[1])),
+        "вчерашняя карточка не исчезает из своего дня из-за сегодняшнего оригинала",
       );
 
       // Скрытое рукой не возвращается ни на одном дне окна: иначе палец вниз
       // означал бы «скрыть, пока не откроешь два дня сразу».
       await sql`
         insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
-        values (${owner.id}, ${ids[1]}, 'down', 110, 0.8)
+        values (${owner.id}, ${solo}, 'down', 110, 0.8)
       `;
       const hidden = await queries.getFeed(owner.id, today, { days: 2 });
       assert.ok(
-        !hidden.items.some((card) => String(card.id) === String(ids[1])),
+        !hidden.items.some((card) => String(card.id) === String(solo)),
         "скрытое пальцем вниз не возвращается окном",
       );
       await sql`
         delete from dailynews.reads
-         where reader_id = ${owner.id} and item_id = ${ids[1]} and event = 'down'
+         where reader_id = ${owner.id} and item_id = ${solo} and event = 'down'
       `;
 
       // Заглушка «проверенную выжимку подготовить не удалось» — не карточка
@@ -567,14 +622,14 @@ async function main() {
       await sql`
         update dailynews.digest_items
            set summary_document = ${sql.json({ status: "unavailable" })}
-         where item_id = ${ids[4]}
+         where item_id = ${solo}
       `;
       assert.ok(
         !(await queries.getFeed(owner.id, today, { days: 2 })).items
-          .some((card) => String(card.id) === String(ids[4])),
+          .some((card) => String(card.id) === String(solo)),
         "заглушка не становится карточкой и в окне",
       );
-      await sql`update dailynews.digest_items set summary_document = null where item_id = ${ids[4]}`;
+      await sql`update dailynews.digest_items set summary_document = null where item_id = ${solo}`;
 
       // Отсечка по знакам считается оконной суммой в SQL, а `fitCards` —
       // её спецификация. Две формулы одного числа расходятся молча: заказ
@@ -610,7 +665,8 @@ async function main() {
       // Убираем за собой: дальше проверяются выпуски одного дня, и лишний
       // день сделал бы чужой провал необъяснимым.
       await sql`delete from dailynews.digests where day = ${before}`;
-      await sql`delete from dailynews.scores where item_id in (${ids[1]}, ${ids[4]})`;
+      await sql`delete from dailynews.scores where item_id in (${ids[1]}, ${ids[4]}, ${solo})`;
+      await sql`delete from dailynews.items where id = ${solo}`;
       console.log("  лента окном: чужого нет, скрытое не всплывает, отсечка сходится с fitCards");
     }
 
