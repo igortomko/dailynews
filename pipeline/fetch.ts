@@ -420,6 +420,12 @@ export async function fetchReddit(source: Source): Promise<RawItem[]> {
 const X_ENDPOINT = "https://api.twitterapi.io/twitter/tweet/advanced_search";
 /** Страница выдачи — 20 постов. Потолок держит счёт предсказуемым. */
 const X_MAX_PAGES = 2;
+/**
+ * Окно свежести. Шире, чем у фидов, потому что автор пишет реже издания:
+ * замер на живом аккаунте — 14 активных дней из 30, своих постов 12 из 47
+ * (остальное реплаи). Трое суток отдавали ноль у обоих заведённых авторов.
+ */
+const X_MAX_AGE_DAYS = 7;
 
 type XTweet = {
   id: string;
@@ -445,10 +451,25 @@ type XTweet = {
  * адресом из RSS первым слоем, без вопроса к Jev по заголовкам, которые
  * у твита и у издания не сходятся никогда.
  *
- * Свои адреса X не считаются: цитата другого твита — не материал. `t.co`
- * тоже не годится — это сокращатель, за которым неизвестно что, а тянуть
- * его в сборе значит платить запросом за каждую ссылку в каждом твите.
+ * Свои адреса X не считаются: цитата другого твита — не материал.
+ * Сокращатели тоже, и это замер, а не осторожность: в живой выдаче
+ * `dlvr.it/TVb9jh` ведёт на datacenterdynamics.com, а `shorturl.at/hjOyJ`
+ * не отвечает вовсе. Взять адрес сокращателя значит записать в `url_canon`
+ * то, что не сойдётся с той же статьёй из RSS, — то есть отдать ровно ту
+ * выгоду, ради которой ссылка из твита и берётся. Разворачивать их в сборе
+ * нельзя: это запрос на каждую ссылку в каждом твите, оплаченный временем
+ * прогона. Такой твит остаётся твитом.
+ *
+ * Список, а не правило: у сокращателя нет признака. `dlvr.it` и `reut.rs`
+ * снаружи одинаковы, и всякий короткий хост в сокращатели записать —
+ * значит выбросить половину изданий.
  */
+const SHORTENERS = new Set([
+  "t.co", "bit.ly", "dlvr.it", "shorturl.at", "buff.ly", "ow.ly", "lnkd.in",
+  "trib.al", "ift.tt", "tinyurl.com", "is.gd", "cutt.ly", "rb.gy", "hubs.ly",
+  "spr.ly", "zurl.co", "shr.lc",
+]);
+
 export function tweetLink(tweet: XTweet): string | null {
   for (const entry of tweet.entities?.urls ?? []) {
     const raw = entry.expanded_url;
@@ -459,7 +480,8 @@ export function tweetLink(tweet: XTweet): string | null {
     } catch {
       continue;
     }
-    if (host === "x.com" || host === "twitter.com" || host === "t.co") continue;
+    if (host === "x.com" || host === "twitter.com") continue;
+    if (SHORTENERS.has(host)) continue;
     return raw;
   }
   return null;
@@ -469,7 +491,15 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
   const apiKey = process.env.X_API_KEY;
   if (!apiKey) throw new Error("нужен X_API_KEY (twitterapi.io)");
 
-  const maxAgeDays = Number(source.config?.max_age_days ?? 3);
+  // Неделя, а не трое суток, и это замер, а не осторожность: автор в X
+  // активен примерно половину дней месяца (14 из 30 у замеренного аккаунта),
+  // и пауза в четыре дня у него обычное дело. В трёхдневное окно живой автор
+  // попадает через раз — оба заведённых источника отдавали ноль при том, что
+  // писали пять дней назад, — а первый пустой прогон ставит `silent_since`
+  // и зовёт убрать источник, который работает. Счёт от окна не зависит:
+  // `since_time` уходит в сам запрос, и платим мы за то, что вернулось,
+  // а у автора это два-три поста, а не архив.
+  const maxAgeDays = Number(source.config?.max_age_days ?? X_MAX_AGE_DAYS);
   const maxPages = Number(source.config?.max_pages ?? X_MAX_PAGES);
   const queryType = String(source.config?.query_type ?? "Latest");
 

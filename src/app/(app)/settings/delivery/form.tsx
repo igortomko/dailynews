@@ -15,7 +15,14 @@ import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { kindleSetupStep, type KindleStep } from "@/lib/kindle-setup";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -184,13 +191,13 @@ export function DeliveryForm({
                 );
               }}
             />
-            <FieldLabel htmlFor="podcast" className="font-normal">
-              <span className="flex items-center gap-1.5">
+            <FieldContent>
+              <FieldLabel htmlFor="podcast" className="items-center gap-1.5 font-normal">
                 {t.settings.delivery.telegram.podcast}
                 {noAudio ? <PaywallCrown feature="audio" plan={plan} /> : null}
-              </span>
+              </FieldLabel>
               <FieldDescription>{t.settings.delivery.telegram.podcastHint}</FieldDescription>
-            </FieldLabel>
+            </FieldContent>
           </Field>
         </CardContent>
       </Card>

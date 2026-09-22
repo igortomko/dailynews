@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightIcon, CheckIcon, PlusIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ExternalLinkIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -11,8 +11,12 @@ import { type Plan } from "@/lib/plans";
 import { useT } from "@/components/i18n-provider";
 import { suggestOrder, TOPIC_LIMITS } from "@/lib/starter-topics";
 import type { Suggestion, TopicOption } from "@/lib/onboarding";
-import { finishOnboarding, saveOnboardingInterests, saveOnboardingSources } from "@/lib/actions";
+import {
+  addOnboardingSource, finishOnboarding, saveOnboardingInterests, saveOnboardingSources,
+} from "@/lib/actions";
 import { NameRules } from "@/components/name-rules";
+import { BrandIllustration } from "@/components/brand-illustration";
+import { openUrlOf, SourceIcon } from "@/components/source-icon";
 import type { Names } from "@/lib/rules";
 
 /**
@@ -214,7 +218,7 @@ export function InterestsStep({
             disabled={total === 0 || pending}
           >
             {pending ? <Spinner /> : null}
-            {t.onboarding.wizard.next}
+            {t.onboarding.wizard.toSources}
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         </div>
@@ -275,21 +279,21 @@ export function InterestsStep({
               addMine();
             }}
           />
-          <Button type="button" variant="outline" onClick={addMine} disabled={full}>
+          <Button type="button" variant="raised" onClick={addMine} disabled={full}>
             <PlusIcon data-icon="inline-start" />
             {t.onboarding.wizard.interests.add}
           </Button>
         </div>
 
         {full ? (
-          <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(t.plans.label[plan.id])}</p>
+          <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(t.plans.label[plan.id], plan.maxTopics)}</p>
         ) : null}
 
         {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
             а отдельный экран стал бы решением, которое нельзя пропустить. */}
         <div className="mt-2 flex flex-col gap-6 border-t pt-6">
-          <NameRules kind="follow" initial={follow} optional onChange={setFollow} />
-          <NameRules kind="exclude" initial={exclude} optional onChange={setExclude} />
+          <NameRules kind="follow" initial={follow} optional raised onChange={setFollow} />
+          <NameRules kind="exclude" initial={exclude} optional raised onChange={setExclude} />
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
@@ -316,7 +320,50 @@ export function SourcesStep({
     suggestions.slice(0, plan.maxSources).map((suggestion) => suggestion.key),
   );
   const [error, setError] = useState<string | null>(null);
+  // Список живёт в состоянии: вставленная ссылка встаёт первой, а не уезжает
+  // под двадцать предложенных, где её ещё надо искать глазами.
+  const [list, setList] = useState(suggestions);
+  const [draft, setDraft] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const [adding, startAdd] = useTransition();
   const full = picked.length >= plan.maxSources;
+
+  /**
+   * Своя ссылка. Разбор ходит в сеть и занимает секунды — поэтому кнопка
+   * говорит, что она делает, а не молчит со спиннером.
+   *
+   * Своё всегда отмечается: человек вставил ссылку не для того, чтобы потом
+   * её отметить. Если мест больше нет, снимается последнее предложенное,
+   * и об этом говорится вслух — молча снятое читалось бы как «моё не взяли».
+   */
+  const paste = () =>
+    startAdd(async () => {
+      const link = draft.trim();
+      if (!link) return;
+      setError(null);
+      setNote(null);
+      try {
+        const result = await addOnboardingSource(link);
+        // Сужение по самому значению, а не по наличию ключа: в нормализованном
+        // union обе ветки несут оба поля, и `in` перестаёт различать их.
+        const added = "suggestion" in result ? result.suggestion : undefined;
+        if (!added) {
+          setError(("error" in result && result.error) || t.onboarding.wizard.saveError);
+          return;
+        }
+        setDraft("");
+        setList((now) => [added, ...now.filter((one) => one.key !== added.key)]);
+        setPicked((now) => {
+          const mine = [added.key, ...now.filter((key) => key !== added.key)];
+          if (mine.length <= plan.maxSources) return mine;
+          const dropped = list.find((one) => one.key === mine[mine.length - 1]);
+          if (dropped) setNote(t.onboarding.wizard.sources.displaced(dropped.label));
+          return mine.slice(0, plan.maxSources);
+        });
+      } catch {
+        setError(t.onboarding.wizard.saveError);
+      }
+    });
 
   const toggle = (key: string) => {
     setError(null);
@@ -348,40 +395,87 @@ export function SourcesStep({
           <Counter picked={picked.length} limit={plan.maxSources} />
           <Button onClick={next} disabled={picked.length === 0 || pending}>
             {pending ? <Spinner /> : null}
-            {t.onboarding.wizard.next}
+            {t.onboarding.wizard.toFeed}
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         </div>
       }
     >
       <div className="flex flex-col gap-1">
-        {suggestions.map((suggestion) => {
+        {/* Поле над подобранным, а не под ним: список длиннее экрана, и внизу
+            поле находят, только долистав до конца — то есть уже согласившись
+            с чужим выбором. Своё называют до того, как разбирают чужое. */}
+        <div className="flex gap-2 pb-1">
+          <Input
+            value={draft}
+            aria-label={t.onboarding.wizard.sources.addPlaceholder}
+            placeholder={t.onboarding.wizard.sources.addPlaceholder}
+            disabled={adding}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              paste();
+            }}
+          />
+          <Button type="button" variant="raised" onClick={paste} disabled={adding || !draft.trim()}>
+            {adding ? <Spinner /> : <PlusIcon data-icon="inline-start" />}
+            {adding ? t.onboarding.wizard.sources.checking : t.onboarding.wizard.sources.add}
+          </Button>
+        </div>
+
+        {note ? <p className="pb-1 text-sm text-muted-foreground">{note}</p> : null}
+
+        {list.map((suggestion) => {
           const on = picked.includes(suggestion.key);
           return (
-            <button
-              key={suggestion.key}
-              type="button"
-              onClick={() => toggle(suggestion.key)}
-              aria-pressed={on}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                on ? "border-foreground/30 bg-foreground/[0.04]" : "border-transparent hover:bg-muted",
-              )}
-            >
-              <span
-                aria-hidden
+            <div key={suggestion.key} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => toggle(suggestion.key)}
+                aria-pressed={on}
                 className={cn(
-                  "flex size-5 shrink-0 items-center justify-center rounded-md border",
-                  on ? "border-foreground/40 bg-foreground/80 text-background" : "border-border",
+                  "flex min-w-0 flex-1 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  on ? "border-foreground/30 bg-foreground/[0.04]" : "border-transparent hover:bg-muted",
                 )}
               >
-                {on ? <CheckIcon className="size-3.5" /> : null}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{suggestion.label}</span>
-                <span className="block truncate text-xs text-muted-foreground">{suggestion.why}</span>
-              </span>
-            </button>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md border",
+                    on ? "border-foreground/40 bg-foreground/80 text-background" : "border-border",
+                  )}
+                >
+                  {on ? <CheckIcon className="size-3.5" /> : null}
+                </span>
+                {/* Значок тот же, что в настройках: список источников человек
+                    узнаёт по логотипам раньше, чем прочитывает названия. */}
+                <SourceIcon kind={suggestion.kind} url={suggestion.url} className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{suggestion.label}</span>
+                  {/* Вид источника через точку: «rss» и «telegram» — это разные
+                      обещания о том, что придёт, и стоят они одного слова. */}
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {suggestion.kind} · {suggestion.why}
+                  </span>
+                </span>
+              </button>
+              {/* Ссылка отдельной кнопкой, а не внутри переключателя: ссылка
+                  внутри кнопки — это два разных действия в одной цели.
+                  Открывать нечего у почты и у листинга — тогда её нет вовсе. */}
+              {openUrlOf(suggestion) ? (
+                <a
+                  href={openUrlOf(suggestion)!}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  aria-label={suggestion.url}
+                  title={suggestion.url}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <ExternalLinkIcon className="size-4" />
+                </a>
+              ) : null}
+            </div>
           );
         })}
 
@@ -471,19 +565,30 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
         )
       }
     >
-      {state === "работаю" ? (
-        <div className="flex items-center gap-3 text-sm text-muted-foreground">
-          <Spinner />
-          {t.onboarding.wizard.ready.dontClose}{" "}
-          <span className="tabular-nums">{t.onboarding.wizard.ready.elapsed(seconds)}</span>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-          {added > 0 ? <p>{t.onboarding.wizard.ready.digestSummary(added, topics)}</p> : null}
-          {note ? <p>{note}</p> : null}
-          <p>{t.onboarding.wizard.ready.footerNote}</p>
-        </div>
-      )}
+      {/* Картинка говорит то же, что и текст, а не украшает пустоту:
+          «observer» — из большого потока остаётся ваше, ровно это и делает
+          отбор; «morning» — начать день с ясной картины. Смена картинки
+          сама по себе сообщает, что работа кончилась. */}
+      <div className="flex flex-col items-center gap-5 py-4 text-center">
+        <BrandIllustration
+          name={state === "работаю" ? "observer" : "morning"}
+          alt=""
+          size={200}
+        />
+
+        {state === "работаю" ? (
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <Spinner />
+            {t.onboarding.wizard.ready.dontClose}{" "}
+            <span className="tabular-nums">{t.onboarding.wizard.ready.elapsed(seconds)}</span>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+            {added > 0 ? <p>{t.onboarding.wizard.ready.digestSummary(added, topics)}</p> : null}
+            {note ? <p>{note}</p> : null}
+          </div>
+        )}
+      </div>
     </Shell>
   );
 }
