@@ -23,9 +23,14 @@ export const onboarding = {
     sources: {
       title: "Where to read from",
       lead: (topics: string[]) =>
-        `Picked for your ${topics.length > 1 ? "interests" : "interest"}: ${topics.join(", ")}. Remove what you don't need; add your own links later — in settings or straight in the bot.`,
+        `Picked for your ${topics.length > 1 ? "interests" : "interest"}: ${topics.join(", ")}. Remove what you don't need, add your own — paste a link below.`,
       full: (planLabel: string, maxSources: number) =>
         `The ${planLabel} plan checks ${maxSources} ${maxSources === 1 ? "source" : "sources"}. Remove one to add another.`,
+      addPlaceholder: "Link to a blog, channel or newsletter",
+      add: "Add",
+      checking: "Checking the link…",
+      addedWhy: (fresh: number, entries: number) => `${fresh} fresh of ${entries}`,
+      displaced: (label: string) => `Unchecked “${label}” to make room for yours`,
     },
     ready: {
       buildingTitle: "Building your first digest",

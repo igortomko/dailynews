@@ -27,9 +27,14 @@ export const onboarding: typeof En = {
     sources: {
       title: "Откуда читать",
       lead: (topics) =>
-        `Подобрал под ${topics.length > 1 ? "интересы" : "интерес"}: ${topics.join(", ")}. Снимай лишнее; свои ссылки добавишь потом — в настройках или прямо в боте.`,
+        `Подобрал под ${topics.length > 1 ? "интересы" : "интерес"}: ${topics.join(", ")}. Снимай лишнее, добавляй своё — вставь ссылку внизу.`,
       full: (planLabel, maxSources) =>
         `Тариф «${planLabel}» опрашивает ${maxSources} источников. Сними один, чтобы взять другой.`,
+      addPlaceholder: "Ссылка на блог, канал или рассылку",
+      add: "Добавить",
+      checking: "Проверяю ссылку…",
+      addedWhy: (fresh: number, entries: number) => `свежих ${fresh} из ${entries}`,
+      displaced: (label: string) => `Снял «${label}», чтобы вместить твой`,
     },
     ready: {
       buildingTitle: "Собираю первый выпуск",
