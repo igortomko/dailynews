@@ -12,7 +12,7 @@ import { styleOf, type Voice } from "../src/lib/voice";
 import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
-  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes, CRITICAL_PER_SECTION,
+  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes, CRITICAL_PER_SECTION, CRITICAL_PER_DOCUMENT,
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
@@ -191,7 +191,15 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
       claims: extracted.claims.map((c) => ({ ...c, id: `${part.id}-${c.id}` })) });
   }
   if (!sections.length) throw new Error("Source has no content");
-  return { sections, sourceVersion, availability };
+  // Потолок на всю статью применяется кодом, а не отказом: у каждой секции
+  // свой предел, и на двух секциях их сумма перестаёт помещаться в карточку.
+  // Лишние становятся major по порядку текста — начало статьи несёт её суть.
+  let critical = 0;
+  const capped = sections.map((section) => ({ ...section, claims: section.claims.map((claim) =>
+    claim.importance === "critical" && ++critical > CRITICAL_PER_DOCUMENT
+      ? { ...claim, importance: "major" as const }
+      : claim) }));
+  return { sections: capped, sourceVersion, availability };
 }
 
 /**
@@ -435,7 +443,10 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       const retained = parseStoredReading(previous?.result);
       if (retained?.status === "verified" && retained.document) {
         retainedIds.push(item.id);
-        console.warn(`reading ${item.id}: retained verified summary of unchanged source`);
+        // Причина называется здесь же: без неё сохранённая прошлая выжимка
+        // выглядит успехом, а карточка молча остаётся такой, какой была,
+        // сколько бы промпт ни правили.
+        console.warn(`reading ${item.id}: оставлена прошлая выжимка (источник не менялся) — ${error instanceof Error ? error.message.slice(0, 160) : "неизвестно"}`);
         return { id: item.id, title_ru: retained.document.title.text,
           summary: readingText(retained), reading: retained };
       }
