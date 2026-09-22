@@ -23,8 +23,8 @@ const valid: ReadingDocument = {
   omitted: [], baselineId: null,
 };
 assert.deepEqual(validateCoverage(valid, analysis, "", []), []);
-assert.ok(validateCoverage({ ...valid, lead: null }, analysis, "", []).some((e) => e.includes("Missing a 35–60 word lead")));
-assert.ok(validateCoverage({ ...valid, lead: evidence("Too short.", "s1-a") }, analysis, "", []).some((e) => e.includes("Lead is 2 words")));
+assert.ok(validateCoverage({ ...valid, lead: null }, analysis, "", []).some((e) => e.includes("Missing a 35–60 word answer")));
+assert.ok(validateCoverage({ ...valid, lead: evidence("Too short.", "s1-a") }, analysis, "", []).some((e) => e.includes("The answer is 2 words")));
 const missing = structuredClone(valid); missing.blocks = [{ kind: "paragraph", content: evidence("Speed improved", "s1-a") }];
 assert.ok(validateCoverage(missing, analysis, "", []).some((e) => e.includes("s1-b")));
 assert.ok(!documentSchema.safeParse({ ...valid, blocks: [{ kind: "html", html: "<script>alert(1)</script>" }] }).success);
@@ -86,8 +86,46 @@ assert.ok(kindle.includes('<p>First</p>') && kindle.includes('<p>Second</p>'));
 assert.ok(kindle.includes('&quot;'));
 
 assert.ok(blockText({ kind: 'steps', sequence: 'timeline', items: [{ label: 'Launch', content: evidence('Release', 's1-a'), state: 'planned' }, { label: 'Pilot', content: evidence('Trial', 's1-a'), state: 'current' }] }).includes('(предстоит)'));
-assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(221), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
+// Цель — 220 слов, отказ — на десятую часть позже: сверенная карточка,
+// выброшенная за десять лишних слов, стоит читателю новости целиком.
+assert.deepEqual(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(180), 's1-b') }] }, analysis, '', []), [], 'перебор в пределах десятой части не отказ');
+assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(260), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
+// Обязательных утверждений не больше семи на секцию: при восьми и больше
+// «все critical видимы» и «не длиннее 220 слов» перестают быть совместимы,
+// и карточка не собирается вовсе (замер на выпуске 22 сентября 2026).
+const claimOf = (id: string, importance: 'critical' | 'major') => ({ id, text: id, quote: id, importance, role: 'fact' as const });
+const sectionWith = (critical: number) => ({ subject: 'Test', genre: 'research' as const, excluded: [],
+  claims: [...Array.from({ length: critical }, (_, i) => claimOf(`c${i}`, 'critical')), claimOf('m1', 'major')] });
+assert.deepEqual(validateSection(sectionWith(7), 'c0 c1 c2 c3 c4 c5 c6 m1'), [], 'семь обязательных утверждений — ещё норма');
+assert.ok(validateSection(sectionWith(8), 'c0 c1 c2 c3 c4 c5 c6 c7 m1').some(e => e.includes('at most 7')), 'восьмое обязательное утверждение — дефект извлечения');
 assert.deepEqual(normalizeDocument({ ...valid, omitted: [{ claimId: 's1-a', reason: 'Accidental duplicate' }] }).omitted, []);
+
+// Два слоя: ответ закрывает главный вопрос сам, лид — второй слой и потому
+// необязателен. Документ, у которого лид повторяет ответ, читается дважды.
+const twoLayer: ReadingDocument = { ...valid, answer: valid.lead, lead: null };
+assert.deepEqual(validateCoverage(twoLayer, analysis, '', []), [], 'ответ работает первым слоем вместо лида');
+assert.ok(validateCoverage({ ...twoLayer, lead: twoLayer.answer ?? null }, analysis, '', []).some(e => e.includes('repeats the answer')));
+assert.ok(documentText(twoLayer).startsWith(twoLayer.answer!.text), 'текст карточки открывается ответом');
+
+// План формы — обещание, а не украшение: названная форма обязана появиться
+// блоком, иначе это возврат к прозе под видом решения.
+const planned = (format: string, blocks: ReadingDocument['blocks']): ReadingDocument =>
+  ({ ...twoLayer, formatPlan: { format, reason: 'Source states two measured values', claimIds: ['s1-a'], fallback: 'brief' } as ReadingDocument['formatPlan'], blocks });
+const figuresBlock: ReadingDocument['blocks'] = [{ kind: 'figures', items: [
+  { value: '78%', label: 'дешевле документ', claimIds: ['s1-a'] },
+  { value: '7,3×', label: 'чаще успех', claimIds: ['s1-b'] }], context: null }];
+assert.deepEqual(validateCoverage(planned('figures', figuresBlock), analysis, '', []), [], 'ряд чисел закрывает план figures');
+assert.ok(validateCoverage(planned('figures', valid.blocks), analysis, '', []).some(e => e.includes('requires a figures block')));
+assert.ok(validateCoverage({ ...planned('brief', valid.blocks), formatPlan: { format: 'brief', reason: 'Prose', claimIds: ['nope'], fallback: 'story' } } as ReadingDocument, analysis, '', []).some(e => e.includes('Unknown format-plan claim')));
+assert.ok(documentSchema.safeParse({ ...twoLayer, blocks: figuresBlock }).success, 'ряд из двух чисел проходит схему');
+assert.ok(!documentSchema.safeParse({ ...twoLayer, blocks: [{ kind: 'figures', items: [figuresBlock[0].kind === 'figures' ? figuresBlock[0].items[0] : null], context: null }] }).success, 'одно число — это metric, а не ряд');
+const correction: ReadingDocument['blocks'] = [{ kind: 'correction', claim: 'Модель считалась быстрее всех', reality: evidence('Замер показал обратное', 's1-b') }];
+assert.ok(documentSchema.safeParse({ ...twoLayer, blocks: correction }).success);
+assert.ok(blockText(correction[0]).includes('Замер показал обратное'));
+assert.ok(blockText(figuresBlock[0]).includes('78%') && blockText(figuresBlock[0]).includes('7,3×'));
+// Сравнение перестало быть строго парным: у моделей и тарифов вариантов больше.
+assert.ok(documentSchema.safeParse({ ...twoLayer, blocks: [{ kind: 'comparison', commonBasis: evidence('Цена за миллион', 's1-a'), emphasis: 'content',
+  items: [{ label: 'A', content: evidence('1$', 's1-a') }, { label: 'B', content: evidence('2$', 's1-b') }, { label: 'C', content: evidence('3$', 's1-c') }] }] }).success, 'сравнение на три варианта');
 
 async function main() {
   const visited: string[] = [];

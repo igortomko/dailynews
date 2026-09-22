@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { FEATURES, PLANS, planOf, type Plan, type PlanId } from "./plans";
-import { SOURCE_LANGUAGE, type Voice } from "./voice";
+import { PLANS, planOf, type Plan, type PlanId } from "./plans";
+import type { Voice } from "./voice";
 import type { Reader } from "./types";
 
 /**
@@ -12,15 +12,39 @@ import type { Reader } from "./types";
  * это был бы второй набор состояний, расходящийся с настоящим.
  */
 
-/** Варианты подписки: числовой id из Lemon Squeezy → тариф. */
-function variants(): Partial<Record<PlanId, { id: string; buy: string }>> {
-  const read = (plan: PlanId, id?: string, buy?: string) =>
-    id && buy ? { [plan]: { id, buy } } : {};
+/**
+ * Варианты подписки: числовой id из Lemon Squeezy → тариф.
+ *
+ * Длина триала лежит здесь же, рядом с вариантом, а не одной переменной
+ * на весь продукт: включается триал на стороне Lemon и на конкретном
+ * варианте. Одна общая переменная обещала бы «7 дней бесплатно» и на том
+ * тарифе, где триала не завели, — надпись, которая врёт ровно тому, кто
+ * по ней нажал.
+ *
+ * Не задана или не число — триала нет. Ноль и «нет» здесь одно и то же:
+ * обещать нечего.
+ */
+function variants(): Partial<Record<PlanId, { id: string; buy: string; trialDays: number }>> {
+  const read = (plan: PlanId, id?: string, buy?: string, trial?: string) =>
+    id && buy
+      ? { [plan]: { id, buy, trialDays: Math.max(0, Math.trunc(Number(trial)) || 0) } }
+      : {};
   return {
-    ...read("plus", process.env.LEMON_VARIANT_PLUS, process.env.LEMON_BUY_PLUS),
-    ...read("pro", process.env.LEMON_VARIANT_PRO, process.env.LEMON_BUY_PRO),
+    ...read("plus", process.env.LEMON_VARIANT_PLUS, process.env.LEMON_BUY_PLUS, process.env.LEMON_TRIAL_PLUS),
+    ...read("pro", process.env.LEMON_VARIANT_PRO, process.env.LEMON_BUY_PRO, process.env.LEMON_TRIAL_PRO),
   };
 }
+
+/**
+ * Сколько дней триала у этого тарифа. Ноль — триала нет, и говорить о нём
+ * нельзя: в Lemon он живёт настройкой варианта, а не нашим желанием.
+ *
+ * Замер 22 сентября 2026, предельная себестоимость Pro: $0.019 в день
+ * типично и $0.053 в потолке (сто карточек, свой список X). Неделя выходит
+ * $0.15–0.38 — дешевле, чем $0.50 фиксированной комиссии Lemon с одного
+ * платежа, и окупается при конверсии от 1,9%. Расчёт — в docs/economics.md.
+ */
+export const trialDaysFor = (plan: PlanId): number => variants()[plan]?.trialDays ?? 0;
 
 /** Тариф по номеру варианта из вебхука. Незнакомый вариант — не тариф. */
 export function planOfVariant(variantId: string | number | null | undefined): Plan | null {
@@ -62,21 +86,26 @@ export const paymentsConfigured = () => Object.keys(variants()).length > 0;
  * гасить по расписанию, а оно здесь ходит раз в сутки.
  */
 /**
- * Голос выпуска с учётом тарифа.
+ * Голос выпуска: на каком языке, какой сложности и в какой манере.
  *
- * Язык хранится таким, каким его выбрал читатель, а применяется по тарифу —
- * ровно как сам тариф: в колонке лежит купленное, а действует посчитанное.
- * Раньше сохранение подменяло колонку на «язык источника», если перевод
- * тарифом не открыт. Подмена необратима: тариф потом открывается, а в колонке
- * остаётся чужой выбор, и следующий выпуск приходит непереведённым.
- * Двадцатого сентября 2026 так и вышло — выпуск на сорок материалов
- * по-английски, при том что в настройках стоял русский, а в коде перевода
- * ничего не ломалось.
+ * Тариф сюда больше не входит. Перевод гасился по тарифу и не экономил
+ * ничего — тот же вызов, те же токены, — а означал разное у разных людей:
+ * при англоязычных источниках бесплатный англичанин получал свой язык,
+ * а бесплатный русский — чужой. Подробности в `GATED` (`lib/plans.ts`).
+ *
+ * Функция остаётся одна на прогон, догрузку и замер: умолчание при пустой
+ * колонке живёт здесь, а не в трёх местах порознь. «Язык источника» —
+ * законный выбор читателя, а не признак тарифа: он есть в списке и означает
+ * «оставь как в источнике».
+ *
+ * Выбор читателя при этом не подменяется записью — ни тогда, ни теперь.
+ * Подмена была необратимой: двадцатого сентября 2026 выпуск пришёл на сорок
+ * материалов по-английски при русском в настройках, потому что сохранение
+ * когда-то переписало колонку.
  */
-export function effectiveVoice(reader: Reader, now = new Date()): Voice {
-  const translates = FEATURES.language.has(effectivePlan(reader, now));
+export function effectiveVoice(reader: Reader): Voice {
   return {
-    language: translates ? reader.language || "русском" : SOURCE_LANGUAGE,
+    language: reader.language || "русском",
     complexity: reader.complexity,
     style: reader.style,
   };

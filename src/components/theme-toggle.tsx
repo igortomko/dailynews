@@ -1,9 +1,12 @@
 "use client";
 
+import { useCallback } from "react";
 import { MoonIcon, SunIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Kbd } from "@/components/ui/kbd";
+import { useHotkey } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
 import { useT } from "@/components/i18n-provider";
 
@@ -25,6 +28,13 @@ import { useT } from "@/components/i18n-provider";
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
   const t = useT();
+  const toggle = useCallback(
+    () => setTheme(resolvedTheme === "dark" ? "light" : "dark"),
+    [resolvedTheme, setTheme],
+  );
+  // Клавиша живёт здесь, а не в ленте: переключатель стоит и в настройках,
+  // и в поиске, а подсказка обещает клавишу на каждом из этих экранов.
+  useHotkey("KeyT", toggle);
 
   return (
     <Tooltip>
@@ -34,7 +44,7 @@ export function ThemeToggle({ className }: { className?: string }) {
             variant="ghost"
             size="icon-sm"
             aria-label={t.theme.toggle}
-            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+            onClick={toggle}
             className={cn(
               "text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground",
               className,
@@ -61,6 +71,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       <TooltipContent>
         <span className="dark:hidden">{t.theme.dark}</span>
         <span className="hidden dark:block">{t.theme.light}</span>
+        <Kbd>t</Kbd>
       </TooltipContent>
     </Tooltip>
   );

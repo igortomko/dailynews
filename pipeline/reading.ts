@@ -22,7 +22,7 @@ export type ReadingOptions = { readerId: number; force?: boolean };
 export type Ask = <T>(phase: string, rules: string, data: unknown, schema: z.ZodType<T>) => Promise<T>;
 export const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const emptyUsage = (): Usage => ({ input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 });
-const OUTPUT_TOKENS = 6000;
+const OUTPUT_TOKENS = 12_000;
 const DEFAULT_REASONING_PROFILE = "extract:none;edit+audit:low";
 
 const phaseBase = (phase: string) => phase.replace(/-(?:format-)?repair$/u, "");
@@ -159,12 +159,20 @@ export async function analyzeSource(ask: Ask, source: string, title: string, sou
   return { sections, sourceVersion, availability };
 }
 
-export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[]): Promise<ReadingDocument> {
+/**
+ * Карточки выпуска читают сверху: у первых форма (число с базой, сравнение,
+ * цепочка, последовательность) решает, поймёт ли читатель новость взглядом.
+ * Поэтому prominence уходит в промпт и в ключ кэша — иначе карточка,
+ * поднявшаяся назавтра в начало выпуска, осталась бы написанной как рядовая.
+ */
+export type Prominence = "lead" | "regular";
+export const LEAD_CARDS = 5;
+export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[], prominence: Prominence = "regular"): Promise<ReadingDocument> {
   const input = {
     language: voice.language, style: styleOf(voice.style).instruction,
     complexityPreference: voice.complexity,
     complexityMeaning: "1 = simple short phrases; 5 = concise technical writing WHERE knowledge is explicitly known. Unknown subtopics need brief explanations at any level.",
-    readerContext, topic,
+    readerContext, topic, prominence,
     quoteCandidates: analysis.sections.flatMap(section => section.claims)
       .filter(claim => claim.role === "interpretation" || claim.role === "recommendation")
       .flatMap(claim => claim.quote.split(/(?<=[.!?])\s+/u).filter(sentence => {
@@ -245,6 +253,9 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
   const exclude = compile(asNames(reader.exclude_rules));
   const excludedIds: number[] = [];
   const retainedIds: number[] = [];
+  const unavailableIds: number[] = [];
+  // Порядок отбора и есть важность: первые карточки читают раньше прочих.
+  const leading = new Set(survivors.slice(0, LEAD_CARDS).map((item) => item.id));
   const { model } = resolve();
   const reasoningEffort = readingReasoningProfile();
   const writeOne = async (item: Survivor): Promise<Written | null> => {
@@ -263,7 +274,8 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       if (!source.text.trim()) throw new Error("Source unavailable");
       splitSource(source.text);
       const baselines = await recentBaselines(sql, options.readerId, item.id, item.title);
-      const key = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion, readerContext, voice, baselines]));
+      const prominence: Prominence = leading.has(item.id) ? "lead" : "regular";
+      const key = hash(JSON.stringify([READING_VERSION, model, reasoningEffort, item.id, sourceVersion, readerContext, voice, baselines, prominence]));
       const cached = options.force ? null : parseStoredReading(await getDocument(sql, options.readerId, key));
       if (cached?.document && cached.status === "verified") {
         return { id: item.id, title_ru: cached.document.title.text, summary: readingText(cached), reading: cached };
@@ -273,7 +285,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       lease = shared.token;
       const analysis = shared.analysis ?? await analyzeSource(ask, source.text, item.title, sourceVersion, availability);
       if (lease) { await finishAnalysis(sql, analysisKey, lease, analysis); lease = null; }
-      const document = await composeDocument(ask, source.text, analysis, readerContext, voice, item.topic_label, baselines);
+      const document = await composeDocument(ask, source.text, analysis, readerContext, voice, item.topic_label, baselines, prominence);
       const notice = availabilityNotice(availability);
       const reading: StoredReading = { version: 2, sourceVersion, availability, status: "verified", document, notice,
         seconds: Math.ceil(minutesOf(cardChars(document.title.text, documentText(document) + (notice ?? "")), voice) * 60) };
@@ -295,11 +307,15 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
         return { id: item.id, title_ru: retained.document.title.text,
           summary: readingText(retained), reading: retained };
       }
-      const budget = error instanceof ReadingBudgetError;
-      console.warn(`reading ${item.id}: ${error instanceof Error ? error.message.slice(0,180) : 'failed'}`);
-      const notice = budget ? "Выжимка пока недоступна: дневной лимит обработки исчерпан. Оригинал — по ссылке в заголовке."
-        : "Проверенную выжимку подготовить не удалось. Оригинал — по ссылке в заголовке.";
-      return { id: item.id, title_ru: item.title, summary: notice, reading: { version: 2, sourceVersion, availability, status: "unavailable", document: null, notice, seconds: 0 } };
+      // Карточки не будет вовсе. Заглушка «выжимку подготовить не удалось»
+      // занимала место новости в ленте, в сообщении, в книге и в подкасте:
+      // читатель видел отказ там, где ждал новость, и открыть её мог только
+      // по ссылке — то есть ровно то, от чего лента и избавляет. Материал
+      // при этом не уходит из кандидатов: в выпуске его нет, и следующий
+      // прогон попробует написать его снова.
+      unavailableIds.push(item.id);
+      console.warn(`reading ${item.id}: ${error instanceof ReadingBudgetError ? 'дневной лимит обработки исчерпан' : ''}${error instanceof Error ? error.message.slice(0,180) : 'failed'}`);
+      return null;
     }
   };
   // Keep source order and settle every in-flight request before propagating a retryable failure.
@@ -321,5 +337,5 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       if (!checked.defects.length) intro = result.intro;
     } catch (error) { console.warn(`reading intro unavailable: ${error instanceof Error ? error.message.slice(0,100) : 'failed'}`); }
   }
-  return { intro, items, excludedIds, retainedIds, usage, model, reasoningEffort: reasoningEffort ?? null, accounted: true };
+  return { intro, items, excludedIds, retainedIds, unavailableIds, usage, model, reasoningEffort: reasoningEffort ?? null, accounted: true };
 }

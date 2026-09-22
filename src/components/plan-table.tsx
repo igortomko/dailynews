@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { checkoutUrl, endingAt } from "@/lib/lemon";
+import { checkoutUrl, endingAt, trialDaysFor } from "@/lib/lemon";
 import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
 import { currentLocale, getDict } from "@/lib/i18n/server";
@@ -165,9 +165,25 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
                   {t.plans.table.yourPlan}
                 </Button>
               ) : action === "buy" ? (
-                <Button size="sm" className="mt-auto" render={<a href={buy!} />}>
-                  {t.plans.moveTo(label)}
-                </Button>
+                // Триал называется на кнопке, а цена — строкой под ней:
+                // на вопрос «сколько это стоит» отвечает сначала «нисколько
+                // неделю», и только потом настоящая цена. Молчащий триал
+                // не существует — по нему некому нажать. А если его
+                // у этого варианта не завели, надписи нет вовсе: обещать
+                // бесплатную неделю там, где Lemon сразу попросит денег,
+                // значит соврать ровно тому, кто поверил.
+                <div className="mt-auto flex flex-col gap-1.5">
+                  <Button size="sm" render={<a href={buy!} />}>
+                    {trialDaysFor(id) > 0
+                      ? t.plans.table.tryFree(trialDaysFor(id))
+                      : t.plans.moveTo(label)}
+                  </Button>
+                  {trialDaysFor(id) > 0 ? (
+                    <span className="text-center text-[11px] leading-tight text-muted-foreground">
+                      {t.plans.table.thenPerMonth(plan.price)}
+                    </span>
+                  ) : null}
+                </div>
               ) : action === "unpaid" ? (
                 // aria-disabled, а не disabled: выключенная кнопка
                 // не показывает подсказку, и «не нажимается» остаётся

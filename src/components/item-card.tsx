@@ -16,6 +16,7 @@ import {
   PauseIcon,
   CrownIcon,
   ChevronDownIcon,
+  ShareIcon,
   HeadphonesIcon,
   EyeIcon,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import { toast } from "sonner";
 import { Spinner } from "@/components/ui/spinner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Kbd } from "@/components/ui/kbd";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -35,7 +37,7 @@ import { cn } from "@/lib/utils";
 import { currentRate, forget, nextRate, onRate, pauseIfPlaying, playOnly } from "@/lib/audio-bus";
 import { QUIET } from "@/lib/quiet";
 import { parseStoredReading } from "@/lib/reading-document";
-import { ReadingSummary } from "@/components/reading-summary";
+import { ReadingSummary, hasDetails } from "@/components/reading-summary";
 import { typography, summaryTime } from "@/lib/typography";
 import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
 import { cheapestFor, FEATURES, type Plan } from "@/lib/plans";
@@ -461,6 +463,52 @@ export function ItemCard({
     }
   };
 
+  /**
+   * Поделиться материалом.
+   *
+   * Уходит ссылка на статью и наш заголовок, а не адрес карточки: лента
+   * стоит за входом, и по нашему адресу получатель упрётся в дверь вместо
+   * новости. Описание в посылку не идёт по той же причине, по которой оно
+   * вообще есть: оно написано языком и сложностью этого читателя — это его
+   * текст, а не общая страница, и в чужом чате он объясняет не то.
+   *
+   * Сначала системное окно: на телефоне шеринг живёт там, и своего списка
+   * сетей ему не заменить — он не знает ни про чат, в котором переписываются
+   * сейчас, ни про то, что стоит на этом телефоне. Нет его (десктоп,
+   * небезопасный адрес) — ссылка уходит в буфер, и об этом говорится вслух:
+   * молча скопировать значит сделать вид, что ничего не произошло.
+   *
+   * Тарифом не закрыто и не будет: закрывать имеет смысл то, что стоит
+   * денег, а здесь нет ни одного вызова модели — и ровно этой кнопкой
+   * бесплатный читатель приводит следующего.
+   */
+  const share = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url: item.url });
+        return;
+      } catch (error) {
+        // Отмена своей же рукой приходит тем же исключением, что и отказ.
+        // Тост «не получилось» на закрытое окно — это ложь; всё остальное
+        // (нет разрешения, не тот контекст) лечится буфером ниже.
+        if ((error as Error).name === "AbortError") return;
+      }
+    }
+    try {
+      // Без буфера (небезопасный адрес, старый браузер) `clipboard`
+      // отсутствует вовсе — это тот же отказ, что и запрет доступа.
+      if (!navigator.clipboard) throw new Error("буфер недоступен");
+      await navigator.clipboard.writeText(item.url);
+      toast.success(t.feed.item.shareCopied, {
+        description: t.feed.item.shareCopiedDescription,
+      });
+    } catch {
+      toast.warning(t.feed.item.shareFailed, {
+        description: t.feed.item.shareFailedDescription,
+      });
+    }
+  };
+
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
   const canListen = FEATURES.audio.has(plan);
@@ -857,8 +905,11 @@ export function ItemCard({
               )}
             />
           </TooltipTrigger>
+          {/* Клавиша названа там же, где кнопка: строка под лентой говорит
+              о ней один раз внизу, а рука в этот момент на отметке. */}
           <TooltipContent>
             {selected ? t.feed.overview.tooltipRemove : t.feed.overview.tooltipAdd}
+            <Kbd>x</Kbd>
           </TooltipContent>
         </Tooltip>
         {/* Разделитель между кусками, а не пробел: «Hacker News ~7 мин
@@ -955,6 +1006,13 @@ export function ItemCard({
                     : t.feed.item.kindleSend}
                 {canKindle ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
+              {/* После читалки и до «Своего мнения»: порядок тот же, что
+                  и в ряду под курсором, — отложить себе, отдать другому,
+                  написать своё. */}
+              <DropdownMenuItem onClick={share}>
+                <ShareIcon />
+                {t.feed.item.share}
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
                   if (!canPost) {
@@ -1045,16 +1103,23 @@ export function ItemCard({
           <Hint
             live={hot}
             tip={
-              !canListen
-                ? t.feed.item.audioTooltipLocked(cheapestFor("audio").label)
-                : // Шаг важнее состояния: «Читаю вслух» отвечает на вопрос,
-                  // который задают, глядя на спиннер, а «Озвучиваю…» — нет.
-                  (busyStep ? AUDIO_STEP(t)[busyStep] : undefined) ??
-                  (busy === "idle" ? t.feed.item.audioTooltipReady : AUDIO_LABEL(t)[busy])
+              <>
+                {!canListen
+                  ? t.feed.item.audioTooltipLocked(cheapestFor("audio").label)
+                  : // Шаг важнее состояния: «Читаю вслух» отвечает на вопрос,
+                    // который задают, глядя на спиннер, а «Озвучиваю…» — нет.
+                    ((busyStep ? AUDIO_STEP(t)[busyStep] : undefined) ??
+                    (busy === "idle" ? t.feed.item.audioTooltipReady : AUDIO_LABEL(t)[busy]))}
+                <Kbd>a</Kbd>
+              </>
             }
             button={
               <button
                 type="button"
+                // Клавише «a» нужно за что-то взяться: по подписи её не найти —
+                // подпись переводится, а селектор молча перестал бы совпадать
+                // у того, кто читает ленту не по-русски.
+                data-slot="listen"
                 aria-label={t.feed.item.audioAria}
                 aria-disabled={busy === "working"}
                 onClick={busy === "working" ? undefined : speak}
@@ -1105,6 +1170,21 @@ export function ItemCard({
               <CheckIcon className={cn("absolute", swap(kindle === "sent"))} />
               <BookOpenIcon className={swap(kindle === "idle")} />
             </span>
+          </Hint>
+
+          <Hint
+            live={hot}
+            tip={t.feed.item.shareTooltip}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.shareAria}
+                onClick={share}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground"
+              />
+            }
+          >
+            <ShareIcon className="size-3.5" />
           </Hint>
 
           <Hint
@@ -1203,19 +1283,41 @@ export function ItemCard({
           {/* Заголовок не переносится: перенос на крупном кегле читается
               как опечатка, а строк тут две-три — рвать нечего. Язык всё
               равно объявлен: по нему говорит скринридер. */}
-          <h3 lang={textLang ?? undefined} className="mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
+          <h3 lang={textLang ?? undefined} className="mt-2.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
             <a
               href={item.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="decoration-muted-foreground/40 underline-offset-4 hover:underline"
+              // Своей рамки у заголовка нет: фокус на карточке уже виден тем,
+              // что гаснут соседние — то же самое, чем лента отвечает на
+              // наведение. Рамка поверх этого была бы вторым знаком одного
+              // состояния, и два знака читаются как два разных.
+              className="decoration-muted-foreground/40 underline-offset-4 outline-none hover:underline"
               onClick={() => report({ item_id: item.id, event: "outbound" })}
             >
               {typography(title)}
             </a>
           </h3>
 
-          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} lang={textLang} /></div> : hasSummary ? (
+          {/* Два слоя: ответ виден сразу, подробности раскрываются. Событие
+              «opened» наконец означает чтение — раньше оно уходило от клика
+              по тексту, который и так был показан целиком. */}
+          {reading ? (
+            <div onClick={() => setExpanded((value) => !value)}>
+              <ReadingSummary reading={reading} labels={t.feed.reading} lang={textLang} open={expanded} />
+              {!expanded && hasDetails(reading) ? (
+                <button
+                  type="button"
+                  aria-expanded={false}
+                  onClick={(event) => { event.stopPropagation(); setExpanded(true); }}
+                  className="mt-2 flex cursor-pointer items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {t.feed.reading.more}
+                  <ChevronDownIcon className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ) : hasSummary ? (
             <p
               lang={textLang ?? undefined}
               onClick={() => setExpanded((value) => !value)}

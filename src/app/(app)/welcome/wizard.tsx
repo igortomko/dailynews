@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightIcon, CheckIcon, ExternalLinkIcon, PlusIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, CrownIcon, ExternalLinkIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { type Plan } from "@/lib/plans";
 import { useT } from "@/components/i18n-provider";
+import { usePaywall } from "@/components/paywall";
 import { suggestOrder, TOPIC_LIMITS } from "@/lib/starter-topics";
 import type { Suggestion, TopicOption } from "@/lib/onboarding";
 import {
@@ -38,12 +39,20 @@ function Shell({
   step,
   title,
   lead,
+  centered,
   children,
   footer,
 }: {
   step: number;
   title: string;
   lead: string;
+  /**
+   * Заголовок по центру — там, где по центру и всё остальное. На первых
+   * двух шагах под заголовком список слева, и центрировать его значило бы
+   * оторвать подпись от того, что она подписывает; на последнем под ним
+   * одна картинка посередине, и левый заголовок висел сам по себе.
+   */
+  centered?: boolean;
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
@@ -73,9 +82,9 @@ function Shell({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className={cn("flex flex-col gap-1", centered && "items-center text-center")}>
         <h1 className="text-xl font-medium">{title}</h1>
-        <p className="text-sm text-muted-foreground">{lead}</p>
+        <p className="max-w-[46ch] text-sm text-muted-foreground">{lead}</p>
       </div>
 
       <div className="flex-1">{children}</div>
@@ -162,6 +171,17 @@ export function InterestsStep({
   );
   const total = picked.length + mine.length;
   const full = total >= plan.maxTopics;
+  /**
+   * Предел — не повод молчать: на пределе чип и «Добавить» остаются
+   * нажимаемыми и открывают окно с предложением. Прежде нажатие не делало
+   * ничего, а строка под списком отсылала в «Подписку» — раздел, до которого
+   * из мастера не дойти, не бросив его на середине.
+   *
+   * То же правило и в «Интересах» после онбординга (`topic-chips`): один
+   * предел, открываемый в двух местах по-разному, читается как настройка,
+   * которая иногда не работает.
+   */
+  const topicsPaywall = usePaywall("topics", plan);
   // Соседи выбранного всплывают наверх: «ИИ» тянет за собой «Разработку»
   // и «Железо», и пять интересов набираются пятью нажатиями, а не пятью
   // попытками вспомнить, что тебе вообще интересно.
@@ -169,10 +189,12 @@ export function InterestsStep({
 
   const toggle = (slug: string) => {
     setError(null);
+    if (full && !picked.includes(slug)) {
+      topicsPaywall.open();
+      return;
+    }
     setPicked((now) => {
       if (now.includes(slug)) return now.filter((other) => other !== slug);
-      // Набран предел — нажатие не делает ничего, и объясняет это счётчик
-      // над кнопкой, а не погасшая кнопка.
       if (full) return now;
       return [...now, slug];
     });
@@ -180,7 +202,11 @@ export function InterestsStep({
 
   const addMine = () => {
     const label = draft.trim();
-    if (!label || full) return;
+    if (full) {
+      topicsPaywall.open();
+      return;
+    }
+    if (!label) return;
     if (mine.some((existing) => existing.toLowerCase() === label.toLowerCase())) return;
     setMine([...mine, label]);
     setDraft("");
@@ -279,8 +305,14 @@ export function InterestsStep({
               addMine();
             }}
           />
-          <Button type="button" variant="raised" onClick={addMine} disabled={full}>
-            <PlusIcon data-icon="inline-start" />
+          {/* На пределе кнопка живёт и с пустым полем: набирать название
+              интереса ради отказа значит взять плату за отказ временем. */}
+          <Button type="button" variant="raised" onClick={addMine}>
+            {full ? (
+              <CrownIcon data-icon="inline-start" className="text-amber-500" />
+            ) : (
+              <PlusIcon data-icon="inline-start" />
+            )}
             {t.onboarding.wizard.interests.add}
           </Button>
         </div>
@@ -288,6 +320,7 @@ export function InterestsStep({
         {full ? (
           <p className="text-sm text-muted-foreground">{t.onboarding.wizard.interests.full(t.plans.label[plan.id], plan.maxTopics)}</p>
         ) : null}
+        {topicsPaywall.dialog}
 
         {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
             а отдельный экран стал бы решением, которое нельзя пропустить. */}
@@ -327,6 +360,9 @@ export function SourcesStep({
   const [note, setNote] = useState<string | null>(null);
   const [adding, startAdd] = useTransition();
   const full = picked.length >= plan.maxSources;
+  // Тот же предел и то же правило, что у интересов: закрытая строка
+  // остаётся нажимаемой и говорит, за чем она закрыта.
+  const sourcesPaywall = usePaywall("sources", plan);
 
   /**
    * Своя ссылка. Разбор ходит в сеть и занимает секунды — поэтому кнопка
@@ -367,6 +403,10 @@ export function SourcesStep({
 
   const toggle = (key: string) => {
     setError(null);
+    if (full && !picked.includes(key)) {
+      sourcesPaywall.open();
+      return;
+    }
     setPicked((now) => {
       if (now.includes(key)) return now.filter((other) => other !== key);
       if (full) return now;
@@ -485,6 +525,7 @@ export function SourcesStep({
           </p>
         ) : null}
         {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
+        {sourcesPaywall.dialog}
       </div>
     </Shell>
   );
@@ -541,28 +582,22 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
   return (
     <Shell
       step={2}
-      title={state === "работаю" ? t.onboarding.wizard.ready.buildingTitle : t.onboarding.wizard.ready.readyTitle}
+      centered
+      // Число — в самой крупной строке экрана, а не серой подписью под
+      // картинкой: сюда приходят с вопросом «ну и что там», и отвечать
+      // на него обязан заголовок. Тот же приём, что в «О проекте», где
+      // заголовком стоит сэкономленное время, а не название раздела.
+      title={
+        state === "работаю"
+          ? t.onboarding.wizard.ready.buildingTitle
+          : added > 0
+            ? t.onboarding.wizard.ready.readyTitle(added)
+            : t.onboarding.wizard.ready.emptyTitle
+      }
       lead={
         state === "работаю"
           ? t.onboarding.wizard.ready.buildingLead
           : t.onboarding.wizard.ready.readyLead(plan.everyDays > 1)
-      }
-      footer={
-        state === "работаю" ? null : (
-          <Button
-            className="w-full"
-            onClick={() => {
-              // Выпуск собрался только что и мимо перерисовки: без refresh
-              // клиентский роутер показал бы ленту такой, какой она была
-              // до сборки, — пустой.
-              router.refresh();
-              router.push("/");
-            }}
-          >
-            {t.onboarding.wizard.ready.openFeed}
-            <ArrowRightIcon data-icon="inline-end" />
-          </Button>
-        )
       }
     >
       {/* Картинка говорит то же, что и текст, а не украшает пустоту:
@@ -583,9 +618,26 @@ export function ReadyStep({ plan, topics }: { plan: Plan; topics: number }) {
             <span className="tabular-nums">{t.onboarding.wizard.ready.elapsed(seconds)}</span>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-            {added > 0 ? <p>{t.onboarding.wizard.ready.digestSummary(added, topics)}</p> : null}
+          <div className="flex w-full flex-col items-center gap-4 text-sm text-muted-foreground">
+            {added > 0 ? <p>{t.onboarding.wizard.ready.byTopics(topics)}</p> : null}
             {note ? <p>{note}</p> : null}
+            {/* Кнопка стоит здесь, а не в липком подвале: на этом шаге
+                под картинкой ничего нет, подвал прижимался к низу экрана,
+                и между «вот твой выпуск» и «открыть» оставалось пол-экрана
+                пустоты — пауза там, где её нечем занять. */}
+            <Button
+              className="mt-1 w-full sm:w-auto sm:min-w-56"
+              onClick={() => {
+                // Выпуск собрался только что и мимо перерисовки: без refresh
+                // клиентский роутер показал бы ленту такой, какой она была
+                // до сборки, — пустой.
+                router.refresh();
+                router.push("/");
+              }}
+            >
+              {t.onboarding.wizard.ready.openFeed}
+              <ArrowRightIcon data-icon="inline-end" />
+            </Button>
           </div>
         )}
       </div>

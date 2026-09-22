@@ -36,10 +36,6 @@ export const plans: typeof En = {
       title: "Язык и подача",
       what: "На каком языке приходит выпуск и как он написан: попроще или как специалисту, суховато или живее. Есть на любом тарифе.",
     },
-    language: {
-      title: "Перевод на свой язык",
-      what: "Выпуск приходит на выбранном языке. На бесплатном заголовки и описания остаются на языке источника.",
-    },
     delivery: {
       title: "Выпуск на читалку",
       what: "Выпуск приходит книгой на Kindle — читать с электронных чернил, без телефона.",
@@ -93,6 +89,8 @@ export const plans: typeof En = {
     dailyCadence: "каждый день",
     everyOtherCadence: "через день",
     upToMinutes: (n) => `до ${n} мин`,
+    tryFree: (days: number) => `${days} ${plural(days, "день", "дня", "дней")} бесплатно`,
+    thenPerMonth: (price: number) => `потом $${price} в месяц`,
     hasFeature: "есть",
     noFeature: "нет",
     techLimit: (items) =>

@@ -27,23 +27,29 @@ import { featureWhat } from "@/lib/i18n";
  * переменных окружения, а клиент до них не достаёт. Контекст, а не пропсы:
  * окно открывается из меню, из формы интересов и из доставки — четыре
  * уровня прокидывания ради двух строк.
+ *
+ * Длина триала едет тем же путём и по той же причине: она живёт настройкой
+ * варианта в Lemon, то есть в окружении сервера, а называть её надо здесь,
+ * на кнопке. Ноль — триала нет, и говорить о нём нельзя.
  */
-const CheckoutContext = createContext<Partial<Record<PlanId, string>>>({});
+export type Checkout = { buy: string; trialDays: number };
+
+const CheckoutContext = createContext<Partial<Record<PlanId, Checkout>>>({});
 
 export function PaywallProvider({
   checkout, children,
 }: {
-  checkout: Partial<Record<PlanId, string>>;
+  checkout: Partial<Record<PlanId, Checkout>>;
   children: ReactNode;
 }) {
   return <CheckoutContext.Provider value={checkout}>{children}</CheckoutContext.Provider>;
 }
 
 function Offer({
-  plan, href, recommended,
+  plan, checkout, recommended,
 }: {
   plan: Plan;
-  href?: string;
+  checkout?: Checkout;
   recommended: boolean;
 }) {
   const t = useT();
@@ -72,9 +78,13 @@ function Offer({
           variant={recommended ? "default" : "outline"}
           // Без настроенной оплаты ведём в «Подписку»: кнопка, ведущая
           // в никуда, обещает больше, чем продукт умеет.
-          render={<a href={href ?? "/settings/subscription"} />}
+          render={<a href={checkout?.buy ?? "/settings/subscription"} />}
         >
-          {t.plans.paywall.choose}
+          {/* Триал называется вместо «Выбрать», когда он есть: это ответ
+              на вопрос «сколько», который задают, глядя на цену слева. */}
+          {checkout && checkout.trialDays > 0
+            ? t.plans.table.tryFree(checkout.trialDays)
+            : t.plans.paywall.choose}
         </Button>
       </div>
     </div>
@@ -118,7 +128,7 @@ export function PaywallDialog({
             <Offer
               key={offer.id}
               plan={offer}
-              href={checkout[offer.id]}
+              checkout={checkout[offer.id]}
               // Выделен самый дешёвый из подходящих: он и есть ответ
               // на вопрос «сколько это стоит».
               recommended={index === 0}

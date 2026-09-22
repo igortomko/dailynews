@@ -39,6 +39,7 @@ export const feed: typeof En = {
     kbdBetween: "между материалами",
     kbdOpen: "открыть",
     kbdOverview: "в обзор",
+    kbdListen: "озвучить",
     kbdSearch: "поиск по выпускам",
   },
 
@@ -58,7 +59,7 @@ export const feed: typeof En = {
     remove: (title: string) => `Убрать из обзора: ${title}`,
     tooltipAdd: "В обзор",
     tooltipRemove: "Убрать из обзора",
-    podcast: "Подкаст",
+    podcast: "Записать подкаст",
     podcastWorking: "Собираю подкаст…",
     podcastQueued: (n: number) => `Подкаст из ${n} ${plural(n, "новости", "новостей", "новостей")} собирается`,
     podcastQueuedNote: "Придёт в Telegram одним файлом",
@@ -126,6 +127,13 @@ export const feed: typeof En = {
     kindleAria: "Отправить на Kindle",
     kindleTooltip: "Отправить статью на читалку",
     kindleTooltipLocked: (plan: string) => `Читалка — на тарифе «${plan}»`,
+    share: "Поделиться",
+    shareAria: "Поделиться ссылкой на статью",
+    shareTooltip: "Отправить ссылку на статью",
+    shareCopied: "Ссылка скопирована",
+    shareCopiedDescription: "Вставляй в чат или письмо",
+    shareFailed: "Не получилось скопировать",
+    shareFailedDescription: "Открой статью по заголовку и скопируй адрес оттуда",
     kindleToastTitle: "Статья ушла на Kindle",
     kindleToastDescription: "Придёт примерно через минуту",
     kindleError: "Не отправилось на Kindle — попробуй ещё раз",
@@ -160,7 +168,7 @@ export const feed: typeof En = {
   search: {
     label: "Поиск по выпускам",
     submit: "Найти",
-    openHint: "Поиск по прошлым выпускам — клавиша /",
+    openHint: "Поиск по прошлым выпускам",
     fieldPlaceholder: "Найти в прошлых выпусках: uranium дата-центры",
     close: "Закрыть поиск",
     recent: "недавнее",
@@ -230,6 +238,7 @@ export const feed: typeof En = {
   },
   reading: {
     equals: "равно", then: "затем", step: "Шаг", stage: "Этап",
+    claimed: "принято считать", reality: "на деле", more: "Подробнее",
     planned: "предстоит", done: "завершён", current: "сейчас", unspecified: "",
   },
   time: {

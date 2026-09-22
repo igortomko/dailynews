@@ -40,6 +40,7 @@ export const feed = {
     kbdBetween: "between stories",
     kbdOpen: "open",
     kbdOverview: "add to overview",
+    kbdListen: "listen",
     kbdSearch: "search digests",
   },
 
@@ -59,7 +60,7 @@ export const feed = {
     remove: (title: string) => `Remove from overview: ${title}`,
     tooltipAdd: "Add to overview",
     tooltipRemove: "Remove from overview",
-    podcast: "Podcast",
+    podcast: "Record podcast",
     podcastWorking: "Building the podcast…",
     podcastQueued: (n: number) => `Podcast of ${n} ${n === 1 ? "story" : "stories"} is on its way`,
     podcastQueuedNote: "It will arrive in Telegram as one file",
@@ -119,6 +120,13 @@ export const feed = {
     kindleAria: "Send to Kindle",
     kindleTooltip: "Send the article to your Kindle",
     kindleTooltipLocked: (plan: string) => `Kindle is on the ${plan} plan`,
+    share: "Share",
+    shareAria: "Share a link to the article",
+    shareTooltip: "Send a link to the article",
+    shareCopied: "Link copied",
+    shareCopiedDescription: "Paste it into a chat or an email",
+    shareFailed: "Couldn't copy",
+    shareFailedDescription: "Open the article from its headline and copy the address there",
     kindleToastTitle: "Sent to your Kindle",
     kindleToastDescription: "Arrives in about a minute",
     kindleError: "Couldn't send to Kindle — try again",
@@ -154,7 +162,7 @@ export const feed = {
   search: {
     label: "Search digests",
     submit: "Search",
-    openHint: "Search past digests — press /",
+    openHint: "Search past digests",
     fieldPlaceholder: "Search past digests: uranium data centers",
     close: "Close search",
     recent: "recent",
@@ -229,6 +237,7 @@ export const feed = {
   },
   reading: {
     equals: "equals", then: "then", step: "Step", stage: "Stage",
+    claimed: "commonly believed", reality: "in fact", more: "More",
     planned: "planned", done: "completed", current: "current", unspecified: "",
   },
   time: {

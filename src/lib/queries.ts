@@ -249,6 +249,12 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
          select 1 from dailynews.reads r
           where r.item_id = i.id and r.reader_id = ${readerId} and r.event = 'down'
        )
+       -- Карточка без проверенной выжимки — не карточка. Прогон её больше
+       -- и не сохраняет, но выпуски, собранные до этого, держат заглушки
+       -- «подготовить не удалось»: отбор, прогресс выпуска и догрузка
+       -- их уже не считают, и лента не должна быть единственным местом,
+       -- где они видны.
+       and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
      order by di.total desc
   `;
 
@@ -648,6 +654,9 @@ async function found(readerId: number, query: string): Promise<ArchiveHit[]> {
            select 1 from dailynews.reads r
             where r.item_id = i.id and r.reader_id = ${readerId} and r.event = 'down'
          )
+         -- Заглушка «выжимку подготовить не удалось» не карточка и в ленте:
+         -- найтись в поиске она может только собой, и это не ответ.
+         and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
        order by rank desc, d.day desc
        limit 40
     )
@@ -717,6 +726,7 @@ export async function archiveSize(readerId: number): Promise<{ items: number; da
          select 1 from dailynews.reads r
           where r.item_id = di.item_id and r.reader_id = ${readerId} and r.event = 'down'
        )
+       and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
   `;
   return row ?? { items: 0, days: 0 };
 }
