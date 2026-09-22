@@ -139,6 +139,9 @@ export const plans = {
   },
 
   about: {
+    // Порядок слов свой: по-русски число идёт первым, по-английски
+    // так звучит объявлением, а не строкой о читателе.
+    heroSaved: (saved: string): string => `You saved ${saved} today`,
     heroTitle: "Only what's worth reading",
     newsWord: (n: number): string => (n === 1 ? "story" : "stories"),
     minutesWord: (n: number): string => (n === 1 ? "minute" : "minutes"),
@@ -149,7 +152,6 @@ export const plans = {
     // Число приходит уже со своим словом («89 stories»): по-русски оно
     // стоит после глагола, по-английски — в начале, и склейка на стороне
     // страницы держала бы один порядок на оба языка.
-    flowSaved: (saved: string): string => `We saved you ${saved} over the last day.`,
     flowBasis: (collected: string, stream: string, minutes: string): string =>
       `${collected} came in from your sources — skimming it all is ${stream}. Your digest is ${minutes}.`,
     // Пустые сутки — не ноль в той же фразе: «came in 0 stories, keeps ~18»

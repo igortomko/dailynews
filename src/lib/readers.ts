@@ -31,7 +31,7 @@ import type { Sql, TransactionSql } from "postgres";
 const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
   reader_context, reading_v2_enabled, digest_minutes, weights, language, ui_language, complexity, style,
-  kindle_address, kindle_sender, kindle_digest, kindle_approved,
+  kindle_address, kindle_sender, kindle_digest, kindle_approved, podcast,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
   paused_at, sleep_asked_at, resume_at,
@@ -706,11 +706,17 @@ const readerTitle = (readerId: unknown, itemId: unknown) => sql`
 export async function cardForReader(
   readerId: number,
   itemId: number,
-): Promise<{ digestId: number; title: string; summary: string; url: string } | null> {
+): Promise<
+  { digestId: number; day: string; title: string; summary: string; url: string } | null
+> {
   const [row] = await sql<
-    { digest_id: number; title: string; summary: string; url: string }[]
+    { digest_id: number; day: string; title: string; summary: string; url: string }[]
   >`
-    select d.id as digest_id, di.title, coalesce(di.summary, '') as summary, i.url
+    select d.id as digest_id,
+           -- Днём, а не датой: вступление подкаста называет число, и день
+           -- выпуска не должен зависеть от пояса, в котором его разбирают.
+           to_char(d.day, 'YYYY-MM-DD') as day,
+           di.title, coalesce(di.summary, '') as summary, i.url
       from dailynews.digest_items di
       join dailynews.digests d on d.id = di.digest_id
       join dailynews.items i on i.id = di.item_id
@@ -719,7 +725,13 @@ export async function cardForReader(
      limit 1
   `;
   return row
-    ? { digestId: Number(row.digest_id), title: row.title, summary: row.summary, url: row.url }
+    ? {
+        digestId: Number(row.digest_id),
+        day: row.day,
+        title: row.title,
+        summary: row.summary,
+        url: row.url,
+      }
     : null;
 }
 

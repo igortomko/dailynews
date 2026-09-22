@@ -39,7 +39,8 @@ import { appOrigin } from "../src/lib/auth";
 import * as bus from "../src/lib/audio-bus";
 import {
   applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
-  spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
+  localeOfVoice, podcastIntro, spelledOut, spokenMap, unabbreviate, unknownRuns,
+  voiceFor, voiceForText,
 } from "../src/lib/speech";
 import { catalogCollisions, fileCoverage, numberCollisions } from "../db/schema-gap";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
@@ -60,7 +61,8 @@ import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
-  channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
+  channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
+  splitClassic, stamp, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import {
@@ -84,7 +86,7 @@ import {
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, langTagFor, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -548,6 +550,21 @@ assert.ok(
   LANGUAGES.every((entry) => flagOf(entry).length > 0),
   "язык без флажка: словарь разъехался со списком",
 );
+// Тот же разъезд, что и с флажком, но цена выше: язык без тега уходит
+// в разметку без `lang`, а без него скринридер читает его фонемами соседа
+// и переносы идут чужими правилами. Язык источника — единственное
+// исключение, и оно названо: на чём написан материал, заранее не знает никто.
+for (const language of LANGUAGES) {
+  if (language === SOURCE_LANGUAGE) continue;
+  assert.ok(langTagFor(language), `язык без тега разметки: ${language}`);
+}
+assert.equal(
+  langTagFor(SOURCE_LANGUAGE), null,
+  "непереведённому выпуску тег не выдумывается: языка его материалов мы не знаем",
+);
+assert.equal(langTagFor("клингонском"), null, "незнакомый язык — без тега, а не с чужим");
+assert.equal(langTagFor("португальском (бразильский)"), "pt-BR", "язык с регионом сохраняет регион");
+
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
 assert.equal(styleOf("выдуманная").key, "нейтральный", "незнакомая манера читается как нейтральная");
@@ -3698,6 +3715,65 @@ for (const [name, table] of [
   assert.equal(audioBlocker(reader, { audioSecondsPerDay: 2700 }, 0, 600, t, "Pro"), "");
 }
 
+// --- сокращения и вступление подкаста -------------------------------------------
+{
+  // Точка сокращения обрывает фразу на 1,3 секунды: движок читает её
+  // как конец предложения. Замер стоит в `CLIPPED`.
+  assert.equal(
+    unabbreviate("Раунд закрыт на 50 тыс. долларов и это рекорд.", "русском"),
+    "Раунд закрыт на 50 тыс долларов и это рекорд.",
+  );
+  // А `г.` движок читает правильно, и снятие точки его ломает: список
+  // перечисляет только измеренное, а не всё похожее.
+  assert.equal(
+    unabbreviate("Отчёт за 2025 г. показал спад.", "русском"),
+    "Отчёт за 2025 г. показал спад.",
+    "работающее сокращение не трогается",
+  );
+  // Настоящий конец предложения остаётся концом: на живом потоке
+  // «чат. llm-keys-ui» и «судьи-модели. jevals» — это две фразы,
+  // и склей их правило, пауза между ними исчезла бы незаметно.
+  assert.equal(
+    unabbreviate("ключи на машину без вставки в чат. llm-keys-ui поднимает веб", "русском"),
+    "ключи на машину без вставки в чат. llm-keys-ui поднимает веб",
+    "точка в конце фразы не снимается",
+  );
+  // Конец текста — это конец: пауза там по делу.
+  assert.equal(unabbreviate("Осталось 20 тыс.", "русском"), "Осталось 20 тыс.");
+  // Ряд на язык: немецкому голосу русское сокращение подставлять нечего.
+  assert.equal(
+    unabbreviate("Runde bei 50 тыс. Dollar", "немецком"),
+    "Runde bei 50 тыс. Dollar",
+    "чужому языку ряд не применяется",
+  );
+
+  // Локаль вступления — из голоса, а не из второго списка: разъедься они,
+  // немецкий выпуск назвал бы число по-русски.
+  assert.equal(localeOfVoice("de-DE-KatjaNeural"), "de-DE");
+  assert.equal(podcastIntro("2026-09-21", "ru-RU-SvetlanaNeural"), "Reporta, 21 сентября.");
+  assert.equal(podcastIntro("2026-09-21", "de-DE-KatjaNeural"), "Reporta, 21. September.");
+  assert.equal(podcastIntro("2026-09-21", "ja-JP-NanamiNeural"), "Reporta, 9月21日.");
+
+  // Каждый язык выпуска называет число своим языком. Незнакомая `Intl`
+  // локаль молча откатывается на язык среды — и выпуск, прочитанный
+  // корейским голосом, назвал бы дату по-английски.
+  const ruDate = podcastIntro("2026-09-21", voiceFor("русском")!);
+  for (const language of LANGUAGES) {
+    if (language === SOURCE_LANGUAGE) continue;
+    const voice = voiceFor(language)!;
+    const said = podcastIntro("2026-09-21", voice);
+    assert.ok(said.startsWith("Reporta, "), `вступление без имени продукта: ${language}`);
+    assert.ok(said.length > "Reporta, ".length + 3, `вступление без даты: ${language}`);
+    if (language !== "русском") {
+      assert.notEqual(said, ruDate, `${language} назвал число по-русски`);
+    }
+  }
+
+  // День приходит строкой «ГГГГ-ММ-ДД», и пояс разбора не должен её сдвигать.
+  assert.equal(podcastIntro("2026-01-01", "ru-RU-SvetlanaNeural"), "Reporta, 1 января.");
+  assert.equal(podcastIntro("2026-12-31", "ru-RU-SvetlanaNeural"), "Reporta, 31 декабря.");
+}
+
 // --- какие миграции сверка формы схемы вообще может проверить ------------------
 // Молчание сверки о файле, который ей ничего не обещал, — не ответ. Пока
 // эти две причины были одной, миграция из одних индексов уходила в журнал
@@ -3973,6 +4049,18 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
     "возврат к карточке — это новый play, а не перезапуск с нуля",
   );
 
+  // Умолчание — быстрее единицы. Шага ускорения в синтезе нет, и звук
+  // из базы приходит медленнее живой речи; выравнивает это плеер.
+  assert.ok(bus.RATES[0] > 1, "первая скорость круга быстрее исходной записи");
+  assert.equal(
+    bus.currentRate(), bus.RATES[0],
+    "до первого нажатия играет первая скорость круга, а не единица",
+  );
+  assert.ok(
+    !(bus.RATES as readonly number[]).includes(1),
+    "единицы в круге нет: сохранённая от прежнего круга читается как «не задано»",
+  );
+
   // Скорость общая и применяется к тому, что уже играет.
   const started = bus.currentRate();
   const next = bus.nextRate();
@@ -3999,6 +4087,107 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   assert.equal(told, 1, "отписавшаяся — уже нет");
 }
 
+// --- Сообщение о выпуске: rich и запасной классический ---------------------
+//
+// Собирается одной функцией в двух видах сразу. Проверяется здесь, потому
+// что разметку нельзя проверить ни на чём, кроме настоящего чата: Telegram
+// отвечает «chat not found» и на верную, и на неверную. Что можно проверить
+// без сети — что мы отдаём: якорь у каждой статьи, ссылка тегом, а не голым
+// адресом, и метка времени только у того, что в записи есть.
+{
+  const APP = "https://news.tomko.io";
+  const heads = [
+    { id: 11, title: "Первая <новость> & прочее", topic: "Энергетика", at: 0 },
+    { id: 12, title: "Вторая", topic: "Энергетика", at: 754 },
+    { id: 13, title: "Третья", topic: "ИИ", at: null },
+  ];
+
+  assert.equal(stamp(0), "0:00", "начало записи");
+  assert.equal(stamp(754), "12:34", "минуты и секунды");
+  assert.equal(stamp(3754), "1:02:34", "за часом появляется час");
+  assert.equal(stamp(-5), "0:00", "отрицательной секунды не бывает");
+
+  assert.equal(dayUrl(`${APP}/`, "2026-09-21"), `${APP}/?day=2026-09-21`,
+    "лишний слеш в APP_URL не удваивается");
+  assert.equal(itemUrl(APP, "2026-09-21", 11), `${APP}/?day=2026-09-21#item-11`,
+    "ссылка ведёт на карточку в своём дне, а не на корень");
+  assert.match(itemUrl(APP, "2026-09-21", 11, true), /\?day=2026-09-21&play=11#item-11$/,
+    "«слушать» просит ленту нажать кнопку этой карточки");
+
+  const withAudio = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
+    size: "19 мин", podcast: 1080,
+  });
+
+  assert.match(withAudio.html, /^<h2>Выпуск за 21 сентября — 19 мин<\/h2>/,
+    "заголовок первый: сгиб решает порядок");
+  assert.ok(withAudio.html.includes("<audio src=\"tg://audio?id=podcast\">"),
+    "подкаст едет блоком в том же сообщении");
+  assert.ok(withAudio.html.indexOf("<audio") < withAudio.html.indexOf("<h3>"),
+    "запись стоит до тем, то есть до сгиба");
+  assert.equal(withAudio.html.match(/<h3>/g)?.length, 2, "тема — раздел, и их две");
+  assert.equal(withAudio.html.match(/<hr>/g)?.length, 2, "перед каждым разделом разделитель");
+
+  for (const head of heads) {
+    assert.ok(withAudio.html.includes(`href="${APP}/?day=2026-09-21#item-${head.id}"`),
+      `у статьи ${head.id} своя ссылка`);
+    assert.ok(withAudio.classic.includes(`#item-${head.id}`),
+      `запасной путь несёт ту же ссылку на ${head.id}`);
+  }
+
+  // Экранирование: заголовок приходит из чужого фида через модель, и угловая
+  // скобка в нём валит разбор сущностей — Telegram не шлёт тогда ничего.
+  assert.ok(withAudio.html.includes("Первая &lt;новость&gt; &amp; прочее"),
+    "три знака экранированы");
+  assert.ok(!/<новость>/.test(withAudio.html), "сырой угловой скобки в разметке нет");
+
+  // Метка времени и «слушать» — только у того, что в записи есть.
+  assert.ok(withAudio.html.includes("12:34"), "у второй статьи её место в записи");
+  assert.equal(withAudio.html.match(/слушать/g)?.length, 2,
+    "две статьи в записи — две ссылки «слушать»");
+  const third = withAudio.html.slice(withAudio.html.indexOf("Третья"));
+  assert.ok(!third.includes("слушать"),
+    "у статьи вне записи ссылки на озвучку нет: она вела бы к кнопке «озвучить»");
+
+  const noAudio = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
+    size: "19 мин", podcast: null,
+  });
+  assert.ok(!noAudio.html.includes("<audio"), "без подкаста блока аудио нет");
+  assert.ok(!noAudio.html.includes("слушать"),
+    "без подкаста не обещаем послушать даже то, у чего есть метка");
+  assert.ok(noAudio.html.includes("#item-13"), "ссылки на статьи остаются и без записи");
+
+  // Ничего не обрезается: старое сообщение упиралось в 4000 знаков
+  // и обрывалось на полуслове у двух выпусков из трёх.
+  const many = Array.from({ length: 100 }, (_, i) => ({
+    id: i + 1, title: `Заголовок номер ${i + 1} про энергетику и модели`, topic: `Тема ${i % 6}`,
+    at: i * 60,
+  }));
+  const big = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: many, appUrl: APP,
+    size: "45 мин", podcast: 6000,
+  });
+  for (const head of many) {
+    assert.ok(big.html.includes(`#item-${head.id}"`), `сотая статья не отрезана: ${head.id}`);
+  }
+  assert.ok(big.html.length < 32768, "сотня статей помещается в предел rich");
+
+  // Классический путь режется по строкам, а не по знакам: срез посреди
+  // `<a href>` Telegram отвергает целиком, и выпуск не приходит вовсе.
+  const parts = splitClassic(big.classic);
+  assert.ok(parts.length > 1, "сотня статей не влезает в одно классическое сообщение");
+  for (const part of parts) {
+    assert.ok(part.length <= 4096, "ни один кусок не длиннее предела");
+    assert.equal(part.match(/<a /g)?.length ?? 0, part.match(/<\/a>/g)?.length ?? 0,
+      "ссылка не разрезана пополам");
+  }
+  assert.equal(parts.join("\n"), big.classic, "склейка кусков — исходный текст, без потерь");
+
+  const long = splitClassic("к".repeat(5000));
+  assert.equal(long.length, 1, "одна строка длиннее предела режется, а не теряется");
+  assert.equal(long[0].length, 4096, "и режется ровно по пределу");
+}
 // ---------------------------------------------------------------------------
 // Твит с внешней ссылкой — это анонс статьи, и материалом должна стать статья.
 // По адресу твита `enrich` не получит ничего, и оценка встала бы по 280 знакам;

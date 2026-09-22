@@ -47,6 +47,7 @@ function FlowGrid({
   chars,
   digest,
   minutes,
+  saved,
   t,
   time,
 }: {
@@ -54,6 +55,8 @@ function FlowGrid({
   chars: number;
   digest: number;
   minutes: number;
+  /** Выигрыш дня в минутах. Считает страница — он же стоит в заголовке. */
+  saved: number;
   t: Dict["plans"]["about"];
   time: Dict["feed"]["time"];
 }) {
@@ -75,26 +78,20 @@ function FlowGrid({
   }
 
   const minutesText = `${minutes} ${t.minutesWord(minutes)}`;
-  // Выигрыш дня одним числом — то, ради чего карточка стоит на странице.
-  // Ниже он разложен на слагаемые: «сэкономили час» без «из чего» — это
-  // обещание, которое нечем проверить.
-  const saved = savedMinutes(chars, minutes);
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Одна строка, а не утверждение со своим разбором. Слагаемые
-          («вышло 89 — просмотреть всё это ~1 час 26 минут») стоят ниже
-          картинкой и легендой, и повторять их ещё и словами значит сказать
-          одно и то же трижды на площади в четыре строки.
+      {/* В обычный день текста перед сеткой нет вовсе: выигрыш стоит
+          заголовком карточки, и повторять его строкой ниже — значит
+          сказать одно и то же дважды на площади в две строки.
 
-          Меньше минуты экономии вслух не называется: в тихий день поток
-          короче заказа, и «сэкономили ~0» — это отчёт о работе, которой
-          не было. Тогда говорится, что вышло и сколько это времени, —
-          фраза, верная в любой день. */}
-      <p className={saved >= 1 ? "text-sm font-medium" : "text-sm"}>
-        {saved >= 1
-          ? t.flowSaved(formatDuration(saved, time))
-          : collected > 0
+          Строка остаётся там, где заголовок о выигрыше молчит. Меньше
+          минуты экономии вслух не называется: в тихий день поток короче
+          заказа, и «сэкономили ~0» — отчёт о работе, которой не было;
+          тогда говорится, что вышло и сколько это времени. */}
+      {saved >= 1 ? null : (
+        <p className="text-sm">
+          {collected > 0
             ? t.flowBasis(
                 `${collected} ${t.newsWord(collected)}`,
                 formatDuration(streamMinutes(chars), time),
@@ -104,7 +101,8 @@ function FlowGrid({
             // отчитывается о работе, которой не было, там, где сказать надо
             // ровно это.
             : t.flowLeadEmpty(`${digest} ${t.newsWord(digest)}`, minutesText)}
-      </p>
+        </p>
+      )}
       {/* В пустые сутки сетки нет совсем, а не сетка из одной серой клетки:
           рисовать нечего, и пустая группа оставила бы на её месте двойной
           зазор — пробел, который читается поломкой вёрстки. */}
@@ -182,6 +180,11 @@ export default async function AboutPage() {
     minutes, cardMinutes(chars, effectiveVoice(reader)), plan.maxItems,
   );
 
+  // Выигрыш дня — то, ради чего карточка стоит на странице, поэтому он
+  // и есть её заголовок. Молчит он только тогда, когда его нет: в тихий
+  // день поток короче заказа, и заголовок возвращается к общему.
+  const saved = savedMinutes(streamChars, minutes);
+
   // Следующий тариф, если он есть. На Pro предложения нет: продавать
   // то, что уже куплено, — это шум в разделе, который читают один раз.
   const next = PLAN_IDS.map((id) => PLANS[id]).find((entry) => entry.price > plan.price);
@@ -190,11 +193,16 @@ export default async function AboutPage() {
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader>
-          {/* Описания у карточки нет: «лента читает всё и оставляет столько,
-              сколько ты просил» — это ровно фраза ниже, только без чисел.
-              Два написания одной мысли подряд читаются как заминка перед
-              тем, что сказано по делу. */}
-          <CardTitle>{t.plans.about.heroTitle}</CardTitle>
+          {/* Заголовок называет сегодняшнее число, а не тему раздела:
+              «~1 час 16 минут ты сэкономил сегодня» отвечает на вопрос,
+              с которым сюда заходят, прямо в самой крупной строке экрана.
+              Описания у карточки нет по той же причине — оно пересказывало
+              бы заголовок без чисел. */}
+          <CardTitle>
+            {saved >= 1
+              ? t.plans.about.heroSaved(formatDuration(saved, t.feed.time))
+              : t.plans.about.heroTitle}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <FlowGrid
@@ -202,6 +210,7 @@ export default async function AboutPage() {
             chars={streamChars}
             digest={inDigest}
             minutes={minutes}
+            saved={saved}
             t={t.plans.about}
             time={t.feed.time}
           />

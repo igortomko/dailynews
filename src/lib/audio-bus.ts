@@ -13,9 +13,20 @@
  * его след между заходами.
  */
 
-/** Скорости по кругу. Замыкается на единице: с ×2 возвращаются чаще. */
-export const RATES = [1, 1.25, 1.5, 2] as const;
+/**
+ * Скорости по кругу. Первая — она же и по умолчанию.
+ *
+ * 1,05, а не 1: голос Edge TTS сам по себе медленнее живой речи, а шага
+ * ускорения в синтезе нет — ни ffmpeg, ни параметра скорости у движка,
+ * так что из базы звук приходит ровно таким, каким его произнесли.
+ * Пять процентов слышны как «нормальный темп», а не как ускоренная запись,
+ * и берутся плеером: `playbackRate` держит высоту голоса и применяется
+ * к уже нарезанным файлам, не требуя их переозвучивать.
+ */
+export const RATES = [1.05, 1.25, 1.5, 2] as const;
 export type Rate = (typeof RATES)[number];
+/** Умолчание — первая в круге, а не константа: разъехались бы молча. */
+const DEFAULT: Rate = RATES[0];
 
 const RATE_KEY = "reporta:audio-rate";
 
@@ -27,7 +38,7 @@ const isRate = (value: unknown): value is Rate => RATES.includes(value as Rate);
  */
 let playing: HTMLAudioElement | null = null;
 
-let rate: Rate = 1;
+let rate: Rate = DEFAULT;
 let loaded = false;
 const listeners = new Set<(next: Rate) => void>();
 
@@ -35,9 +46,12 @@ const listeners = new Set<(next: Rate) => void>();
 function read(): Rate {
   try {
     const saved = Number(localStorage.getItem(RATE_KEY));
-    return isRate(saved) ? saved : 1;
+    // Сохранённая скорость прежнего круга (была единица) не в списке —
+    // читается как «не задано» и заменяется умолчанием, а не остаётся
+    // значением, которого кнопка больше не выдаёт.
+    return isRate(saved) ? saved : DEFAULT;
   } catch {
-    return 1;
+    return DEFAULT;
   }
 }
 

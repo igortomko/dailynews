@@ -9,7 +9,8 @@ import { canonUrl, normalizeTitle } from "./normalize";
 import { askDuplicates, flattenDupChains, markDuplicates } from "./dedup";
 import { enrichArticles } from "./enrich";
 import { composite, scoreAll, type Scorable } from "./score";
-import { writeDigest, type Survivor } from "./digest";
+import { resolve, writeDigest, type Survivor, type Usage } from "./digest";
+import { buildPodcast } from "./tts";
 import { selectSurvivors, targetsOf, WINDOW_DAYS } from "./select";
 import { askResume, notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
@@ -19,7 +20,7 @@ import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoI
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { jevCost, llmCost } from "./cost";
-import { issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
+import { FEATURES, issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
 import {
   cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf,
 } from "../src/lib/reading-time";
@@ -507,12 +508,49 @@ async function deliver(
     // ошибок нет, а читатель о нём не знает.
     log(`  ${name}: Telegram не привязан — уведомление пропущено`);
   } else {
+    // Подкаст собирается до уведомления, потому что едет тем же сообщением
+    // отдельным блоком аудио: списку и записи незачем приходить порознь.
+    //
+    // Тумблер и тариф спрашиваются оба. Тумблер — потому что час звука
+    // каждую ночь включают сами; тариф — потому что он мог кончиться уже
+    // после того, как тумблер включили, и тогда корона над кнопкой
+    // в ленте означала бы одно, а прогон делал бы другое.
+    //
+    // В дневную квоту (`audioSecondsPerDay`) это не пишется намеренно:
+    // квота защищает от того, что читатель нащёлкает сам, а выпуск голосом
+    // приходит один раз в сутки и размером ровно с выпуск. Засчитанный,
+    // он выбирал бы её целиком, и кнопка «озвучить» отказывала бы весь день
+    // за то, чего читатель не просил.
+    let podcast: Awaited<ReturnType<typeof buildPodcast>> | null = null;
+    if (reader.podcast && FEATURES.audio.has(effectivePlan(reader))) {
+      const usage: Usage = { requests: 0, input: 0, output: 0, cached: 0, reasoning: 0 };
+      try {
+        podcast = await buildPodcast(reader, survivors.map((s) => Number(s.id)), usage);
+        log(`  ${name}: подкаст — ${podcast.titles.length} карточек, ${Math.round(podcast.seconds / 60)} мин`);
+      } catch (error) {
+        // Выпуск важнее записи: не собралась — уходит сообщение без неё
+        // и без меток времени, а не молчание.
+        log(`  ${name}: подкаст не собрался — ${(error as Error).message}`);
+      }
+      if (usage.requests > 0) {
+        await recordCall({
+          readerId: reader.id, stage: "spoken-terms", model: resolve().model,
+          tokensIn: usage.input, tokensOut: usage.output, costUsd: llmCost(usage),
+        });
+      }
+    }
     try {
       await notify(
         Number(reader.telegram_id), day, intro,
-        survivors.map((s) => ({ title: titleOf(s), topic: s.topic_label })),
+        survivors.map((s) => ({
+          id: Number(s.id),
+          title: titleOf(s),
+          topic: s.topic_label,
+          at: podcast?.at.get(Number(s.id)) ?? null,
+        })),
         appUrl,
         reading,
+        podcast,
       );
       await sql`
         update dailynews.digests set sent_at = now()

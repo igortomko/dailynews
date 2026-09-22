@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
+import { DEFAULT_LOCALE } from "@/lib/i18n";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -47,9 +48,17 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * Язык корня — язык оболочки, а не читателя: корень накрывает и /login,
+ * где читателя ещё нет, — `currentLocale()` спросил бы `currentReader()`,
+ * а тот с этого экрана уводит на него же. Язык читателя ставится ниже,
+ * в раскладке приложения, а язык выпуска — на самом тексте карточки:
+ * интерфейс и выпуск переводятся порознь и сходятся не всегда.
+ * Стоял «ru» гвоздём, и немецкий выпуск скринридер читал русскими фонемами.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" className={inter.variable} suppressHydrationWarning>
+    <html lang={DEFAULT_LOCALE} className={inter.variable} suppressHydrationWarning>
       <body className="min-h-svh bg-background font-sans antialiased">
         {/*
           Тема идёт за системной и переключателя не имеет. Переменные .dark
