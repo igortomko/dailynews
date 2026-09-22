@@ -223,7 +223,7 @@ export async function writeDigest(
     // осталась ручкой замера и может только урезать квоту тарифа, иначе
     // одна строка в окружении молча выдала бы Pro-выпуск бесплатному.
     const [reader] = await sql<(Reader & { reading_v2_enabled: boolean })[]>`
-      select reading_v2_enabled, owner, plan, plan_status, plan_ends_at
+      select reading_v2_enabled, owner, plan, subscription_status, plan_ends_at
         from dailynews.readers where id=${options.readerId}`;
     if (!reader) throw new Error("Reader unavailable");
     if (reader.reading_v2_enabled) {

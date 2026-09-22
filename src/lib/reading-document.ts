@@ -20,6 +20,15 @@ const block = z.discriminatedUnion("kind", [
   // Разоблачение — обычный сюжет технической ленты: «обещали X, на деле Y».
   // Сравнением его не выразить: у сторон разный статус, а не общий базис.
   z.object({ kind: z.literal("correction"), claim: text, reality: supported }).strict(),
+  // Матрица: несколько объектов, сравниваемых по нескольким числам.
+  // Ни comparison (варианты по одному базису), ни figures (числа одного
+  // результата) этого не выражают, и сравнение четырёх моделей по двум
+  // бенчмаркам уходило в абзац, где числа читаются подряд и не сравниваются.
+  z.object({ kind: z.literal("table"),
+    columns: z.array(text.max(40)).min(2).max(4),
+    rows: z.array(z.object({ label: text.max(60), cells: z.array(text.max(60)).min(2).max(4), claimIds: ids }).strict()).min(2).max(6),
+    context: supported.nullable(),
+  }).strict(),
   z.object({ kind: z.literal("steps"), sequence: z.enum(["procedure", "timeline"]), items: z.array(z.object({ label: text, content: supported, state: z.enum(["done", "current", "planned", "unspecified"]) }).strict()).min(2).max(6) }).strict(),
   z.object({ kind: z.literal("takeaway"), attribution: text, content: supported }).strict(),
 ]);
@@ -33,7 +42,7 @@ const block = z.discriminatedUnion("kind", [
  */
 export const editorialFormat = z.enum([
   "brief", "story", "bullets", "steps", "timeline", "data", "figures",
-  "quote", "comparison", "mechanism", "qa", "correction",
+  "quote", "comparison", "mechanism", "qa", "correction", "table",
 ]);
 export type EditorialFormat = z.infer<typeof editorialFormat>;
 export const formatPlanSchema = z.object({
@@ -67,6 +76,7 @@ export type ReadingBlock = ReadingDocument["blocks"][number];
 export const formatBlock: Partial<Record<EditorialFormat, ReadingBlock["kind"]>> = {
   bullets: "list", steps: "steps", timeline: "steps", data: "metric", figures: "figures",
   quote: "quote", comparison: "comparison", mechanism: "flow", qa: "qa", correction: "correction",
+  table: "table",
 };
 export type SourceAvailability = "article_text" | "feed_text" | "excerpt_only" | "derived_summary";
 export type StoredReading = {
@@ -101,7 +111,7 @@ export const auditSchema = z.object({ defects: z.array(z.object({
 export const auditDefects = (result: z.infer<typeof auditSchema>) => result.defects.map(d => `${d.kind}: ${d.issue} Source: ${d.sourceEvidence} Required correction: ${d.correction}`);
 
 export const isAccent = (b: ReadingBlock) => !["paragraph", "list", "qa"].includes(b.kind);
-export const ACCENT_KINDS = ["flow", "comparison", "metric", "figures", "steps", "takeaway", "quote", "correction"] as const;
+export const ACCENT_KINDS = ["flow", "comparison", "metric", "figures", "steps", "takeaway", "quote", "correction", "table"] as const;
 export function supportedFields(doc: ReadingDocument): z.infer<typeof supported>[] {
   const values = [doc.title, ...(doc.answer ? [doc.answer] : []), ...(doc.lead ? [doc.lead] : [])];
   for (const b of doc.blocks) {
@@ -114,6 +124,7 @@ export function supportedFields(doc: ReadingDocument): z.infer<typeof supported>
       case "metric": values.push(b.context); break;
       case "figures": values.push(...b.items.map((i) => ({ text: `${i.value} ${i.label}`, claimIds: i.claimIds })), ...(b.context ? [b.context] : [])); break;
       case "correction": values.push(b.reality); break;
+      case "table": values.push(...b.rows.map((r) => ({ text: `${r.label} ${r.cells.join(" ")}`, claimIds: r.claimIds })), ...(b.context ? [b.context] : [])); break;
       case "steps": values.push(...b.items.map((i) => i.content)); break;
     }
   }
@@ -130,7 +141,10 @@ export function normalizeDocument(doc: ReadingDocument): ReadingDocument {
 export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis, context: string, baselineIds: number[]): string[] {
   const issues: string[] = [];
   const words = `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
-  const limit = ["narrative", "argument", "investigation"].includes(doc.genre) ? 320 : 220;
+  // Замер 22 сентября 2026 на тридцати карточках: при цели 80–140 и пределе
+  // 220 медиана вышла 182 слова, треть карточек перевалила за 200. Модель
+  // пишет по верхней границе, а не по цели, поэтому двигать надо границу.
+  const limit = ["narrative", "argument", "investigation"].includes(doc.genre) ? 240 : 170;
   // Цель называется точной, а отказ наступает на десятую часть позже.
   // Лимит — редакционная мерка, а не обещание читателю: время выпуска
   // считается по написанному тексту. Сверенная карточка, выброшенная
@@ -151,6 +165,22 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   }
   if (doc.answer && doc.lead && normalize(doc.answer.text) === normalize(doc.lead.text)) {
     issues.push("The lead repeats the answer; it must add detail or be null.");
+  }
+  // Каждый слой добавляет своё. Проверяется кодом, потому что запрет
+  // в промпте протекает: на карточке про Grok 4.7 лид обещал проверку работы
+  // и цену, а абзацы ниже повторяли и то и другое.
+  const layers: { name: string; text: string }[] = [
+    ...(opener ? [{ name: "answer", text: opener.text }] : []),
+    ...(doc.answer && doc.lead ? [{ name: "lead", text: doc.lead.text }] : []),
+    ...doc.blocks.map((b, at) => ({ name: `block ${at + 1} (${b.kind})`, text: blockText(b) })),
+    ...(doc.evidence ? [{ name: "evidence", text: doc.evidence.text }] : []),
+  ];
+  for (let i = 0; i < layers.length; i++) {
+    for (let j = i + 1; j < layers.length; j++) {
+      if (restates(layers[i].text, layers[j].text)) {
+        issues.push(`The ${layers[j].name} restates the ${layers[i].name}: same facts and numbers said twice. Keep one of them and spend the other on what the article says next, or drop it.`);
+      }
+    }
   }
   const claims = analysis.sections.flatMap((s) => s.claims);
   const known = new Set(claims.map((c) => c.id));
@@ -179,6 +209,40 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   return issues;
 }
 export const normalize = (s: string) => s.replace(/\s+/gu, " ").trim();
+
+/**
+ * Говорят ли два куска одно и то же.
+ *
+ * Запрет «не повторяйся» в промпте протекает: на живой карточке про Grok 4.7
+ * лид обещал «тщательнее себя проверяет» и «цена как у 4.6», а следующие
+ * абзацы повторяли и проверку, и цену — 212 слов, из которых четверть
+ * сказана дважды. Читатель видит это сразу, а модель — нет: каждое
+ * предложение по отдельности верно и подкреплено источником.
+ *
+ * Мерка та же, что у пересказа заголовка (`repeatsHeadline`): доля общих
+ * значимых слов, а повторённое число ужесточает порог. Число здесь весомее
+ * слова — «46,3%» во второй раз не добавляет ничего и читается как сбой.
+ */
+export const RESTATE_MIN_WORDS = 6;
+export function restates(first: string, second: string): boolean {
+  // Слово режется до шести знаков: «разработчик» и «разработчика» — одно
+  // и то же дважды, а морфологии здесь нет и не будет (урок `lexicon.ts`).
+  const words = (text: string) => new Set(
+    text.toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").split(/\s+/u)
+      .filter((word) => word.length > 3).map((word) => word.slice(0, 6)));
+  const numbers = (text: string) => new Set(
+    (text.match(/\d[\d\s.,]*\d|\d/gu) ?? []).map((n) => n.replace(/\s/gu, "")).filter((n) => n.length > 1));
+  const a = words(first), b = words(second);
+  // На коротком куске мерка вырождается: у акцента из трёх слов любое
+  // совпадение даёт единицу, и «46,3 балла» рядом с абзацем про баллы
+  // объявлялось бы повтором. Такие куски судит промпт, а не счётчик.
+  if (a.size < RESTATE_MIN_WORDS || b.size < RESTATE_MIN_WORDS) return false;
+  let shared = 0;
+  for (const word of a) if (b.has(word)) shared++;
+  const overlap = shared / Math.min(a.size, b.size);
+  const sharedNumber = [...numbers(first)].some((n) => numbers(second).has(n));
+  return overlap > 0.5 || (sharedNumber && overlap > 0.3);
+}
 export function validateQuotes(doc: ReadingDocument, source: string): string[] {
   const issues: string[] = [];
   for (const b of doc.blocks) if (b.kind === "quote") {
@@ -217,6 +281,7 @@ export function blockText(b: ReadingBlock): string {
     case "metric": return `${b.value} ${b.label}\n${b.context.text}`;
     case "figures": return [b.items.map((i) => `${i.value} ${i.label}`).join(" · "), b.context?.text].filter(Boolean).join("\n");
     case "correction": return `${b.claim}\n${b.reality.text}`;
+    case "table": return [b.columns.join(" · "), ...b.rows.map((r) => `${r.label}: ${r.cells.join(" · ")}`), b.context?.text].filter(Boolean).join("\n");
     case "steps": return b.items.map((i, at) => `${at + 1}. ${i.label}${stepStateText[i.state] ? ` (${stepStateText[i.state]})` : ""}: ${i.content.text}`).join("\n");
     case "takeaway": return `${b.content.text}\n${b.attribution}`;
     case "quote": return `“${b.content.text}”\n— ${b.attribution}`;

@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { ReadingBlock, StoredReading } from "@/lib/reading-document";
 import { relationText } from "@/lib/reading-document";
 import type { Dict } from "@/lib/i18n";
@@ -59,6 +60,19 @@ function Block({ block: b, labels }: { block: ReadingBlock; labels: Labels }) {
     </div>;
     // У разоблачения стороны неравны, и подложка одна на обе: два блока
     // рядом читались бы как выбор между ними.
+    // Матрица сравнения. Заголовок столбца мельче значения: первым читают
+    // строку, а не шапку, — столбцы объясняют её, а не наоборот.
+    case "table": return <div className="overflow-x-auto rounded-xl bg-muted/40 p-4">
+      <div className="grid min-w-fit gap-x-4 gap-y-2" style={{ gridTemplateColumns: `minmax(6rem,auto) repeat(${b.columns.length}, minmax(3.5rem,1fr))` }}>
+        <span />
+        {b.columns.map((column, i) => <span key={`h${i}`} className="text-sm text-muted-foreground">{t(column)}</span>)}
+        {b.rows.map((row, i) => <Fragment key={i}>
+          <span className="font-medium">{t(row.label)}</span>
+          {row.cells.map((cell, j) => <span key={j} className="tabular-nums">{t(cell)}</span>)}
+        </Fragment>)}
+      </div>
+      {b.context ? <p className="mt-3 text-sm text-muted-foreground">{t(b.context.text)}</p> : null}
+    </div>;
     case "correction": return <div className="rounded-xl bg-muted/40 p-4">
       <p className="text-sm text-muted-foreground">{labels.claimed}</p>
       <p className="mt-1 text-muted-foreground">{t(b.claim)}</p>

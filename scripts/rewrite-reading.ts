@@ -26,7 +26,7 @@ async function main() {
     left join dailynews.topics t on t.id=sc.topic_id
     where d.reader_id=${readerId} and d.id=${digest.id}
       ${process.argv.includes('--all') ? sql`` : sql`and coalesce(di.summary_document->>'status','') <> 'verified'`}
-      ${arg('--items') ? sql`and di.item_id = any(${arg('--items')!.split(',').map(Number)}::bigint[])` : sql``}
+      ${process.argv.includes('--items') ? sql`and di.item_id = any(${arg('--items')!.split(',').map(Number)}::bigint[])` : sql``}
     order by di.position`;
   const limit = process.argv.includes('--limit') ? Number(arg('--limit')) : rows.length;
   if (!rows.length) { console.log(JSON.stringify({ readerId, day: digest.day, rewritten: 0, failed: 0, backup: dir })); return; }
