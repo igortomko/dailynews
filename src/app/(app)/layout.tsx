@@ -1,8 +1,8 @@
 import { RebuildOnLeave } from "@/components/rebuild-queue";
 import { I18nProvider } from "@/components/i18n-provider";
-import { PaywallProvider } from "@/components/paywall";
-import { checkoutUrl } from "@/lib/lemon";
-import { PLAN_IDS } from "@/lib/plans";
+import { PaywallProvider, type Checkout } from "@/components/paywall";
+import { checkoutUrl, trialDaysFor } from "@/lib/lemon";
+import { PLAN_IDS, type PlanId } from "@/lib/plans";
 import { currentLocale } from "@/lib/i18n/server";
 import { currentReader } from "@/lib/session";
 import { brandColorsV2Enabled } from "@/lib/flags";
@@ -27,9 +27,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
    * уводило в «Подписку» вместо оплаты — запасной путь, задуманный
    * на ненастроенные ключи, срабатывал при настроенных.
    */
-  const checkout = Object.fromEntries(
-    PLAN_IDS.map((id) => [id, checkoutUrl(id, reader.id)]).filter(([, url]) => url),
-  ) as Record<string, string>;
+  const checkout: Partial<Record<PlanId, Checkout>> = Object.fromEntries(
+    PLAN_IDS.map((id) => [id, { buy: checkoutUrl(id, reader.id), trialDays: trialDaysFor(id) }])
+      .filter(([, value]) => (value as Checkout).buy),
+  );
   return (
     <I18nProvider locale={locale}>
     <PaywallProvider checkout={checkout}>
