@@ -2074,6 +2074,7 @@ import { samplePairs } from "./translation-quality";
 import { articleBlocker } from "./kindle";
 import { parseUpdate as parseBotUpdate } from "../src/lib/telegram";
 import type { Reader } from "../src/lib/types";
+import { thinkingControl } from "./digest";
 
 // Модель на длинном тексте возвращает пересказ вместо перевода. Книга при
 // этом приходит, текст на русском, абзацы на месте — просто их меньше.
@@ -4338,5 +4339,18 @@ assert.equal(
   null,
   "твит без ссылок остаётся твитом",
 );
+
+// Как просить «не рассуждай», решает провайдер. MiMo принимает чужой
+// reasoning_effort молча и продолжает думать — счёт растёт невидимо,
+// потому что рассуждение тарифицируется как выход.
+{
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com/v1", "low"), { thinking: { type: "enabled" } });
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com/v1", "none"), { thinking: { type: "disabled" } });
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com/v1", ""), { thinking: { type: "disabled" } });
+  assert.deepEqual(thinkingControl("https://api.deepseek.com", "low"), { reasoning_effort: "low" });
+  assert.deepEqual(thinkingControl("https://api.deepseek.com", ""), {});
+  // Хост сверяется целиком: чужой домен с нашим именем внутри — не наш.
+  assert.deepEqual(thinkingControl("https://api.xiaomimimo.com.evil.test/v1", "none"), { reasoning_effort: "none" });
+}
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

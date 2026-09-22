@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import type { Sql } from "postgres";
-import { resolve, type Survivor, type Usage, type Written, type DigestResult } from "./digest";
+import { resolve, thinkingControl, type Survivor, type Usage, type Written, type DigestResult } from "./digest";
 import { llmCost } from "./cost";
 import { fetchArticle } from "./article";
 import { articleHtml, videoIdOf } from "./youtube";
@@ -104,7 +104,7 @@ function caller(sql: Sql, readerId: number, usage: Usage): Ask {
       const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ model, max_tokens: outputTokens, response_format: { type: "json_object" },
-          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}), messages }),
+          ...thinkingControl(baseUrl, reasoningEffort), messages }),
         signal: AbortSignal.timeout(150_000),
       });
       if (!response.ok) throw new Error(`Reading model HTTP ${response.status}`);

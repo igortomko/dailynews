@@ -69,6 +69,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # Без ключа выпуск не уходит на читалку, но прогон идёт.
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # Рассуждение тарифицируется как выход и в ответ не попадает.
+          # Замер 22 сентября 2026 на MiMo: две карточки с рассуждением —
+          # $0.0311 и 13 минут, без него — $0.0159 и 7,5 минуты, тот же
+          # состав форм. Профиль пустой означает «рассуждать», а не «нет».
+          READING_REASONING_PHASES: ${{ vars.READING_REASONING_PHASES }}
           LLM_INPUT_PRICE: ${{ vars.LLM_INPUT_PRICE }}
           LLM_CACHE_INPUT_PRICE: ${{ vars.LLM_CACHE_INPUT_PRICE }}
           LLM_OUTPUT_PRICE: ${{ vars.LLM_OUTPUT_PRICE }}

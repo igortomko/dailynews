@@ -190,6 +190,23 @@ export function resolve() {
 }
 
 /**
+ * Чем провайдеру сказать «не рассуждай». У OpenAI-совместимых это
+ * `reasoning_effort`, у Xiaomi MiMo — своё поле `thinking`, а чужой
+ * параметр он принимает молча и продолжает думать: замер 22 сентября
+ * 2026 — `reasoning_effort: "low"` и `thinking: enabled` дают одинаковые
+ * рассуждающие ответы, ошибки нет ни одной. Рассуждение тарифицируется
+ * как выход, и невидимая строка счёта — это ровно тот отказ, который
+ * выглядит успехом.
+ */
+export function thinkingControl(baseUrl: string, effort: string): Record<string, unknown> {
+  // Хост сверяется до конца: `api.xiaomimimo.com.example.net` — чужой.
+  if (/(^|\.)xiaomimimo\.com$/u.test(new URL(baseUrl).hostname)) {
+    return { thinking: { type: effort && effort !== "none" ? "enabled" : "disabled" } };
+  }
+  return effort ? { reasoning_effort: effort } : {};
+}
+
+/**
  * Дорогая модель видит только выживших — пятнадцать материалов вместо трёхсот.
  * Отбор уже сделан кодом по оценкам Jev, здесь только письмо.
  */
@@ -362,7 +379,9 @@ ${blockOf(list)}
       // из двадцати, и дайджест внешне собрался — просто девятнадцать
       // заголовков остались на языке источника.
       max_tokens: 32000,
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      // Как просить «не рассуждай», решает провайдер: MiMo чужой параметр
+      // принимает молча и думает дальше (pipeline/reading.ts).
+      ...thinkingControl(baseUrl, reasoningEffort ?? ""),
       response_format: { type: "json_object" },
       messages: [{ role: "user", content: promptFor(list, askIntro) }],
     }),
