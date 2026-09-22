@@ -162,6 +162,21 @@ const FILLER = [
 export const fillers = (text: string): string[] =>
   FILLER.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0]));
 
+/**
+ * Части карточки по порядку чтения. Одна сборка на проверку повторов
+ * счётчиком и на вопрос к Jev: два списка разъехались бы, и дефект
+ * указывал бы не на ту часть.
+ */
+export function layersOf(doc: ReadingDocument): { name: string; text: string; accent: boolean }[] {
+  const opener = doc.answer ?? doc.lead;
+  return [
+    ...(opener ? [{ name: "answer", text: opener.text, accent: false }] : []),
+    ...(doc.answer && doc.lead ? [{ name: "lead", text: doc.lead.text, accent: false }] : []),
+    ...doc.blocks.map((b, at) => ({ name: `block ${at + 1} (${b.kind})`, text: blockText(b), accent: isAccent(b) })),
+    ...(doc.evidence ? [{ name: "evidence", text: doc.evidence.text, accent: false }] : []),
+  ];
+}
+
 export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis, context: string, baselineIds: number[]): string[] {
   const issues: string[] = [];
   const words = `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
@@ -193,12 +208,7 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
   // Каждый слой добавляет своё. Проверяется кодом, потому что запрет
   // в промпте протекает: на карточке про Grok 4.7 лид обещал проверку работы
   // и цену, а абзацы ниже повторяли и то и другое.
-  const layers: { name: string; text: string; accent: boolean }[] = [
-    ...(opener ? [{ name: "answer", text: opener.text, accent: false }] : []),
-    ...(doc.answer && doc.lead ? [{ name: "lead", text: doc.lead.text, accent: false }] : []),
-    ...doc.blocks.map((b, at) => ({ name: `block ${at + 1} (${b.kind})`, text: blockText(b), accent: isAccent(b) })),
-    ...(doc.evidence ? [{ name: "evidence", text: doc.evidence.text, accent: false }] : []),
-  ];
+  const layers = layersOf(doc);
   for (let i = 0; i < layers.length; i++) {
     for (let j = i + 1; j < layers.length; j++) {
       if (!restates(layers[i].text, layers[j].text)) continue;

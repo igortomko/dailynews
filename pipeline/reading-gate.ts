@@ -166,3 +166,64 @@ export async function sectionAuditNeeded(spans: Span[], claims: ClaimPair[], rea
   }
   return alarm || failed;
 }
+
+/**
+ * Повтор мысли между частями карточки.
+ *
+ * Счётчик слов (`restates`) ловит только повтор словами. На живой карточке
+ * про Jev ответ говорил «числа вместо объяснений, почему — не понять»,
+ * блок-цепочка — «числа с уверенностью, без объяснений», а абзац ниже —
+ * «обычная модель даёт объяснение, Jev только число»: одна мысль трижды,
+ * и ни одной общей пары слов сверх порога.
+ *
+ * Спрашивается по паре, а не про весь документ: на списке частей вопрос
+ * «есть ли повтор» отвечает «да» почти всегда — всякая карточка про одно
+ * и то же. Вход у Jev тарифицируется, выход нет, поэтому пары идут одним
+ * запросом: десять вопросов на карточку стоят $0.00006.
+ *
+ * Порог тот же, что у дедупа: ниже 0,6 — «разные мысли». Цена ошибки
+ * несимметрична в другую сторону, чем у сверки: лишний ремонт стоит цент,
+ * а повтор читатель видит первым же взглядом и считает его нашей небрежностью.
+ */
+export const REPEAT_ALARM = 0.6;
+
+export async function repeatedLayers(
+  layers: { name: string; text: string }[],
+  readerId: number,
+): Promise<[string, string][]> {
+  const pairs: [number, number][] = [];
+  for (let i = 0; i < layers.length; i++) {
+    for (let j = i + 1; j < layers.length; j++) pairs.push([i, j]);
+  }
+  if (!pairs.length) return [];
+  try {
+    const client = new TypeSafeClient();
+    const questions = Object.fromEntries(pairs.map(([i, j], at) => [`p${at}`, choice(
+      "Сообщают ли эти две части одно и то же? Одна мысль, пересказанная другими словами " +
+      "или показанная схемой вместо предложения, — это повтор. Разные стороны одного " +
+      "события — не повтор.",
+      {
+        same: "вторая часть не добавляет ничего, чего нет в первой",
+        adds: "вторая часть сообщает то, чего в первой нет",
+      },
+    )]));
+    const answered = await client.systemOne({
+      state: Object.fromEntries(pairs.map(([i, j], at) => [`p${at}`, { first: layers[i].text, second: layers[j].text }])),
+      questions,
+    });
+    const { recordCall } = await import("../src/lib/readers");
+    await recordCall({
+      readerId, stage: "reading-repeat", model: answered.model,
+      tokensIn: answered.usage.input_tokens, tokensOut: answered.usage.output_tokens,
+      costUsd: jevCost(answered.usage.input_tokens),
+    });
+    return pairs.flatMap(([i, j], at) => {
+      const probabilities = (answered.answers as Record<string, { probabilities: Record<string, number> }>)[`p${at}`]?.probabilities;
+      return (probabilities?.same ?? 0) >= REPEAT_ALARM ? [[layers[i].name, layers[j].name] as [string, string]] : [];
+    });
+  } catch {
+    // Сторож молчит — повторов не называем: его дело добавлять дефекты,
+    // а не придумывать их. Механический счётчик при этом работает.
+    return [];
+  }
+}

@@ -215,6 +215,24 @@ async function main() {
   assert.ok(longSource.length > 30_000 && longSource.length < VERIFY_SOURCE_CHARS, 'источник замера длиннее трёх кусков извлечения');
   await composeDocument(countingVerify, longSource, analysis, "", DEFAULT_VOICE, "Research", []);
   assert.equal(wholeArticle.length, 1, 'статья на тридцать тысяч знаков проверяется одним вызовом, а не тремя');
+  // Повтор мысли между частями возвращается дефектом до дорогой сверки:
+  // счётчик слов ловит повтор словами, а «одно и то же другими словами» —
+  // нет, и это видит читатель первым же взглядом.
+  const repeatPhases: string[] = [];
+  const withRepeat: Ask = async (phase, _rules, _data, schema) => {
+    repeatPhases.push(phase);
+    return schema.parse(phase.startsWith("compose") ? valid : { defects: [] });
+  };
+  await composeDocument(withRepeat, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", [], "regular",
+    // Привратник сверки отвечает «чисто», поэтому дорогого вызова не будет
+    // ни на первом проходе (его останавливает повтор), ни на втором.
+    async () => false,
+    // Повтор называется один раз: ремонт его убирает, как и настоящий.
+    (() => { let asked = 0; return async (layers: { name: string; text: string }[]) =>
+      asked++ === 0 && layers.length > 1 ? [[layers[0].name, layers[1].name] as [string, string]] : []; })());
+  assert.ok(repeatPhases.includes("compose-repair"), "повтор чинится ремонтом, а не проходит дальше");
+  assert.ok(!repeatPhases.includes("verify"), "дорогая сверка не зовётся на документ, который всё равно переписывать");
+
   const semanticPhases: string[] = [];
   const semanticRepair: Ask = async (phase, _rules, _data, schema) => {
     semanticPhases.push(phase);

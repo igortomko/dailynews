@@ -12,11 +12,11 @@ import { styleOf, type Voice } from "../src/lib/voice";
 import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
   documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
-  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes, CRITICAL_PER_SECTION, CRITICAL_PER_DOCUMENT,
+  documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes, CRITICAL_PER_SECTION, CRITICAL_PER_DOCUMENT, layersOf,
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
 import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RULES } from "./reading-prompts";
-import { auditNeeded, sectionAuditNeeded } from "./reading-gate";
+import { auditNeeded, sectionAuditNeeded, repeatedLayers } from "./reading-gate";
 import { acquireAnalysis, finishAnalysis, getDocument, saveDocument, reserveCall, settleCall, recentBaselines, ReadingBudgetError, ReadingBusyError, type Baseline } from "./reading-store";
 
 export type ReadingOptions = { readerId: number; force?: boolean };
@@ -297,8 +297,10 @@ export function readingCards(): number {
  * а не импортом: так его подменяет проверка и отключает замер.
  */
 export type AuditGate = (source: string, summary: string) => Promise<boolean>;
+/** Какие пары частей карточки говорят одно и то же — см. `reading-gate.ts`. */
+export type RepeatGate = (layers: { name: string; text: string }[]) => Promise<[string, string][]>;
 
-export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[], prominence: Prominence = "regular", gate?: AuditGate): Promise<ReadingDocument> {
+export async function composeDocument(ask: Ask, source: string, analysis: ArticleAnalysis, readerContext: string, voice: Voice, topic: string, baselines: Baseline[], prominence: Prominence = "regular", gate?: AuditGate, repeats?: RepeatGate): Promise<ReadingDocument> {
   const input = {
     language: voice.language, style: styleOf(voice.style).instruction,
     complexityPreference: voice.complexity,
@@ -321,6 +323,18 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
     // в рассуждение, а у Jev выход не тарифицируется. Уверенное «всё
     // подтверждается» отменяет дорогой вызов; всё остальное, включая отказ
     // самого привратника, пропускает дальше — см. `reading-gate.ts`.
+    //
+    // Повтор мысли спрашивается раньше сверки и у того же Jev: счётчик слов
+    // ловит только повтор словами, а «числа без объяснений» сказанное трижды
+    // разными словами он пропускает. Дефект возвращается сразу — сверять
+    // документ, который придётся переписывать, незачем.
+    if (repeats) {
+      const said = await repeats(layersOf(doc));
+      for (const [first, second] of said) {
+        errors.push(`The ${second} says the same thing as the ${first} in other words. One thought lives in one place: keep it where it reads best and give the other part something the article says next, or remove that part.`);
+      }
+      if (errors.length) return errors;
+    }
     if (gate && !(await gate(source, `${doc.title.text}\n${documentText(doc)}`))) return errors;
     for (const section of splitSource(source, VERIFY_SOURCE_CHARS)) {
       const result = await ask("verify", VERIFY_RULES, { ...input, sourceSection: section, document: doc }, auditSchema);
@@ -425,6 +439,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
       const document = await composeDocument(
         ask, source.text, analysis, readerContext, voice, item.topic_label, baselines, prominence,
         (text, summary) => auditNeeded(text, summary, options.readerId),
+        (layers) => repeatedLayers(layers, options.readerId),
       );
       const notice = availabilityNotice(availability);
       const reading: StoredReading = { version: 2, sourceVersion, availability, status: "verified", document, notice,

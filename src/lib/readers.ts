@@ -367,7 +367,8 @@ export type CallRecord = {
     | "voice" | "post" | "post-quality" | "spoken-terms"
     // Привратник разбора: дешёвый вопрос к Jev, решающий, звать ли дорогую
     // сверку документа с источником.
-    | "reading-gate";
+    | "reading-gate"
+    | "reading-repeat";
   model: string;
   tokensIn: number;
   tokensOut?: number;

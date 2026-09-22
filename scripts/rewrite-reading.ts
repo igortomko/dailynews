@@ -38,7 +38,20 @@ async function main() {
       const result = await writeDigest([item], reader.reader_context, effectiveVoice(reader), { readerId, force: process.argv.includes('--force') });
       if (result.excludedIds?.includes(item.id)) { console.log(JSON.stringify({ item: item.id, status: 'excluded-by-reader' })); return; }
       const written = result.items[0];
-      if (!written?.reading) throw new Error('Expected reading document');
+      if (!written) throw new Error('Модель не вернула карточку');
+      // Разбор положен не каждому материалу: статья короче порога пишется
+      // обычной карточкой, и это не отказ. Прежде скрипт падал на ней
+      // «Expected reading document», а в выпуске оставался старый разбор,
+      // написанный до того, как порог появился.
+      if (!written.reading) {
+        const updated = await sql`update dailynews.digest_items di
+          set title=${written.title_ru}, summary=${written.summary ?? ''}, summary_document=null
+          from dailynews.digests d where d.id=di.digest_id and d.reader_id=${readerId}
+            and d.id=${digest.id} and di.item_id=${item.id} returning di.item_id`;
+        rewritten += updated.length;
+        console.log(JSON.stringify({ item: item.id, status: 'plain', reason: 'короче порога разбора' }));
+        return;
+      }
       writeFileSync(`${dir}/${item.id}.json`, JSON.stringify(result, null, 2), { mode: 0o600 });
       if (written.reading.status !== 'verified') {
         failed++;
