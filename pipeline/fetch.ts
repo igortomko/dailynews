@@ -202,11 +202,18 @@ function parseDate(value: unknown): Date | null {
 export type FeedDoc = { title: string; items: RawItem[] };
 
 /**
+ * Узел разобранного XML. Описана только вложенность: листья приезжают
+ * строками, числами и массивами — их разбирает firstString, которому
+ * всё равно, что пришло.
+ */
+type XmlNode = { [key: string]: XmlNode | undefined };
+
+/**
  * Разбор отделён от запроса: форма добавления источника уже скачала страницу,
  * чтобы понять, фид это или HTML, и качать то же тело второй раз незачем.
  */
 export function parseFeed(xml: string): FeedDoc {
-  const doc = parser.parse(xml) as Record<string, any>;
+  const doc = parser.parse(xml) as XmlNode;
 
   // RSS 2.0 кладёт записи в rss.channel.item, Atom — в feed.entry.
   const channel = doc?.rss?.channel ?? doc?.["rdf:RDF"] ?? doc?.feed;
@@ -223,8 +230,10 @@ export function parseFeed(xml: string): FeedDoc {
     // Atom прячет ссылку в атрибуте link/@href, RSS — в тексте <link>.
     let url = firstString(node.link);
     if (!url || url.startsWith("{")) {
-      const links = Array.isArray(node.link) ? node.link : [node.link];
-      const alternate = links.find((l: any) => l?.["@rel"] !== "self" && l?.["@href"]);
+      const links = (Array.isArray(node.link) ? node.link : [node.link]) as (
+        Record<string, unknown> | undefined
+      )[];
+      const alternate = links.find((l) => l?.["@rel"] !== "self" && l?.["@href"]);
       url = firstString(alternate) || firstString(node.id) || firstString(node.guid);
     }
     if (!title || !url?.startsWith("http")) return [];
@@ -276,6 +285,7 @@ export async function fetchRss(source: Source): Promise<RawItem[]> {
 // которых нет в RSS-выдаче.
 // ---------------------------------------------------------------------------
 type HnItem = {
+  id?: number;
   title?: string;
   url?: string;
   score?: number;
@@ -304,7 +314,7 @@ export async function fetchHackerNews(source: Source): Promise<RawItem[]> {
   return stories.flatMap((story) => {
     if (!story?.title || story.type !== "story") return [];
     return [{
-      url: story.url ?? `https://news.ycombinator.com/item?id=${(story as any).id}`,
+      url: story.url ?? `https://news.ycombinator.com/item?id=${story.id}`,
       title: story.title,
       excerpt: story.text ? stripHtml(story.text).slice(0, 1200) : "",
       points: story.score ?? null,

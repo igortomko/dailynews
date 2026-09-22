@@ -4,7 +4,6 @@ import "server-only";
 import { sql } from "./db";
 import { catalogFor } from "./queries";
 import { STARTER_TOPICS, starterBySlug } from "./starter-topics";
-import { count } from "./plural";
 import type { Plan } from "./plans";
 import type { Source } from "./types";
 

@@ -40,10 +40,9 @@ export function PaywallProvider({
 }
 
 function Offer({
-  plan, feature, href, recommended,
+  plan, href, recommended,
 }: {
   plan: Plan;
-  feature: FeatureId;
   href?: string;
   recommended: boolean;
 }) {
@@ -119,7 +118,6 @@ export function PaywallDialog({
             <Offer
               key={offer.id}
               plan={offer}
-              feature={feature}
               href={checkout[offer.id]}
               // Выделен самый дешёвый из подходящих: он и есть ответ
               // на вопрос «сколько это стоит».

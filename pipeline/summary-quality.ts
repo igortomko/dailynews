@@ -1,4 +1,4 @@
-import { TypeSafeClient, choice, noul, score } from "@typesafe-ai/sdk";
+import { TypeSafeClient, noul, score } from "@typesafe-ai/sdk";
 
 /**
  * Оценка собственного выхода.
