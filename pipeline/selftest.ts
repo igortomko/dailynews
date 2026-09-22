@@ -40,7 +40,7 @@ import {
   applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
   spelledOut, spokenMap, unknownRuns, voiceFor, voiceForText,
 } from "../src/lib/speech";
-import { fileCoverage, numberCollisions } from "../db/schema-gap";
+import { catalogCollisions, fileCoverage, numberCollisions } from "../db/schema-gap";
 import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
 import { en as EN_DICT } from "../src/lib/i18n/en/index";
 import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
@@ -2413,6 +2413,17 @@ assert.equal(form(0), "материалов");
     numberCollisions(["0036_a.sql"], ["0036_b", "0036_c"]),
     [{ file: "0036_a.sql", taken: ["0036_b", "0036_c"] }],
     "называются все занявшие, а не первый",
+  );
+
+  // А это — настоящий каталог, а не выдуманный список. Выдуманным он и был:
+  // numberCollisions звалась здесь четырьмя придуманными именами и ни разу
+  // тем, что лежит в db/migrations. Обещание AGENTS.md держалось на функции,
+  // которую на живых данных не запускал никто — и три пары (0036, 0042, 0047)
+  // прошли молча.
+  assert.deepEqual(
+    catalogCollisions(),
+    [],
+    "в db/migrations нет двух файлов под одним номером сверх уже осевших",
   );
 }
 

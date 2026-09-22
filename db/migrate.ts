@@ -33,7 +33,7 @@
  */
 import postgres from "postgres";
 import { readFileSync, readdirSync } from "node:fs";
-import { fileCoverage, numberCollisions, promised, schemaGaps } from "./schema-gap";
+import { catalogCollisions, fileCoverage, promised, schemaGaps } from "./schema-gap";
 import { sql } from "../src/lib/db";
 
 const OWNER = process.env.SUPABASE_DB_URL;
@@ -165,11 +165,15 @@ async function main() {
       console.log(`В журнале есть записи без файлов: ${foreign.join(", ")}`);
     }
 
-    // Номер, уже занятый в журнале другим файлом. Проверка обещана
-    // в AGENTS.md, а её не было: так в базу попало три файла под номером
-    // 0036, и два из них переопределяли одно ограничение.
-    for (const { file, taken } of numberCollisions(pending, known)) {
-      console.log(`! номер ${file.slice(0, 4)} уже занят: ${taken.join(", ")}`);
+    // Номер, занятый дважды: другим файлом каталога или записью журнала.
+    //
+    // Спрашивается весь каталог, а не одни ожидающие файлы. По `pending`
+    // проверка молчала ровно тогда, когда столкновение уже случилось:
+    // оба файла в журнале, накатывать нечего, цикл не выполняется ни разу.
+    // Так 22 сентября 2026 прогон отчитался «Журнал знает все 55 миграций»
+    // поверх трёх пар — 0036, 0042 и 0047.
+    for (const { file, taken } of catalogCollisions("db/migrations", known)) {
+      console.log(`! номер ${file.slice(0, 4)} занят дважды: ${file} и ${taken.join(", ")}`);
     }
 
     // Какой файл за какой разрыв отвечает: если разрывов у файла нет,
