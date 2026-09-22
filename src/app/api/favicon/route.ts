@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/auth";
-import { iconHref } from "@/lib/favicon";
+import { iconHref, publicHost } from "@/lib/favicon";
 
 /**
  * Значок чужого сайта — нашими руками, а не браузером читателя.
@@ -37,38 +37,40 @@ const MAX_BYTES = 256 * 1024;
  */
 const CACHE = "public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800";
 
-/**
- * Свой сайт под чужим адресом. Хост приходит из запроса, поэтому проверяется
- * он, а не наши намерения: без этого адрес становится чужими руками внутри
- * нашей сети — `?host=localhost:3000` или адрес пулера базы.
- */
-function publicHost(host: string): boolean {
-  if (!host || host.length > 253 || /[^a-z0-9.\-:]/i.test(host)) return false;
-  const name = host.split(":")[0].toLowerCase();
-  if (name === "localhost" || name.endsWith(".localhost") || name.endsWith(".internal")) return false;
-  // Голый адрес вместо имени: у настоящего сайта есть имя, а IP в параметре
-  // означает попытку дотянуться до соседа по сети.
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(name) || name.includes("[")) return false;
-  return name.includes(".");
-}
-
 /** Картинка ли это на самом деле, а не страница с ошибкой под видом значка. */
 const isImage = (type: string | null, size: number) =>
   size > 0 && size <= MAX_BYTES && Boolean(type) && type!.startsWith("image/");
 
+/**
+ * Сколько переходов готовы пройти. Значок за четвёртым редиректом — это
+ * уже не значок, а цепочка, в которой легко спрятать последний адрес.
+ */
+const MAX_HOPS = 3;
+
 async function grab(url: string): Promise<Response | null> {
   try {
-    const res = await fetch(url, {
-      // Браузерный заголовок, но без `Referer`: бот-защита у половины
-      // проблемных хостов срабатывает именно на кросс-сайтовую ссылку.
-      headers: {
-        "user-agent": "Mozilla/5.0 (compatible; Reporta/1.0; +https://news.tomko.io)",
-        accept: "image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    return res.ok ? res : null;
+    let at = url;
+    for (let hop = 0; hop <= MAX_HOPS; hop++) {
+      // Хост проверяется на каждом переходе, а не только на первом: с
+      // `redirect: "follow"` публичный сайт одним `302` уводил бы наш
+      // сервер внутрь нашей же сети, и проверка входа ничего бы не значила.
+      if (!publicHost(new URL(at).host)) return null;
+      const res = await fetch(at, {
+        // Браузерный заголовок, но без `Referer`: бот-защита у половины
+        // проблемных хостов срабатывает именно на кросс-сайтовую ссылку.
+        headers: {
+          "user-agent": "Mozilla/5.0 (compatible; Reporta/1.0; +https://news.tomko.io)",
+          accept: "image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8",
+        },
+        redirect: "manual",
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      const next = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!next) return res.ok ? res : null;
+      at = new URL(next, at).toString();
+      if (!at.startsWith("https://")) return null;
+    }
+    return null;
   } catch {
     return null;
   }
