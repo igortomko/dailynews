@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TopicBudgetBar } from "@/components/topic-budget-bar";
 import { Field, FieldDescription, FieldLabel, FieldGroup } from "@/components/ui/field";
-import { MIN_PER_TOPIC, colorAt, normalize } from "@/lib/topic-budget";
+import { MIN_PER_TOPIC, colorAt, normalize, nudgeTopic } from "@/lib/topic-budget";
 import { MIN_READING_MINUTES, READING_MINUTES, PLAN_IDS, PLANS, type Plan } from "@/lib/plans";
 import { formatMinutes, itemsForMinutes } from "@/lib/reading-time";
 import { usePaywall } from "@/components/paywall";
@@ -182,18 +182,19 @@ export function TopicChips({
   const patch = (index: number, fields: Partial<Pick<ChipInput, "label" | "hint">>) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, ...fields } : chip)));
 
-  /** Добавить теме место можно только отняв у соседа: сумма — это весь выпуск. */
+  /**
+   * Добавить теме место можно только отняв у другой: сумма — это весь выпуск.
+   * Правило берётся у полосы (`nudgeTopic`), а не пишется здесь заново: это
+   * одна и та же настройка в двух местах экрана, и «+» обязан отнять у того
+   * же, у кого отнимает граница.
+   */
   const nudge = (index: number, by: number) => {
-    // Отнять не у кого: у единственной темы счётчик уехал бы от суммы,
-    // а «3 из 20» на экране означало бы не то, что придёт.
-    if (chips.length < 2) return;
-    const donor = chips.findIndex((chip, i) => i !== index && chip.count > MIN_PER_TOPIC);
-    if (by > 0 && donor < 0) return;
-    if (by < 0 && chips[index].count <= MIN_PER_TOPIC) return;
     const counts = chips.map((chip) => chip.count);
-    counts[index] += by;
-    counts[by > 0 ? donor : biggestOther(counts, index)] -= by;
-    setCounts(counts);
+    const next = nudgeTopic(counts, index, by);
+    // Упёрлись в предел — не пишем: setChips зовёт `touch`, и кнопка,
+    // которая ничего не сделала, зажигала бы «Сохранить» и сторожа ухода.
+    if (next.every((count, i) => count === counts[i])) return;
+    setCounts(next);
   };
 
   /** Порядок интересов — это порядок вкладок в ленте и кусков на полосе. */
@@ -542,10 +543,3 @@ export function TopicChips({
 
 const withCounts = <T extends ChipInput>(chips: T[], counts: number[]): T[] =>
   chips.map((chip, index) => ({ ...chip, count: counts[index] ?? MIN_PER_TOPIC }));
-
-/** У кого отнять место: у самой крупной темы, кроме той, что растёт. */
-const biggestOther = (counts: number[], except: number) =>
-  counts.reduce(
-    (best, count, index) => (index !== except && count > counts[best] ? index : best),
-    except === 0 ? 1 : 0,
-  );
