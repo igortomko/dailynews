@@ -1402,20 +1402,28 @@ async function main() {
     // Флаг назван, а не подставлен числом: `true` в хвосте вызова не говорит,
     // что это «из каталога», и перепутанный случай прошёл бы проверку молча.
     const CATALOG = true;
-    const OWN = false;
-    const [designBefore] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where slug = 'design'
+    const NOT_CATALOG = false;
+    // Тема, которую держит только владелец: «дизайн» к этому месту взят
+    // и вторым читателем, и запись отбило бы условие про соседа, а не про
+    // каталог, — проверка каталожной ветки прошла бы и без неё.
+    const [{ holders }] = await sql<{ holders: number }[]>`
+      select count(*)::int as holders from dailynews.reader_topics rt
+        join dailynews.topics t on t.id = rt.topic_id where t.slug = 'blockchain'
+    `;
+    assert.equal(holders, 1, "проверка каталожной ветки держится на теме, взятой только владельцем");
+    const [chainBefore] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where slug = 'blockchain'
     `;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "design", label: "Дизайн", hint: "Figma", position: 1 }, CATALOG,
+      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 }, CATALOG,
     );
-    const [designAfter] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where slug = 'design'
+    const [chainAfter] = await sql<{ label: string; hint: string }[]>`
+      select label, hint from dailynews.topics where slug = 'blockchain'
     `;
-    assert.deepEqual(designAfter, designBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
+    assert.deepEqual(chainAfter, chainBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
 
     const ownId = await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 }, OWN,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 }, NOT_CATALOG,
     );
     await sql`
       insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
@@ -1423,7 +1431,7 @@ async function main() {
     `;
     assert.equal(
       await readers.upsertTopic(
-        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, OWN,
+        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, NOT_CATALOG,
       ),
       ownId,
       "повторная запись отдаёт ту же тему",
@@ -1441,7 +1449,7 @@ async function main() {
     // и присоединение к ничьей теме не должно стирать сохранённую.
     await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 }, OWN,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 }, NOT_CATALOG,
     );
     const [rejoined] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where id = ${ownId}
@@ -1457,7 +1465,7 @@ async function main() {
       values (${second.id}, ${ownId}, 1, 1)
     `;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 }, OWN,
+      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 }, NOT_CATALOG,
     );
     const [sharedTopic] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where id = ${ownId}

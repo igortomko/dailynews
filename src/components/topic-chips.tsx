@@ -17,6 +17,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
 import { rulesAnchor } from "@/lib/rules";
+import { toSlug } from "@/lib/slug";
+import { starterBySlug } from "@/lib/starter-topics";
 import { queueRebuild } from "@/components/rebuild-queue";
 import { useT } from "@/components/i18n-provider";
 
@@ -131,9 +133,15 @@ export function TopicChips({
     if (full) return;
     if (chips.some((chip) => chip.label.toLowerCase() === trimmed.toLowerCase())) return;
     // Заведённая руками тема — своя: подсказку и имя можно править сразу.
+    // Кроме имени, которое сводится к слагу каталожной темы («AI-инфра» —
+    // это `ai-infra`): сервер сочтёт её каталожной, и поле, чью правку он
+    // отбросит, здесь не показывается — тем же правилом, что и у него.
     // Совпадёт со взятой соседом — сервер правку отбросит, а после
     // перезагрузки чип придёт уже общим.
-    const next = [...chips, { slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC, own: true }];
+    const next = [...chips, {
+      slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC,
+      own: !starterBySlug.has(toSlug(trimmed)),
+    }];
     // Новая тема берёт место у самой крупной, а не растит выпуск:
     // сколько читать, читатель задал отдельно и сам.
     setChips(withCounts(next, normalize(next.map((chip) => chip.count), places)));
