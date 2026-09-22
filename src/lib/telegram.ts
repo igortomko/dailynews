@@ -246,6 +246,117 @@ export async function sendMessage(
   });
 }
 
+/** Предел классического сообщения. Rich считает свои 32768 отдельно. */
+const CLASSIC_LIMIT = 4096;
+
+/**
+ * Длинный текст по сообщениям.
+ *
+ * Режется по строкам, а не по знакам: срез посреди `<a href>` Telegram
+ * отвергает целиком («can\u0027t parse entities»), и выпуск не приходит вовсе.
+ * Кнопка — только под последним: под каждым она читалась бы как «это конец».
+ */
+export function splitClassic(html: string): string[] {
+  const parts: string[] = [];
+  for (const line of html.split("\n")) {
+    const last = parts[parts.length - 1];
+    if (last !== undefined && last.length + 1 + line.length <= CLASSIC_LIMIT) {
+      parts[parts.length - 1] = `${last}\n${line}`;
+      continue;
+    }
+    // Строка длиннее целого сообщения — это один заголовок на четыре
+    // тысячи знаков. Такой режется по знакам: потерять его целиком хуже.
+    parts.push(line.length <= CLASSIC_LIMIT ? line : line.slice(0, CLASSIC_LIMIT));
+  }
+  return parts;
+}
+
+export async function sendLong(
+  chatId: number,
+  html: string,
+  button?: { text: string; url: string },
+): Promise<void> {
+  const parts = splitClassic(html);
+  for (const [index, part] of parts.entries()) {
+    await sendMessage(chatId, part, index === parts.length - 1 ? button : undefined);
+  }
+}
+
+/**
+ * Rich message: заголовки, разделы, списки, ссылки и аудио одним сообщением.
+ *
+ * Аудио приходит блоком, а не отдельным сообщением: в разметке стоит
+ * `tg://audio?id=<имя>`, а сам файл — в `media` рядом. Замерено живьём
+ * 22 сентября 2026: принимается и свежая заливка (`attach://`), и готовый
+ * `file_id`.
+ *
+ * `skip_entity_detection` включён всегда: это документ, а не реплика.
+ * Отсюда правило про `<a href>` у каждого адреса — с выключенным разбором
+ * голый адрес остаётся текстом (проверено тем же запросом).
+ *
+ * Отказ не проглатывается: он и есть сигнал перейти на классический путь.
+ */
+export async function sendRichMessage(
+  chatId: number,
+  html: string,
+  options: {
+    button?: { text: string; url: string };
+    audio?: { id: string; audio: Buffer; seconds: number; title: string };
+  } = {},
+): Promise<void> {
+  const { button, audio } = options;
+  const rich: Record<string, unknown> = { html, skip_entity_detection: true };
+  if (audio) {
+    rich.media = [{
+      id: audio.id,
+      media: {
+        type: "audio",
+        media: `attach://${audio.id}`,
+        duration: Math.round(audio.seconds),
+        title: audio.title.slice(0, 120),
+        performer: "Reporta",
+      },
+    }];
+  }
+  const markup = button ? { inline_keyboard: [[button]] } : undefined;
+
+  if (!audio) {
+    await call("sendRichMessage", {
+      chat_id: chatId,
+      rich_message: rich,
+      ...(markup ? { reply_markup: markup } : {}),
+    });
+    return;
+  }
+
+  // Заливка идёт multipart — единственное, чего `call` не умеет. Поля
+  // сложного типа уезжают строкой JSON: так их и ждёт Telegram в форме.
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("rich_message", JSON.stringify(rich));
+  if (markup) form.append("reply_markup", JSON.stringify(markup));
+  form.append(
+    audio.id,
+    new Blob([new Uint8Array(audio.audio)], { type: "audio/mpeg" }),
+    `${slugOf(audio.title)}.mp3`,
+  );
+  const res = await fetch(`${apiBase(token)}/sendRichMessage`, {
+    method: "POST",
+    body: form,
+    // Час речи — это десятки мегабайт с общей машины.
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!res.ok) {
+    throw new Error(`Telegram HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+  // `ok: false` приезжает с кодом 200: без этой проверки отказ выглядел бы
+  // отправкой, и запасной классический путь не включился бы никогда.
+  const body = (await res.json()) as { ok: boolean; description?: string };
+  if (!body.ok) throw new Error(`Telegram отказал: ${body.description ?? "без причины"}`);
+}
+
 /**
  * Отправить озвучку.
  *
@@ -328,6 +439,21 @@ export async function sendAudio(
     throw new Error(`Telegram отказал: ${body.description ?? "нет file_id в ответе"}`);
   }
   return { fileId: body.result.audio.file_id, messageId: body.result.message_id };
+}
+
+/**
+ * Убрать сообщение.
+ *
+ * Нужно там, где Telegram работает хранилищем, а не чатом: озвучка карточки
+ * заливается ради `file_id`, которым её потом отдаёт плеер на странице,
+ * и оставлять ради этого шестьдесят аудиосообщений в чате нельзя.
+ *
+ * Замерено 22 сентября 2026: `file_id` переживает удаление сообщения —
+ * `getFile` отвечает путём, файл скачивается. Перестанет переживать —
+ * сломается воспроизведение на карточке, а не выпуск.
+ */
+export async function deleteMessage(chatId: number, messageId: number): Promise<void> {
+  await call("deleteMessage", { chat_id: chatId, message_id: messageId });
 }
 
 /**
@@ -470,12 +596,144 @@ function plural(n: number, one: string, few: string, many: string): string {
 export const digestsWord = (n: number) => plural(n, "выпуск", "выпуска", "выпусков");
 export const newsWord = (n: number) => plural(n, "новость", "новости", "новостей");
 
-export type Headline = { title: string; topic: string };
+/**
+ * Заголовок в сообщении: свой адрес в ленте и своё место в подкасте.
+ *
+ * `at` — секунда, с которой карточка начинается в записи. `null` значит
+ * «в подкасте её нет»: строка про место в файле, которого не собрали,
+ * отправила бы читателя мотать туда, где звучит соседняя новость.
+ */
+export type Headline = {
+  id: number;
+  title: string;
+  topic: string;
+  at?: number | null;
+};
+
+/** Адрес дня выпуска. Не корень: сообщение открывают и назавтра. */
+export const dayUrl = (appUrl: string, day: string) =>
+  `${appUrl.replace(/\/$/, "")}/?day=${encodeURIComponent(day)}`;
 
 /**
- * Уведомление о выпуске. Заголовки без ссылок на источники: открытие
- * материала должно происходить в вебе, иначе калибровке неоткуда узнать,
- * что было прочитано, а что пролистано.
+ * Адрес карточки. Якорь ставит ей же карточка в ленте (`item-<id>`),
+ * а `play` просит ленту нажать её кнопку воспроизведения: озвучка карточки
+ * уже лежит в Telegram, и слушать её второй раз нечем, кроме потока.
+ */
+export const itemUrl = (appUrl: string, day: string, id: number, play = false) =>
+  `${dayUrl(appUrl, day)}${play ? `&play=${id}` : ""}#item-${id}`;
+
+/** Место в записи: «12:30», а за часом — «1:02:30». */
+export function stamp(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const s = String(total % 60).padStart(2, "0");
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+/**
+ * Текст выпуска в двух видах сразу: rich и классический.
+ *
+ * Один источник на оба, потому что второй — это запасной путь, а не другое
+ * сообщение: разойдись они, отказ Telegram превратил бы «ту же новость
+ * попроще» в «другую новость», и заметить это было бы нечем — запасной путь
+ * включается раз в год.
+ *
+ * Ничего не обрезается. Классический вид режется по сообщениям снаружи
+ * (`sendLong`), а rich не режется вовсе: 32768 знаков хватает и на сотню
+ * карточек, а клиент прячет лишнее за «Показать ещё» сам.
+ */
+export function digestMessage(input: {
+  day: string;
+  intro: string;
+  headlines: Headline[];
+  appUrl: string;
+  /** Уже собранная фраза про время: «19 мин» или объяснение недобора. */
+  size: string;
+  /** Длина подкаста в секундах. Нет подкаста — нет ни блока, ни меток. */
+  podcast: number | null;
+}): { html: string; classic: string } {
+  const { day, intro, headlines, appUrl, size, podcast } = input;
+
+  const byTopic = new Map<string, Headline[]>();
+  for (const h of headlines) {
+    byTopic.set(h.topic, [...(byTopic.get(h.topic) ?? []), h]);
+  }
+
+  const title = `Выпуск за ${dayInWords(day)} — ${size}`;
+
+  // Порядок решает сгиб, а не предел: клиент прячет всё после примерно
+  // восьми тысяч знаков за «Показать ещё». Поэтому заголовок, время,
+  // вступление и подкаст стоят до тем — это то, ради чего сообщение
+  // открывают, и то, по чему решают, читать ли дальше.
+  const html: string[] = [`<h2>${escapeHtml(title)}</h2>`];
+  const classic: string[] = [`<b>${escapeHtml(title)}</b>`];
+  if (intro) {
+    html.push(`<p>${escapeHtml(intro)}</p>`);
+    classic.push(escapeHtml(intro));
+  }
+  if (podcast !== null) {
+    // Подпись объясняет метки времени один раз, а не подписывает каждую
+    // строку словом «в записи»: пятьдесят одинаковых пояснений перестают
+    // что-либо пояснять и съедают тот самый сгиб.
+    html.push(
+      `<figure><audio src="tg://audio?id=${PODCAST_MEDIA_ID}"></audio>` +
+      `<figcaption>${escapeHtml(
+        `Весь выпуск голосом — ${formatMinutesLong(podcast / 60, ruFeed.time)}. ` +
+        "Время у заголовка — его место в записи.",
+      )}</figcaption></figure>`,
+    );
+  }
+
+  for (const [topic, list] of byTopic) {
+    html.push("<hr>", `<h3>${escapeHtml(topic)}</h3>`);
+    classic.push(`<b>${escapeHtml(topic)}</b>`);
+    const items: string[] = [];
+    for (const h of list) {
+      const link = `<a href="${escapeAttr(itemUrl(appUrl, day, h.id))}">${escapeHtml(h.title)}</a>`;
+      // «Слушать» печатается только у карточки, которая в записи есть:
+      // ссылка на озвучку, которой не собрали, ведёт к кнопке «озвучить» —
+      // то есть обещает готовое, а отдаёт минуту ожидания.
+      // Место в записи решает та же величина, что и сам блок аудио. Разведи
+      // их — и сообщение без подкаста печатало бы «слушать · 12:34», ведя
+      // к кнопке «озвучить»: обещание готового, за которым минута ожидания.
+      const listen =
+        podcast === null || h.at === null || h.at === undefined
+          ? ""
+          : ` <i>(<a href="${escapeAttr(itemUrl(appUrl, day, h.id, true))}">слушать</a>` +
+            ` · ${escapeHtml(stamp(h.at))})</i>`;
+      items.push(`<li>${link}${listen}</li>`);
+      classic.push(`· ${link}${listen}`);
+    }
+    html.push(`<ul>${items.join("")}</ul>`);
+    classic.push("");
+  }
+
+  return { html: html.join("\n"), classic: classic.join("\n").trim() };
+}
+
+/**
+ * Имя медиа внутри сообщения. Telegram ищет по нему `tg://audio?id=`
+ * в разметке и `media[].id` в запросе: разойдись они, блок приедет пустым.
+ */
+const PODCAST_MEDIA_ID = "podcast";
+
+/**
+ * Уведомление о выпуске.
+ *
+ * Rich message, а не классическое: в выпуске бывает сто заголовков, и старое
+ * сообщение упиралось в 4000 знаков и обрывалось на полуслове — два выпуска
+ * из трёх в базе на 22 сентября 2026. Здесь предел 32768, а разделами,
+ * списками и ссылкой на каждую статью занимается сам Telegram.
+ *
+ * `skip_entity_detection` — потому что это документ, а не реплика: адреса
+ * и числа в нём не должны становиться телефонами и карточками. Плата за это
+ * названа в проверке живьём: голый адрес перестаёт быть ссылкой, поэтому
+ * каждый адрес здесь стоит в `<a href>`.
+ *
+ * Заголовки ведут в веб, а не на источник: открытие материала должно
+ * происходить в ленте, иначе калибровке неоткуда узнать, что прочитано,
+ * а что пролистано.
  */
 export async function notify(
   chatId: number,
@@ -488,33 +746,48 @@ export async function notify(
    * «40 новостей» не отвечает на вопрос, который задают перед чтением.
    */
   reading: { minutes: number; target: number },
+  /** Выпуск голосом. Едет тем же сообщением — отдельным блоком аудио. */
+  podcast?: { audio: Buffer; seconds: number } | null,
 ): Promise<void> {
-  const byTopic = new Map<string, string[]>();
-  for (const h of headlines) {
-    byTopic.set(h.topic, [...(byTopic.get(h.topic) ?? []), h.title]);
-  }
-
-  const body = [...byTopic.entries()]
-    .map(([topic, titles]) =>
-      [`<b>${escapeHtml(topic)}</b>`, ...titles.map((t) => `· ${escapeHtml(t)}`)].join("\n"),
-    )
-    .join("\n\n");
-
   // Недобор называется вслух, а не заметается добором слабого материала:
   // короткий выпуск без объяснения читается как поломка отбора.
   const size = isShort(reading.minutes, reading.target)
     ? shortfallNote(reading.minutes, reading.target, ruFeed.time)
     : formatMinutesLong(reading.minutes, ruFeed.time);
 
-  const text = [
-    `<b>Выпуск за ${escapeHtml(dayInWords(day))}</b> — ${escapeHtml(size)}`,
-    intro ? escapeHtml(intro) : "",
-    body,
-  ].filter(Boolean).join("\n\n");
+  const { html, classic } = digestMessage({
+    day, intro, headlines, appUrl, size,
+    podcast: podcast ? podcast.seconds : null,
+  });
 
   // Кнопкой, а не строкой в конце: выпуск приходит с десятком заголовков,
   // и ссылка последней строкой тонет в них ровно там, где её и ищут.
-  await sendMessage(chatId, text, { text: "Читать выпуск", url: appUrl });
+  // Клавиатура живёт под сообщением и в сгиб не попадает ни при какой длине.
+  const button = { text: "Читать выпуск", url: dayUrl(appUrl, day) };
+
+  try {
+    await sendRichMessage(chatId, html, {
+      button,
+      audio: podcast
+        ? { id: PODCAST_MEDIA_ID, audio: podcast.audio, seconds: podcast.seconds, title: `Выпуск за ${dayInWords(day)}` }
+        : undefined,
+    });
+    return;
+  } catch (error) {
+    // Отказ rich не должен стоить читателю выпуска. Как старые клиенты
+    // рисуют rich, не замерено никем, а 400 от молодого метода — самая
+    // вероятная поломка здесь; поэтому тот же материал уходит классическим.
+    console.log(`  ! rich не принят, шлю классическим: ${(error as Error).message}`);
+  }
+  await sendLong(chatId, classic, button);
+  // Аудио в классическом сообщении блоком не бывает — отдельным.
+  if (podcast) {
+    await sendAudio(chatId, podcast.audio, {
+      title: `Выпуск за ${dayInWords(day)}`,
+      url: dayUrl(appUrl, day),
+      duration: podcast.seconds,
+    });
+  }
 }
 
 export const loginLink = (appUrl: string, token: string) =>

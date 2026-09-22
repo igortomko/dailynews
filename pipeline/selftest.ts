@@ -61,7 +61,8 @@ import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
-  channelHandle, checkSecret, looksLikeSource, parseUpdate, SUBSCRIBED_PREFIX, verdictOf,
+  channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
+  splitClassic, stamp, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
 import {
@@ -4077,6 +4078,108 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
   off();
   bus.nextRate();
   assert.equal(told, 1, "отписавшаяся — уже нет");
+}
+
+// --- Сообщение о выпуске: rich и запасной классический ---------------------
+//
+// Собирается одной функцией в двух видах сразу. Проверяется здесь, потому
+// что разметку нельзя проверить ни на чём, кроме настоящего чата: Telegram
+// отвечает «chat not found» и на верную, и на неверную. Что можно проверить
+// без сети — что мы отдаём: якорь у каждой статьи, ссылка тегом, а не голым
+// адресом, и метка времени только у того, что в записи есть.
+{
+  const APP = "https://news.tomko.io";
+  const heads = [
+    { id: 11, title: "Первая <новость> & прочее", topic: "Энергетика", at: 0 },
+    { id: 12, title: "Вторая", topic: "Энергетика", at: 754 },
+    { id: 13, title: "Третья", topic: "ИИ", at: null },
+  ];
+
+  assert.equal(stamp(0), "0:00", "начало записи");
+  assert.equal(stamp(754), "12:34", "минуты и секунды");
+  assert.equal(stamp(3754), "1:02:34", "за часом появляется час");
+  assert.equal(stamp(-5), "0:00", "отрицательной секунды не бывает");
+
+  assert.equal(dayUrl(`${APP}/`, "2026-09-21"), `${APP}/?day=2026-09-21`,
+    "лишний слеш в APP_URL не удваивается");
+  assert.equal(itemUrl(APP, "2026-09-21", 11), `${APP}/?day=2026-09-21#item-11`,
+    "ссылка ведёт на карточку в своём дне, а не на корень");
+  assert.match(itemUrl(APP, "2026-09-21", 11, true), /\?day=2026-09-21&play=11#item-11$/,
+    "«слушать» просит ленту нажать кнопку этой карточки");
+
+  const withAudio = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
+    size: "19 мин", podcast: 1080,
+  });
+
+  assert.match(withAudio.html, /^<h2>Выпуск за 21 сентября — 19 мин<\/h2>/,
+    "заголовок первый: сгиб решает порядок");
+  assert.ok(withAudio.html.includes("<audio src=\"tg://audio?id=podcast\">"),
+    "подкаст едет блоком в том же сообщении");
+  assert.ok(withAudio.html.indexOf("<audio") < withAudio.html.indexOf("<h3>"),
+    "запись стоит до тем, то есть до сгиба");
+  assert.equal(withAudio.html.match(/<h3>/g)?.length, 2, "тема — раздел, и их две");
+  assert.equal(withAudio.html.match(/<hr>/g)?.length, 2, "перед каждым разделом разделитель");
+
+  for (const head of heads) {
+    assert.ok(withAudio.html.includes(`href="${APP}/?day=2026-09-21#item-${head.id}"`),
+      `у статьи ${head.id} своя ссылка`);
+    assert.ok(withAudio.classic.includes(`#item-${head.id}`),
+      `запасной путь несёт ту же ссылку на ${head.id}`);
+  }
+
+  // Экранирование: заголовок приходит из чужого фида через модель, и угловая
+  // скобка в нём валит разбор сущностей — Telegram не шлёт тогда ничего.
+  assert.ok(withAudio.html.includes("Первая &lt;новость&gt; &amp; прочее"),
+    "три знака экранированы");
+  assert.ok(!/<новость>/.test(withAudio.html), "сырой угловой скобки в разметке нет");
+
+  // Метка времени и «слушать» — только у того, что в записи есть.
+  assert.ok(withAudio.html.includes("12:34"), "у второй статьи её место в записи");
+  assert.equal(withAudio.html.match(/слушать/g)?.length, 2,
+    "две статьи в записи — две ссылки «слушать»");
+  const third = withAudio.html.slice(withAudio.html.indexOf("Третья"));
+  assert.ok(!third.includes("слушать"),
+    "у статьи вне записи ссылки на озвучку нет: она вела бы к кнопке «озвучить»");
+
+  const noAudio = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: heads, appUrl: APP,
+    size: "19 мин", podcast: null,
+  });
+  assert.ok(!noAudio.html.includes("<audio"), "без подкаста блока аудио нет");
+  assert.ok(!noAudio.html.includes("слушать"),
+    "без подкаста не обещаем послушать даже то, у чего есть метка");
+  assert.ok(noAudio.html.includes("#item-13"), "ссылки на статьи остаются и без записи");
+
+  // Ничего не обрезается: старое сообщение упиралось в 4000 знаков
+  // и обрывалось на полуслове у двух выпусков из трёх.
+  const many = Array.from({ length: 100 }, (_, i) => ({
+    id: i + 1, title: `Заголовок номер ${i + 1} про энергетику и модели`, topic: `Тема ${i % 6}`,
+    at: i * 60,
+  }));
+  const big = digestMessage({
+    day: "2026-09-21", intro: "Вступление", headlines: many, appUrl: APP,
+    size: "45 мин", podcast: 6000,
+  });
+  for (const head of many) {
+    assert.ok(big.html.includes(`#item-${head.id}"`), `сотая статья не отрезана: ${head.id}`);
+  }
+  assert.ok(big.html.length < 32768, "сотня статей помещается в предел rich");
+
+  // Классический путь режется по строкам, а не по знакам: срез посреди
+  // `<a href>` Telegram отвергает целиком, и выпуск не приходит вовсе.
+  const parts = splitClassic(big.classic);
+  assert.ok(parts.length > 1, "сотня статей не влезает в одно классическое сообщение");
+  for (const part of parts) {
+    assert.ok(part.length <= 4096, "ни один кусок не длиннее предела");
+    assert.equal(part.match(/<a /g)?.length ?? 0, part.match(/<\/a>/g)?.length ?? 0,
+      "ссылка не разрезана пополам");
+  }
+  assert.equal(parts.join("\n"), big.classic, "склейка кусков — исходный текст, без потерь");
+
+  const long = splitClassic("к".repeat(5000));
+  assert.equal(long.length, 1, "одна строка длиннее предела режется, а не теряется");
+  assert.equal(long[0].length, 4096, "и режется ровно по пределу");
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
