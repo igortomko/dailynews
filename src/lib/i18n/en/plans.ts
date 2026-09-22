@@ -51,7 +51,8 @@ export const plans = {
     },
     audio: {
       title: "Article audio",
-      what: "Any article from your issue is read aloud and arrives in Telegram — listen while driving or walking. 45 minutes a day.",
+      what: (minutes: number) =>
+        `Any article from your issue is read aloud and arrives in Telegram — listen while driving or walking. ${minutes} minutes a day.`,
     },
     x: {
       title: "Posts from X",
@@ -73,7 +74,13 @@ export const plans = {
       title: "Sources",
       what: "Sites, blogs, and channels the feed checks every day. More sources means a wider pick for the digest.",
     },
-  } satisfies Record<FeatureId, { title: string; what: string }>,
+  } satisfies Record<
+    FeatureId,
+    // `what` бывает функцией: у озвучки в описании стоит квота, а она
+    // живёт в plans.ts — числом в словаре она разъехалась бы с настоящим
+    // пределом молча. Разворачивает это `featureWhat`.
+    { title: string; what: string | ((minutes: number) => string) }
+  >,
 
   /** «1 interest», «5 interests» — нужна и в отказе, и в заглушке. */
   topicsWord: (n: number): string => (n === 1 ? "interest" : "interests"),

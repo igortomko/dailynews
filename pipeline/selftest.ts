@@ -3460,15 +3460,22 @@ for (const [name, table] of [
   const parts = chunks(article, 100);
   assert.equal(parts.join(" "), article, "склейка кусков равна исходнику");
   assert.ok(parts.length > 1, "длинный текст действительно поделился");
-  for (const part of parts) assert.ok(part.length <= 100 || !part.includes(" ") || part.split(/(?<=[.!?…])\s+/).length === 1);
+  // Прямо про предел: у фикстуры все предложения короткие, и проверка
+  // «длина либо не больше предела, либо это одно предложение» проходила бы
+  // и у резки, которая предел не смотрит вовсе.
+  for (const part of parts) {
+    assert.ok(part.length <= 100, `кусок длиннее предела: ${part.length}`);
+  }
 
   // Иероглифы режутся по своей точке: пробела за ней нет, и правило
   // «точка плюс пробел» отдало бы весь японский текст одним куском.
-  assert.equal(
-    chunks("あああ。いいい。ううう。", 8).length,
-    3,
-    "полноширинная точка режет текст без пробела",
-  );
+  const jp = "あああ。いいい。ううう。";
+  const jpParts = chunks(jp, 8);
+  assert.ok(jpParts.length > 1, "полноширинная точка режет текст без пробела");
+  // И склейка не вставляет пробел туда, где письменность его не знает:
+  // голос читает вставленный пробел как паузу посреди фразы.
+  assert.equal(jpParts.join(""), jp, "иероглифы не разводятся пробелами");
+  for (const part of jpParts) assert.ok(part.length <= 8, `кусок длиннее предела: ${part}`);
 
   // Знак у иероглифа — это слог, а не буква: те же 880 знаков в минуту
   // дали бы оценку втрое короче правды, и статья на десять минут прошла бы
@@ -3498,10 +3505,10 @@ for (const [name, table] of [
   // числа — читателю сказали бы одно, а применили другое, и оба выглядели
   // бы одинаково правдоподобно.
   const t = {
-    audioOnPro: "нужен {plan}",
+    audioOnPro: (plan: string) => `нужен ${plan}`,
     audioNoTelegram: "нет телеграма",
-    audioCapReached: "на сегодня всё, завтра {minutes}",
-    audioTooLong: "осталось {left}, нужно {needed}",
+    audioCapReached: (minutes: number) => `на сегодня всё, завтра ${minutes}`,
+    audioTooLong: (left: number, needed: number) => `осталось ${left}, нужно ${needed}`,
   };
   const reader = { telegram_id: "1" };
   assert.equal(

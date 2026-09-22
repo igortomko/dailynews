@@ -598,3 +598,37 @@ export async function removeReaderSource(readerId: number, sourceId: number): Pr
      where reader_id = ${readerId} and source_id = ${sourceId}
   `;
 }
+
+/**
+ * Заголовок материала так, как его видит этот читатель.
+ *
+ * Перевод заголовка живёт в `digest_items.title` и персонален: в `items`
+ * колонки `title_ru` нет с 0020, и запрос к ней падает целиком — так
+ * отправка на читалку и не работала вовсе.
+ *
+ * Условие по читателю стоит на самой подзапросной выборке, а не только
+ * на `digests`: с внешним соединением строки `digest_items` приходят
+ * от всех читателей сразу, и порядок по дате лишь делает чужой перевод
+ * маловероятным. Материал, попавший в чужой выпуск и не попавший в свой,
+ * озвучивался бы чужим заголовком — вовремя и не тем.
+ */
+export async function itemForReader(
+  readerId: number,
+  itemId: number,
+): Promise<{ url: string; title: string; body: string | null } | null> {
+  const [row] = await sql<{ url: string; title: string; body: string | null }[]>`
+    select i.url, i.body,
+           coalesce(
+             (select di.title
+                from dailynews.digest_items di
+                join dailynews.digests d on d.id = di.digest_id
+               where di.item_id = i.id and d.reader_id = ${readerId}
+               order by d.day desc
+               limit 1),
+             i.title
+           ) as title
+      from dailynews.items i
+     where i.id = ${itemId}
+  `;
+  return row ?? null;
+}

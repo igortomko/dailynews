@@ -8,6 +8,7 @@ import { checkoutUrl, endingAt } from "@/lib/lemon";
 import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
 import { currentLocale, getDict } from "@/lib/i18n/server";
+import { featureWhat } from "@/lib/i18n";
 
 /**
  * Сравнение тарифов.
@@ -133,7 +134,7 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
                           {t.plans.feature[feature].title}
                         </TooltipTrigger>
                         <TooltipContent className="max-w-64">
-                          {t.plans.feature[feature].what}
+                          {featureWhat(t, feature)}
                         </TooltipContent>
                       </Tooltip>
                     </dt>

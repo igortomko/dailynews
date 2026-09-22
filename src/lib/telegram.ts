@@ -255,7 +255,12 @@ export async function sendAudio(
     // Адрес приходит из чужого фида, и кавычка внутри него выбивается
     // из атрибута: Telegram отвечает «can't parse entities» и не шлёт
     // ничего — озвучка пропадает целиком из-за одного знака в ссылке.
-    caption: `<a href="${escapeAttr(meta.url)}">${escapeHtml(meta.title).slice(0, 900)}</a>`,
+    // Обрезка идёт до экранирования: `&` превращается в `&amp;`, и срез
+    // по готовой строке рубит сущность пополам — Telegram отвечает
+    // «can't parse entities» и не шлёт ничего. То есть защита от длинного
+    // заголовка сама роняла бы озвучку, ровно тем способом, от которого
+    // экранирование здесь и стоит.
+    caption: `<a href="${escapeAttr(meta.url)}">${escapeHtml(meta.title.slice(0, 700))}</a>`,
     parse_mode: "HTML",
   };
   if (meta.duration) fields.duration = String(Math.round(meta.duration));

@@ -1600,6 +1600,52 @@ async function main() {
     `;
     assert.equal(await listened(owner.id), 600, "провалившаяся озвучка квоту не тратит");
 
+    // 0046: произношение принадлежит языку. Один термин живёт на двух
+    // языках, а пара «термин + язык» повторно не вставляется. Без этого
+    // первый ответивший язык занимал бы строку для всех остальных,
+    // и японский читатель получал бы кириллицу.
+    await sql`
+      insert into dailynews.spoken_terms (term, spoken, language)
+      values ('gemini', 'джемини', 'русском'), ('gemini', 'ジェミニ', 'японском')
+    `;
+    const [twoTongues] = await sql<{ n: number }[]>`
+      select count(*)::int as n from dailynews.spoken_terms where term = 'gemini'
+    `;
+    assert.equal(twoTongues.n, 2, "один термин звучит по-разному на разных языках");
+    await rejects(
+      `insert into dailynews.spoken_terms (term, spoken, language)
+       values ('gemini', 'другое', 'русском')`,
+      /spoken_terms_pkey/,
+      "пара «термин и язык» повторно не заводится",
+    );
+    // 0047: язык не подставляется молча. С `default 'русском'` вставка
+    // без языка заводила бы русскую строку — тот самый отказ, который
+    // 0046 и чинила.
+    await rejects(
+      `insert into dailynews.spoken_terms (term, spoken) values ('qwen', 'квен')`,
+      /language/,
+      "язык обязателен: молча русским он больше не становится",
+    );
+
+    // 0047: одна незавершённая озвучка на статью, и это ограничение базы.
+    // `where not exists` перед вставкой две одновременные транзакции
+    // проходят обе — ровно тот случай, от которого оно ставилось.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 100, 'speaking')
+    `;
+    await rejects(
+      `insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+       values (${owner.id}, ${firstItem.id}, 100, 'queued')`,
+      /audio_sends_one_in_flight/,
+      "вторая озвучка той же статьи в работе отбивается ключом",
+    );
+    // А законченные копятся: по ним считается квота дня.
+    await sql`
+      insert into dailynews.audio_sends (reader_id, item_id, seconds, status)
+      values (${owner.id}, ${firstItem.id}, 100, 'sent')
+    `;
+
     // Шаг — состояние той же строки, и выдуманного шага не бывает.
     await rejects(
       `insert into dailynews.audio_sends (reader_id, item_id, seconds, status)

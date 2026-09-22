@@ -278,11 +278,21 @@ export function ItemCard({
       // Опрос, а не сокет: одна кнопка на карточку и минуты работы —
       // держать соединение ради четырёх слов дороже, чем спросить раз
       // в две секунды.
-      for (let i = 0; i < 150 && alive.current; i++) {
+      for (let i = 0; i < 150; i++) {
         await new Promise((done) => setTimeout(done, 2000));
-        if (!alive.current) return;
+        // Уход с карточки гасит тост: он глобальный и живёт, пока его
+        // обновляют, — брошенный, он останется на экране навсегда.
+        if (!alive.current) {
+          toast.dismiss(toastId);
+          return;
+        }
         const tick = await fetch(`/api/audio?send_id=${body.send_id}`);
         const state = await tick.json().catch(() => ({}));
+        // Код ответа проверяется до статуса. Без этого истёкшая сессия
+        // (401) или пропавшая строка (404) дают `{}`, `state.status`
+        // становится undefined, и цикл крутится пять минут, чтобы
+        // сказать «ещё готовится»: отказ выглядит как медленная работа.
+        if (!tick.ok) throw new Error(state?.error ?? t.feed.item.audioError);
         if (state.status === "sent") {
           setAudio("sent");
           toast.success(t.feed.item.audioDoneTitle, {
@@ -301,6 +311,7 @@ export function ItemCard({
       // Пять минут без ответа — это не «ещё чуть-чуть». Молчащий спиннер
       // читается как поломка, и лучше сказать правду: работа идёт, а мы
       // перестали ждать.
+      if (!alive.current) return;
       toast.info(t.feed.item.audioSlowTitle, {
         id: toastId,
         description: t.feed.item.audioSlowDescription,

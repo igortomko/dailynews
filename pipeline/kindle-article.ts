@@ -9,7 +9,7 @@
 import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { sql } from "../src/lib/db";
-import { spentToday } from "../src/lib/readers";
+import { itemForReader, spentToday } from "../src/lib/readers";
 import type { Reader } from "../src/lib/types";
 import { fetchArticle } from "./article";
 import { translateArticle, splitBlocks } from "./translate";
@@ -55,23 +55,9 @@ export async function runArticleSend(
   itemId: number,
 ): Promise<void> {
   try {
-    // Переведённый заголовок живёт в `digest_items.title` и персонален.
-    // Колонки `items.title_ru` нет с 0020, и запрос к ней падал целиком:
-    // единственная строка в `kindle_sends` провалилась именно так —
-    // «column "title_ru" does not exist», а на вид это была обычная
-    // неудачная отправка.
-    const [item] = await sql<
-      { url: string; title: string; mine: string | null; body: string | null }[]
-    >`
-      select i.url, i.title, i.body, di.title as mine
-        from dailynews.items i
-        left join dailynews.digest_items di on di.item_id = i.id
-        left join dailynews.digests d
-               on d.id = di.digest_id and d.reader_id = ${reader.id}
-       where i.id = ${itemId}
-       order by d.day desc nulls last
-       limit 1
-    `;
+    // Заголовок — общий запрос с озвучкой: он знает про то, что
+    // `items.title_ru` нет с 0020, и скоуплен по читателю.
+    const item = await itemForReader(reader.id, itemId);
     if (!item) throw new Error(`материала ${itemId} нет`);
 
     // body — полный текст из фида, если он был. Тогда никуда идти не надо.
@@ -115,7 +101,7 @@ export async function runArticleSend(
     const epub = await buildEpub({
       // Заголовок берётся из выпуска: он уже переведён прогоном, платить
       // за перевод одной строки второй раз незачем.
-      title: item.mine || article.title,
+      title: item.title || article.title,
       author: article.author,
       site: article.site,
       url: item.url,
@@ -126,7 +112,7 @@ export async function runArticleSend(
     await sendArticleToKindle({
       to: reader.kindle_address!,
       sender: reader.kindle_sender!,
-      title: item.mine || article.title,
+      title: item.title || article.title,
       epub,
     });
 
@@ -156,7 +142,7 @@ export async function runArticleSend(
     `;
 
     console.log(
-      `  на Kindle: ${item.mine || article.title} ` +
+      `  на Kindle: ${item.title || article.title} ` +
       `(${(epub.length / 1024).toFixed(0)} КБ, качество ${quality?.total?.toFixed(0) ?? "—"})`,
     );
   } catch (error) {

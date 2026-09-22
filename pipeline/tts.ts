@@ -17,14 +17,14 @@ import {
   spokenMap, unknownRuns, voiceFor, voiceForText, type AudioErrors,
 } from "../src/lib/speech";
 import { sendAudio } from "../src/lib/telegram";
-import { recordCall } from "../src/lib/readers";
+import { itemForReader, recordCall } from "../src/lib/readers";
 import { SOURCE_LANGUAGE } from "../src/lib/voice";
 import type { Plan } from "../src/lib/plans";
 import type { Reader } from "../src/lib/types";
 import { fetchArticle } from "./article";
 import { translateArticle } from "./translate";
 import { llmCost } from "./cost";
-import { type Usage } from "./digest";
+import { resolve, type Usage } from "./digest";
 
 /**
  * Что уже известно про произношение: затравка из кода и накопленное в базе.
@@ -57,10 +57,11 @@ export async function askSpoken(
   usage: Usage,
 ): Promise<Record<string, string>> {
   if (terms.length === 0) return {};
-  const baseUrl = process.env.LLM_BASE_URL;
-  const apiKey = process.env.LLM_API_KEY;
-  const model = process.env.LLM_MODEL;
-  if (!baseUrl || !apiKey || !model) {
+  // Провайдера решает тот же код, что у дайджеста и перевода: вторая копия
+  // дефолтов разъезжается с первой молча, и разойтись она может в сторону
+  // «ходим не туда», а не «не ходим вовсе».
+  const { baseUrl, model, apiKey } = resolve();
+  if (!apiKey) {
     console.log("  ! ключа модели нет — термины останутся как написаны");
     return {};
   }
@@ -175,7 +176,7 @@ export async function synthesize(text: string, voice: string): Promise<Buffer> {
   const parts: Buffer[] = [];
   for (const piece of chunks(text)) {
     const tts = new MsEdgeTTS();
-    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    await tts.setMetadata(voice, FORMAT);
     try {
       const { audioStream } = await tts.toStream(piece);
       const buffers: Buffer[] = [];
@@ -188,8 +189,18 @@ export async function synthesize(text: string, voice: string): Promise<Buffer> {
   return Buffer.concat(parts);
 }
 
-/** 48 кбит/с — столько секунд в байтах отданного движком потока. */
-export const secondsOf = (audio: Buffer): number => Math.round(audio.length / (48_000 / 8));
+/**
+ * Формат потока — один на синтез и на подсчёт.
+ *
+ * Длительность считается делением на битрейт, и битрейт обязан быть тем же,
+ * которым просили синтез. Напиши его числом отдельно — смена формата
+ * поедет только в одном месте, а квота продолжит считать по старому,
+ * не ошибившись ни разу заметно.
+ */
+const FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3;
+const BYTES_PER_SECOND = Number(/(\d+)KBITRATE/.exec(FORMAT)?.[1] ?? 48) * 1000 / 8;
+
+export const secondsOf = (audio: Buffer): number => Math.round(audio.length / BYTES_PER_SECOND);
 
 
 /**
@@ -284,26 +295,15 @@ export async function runAudioSend(
   reader: Reader,
   itemId: number,
 ): Promise<void> {
+  // Слушает он или нет — решается один раз и до разбора ошибки.
+  let delivered = false;
   try {
-    // Заголовок берётся из выпуска этого читателя, а не из `items`:
-    // переведённый заголовок живёт в `digest_items.title`, он персонален,
-    // и платить за перевод одной строки второй раз незачем. В `items`
-    // колонки `title_ru` нет с 0020 — запрос к ней падает целиком.
-    const [item] = await sql<
-      { url: string; title: string; mine: string | null; body: string | null }[]
-    >`
-      select i.url, i.title, i.body, di.title as mine
-        from dailynews.items i
-        left join dailynews.digest_items di on di.item_id = i.id
-        left join dailynews.digests d
-               on d.id = di.digest_id and d.reader_id = ${reader.id}
-       where i.id = ${itemId}
-       order by d.day desc nulls last
-       limit 1
-    `;
+    // Заголовок — общий запрос с читалкой: он знает про то, что
+    // `items.title_ru` нет с 0020, и скоуплен по читателю.
+    const item = await itemForReader(reader.id, itemId);
     if (!item) throw new Error(`материала ${itemId} нет`);
 
-    const title = item.mine || item.title;
+    const title = item.title;
     const language = reader.language;
 
     // Готовое аудио на этом языке — вторая отправка не стоит ничего:
@@ -383,6 +383,12 @@ export async function runAudioSend(
       duration: seconds,
     });
 
+    // Отсюда и ниже читатель уже слушает. Провал записи — это наша
+    // бухгалтерия, а не его неудача: пометить строку `failed` с нулём
+    // секунд значило бы отдать озвучку бесплатно и не списать квоту,
+    // причём выглядело бы это как честный отказ.
+    delivered = true;
+
     // Кладём file_id только после успешной отправки: строка про аудио,
     // которого у Telegram нет, отдала бы второму читателю ссылку в пустоту.
     await sql`
@@ -398,6 +404,17 @@ export async function runAudioSend(
     console.log(`  озвучил «${title.slice(0, 50)}»: ${seconds} с, голос ${voice}`);
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
+    if (delivered) {
+      // Доставлено, но не записалось. Отправка состоялась, значит и квота
+      // списывается; в ошибку идёт причина, чтобы разрыв было видно.
+      await sql`
+        update dailynews.audio_sends
+           set status = 'sent', error = ${`доставлено, но не записалось: ${text}`.slice(0, 500)}
+         where id = ${sendId}
+      `.catch(() => {});
+      console.log(`  ! озвучка ушла, но запись не легла: ${text}`);
+      return;
+    }
     // Секунды снимаются вместе с отказом: неудавшаяся озвучка не имеет
     // права съесть квоту дня — иначе три поломки подряд закрывают день
     // читателю, который не услышал ничего.

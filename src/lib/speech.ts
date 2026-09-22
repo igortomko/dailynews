@@ -249,29 +249,25 @@ export function audioBlocker(
   // `audioSecondsPerDay`, по которой работает предел. Разойдись они —
   // читателю назвали бы одну квоту, а применили другую, и оба числа
   // выглядели бы одинаково правдоподобно.
-  if (plan.audioSecondsPerDay <= 0) return t.audioOnPro.replace("{plan}", planLabel);
+  if (plan.audioSecondsPerDay <= 0) return t.audioOnPro(planLabel);
   // Слушать нечем: озвучка уходит в Telegram, другого плеера у неё нет.
   if (!reader.telegram_id) return t.audioNoTelegram;
   const left = plan.audioSecondsPerDay - secondsToday;
-  if (left <= 0) {
-    return t.audioCapReached.replace("{minutes}", String(Math.floor(plan.audioSecondsPerDay / 60)));
-  }
+  if (left <= 0) return t.audioCapReached(Math.floor(plan.audioSecondsPerDay / 60));
   // Длинную статью не режем и не начинаем наполовину: обрезанная на
   // середине статья звучит как поломка, а не как исчерпанная квота.
   if (wantSeconds > left) {
-    return t.audioTooLong
-      .replace("{left}", String(Math.floor(left / 60)))
-      .replace("{needed}", String(Math.ceil(wantSeconds / 60)));
+    return t.audioTooLong(Math.floor(left / 60), Math.ceil(wantSeconds / 60));
   }
   return "";
 }
 
 /** Те строки словаря, которые нужны отказу. Больше он ни о чём не знает. */
 export type AudioErrors = {
-  audioOnPro: string;
+  audioOnPro: (plan: string) => string;
   audioNoTelegram: string;
-  audioCapReached: string;
-  audioTooLong: string;
+  audioCapReached: (minutes: number) => string;
+  audioTooLong: (left: number, needed: number) => string;
 };
 
 /**
@@ -312,12 +308,19 @@ export function chunks(text: string, limit = CHUNK): string[] {
   // Полноширинные знаки конца предложения режут и без пробела за ними:
   // у японского и китайского пробелов нет вовсе, и правило «точка плюс
   // пробел» отдавало бы весь текст одним куском.
-  for (const piece of text.split(/(?<=[.!?…])\s+|(?<=[。！？])/)) {
-    if (current && current.length + piece.length + 1 > limit) {
+  // Разделитель сохраняется: у латиницы после точки съедается пробел,
+  // и вернуть его надо; у полноширинной точки пробела не было, и вставить
+  // его значит развести иероглифы там, где их не разводят, — голос читает
+  // это как паузу посреди фразы.
+  for (const piece of text.split(/(?<=[.!?…])(\s+)|(?<=[。！？])()/).filter((p) => p !== undefined)) {
+    if (piece === "") continue;
+    if (/^\s+$/.test(piece)) continue;
+    const glue = /[。！？]$/.test(current) ? "" : " ";
+    if (current && current.length + piece.length + glue.length > limit) {
       out.push(current);
       current = piece;
     } else {
-      current = current ? `${current} ${piece}` : piece;
+      current = current ? `${current}${glue}${piece}` : piece;
     }
   }
   if (current) out.push(current);
