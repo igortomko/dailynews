@@ -8,6 +8,7 @@ import {
   CheckIcon,
   CopyIcon,
   FileTextIcon,
+  HeadphonesIcon,
   XIcon,
 } from "lucide-react";
 import {
@@ -19,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -48,22 +50,38 @@ export function SelectionBar({
   count: selected,
   onClear,
   onOpen,
+  onPodcast,
+  podcasting,
 }: {
   count: number;
   onClear: () => void;
   onOpen: () => void;
+  onPodcast: () => void;
+  podcasting: boolean;
 }) {
-  return selected === 0 ? null : <Bar count={selected} onClear={onClear} onOpen={onOpen} />;
+  return selected === 0 ? null : (
+    <Bar
+      count={selected}
+      onClear={onClear}
+      onOpen={onOpen}
+      onPodcast={onPodcast}
+      podcasting={podcasting}
+    />
+  );
 }
 
 function Bar({
   count: selected,
   onClear,
   onOpen,
+  onPodcast,
+  podcasting,
 }: {
   count: number;
   onClear: () => void;
   onOpen: () => void;
+  onPodcast: () => void;
+  podcasting: boolean;
 }) {
   const t = useT().feed.overview;
   const bar = useRef<HTMLDivElement>(null);
@@ -133,6 +151,19 @@ function Bar({
         </span>
         {/* «Собрать», а не «написать»: текст уже готов, модель здесь
             не зовётся, и обещать её работу было бы неправдой. */}
+        {/* Подкаст стоит слева от обзора и второстепенным: обзор — это
+            текст, за которым сюда чаще и приходят, а озвучка тратит квоту
+            и приходит в другое приложение. Одинаково заметные кнопки
+            рядом означали бы, что выбор между ними безразличен. */}
+        <button
+          type="button"
+          onClick={podcasting ? undefined : onPodcast}
+          aria-disabled={podcasting}
+          className="mr-1 flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-background/80 transition-colors duration-150 outline-none hover:bg-background/15 hover:text-background focus-visible:ring-3 focus-visible:ring-background/40 aria-disabled:cursor-default"
+        >
+          {podcasting ? <Spinner className="size-4" /> : <HeadphonesIcon className="size-4" />}
+          {t.podcast}
+        </button>
         <button
           type="button"
           onClick={onOpen}

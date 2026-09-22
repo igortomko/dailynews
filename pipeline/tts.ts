@@ -16,13 +16,12 @@ import {
   applySpoken, audioBlocker, chunks, estimateSeconds, latinRuns, NON_LATIN,
   spokenMap, unknownRuns, voiceFor, voiceForText, type AudioErrors,
 } from "../src/lib/speech";
-import { sendAudio } from "../src/lib/telegram";
-import { itemForReader, recordCall } from "../src/lib/readers";
+import { audioUrl, sendAudio } from "../src/lib/telegram";
+import { cardForReader, recordCall } from "../src/lib/readers";
+import { appOrigin } from "../src/lib/auth";
 import { SOURCE_LANGUAGE } from "../src/lib/voice";
 import type { Plan } from "../src/lib/plans";
 import type { Reader } from "../src/lib/types";
-import { fetchArticle } from "./article";
-import { translateArticle } from "./translate";
 import { llmCost } from "./cost";
 import { resolve, type Usage } from "./digest";
 
@@ -246,39 +245,25 @@ export async function queueAudioSend(
   t: AudioErrors & { audioNoText: string; audioAlreadySpeaking: string },
   planLabel: string,
 ): Promise<{ id: number; seconds: number } | { error: string }> {
-  // Оценка считается по тому тексту, который и будет озвучен: перевод
-  // на кириллицу длиннее английского оригинала примерно на треть, а фид
-  // отдаёт куда меньше, чем догрузка. Мерить по `items.body`, а звучать
-  // переводом — значит отказывать на коротком и пропускать за предел
-  // на длинном, и оба раза числа выглядят правдоподобно.
-  const [ready] = await sql<{ markdown: string }[]>`
-    select markdown from dailynews.item_translations
-     where item_id = ${itemId} and language = ${reader.language}
-  `;
-  const [item] = await sql<{ body: string | null; excerpt: string | null }[]>`
-    select body, excerpt from dailynews.items where id = ${itemId}
-  `;
-  if (!item) return { error: t.audioNoText };
+  // Считается по тому тексту, который и будет озвучен, — по карточке.
+  // Пока озвучивалась статья, оценка шла по `items.body`, а звучал перевод:
+  // 48 749 знаков превращались в 78 минут при квоте в 45, и кнопка
+  // отказывала почти на всём, хотя карточка над ней обещала две минуты.
+  const card = await cardForReader(reader.id, itemId);
+  if (!card) return { error: t.audioNoText };
 
-  const source = ready?.markdown ?? item.body ?? item.excerpt ?? "";
-  if (source.trim().length < 200) return { error: t.audioNoText };
-  // Без готового перевода длина известна только приблизительно: догрузка
-  // даёт больше текста, перевод — ещё. Берётся запас, чтобы разрешить
-  // то, что потом не влезет, было нельзя.
-  const want = Math.ceil(estimateSeconds(source, reader.language) * (ready ? 1 : 1.4));
+  const text = `${card.title}. ${card.summary}`.trim();
+  if (text.length < 40) return { error: t.audioNoText };
+  const want = estimateSeconds(text, reader.language);
 
   const blocker = audioBlocker(reader, plan, await secondsToday(reader.id), want, t, planLabel);
   if (blocker) return { error: blocker };
 
-  // Второе нажатие на ту же карточку не заводит вторую озвучку: два
-  // одновременных запроса оба видят свободную квоту, и читатель уходит
-  // за предел вдвое. Решает это индекс `audio_sends_one_in_flight` из
-  // 0047, а не проверка перед вставкой: между чтением и записью
-  // помещается ровно этот случай.
-  //
-  // Проигравший гонку должен получить внятный отказ, а не пятисотую:
-  // `on conflict do nothing` превращает нарушение ключа в пустой ответ,
-  // и он читается так же, как «уже озвучиваю».
+  // Второе нажатие на ту же карточку не заводит вторую озвучку. Решает
+  // это индекс `audio_sends_one_in_flight` из 0047, а не проверка перед
+  // вставкой: между чтением и записью помещается ровно этот случай.
+  // `on conflict do nothing` превращает нарушение ключа во внятный отказ
+  // вместо пятисотой.
   const [row] = await sql<{ id: number }[]>`
     insert into dailynews.audio_sends (reader_id, item_id, seconds)
     values (${reader.id}, ${itemId}, ${want})
@@ -308,25 +293,22 @@ export async function runAudioSend(
   // Слушает он или нет — решается один раз и до разбора ошибки.
   let delivered = false;
   try {
-    // Заголовок — общий запрос с читалкой: он знает про то, что
-    // `items.title_ru` нет с 0020, и скоуплен по читателю.
-    const item = await itemForReader(reader.id, itemId);
-    if (!item) throw new Error(`материала ${itemId} нет`);
+    const card = await cardForReader(reader.id, itemId);
+    if (!card) throw new Error(`карточки ${itemId} у читателя ${reader.id} нет`);
 
-    const title = item.title;
     const language = reader.language;
 
-    // Готовое аудио на этом языке — вторая отправка не стоит ничего:
-    // ни синтеза, ни трафика, только пересылка по file_id.
+    // Готовая озвучка этой карточки: второе нажатие и подкаст, в который
+    // она попала, стоят пересылку по file_id, а не синтез.
     const [ready] = await sql<{ file_id: string; seconds: number }[]>`
-      select file_id, seconds from dailynews.item_audio
-       where item_id = ${itemId} and language = ${language}
+      select file_id, seconds from dailynews.card_audio
+       where digest_id = ${card.digestId} and item_id = ${itemId}
     `;
     if (ready) {
       await step(sendId, "sending");
       await sendAudio(Number(reader.telegram_id), ready.file_id, {
-        title,
-        url: item.url,
+        title: card.title,
+        url: card.url,
         duration: ready.seconds,
       });
       // Пересылка — такая же доставка: читатель уже слушает, и упавшая
@@ -341,47 +323,14 @@ export async function runAudioSend(
       return;
     }
 
-    await step(sendId, "translating");
-
-    // За статьёй идём только когда её нечем заменить: готовый перевод
-    // делает догрузку бесполезной, а она стоит запроса к чужому сайту
-    // и секунд ожидания. Раньше она шла всегда, в том числе у читателя,
-    // которому оставалось только переслать готовое.
-    let body: string;
-    const [cached] = await sql<{ markdown: string }[]>`
-      select markdown from dailynews.item_translations
-       where item_id = ${itemId} and language = ${language}
-    `;
-    if (cached) {
-      body = cached.markdown;
-    } else if (language === SOURCE_LANGUAGE) {
-      // Читатель просил не переводить — переводить и не надо.
-      body = (await fetchArticle(item.url, item.body)).markdown;
-    } else {
-      const article = await fetchArticle(item.url, item.body);
-      const translated = await translateArticle(article.markdown, language);
-      body = translated.markdown;
-      await recordCall({
-        readerId: reader.id, stage: "translate", model: translated.model,
-        tokensIn: translated.usage.input, tokensOut: translated.usage.output,
-        costUsd: llmCost(translated.usage),
-      });
-      await sql`
-        insert into dailynews.item_translations (item_id, language, markdown, model)
-        values (${itemId}, ${language}, ${body}, ${translated.model})
-        on conflict (item_id, language) do nothing
-      `;
-    }
-
+    // Переводить нечего: карточка уже написана языком читателя. Отсюда
+    // и вся разница с прежней озвучкой статьи — ни запроса к чужому
+    // сайту, ни минуты перевода, ни цента за него.
     await step(sendId, "speaking");
     const usage: Usage = { requests: 0, input: 0, output: 0, cached: 0, reasoning: 0 };
-    const plain = `${title}. ${stripMarkdown(body)}`;
-    const spoken = await spokenText(plain, language, usage);
+    const spoken = await spokenText(`${card.title}. ${card.summary}`, language, usage);
     if (usage.requests > 0) {
       await recordCall({
-        // Та же модель, которую и звали: `resolve()` подставляет
-        // умолчание, когда переменной нет, и запись из переменной
-        // назвала бы расход чужим именем.
         readerId: reader.id, stage: "spoken-terms", model: resolve().model,
         tokensIn: usage.input, tokensOut: usage.output, costUsd: llmCost(usage),
       });
@@ -394,30 +343,23 @@ export async function runAudioSend(
 
     await step(sendId, "sending");
     const sent = await sendAudio(Number(reader.telegram_id), audio, {
-      title,
-      url: item.url,
+      title: card.title,
+      url: card.url,
       duration: seconds,
     });
-
-    // Отсюда и ниже читатель уже слушает. Провал записи — это наша
-    // бухгалтерия, а не его неудача: пометить строку `failed` с нулём
-    // секунд значило бы отдать озвучку бесплатно и не списать квоту,
-    // причём выглядело бы это как честный отказ.
     delivered = true;
 
     // Кладём file_id только после успешной отправки: строка про аудио,
-    // которого у Telegram нет, отдала бы второму читателю ссылку в пустоту.
+    // которого у Telegram нет, отдала бы ссылку в пустоту.
     await sql`
-      insert into dailynews.item_audio (item_id, language, file_id, seconds, voice)
-      values (${itemId}, ${language}, ${sent.fileId}, ${seconds}, ${voice})
-      on conflict (item_id, language) do nothing
+      insert into dailynews.card_audio (digest_id, item_id, file_id, seconds, voice)
+      values (${card.digestId}, ${itemId}, ${sent.fileId}, ${seconds}, ${voice})
+      on conflict (digest_id, item_id) do nothing
     `;
     await sql`
-      update dailynews.audio_sends
-         set status = 'sent', seconds = ${seconds}
-       where id = ${sendId}
+      update dailynews.audio_sends set status = 'sent', seconds = ${seconds} where id = ${sendId}
     `;
-    console.log(`  озвучил «${title.slice(0, 50)}»: ${seconds} с, голос ${voice}`);
+    console.log(`  озвучил «${card.title.slice(0, 50)}»: ${seconds} с, голос ${voice}`);
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     if (delivered) {
@@ -431,9 +373,6 @@ export async function runAudioSend(
       console.log(`  ! озвучка ушла, но запись не легла: ${text}`);
       return;
     }
-    // Секунды снимаются вместе с отказом: неудавшаяся озвучка не имеет
-    // права съесть квоту дня — иначе три поломки подряд закрывают день
-    // читателю, который не услышал ничего.
     await sql`
       update dailynews.audio_sends
          set status = 'failed', error = ${text.slice(0, 500)}, seconds = 0
@@ -463,4 +402,137 @@ export function stripMarkdown(markdown: string): string {
     .replace(/\n{2,}/g, "\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+}
+
+/**
+ * Озвучка одной карточки: готовая или новая, всегда байтами.
+ *
+ * Байты нужны обоим путям — и подкасту на склейку, и первой отправке.
+ * Готовая скачивается из Telegram: это тот же файл, который мы туда
+ * и положили, и второй синтез дал бы другой, но не лучший.
+ */
+async function cardAudio(
+  reader: Reader,
+  itemId: number,
+  usage: Usage,
+): Promise<{ audio: Buffer; seconds: number; title: string } | null> {
+  const card = await cardForReader(reader.id, itemId);
+  if (!card) return null;
+
+  const [ready] = await sql<{ file_id: string; seconds: number }[]>`
+    select file_id, seconds from dailynews.card_audio
+     where digest_id = ${card.digestId} and item_id = ${itemId}
+  `;
+  if (ready) {
+    const res = await fetch(await audioUrl(ready.file_id), { signal: AbortSignal.timeout(60_000) });
+    if (res.ok) {
+      return {
+        audio: Buffer.from(await res.arrayBuffer()),
+        seconds: ready.seconds,
+        title: card.title,
+      };
+    }
+    // Ссылка Telegram живёт около часа, а строка у нас вечно. Не скачалось —
+    // синтезируем заново: молча отдать подкаст без одной карточки значит
+    // выдать неполное за целое.
+    console.log(`  ~ готовая озвучка ${itemId} не скачалась, синтезирую заново`);
+  }
+
+  const spoken = await spokenText(`${card.title}. ${card.summary}`, reader.language, usage);
+  const voice =
+    reader.language === SOURCE_LANGUAGE
+      ? voiceForText(spoken)
+      : voiceFor(reader.language) ?? voiceForText(spoken);
+  const audio = await synthesize(spoken, voice);
+  const seconds = secondsOf(audio);
+
+  const sent = await sendAudio(Number(reader.telegram_id), audio, {
+    title: card.title,
+    url: card.url,
+    duration: seconds,
+  });
+  await sql`
+    insert into dailynews.card_audio (digest_id, item_id, file_id, seconds, voice)
+    values (${card.digestId}, ${itemId}, ${sent.fileId}, ${seconds}, ${voice})
+    on conflict (digest_id, item_id) do nothing
+  `;
+  return { audio, seconds, title: card.title };
+}
+
+/**
+ * Подкаст из нескольких карточек.
+ *
+ * Синтезируется по карточке, склеивается буфером: кадры mp3 стыкуются
+ * встык, перекодировать нечем и незачем. Покарточно, а не одним куском,
+ * потому что карточка совпадает сама с собой всегда, а «эти три в этом
+ * порядке» — ни с чем: поменял порядок, и это уже другой файл. Карточка,
+ * которую читатель уже слушал, достаётся подкасту даром.
+ *
+ * Порядок — тот, в котором карточки идут в выпуске, а не в котором их
+ * отмечали: подкаст слушают как выпуск, а отмечают сверху вниз и вразнобой.
+ */
+export async function runPodcast(
+  sendIds: number[],
+  reader: Reader,
+  itemIds: number[],
+): Promise<void> {
+  const usage: Usage = { requests: 0, input: 0, output: 0, cached: 0, reasoning: 0 };
+  const mark = (status: string) =>
+    sql`update dailynews.audio_sends set status = ${status} where id = any(${sendIds})`;
+  let delivered = false;
+  try {
+    await mark("speaking");
+    const parts: Buffer[] = [];
+    const titles: string[] = [];
+    let seconds = 0;
+    for (const itemId of itemIds) {
+      const piece = await cardAudio(reader, itemId, usage);
+      if (!piece) continue;
+      parts.push(piece.audio);
+      titles.push(piece.title);
+      seconds += piece.seconds;
+    }
+    if (parts.length === 0) throw new Error("ни одной карточки озвучить не вышло");
+
+    if (usage.requests > 0) {
+      await recordCall({
+        readerId: reader.id, stage: "spoken-terms", model: resolve().model,
+        tokensIn: usage.input, tokensOut: usage.output, costUsd: llmCost(usage),
+      });
+    }
+
+    await mark("sending");
+    // Заголовок — сколько внутри и чем начинается: «Подкаст» без этого
+    // неотличим от вчерашнего в списке файлов Telegram.
+    await sendAudio(Number(reader.telegram_id), Buffer.concat(parts), {
+      title: `${titles.length} · ${titles[0]}`,
+      url: appOrigin("https://news.tomko.io"),
+      duration: seconds,
+    });
+    delivered = true;
+    // Секунды раскладываются по строкам: квота считается суммой, и одна
+    // строка на весь подкаст сделала бы её неделимой при частичном отказе.
+    const each = Math.round(seconds / sendIds.length);
+    await sql`
+      update dailynews.audio_sends set status = 'sent', seconds = ${each}
+       where id = any(${sendIds})
+    `;
+    console.log(`  подкаст: ${parts.length} карточек, ${seconds} с`);
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    if (delivered) {
+      await sql`
+        update dailynews.audio_sends
+           set status = 'sent', error = ${`доставлено, но не записалось: ${text}`.slice(0, 500)}
+         where id = any(${sendIds})
+      `.catch(() => {});
+      return;
+    }
+    await sql`
+      update dailynews.audio_sends
+         set status = 'failed', error = ${text.slice(0, 500)}, seconds = 0
+       where id = any(${sendIds})
+    `;
+    console.log(`  ! подкаст не вышел: ${text}`);
+  }
 }
