@@ -351,7 +351,7 @@ export function FeedTabs({
           управление лентой относится ко всей странице. Вкладки под ними
           по центру; когда не помещаются, начинают прокручиваться —
           семь тем по-русски не влезают ни в какую ширину. */}
-      <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b bg-background/85 backdrop-blur touch:bg-background touch:backdrop-blur-none">
         {/* На телефоне шапка выше, а кнопки в ней крупнее: 28 пикселей —
             это иконка, а не цель для пальца. На мыши лишняя высота ни к чему. */}
         {/* Строка и поле лежат в одной клетке сетки и меняются местами
