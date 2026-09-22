@@ -9,29 +9,31 @@ import { addChannel, rebuildVoice, saveSample, toggleChannel } from "@/lib/actio
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SourceIcon } from "@/components/source-icon";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
+import { Field, FieldDescription, FieldTitle } from "@/components/ui/field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { NETWORK_IDS, NETWORKS, type NetworkId } from "@/lib/networks";
 import { relativeTime } from "@/lib/relative-time";
 import { useT } from "@/components/i18n-provider";
+import { cn } from "@/lib/utils";
 import type { ReaderChannel, VoiceCardRow } from "@/lib/types";
 
 /**
- * Мои площадки.
+ * Черновики постов: три блока, и каждый назван вопросом, на который отвечает.
  *
- * Две разные вещи в одном списке, и путать их нельзя: откуда берётся голос
- * (читаемое — канал Telegram, блог по RSS, твиты) и куда он публикует
- * (там же плюс LinkedIn и Threads, которые наружу не отдают ничего).
- * Поэтому у сети две отметки: переключатель «публикую здесь» даёт таб
- * в мотатке, а ссылка рядом — то, по чему собран голос.
+ * «Мои площадки» не отвечали ни на один. В одном списке стояли две разные
+ * вещи: где он публикует (отметка даёт таб в черновике) и откуда мы читаем
+ * его тексты, — а вторая половина того же дела, вставленные руками посты,
+ * лежала вообще в другой карточке под заголовком «Мой голос». Ссылка
+ * на канал и вставленный текст делают одно: дают ленте почитать его посты.
+ * Теперь они рядом, а отметки сетей остались отдельно и легли в ряд —
+ * четыре одинаковых плитки читаются взглядом, а не построчно.
  *
  * Карточка автора показывается как есть. Скрыть её было бы удобнее на вид
- * и хуже по делу: пост пишется по этим строкам, и если голос описан
+ * и хуже по делу: пост пишется по этим строкам, и если разобрано
  * неправильно, увидеть это можно только прочитав их.
  */
 /**
@@ -75,11 +77,14 @@ export function ChannelsForm({
   const [busy, startTransition] = useTransition();
   const [building, setBuilding] = useState(false);
   // Карточка приходит с сервера, а форма клиентская: без обновления она
-  // осталась бы с прежними пропсами, и собранный голос выглядел бы
-  // как несобранный — тот самый отказ, похожий на успех.
+  // осталась бы с прежними пропсами, и разобранное выглядело бы
+  // как неразобранное — тот самый отказ, похожий на успех.
   const router = useRouter();
 
   const byNetwork = new Map(channels.map((channel) => [channel.network, channel]));
+  // Что лента читает прямо сейчас. Адрес есть только там, где его можно
+  // прочитать: у LinkedIn и Threads его не бывает по устройству сети.
+  const reads = channels.filter((channel) => channel.handle);
 
   const add = () => {
     const value = input.trim();
@@ -127,11 +132,60 @@ export function ChannelsForm({
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader>
-          <CardTitle>{onboarding ? t.onboarding.channels.lastStepTitle : t.nav.channels}</CardTitle>
-          <CardDescription>{t.onboarding.channels.description}</CardDescription>
+          <CardTitle>
+            {onboarding ? t.onboarding.channels.lastStepTitle : t.onboarding.channels.postingTitle}
+          </CardTitle>
+          <CardDescription>{t.onboarding.channels.postingDescription}</CardDescription>
         </CardHeader>
 
-        <CardContent className="flex flex-col gap-4">
+        <CardContent>
+          {/* Четыре сети в ряд, а не списком: строки различались только
+              названием, и глаз всё равно читал их как один ряд знаков.
+              Отметка стоит под описанием, потому что решение принимается
+              после него, а не до. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {NETWORK_IDS.filter((id) => NETWORKS[id].tab).map((id) => {
+              const on = byNetwork.has(id);
+              return (
+                // Плитка целиком — ярлык отметки: попасть в квадрат 16×16
+                // пальцем можно, но промах здесь ничего не говорит о том,
+                // куда надо было попасть.
+                <label
+                  key={id}
+                  className={cn(
+                    "flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition-colors",
+                    on ? "border-primary/30 bg-primary/5" : "hover:bg-muted/50",
+                  )}
+                >
+                  {/* Значок общий с источниками: площадка и источник —
+                      один и тот же список чужих сервисов, и узнаются они
+                      знаком раньше, чем названием. */}
+                  <SourceIcon kind={ICON_KIND[id]} url={NETWORK_HOME[id]} className="size-5" />
+                  <span className="text-sm font-medium">{t.onboarding.networks[id]}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t.onboarding.channels.charLimit(NETWORKS[id].limit)}
+                  </span>
+                  <Checkbox
+                    className="mt-1"
+                    checked={on}
+                    onCheckedChange={(next) => toggle(id, next === true)}
+                    disabled={busy}
+                    aria-label={t.onboarding.channels.publishingIn(t.onboarding.networks[id])}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t.onboarding.channels.sourcesTitle}</CardTitle>
+          <CardDescription>{t.onboarding.channels.sourcesDescription}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="flex flex-col gap-5">
           <Field>
             <div className="flex gap-2">
               <Input
@@ -154,75 +208,83 @@ export function ChannelsForm({
             <FieldDescription>{t.onboarding.channels.addDescription}</FieldDescription>
           </Field>
 
-          <FieldGroup>
-            {NETWORK_IDS.filter((id) => NETWORKS[id].tab).map((id) => {
-              const network = NETWORKS[id];
-              const mine = byNetwork.get(id);
-              // Тумблер у правого края, а не слева, как у одиночных настроек
-              // «Доставки»: это строка списка, и управление в ней стоит там же,
-              // где корзина у источника.
-              return (
-                <div key={id} className="flex items-center justify-between gap-3 py-1.5">
-                  {/* Значок общий с источниками: строка площадки и строка
-                      источника — один и тот же список чужих сервисов,
-                      и узнаются они знаком раньше, чем названием. */}
-                  <SourceIcon kind={ICON_KIND[id]} url={NETWORK_HOME[id]} className="size-4 shrink-0" />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      {t.onboarding.networks[id]}
-                      {mine?.handle ? (
-                        <Badge variant="secondary">{t.onboarding.channels.readableBadge}</Badge>
-                      ) : network.readable ? null : (
-                        <Badge variant="secondary">{t.onboarding.channels.pasteOnlyBadge}</Badge>
-                      )}
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {mine?.input_url || mine?.label || t.onboarding.channels.charLimit(network.limit)}
-                    </span>
+          {reads.length ? (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {t.onboarding.channels.readingFrom}
+              </span>
+              {reads.map((channel) => {
+                const id = channel.network as NetworkId;
+                const address = channel.input_url ?? channel.handle ?? "";
+                return (
+                  <div key={id} className="flex items-center gap-3 py-1.5">
+                    <SourceIcon
+                      kind={ICON_KIND[id] ?? "rss"}
+                      url={address || NETWORK_HOME[id]}
+                      className="size-4 shrink-0"
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-sm font-medium">{t.onboarding.networks[id]}</span>
+                      <span className="truncate text-xs text-muted-foreground">{address}</span>
+                    </div>
+                    {/* Убрать можно только блог: у остальных сетей это
+                        делает та же отметка сверху, и вторая кнопка с тем
+                        же смыслом читалась бы как другая. Адрес меняется
+                        новой ссылкой — она заменяет прежнюю. */}
+                    {NETWORKS[id]?.tab ? null : (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t.onboarding.channels.removeBlog}
+                        onClick={() => toggle(id, false)}
+                        disabled={busy}
+                      >
+                        <TrashIcon />
+                      </Button>
+                    )}
                   </div>
-                  <Switch
-                    checked={Boolean(mine)}
-                    onCheckedChange={(on) => toggle(id, on)}
-                    disabled={busy}
-                    aria-label={t.onboarding.channels.publishingIn(t.onboarding.networks[id])}
-                  />
-                </div>
-              );
-            })}
-          </FieldGroup>
-
-          {byNetwork.get("blog") ? (
-            <div className="flex items-center justify-between gap-3 border-t pt-3">
-              <SourceIcon
-                kind="rss"
-                url={byNetwork.get("blog")?.input_url ?? byNetwork.get("blog")?.handle ?? ""}
-                className="size-4 shrink-0"
-              />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">{t.onboarding.channels.blogLabel}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {byNetwork.get("blog")?.input_url ?? byNetwork.get("blog")?.handle}
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t.onboarding.channels.removeBlog}
-                onClick={() => toggle("blog", false)}
-                disabled={busy}
-              >
-                <TrashIcon />
-              </Button>
+                );
+              })}
             </div>
           ) : null}
+
+          <Field>
+            <FieldTitle>{t.onboarding.channels.pasteTitle}</FieldTitle>
+            <Textarea
+              name="sample"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              rows={8}
+              placeholder={t.onboarding.channels.samplePlaceholder}
+            />
+            <FieldDescription>{t.onboarding.channels.sampleDescription}</FieldDescription>
+          </Field>
+
+          {/* Кнопка стоит вне `Field`: он растягивает детей на всю ширину,
+              и «Сохранить» выходило полосой во всю карточку — крупнее
+              «Перечитать мои посты», которое здесь главное действие. */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="self-start"
+            disabled={busy || text === sample}
+            onClick={() =>
+              startTransition(async () => {
+                const form = new FormData();
+                form.set("sample", text);
+                const result = await saveSample(form);
+                if ("error" in result) toast.error(result.error);
+                else
+                  toast.success(t.onboarding.channels.saved, {
+                    description: t.onboarding.channels.savedDescription,
+                  });
+              })
+            }
+          >
+            {t.onboarding.channels.save}
+          </Button>
         </CardContent>
       </Card>
-
-      {onboarding ? (
-        <Button variant="outline" className="self-start" render={<Link href="/" />}>
-          {t.onboarding.channels.toFeed}
-        </Button>
-      ) : null}
 
       <Card>
         <CardHeader>
@@ -231,7 +293,7 @@ export function ChannelsForm({
         </CardHeader>
 
         <CardContent className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Button onClick={build} disabled={building}>
               {building ? <Spinner /> : <RefreshCwIcon />}
               {t.onboarding.channels.rebuildVoice}
@@ -272,39 +334,17 @@ export function ChannelsForm({
               ) : null}
             </div>
           ) : null}
-
-          <Field>
-            <Textarea
-              name="sample"
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              rows={8}
-              placeholder={t.onboarding.channels.samplePlaceholder}
-            />
-            <FieldDescription>{t.onboarding.channels.sampleDescription}</FieldDescription>
-            <Button
-              variant="outline"
-              size="sm"
-              className="self-start"
-              disabled={busy || text === sample}
-              onClick={() =>
-                startTransition(async () => {
-                  const form = new FormData();
-                  form.set("sample", text);
-                  const result = await saveSample(form);
-                  if ("error" in result) toast.error(result.error);
-                  else
-                    toast.success(t.onboarding.channels.saved, {
-                      description: t.onboarding.channels.savedDescription,
-                    });
-                })
-              }
-            >
-              {t.onboarding.channels.save}
-            </Button>
-          </Field>
         </CardContent>
       </Card>
+
+      {/* Выход в ленту стоит после всех трёх блоков, а не между первым
+          и вторым: посреди настройки он звал уйти раньше, чем прочитано
+          хоть что-то, — и черновик вышел бы не его. */}
+      {onboarding ? (
+        <Button variant="outline" className="self-start" render={<Link href="/" />}>
+          {t.onboarding.channels.toFeed}
+        </Button>
+      ) : null}
     </div>
   );
 }

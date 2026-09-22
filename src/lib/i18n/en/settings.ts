@@ -67,7 +67,7 @@ export const settings = {
     aboutLabel: "About you and what matters",
     aboutPlaceholder: "What you do, your product, where you live, and which news matters most to you",
     aboutHint: "The more detail you give, the more precisely we can explain why a story matters to you.",
-    next: "Next: my channels",
+    next: "Next: post drafts",
     done: "Done",
   },
 
