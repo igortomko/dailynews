@@ -1235,7 +1235,7 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // которое заказано, — а узнаётся это от читателя через месяц.
 import {
   CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
-  formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+  flowSplit, formatMinutesLong, isShort, itemsForMinutes, minutesOf,
 } from "../src/lib/reading-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
 
@@ -1319,6 +1319,22 @@ assert.equal(
 assert.equal(
   cardMinutes(0, DEFAULT_VOICE), perCard,
   "у нового читателя мерки нет, и берётся общая",
+);
+
+// Картинка потока на «О проекте» обещает выпуск, а не заказ. В тихий день
+// мест больше, чем новостей, и «вышло 5, оставит ~18» — то же враньё,
+// что норма, добитая хвостом потока: выпуска из того, чего нет, не будет.
+assert.deepEqual(
+  flowSplit(89, 18), { kept: 18, dropped: 71 },
+  "обычный день: дошедшее и отброшенное считаются от потока",
+);
+assert.deepEqual(
+  flowSplit(5, 18), { kept: 5, dropped: 0 },
+  "тихий день: выпуск не больше потока, отбрасывать нечего",
+);
+assert.deepEqual(
+  flowSplit(0, 18), { kept: 0, dropped: 0 },
+  "пустые сутки: до читателя не дошло ничего, и отброшено тоже ничего",
 );
 
 // --- тарифы -----------------------------------------------------------------
