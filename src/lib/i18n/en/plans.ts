@@ -44,10 +44,6 @@ export const plans = {
       title: "Language and voice",
       what: "The digest's language and how it's written: plain or expert, dry or lively. Included on every plan.",
     },
-    language: {
-      title: "Translation",
-      what: "The digest arrives in your language. On Free, titles and summaries stay in the source language.",
-    },
     delivery: {
       title: "Send to e-reader",
       what: "The digest arrives as a book on Kindle — read on e-ink, no phone needed.",
@@ -109,6 +105,8 @@ export const plans = {
     dailyCadence: "every day",
     everyOtherCadence: "every other day",
     upToMinutes: (n: number) => `up to ${n} min`,
+    tryFree: (days: number) => `${days} days free`,
+    thenPerMonth: (price: number) => `then $${price} a month`,
     hasFeature: "included",
     noFeature: "not included",
     techLimit: (items: string) =>

@@ -33,7 +33,7 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
   },
 }) as typeof assertStrict;
 import {
-  effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt,
+  effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt, trialDaysFor,
 } from "../src/lib/lemon";
 import { appOrigin } from "../src/lib/auth";
 import * as bus from "../src/lib/audio-bus";
@@ -1573,11 +1573,6 @@ const offersFor = (feature: FeatureId, current: Plan) =>
   PLAN_IDS.map((id) => PLANS[id]).filter((p) => FEATURES[feature].has(p) && p.price > current.price);
 
 assert.deepEqual(
-  offersFor("language", PLANS.free).map((p) => p.id),
-  ["plus", "pro"],
-  "за переводом с бесплатного предлагаются оба платных тарифа",
-);
-assert.deepEqual(
   offersFor("delivery", PLANS.free).map((p) => p.id),
   ["plus", "pro"],
   "читалка переехала на Plus: тариф для того, кто читает",
@@ -1589,7 +1584,7 @@ assert.deepEqual(
 );
 // Окно вообще не открывается тому, у кого возможность уже есть: корона
 // рисуется по тому же FEATURES.has, и предлагать ему нечего.
-assert.ok(FEATURES.language.has(PLANS.plus), "у Plus перевод уже есть, короны не будет");
+assert.ok(FEATURES.delivery.has(PLANS.plus), "у Plus читалка уже есть, короны не будет");
 
 // Темы всех читателей уходят в вопрос Jev одним списком, и каждая удлиняет
 // его на каждом материале потока. Предел персонален, цена — общая, поэтому
@@ -1599,10 +1594,64 @@ assert.ok(
   "предел по интересам растёт с тарифом",
 );
 
-// Перевод платный, а язык источника — законное значение, а не пустота:
+// Перевод бесплатен на всех тарифах, и это не щедрость, а арифметика:
+// `effectiveVoice` подставляет в промпт «на языке источника» — тот же вызов
+// и те же токены, ноль экономии. Платным он при этом означал разное
+// у разных людей: стартовый набор почти весь англоязычный, и англичанину
+// «язык источника» — его язык, а русскому приходила лента, которой он
+// не понимает. Предел, зависящий от того, на каком языке пишут источники,
+// это не тариф, а лотерея.
+// Триал: длина живёт рядом с вариантом Lemon, а не одной переменной
+// на продукт. Одна общая обещала бы «7 дней бесплатно» и там, где триала
+// не завели, — надпись, которая врёт ровно тому, кто по ней нажал.
+// Не задана, не число, ноль или минус — триала нет и говорить о нём нечего.
+{
+  const was = { ...process.env };
+  try {
+    process.env.LEMON_VARIANT_PRO = "1";
+    process.env.LEMON_BUY_PRO = "https://example.lemonsqueezy.com/buy/pro";
+    delete process.env.LEMON_VARIANT_PLUS;
+    delete process.env.LEMON_BUY_PLUS;
+
+    delete process.env.LEMON_TRIAL_PRO;
+    assert.equal(trialDaysFor("pro"), 0, "незаданный триал — это ноль, а не обещание");
+    process.env.LEMON_TRIAL_PRO = "7";
+    assert.equal(trialDaysFor("pro"), 7, "заданный триал читается числом дней");
+    assert.equal(trialDaysFor("plus"), 0, "у тарифа без варианта триала нет по построению");
+    for (const junk of ["", "неделя", "-3", "0"]) {
+      process.env.LEMON_TRIAL_PRO = junk;
+      assert.equal(trialDaysFor("pro"), 0, `«${junk}» не становится днями триала`);
+    }
+    // Сам триал действует как тариф: Lemon присылает `on_trial`, и выпуск
+    // обязан быть уже платным — иначе неделя бесплатного Pro выглядит как
+    // бесплатный Free, за который читатель оставил карту.
+    process.env.LEMON_TRIAL_PRO = "7";
+    assert.equal(
+      effectivePlan({
+        plan: "pro", owner: false, subscription_id: "sub_1",
+        subscription_status: "on_trial", plan_ends_at: null,
+      } as never).id,
+      "pro",
+      "на триале действует купленный тариф, а не бесплатный",
+    );
+  } finally {
+    for (const key of ["LEMON_VARIANT_PRO", "LEMON_BUY_PRO", "LEMON_TRIAL_PRO", "LEMON_VARIANT_PLUS", "LEMON_BUY_PLUS"]) {
+      if (was[key] === undefined) delete process.env[key];
+      else process.env[key] = was[key];
+    }
+  }
+}
+
+assert.ok(
+  !(GATED as readonly string[]).includes("language"),
+  "перевод не должен закрываться тарифом: он не стоит ни одного лишнего токена",
+);
+assert.ok(
+  !Object.keys(FEATURES).includes("language"),
+  "и не должен числиться закрываемой возможностью: корона без предложения ведёт в пустое окно",
+);
+// Язык источника при этом остаётся законным значением, а не пустотой:
 // оно уходит в промпт и означает «оставь как в источнике».
-assert.ok(!FEATURES.language.has(PLANS.free), "на бесплатном перевода нет");
-assert.ok(FEATURES.language.has(PLANS.plus), "перевод есть с Plus");
 assert.ok(LANGUAGES.includes(SOURCE_LANGUAGE), "язык источника — вариант списка, а не особый случай");
 
 // Читалка — с Plus: это тариф для того, кто читает. Расход у Resend
@@ -1629,7 +1678,7 @@ assert.ok(
   "раздел подписки не должен закрываться тарифом",
 );
 assert.ok(
-  allows(PLANS.plus, "language") && allows(PLANS.pro, "language"),
+  allows(PLANS.plus, "delivery") && allows(PLANS.pro, "delivery"),
   "раздел, открытый дешёвым тарифом, обязан быть открыт и дорогим",
 );
 // Персонализация не стоит ни одного лишнего токена, поэтому тарифом
@@ -3284,29 +3333,35 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
 }
 
 
-// --- язык выпуска считается по тарифу, а выбор читателя не стирается ---------
-// Подмена колонки при сохранении была необратимой: тариф открывается обратно,
-// а в базе остаётся «язык источника». Двадцатого сентября 2026 выпуск пришёл
-// на сорок материалов по-английски при русском в настройках.
+// --- язык выпуска: выбор читателя, а не признак тарифа -----------------------
+// Тарифом он не гасится вовсе: перевод не стоит ни одного лишнего токена,
+// а гашение означало разное у разных людей — при англоязычных источниках
+// бесплатный англичанин получал свой язык, а бесплатный русский чужой.
 {
   const reader = (extra: object) =>
     ({ language: "русском", complexity: 3, style: "нейтральный", ...extra }) as never;
 
+  for (const plan of ["free", "plus", "pro"]) {
+    assert.equal(
+      effectiveVoice(reader({ plan, owner: false })).language,
+      "русском",
+      `на тарифе ${plan} выпуск пишется языком читателя`,
+    );
+  }
+  // «Язык источника» остаётся: это выбор читателя «не переводить»,
+  // и подменять его умолчанием нельзя — иначе выбравший оригинал
+  // получал бы перевод, которого не просил.
   assert.equal(
-    effectiveVoice(reader({ plan: "free", owner: false })).language,
+    effectiveVoice(reader({ language: SOURCE_LANGUAGE })).language,
     SOURCE_LANGUAGE,
-    "на бесплатном тарифе выпуск пишется языком источника",
+    "выбранный язык источника остаётся языком источника",
   );
+  // Пустая колонка — не выбор, а её отсутствие: у неё умолчание, и живёт
+  // оно в одном месте, иначе прогон и догрузка разойдутся молча.
   assert.equal(
-    effectiveVoice(reader({ plan: "pro", owner: false, subscription_status: "active" })).language,
+    effectiveVoice(reader({ language: "" })).language,
     "русском",
-    "на платном — языком читателя",
-  );
-  const stored = { language: "русском", complexity: 3, style: "нейтральный", plan: "free", owner: false };
-  assert.equal(
-    effectiveVoice(stored as never).language !== stored.language && stored.language === "русском",
-    true,
-    "сам выбор при этом остаётся: гасится применение, а не колонка",
+    "пустая колонка даёт умолчание, а не пустую строку в промпте",
   );
 }
 
