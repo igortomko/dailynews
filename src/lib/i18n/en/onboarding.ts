@@ -145,7 +145,7 @@ export const onboarding = {
    */
   starterTopics: {
     "ai-infra": {
-      label: "AI infra",
+      label: "Artificial intelligence",
       hint: "models, chips, data centers, inference, training, agents, LLM developer tools",
     },
     programming: {
@@ -161,7 +161,7 @@ export const onboarding = {
       hint: "funding rounds, valuations, exits, funds, hiring and layoffs, young companies' business models",
     },
     energy: {
-      label: "Energy and uranium",
+      label: "Energy",
       hint: "nuclear power, uranium and its mining, power grids, energy demand from data centers, oil and gas",
     },
     climate: {
@@ -185,15 +185,15 @@ export const onboarding = {
       hint: "launches and rockets, satellites and constellations, interplanetary missions, space telescopes, the space industry",
     },
     biotech: {
-      label: "Biotech and drugs",
+      label: "Biotech",
       hint: "clinical trials, drug approvals, genomics, pharma as an industry, biotech companies",
     },
     "mental-health": {
-      label: "Therapy and mental health",
+      label: "Therapy",
       hint: "evidence-based therapy, clinical research, psychiatry, tools for therapists, burnout",
     },
     health: {
-      label: "Health and longevity",
+      label: "Health",
       hint: "nutrition, sleep, exercise, evidence-based medicine for everyday life, aging and lifespan extension",
     },
     security: {
@@ -201,7 +201,7 @@ export const onboarding = {
       hint: "breaches and hacks, vulnerabilities, privacy and surveillance, cryptography, supply chain security",
     },
     hardware: {
-      label: "Hardware and gadgets",
+      label: "Gadgets",
       hint: "CPUs and GPUs, phones and laptops, wearables, chip manufacturing, hardware reviews",
     },
     games: {
@@ -233,11 +233,11 @@ export const onboarding = {
       hint: "airlines and miles, hotels, visas and entry rules, destinations and routes",
     },
     demography: {
-      label: "Demographics",
+      label: "Society",
       hint: "birth rates, aging, migration, country populations, long-term social shifts",
     },
     politics: {
-      label: "World and politics",
+      label: "Politics",
       hint: "international relations, elections and governments, conflicts, sanctions and trade wars, tech regulation",
     },
     education: {
@@ -245,12 +245,28 @@ export const onboarding = {
       hint: "school and university, online learning, AI in education, learning research, education policy",
     },
     transport: {
-      label: "Transport and EVs",
+      label: "Transport",
       hint: "EVs and charging networks, self-driving, trains and transit, aviation, logistics",
     },
     media: {
       label: "Media",
       hint: "publishers and their economics, social platforms, journalism, advertising, AI in content production",
+    },
+    career: {
+      label: "Career",
+      hint: "hiring and layoffs, salaries and levels, interviews, remote work, burnout, the job market in an industry",
+    },
+    money: {
+      label: "Personal finance",
+      hint: "saving and investing for yourself, mortgages and loans, taxes, retirement, household budget",
+    },
+    parenting: {
+      label: "Parenting",
+      hint: "pregnancy and birth, child development, school and daycare, teenagers, research on raising kids",
+    },
+    cars: {
+      label: "Cars",
+      hint: "new models and road tests, carmakers and their plants, prices and the market, motorsport",
     },
   } as Record<string, { label: string; hint: string }>,
 };

@@ -45,7 +45,7 @@ const HN: StarterFeed = { kind: "hackernews", url: "topstories", label: "Hacker 
 export const STARTER_TOPICS: StarterTopic[] = [
   {
     slug: "ai-infra",
-    label: "AI-инфра",
+    label: "Искусственный интеллект",
     hint: "модели, чипы, дата-центры, инференс, обучение, агенты, инструменты разработки с LLM",
     related: ["programming", "hardware", "startups", "security"],
     feeds: [
@@ -61,7 +61,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
     slug: "programming",
     label: "Разработка",
     hint: "языки и рантаймы, архитектура, релизы библиотек, инженерные практики, инфраструктура, открытый код",
-    related: ["ai-infra", "security", "hardware", "design"],
+    related: ["ai-infra", "security", "hardware", "design", "career"],
     feeds: [
       HN,
       { kind: "rss", url: "https://www.infoq.com/feed/", label: "InfoQ" },
@@ -98,7 +98,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "energy",
-    label: "Энергетика и уран",
+    label: "Энергетика",
     hint: "атомная энергетика, уран и его добыча, электросети, спрос на энергию под дата-центры, нефть и газ",
     related: ["climate", "transport", "economy", "demography"],
     feeds: [
@@ -132,7 +132,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
     slug: "economy",
     label: "Экономика и рынки",
     hint: "ставки и инфляция, рынки труда и жилья, торговля и пошлины, макроэкономические данные, разборы экономистов",
-    related: ["demography", "politics", "startups", "blockchain"],
+    related: ["demography", "politics", "startups", "blockchain", "money"],
     feeds: [
       { kind: "rss", url: "https://www.economist.com/finance-and-economics/rss.xml", label: "The Economist: экономика" },
       { kind: "rss", url: "https://marginalrevolution.com/feed", label: "Marginal Revolution" },
@@ -162,7 +162,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "biotech",
-    label: "Биотех и лекарства",
+    label: "Биотех",
     hint: "клинические испытания, одобрения лекарств, геномика, фарма как отрасль, биотехнологические компании",
     related: ["science", "health", "mental-health"],
     feeds: [
@@ -172,7 +172,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "mental-health",
-    label: "Психотерапия и mental health",
+    label: "Психотерапия",
     hint: "доказательная психотерапия, клинические исследования, психиатрия, инструменты для терапевтов, выгорание",
     related: ["health", "science", "demography"],
     feeds: [
@@ -182,7 +182,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "health",
-    label: "Здоровье и долголетие",
+    label: "Здоровье",
     hint: "питание, сон, физическая нагрузка, доказательная медицина для обычного человека, старение и продление жизни",
     related: ["biotech", "mental-health", "food", "sport"],
     feeds: [
@@ -203,7 +203,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "hardware",
-    label: "Железо и гаджеты",
+    label: "Гаджеты",
     hint: "процессоры и видеокарты, телефоны и ноутбуки, носимые устройства, производство чипов, обзоры техники",
     related: ["ai-infra", "games", "transport", "programming"],
     feeds: [
@@ -288,7 +288,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "demography",
-    label: "Демография",
+    label: "Общество",
     hint: "рождаемость, старение, миграция, население стран, долгосрочные социальные сдвиги",
     related: ["economy", "politics", "education", "science"],
     feeds: [
@@ -299,7 +299,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "politics",
-    label: "Мир и политика",
+    label: "Политика",
     hint: "международные отношения, выборы и правительства, конфликты, санкции и торговые войны, регулирование технологий",
     related: ["demography", "economy", "security", "media"],
     feeds: [
@@ -311,7 +311,7 @@ export const STARTER_TOPICS: StarterTopic[] = [
     slug: "education",
     label: "Образование",
     hint: "школа и университеты, онлайн-обучение, ИИ в учёбе, исследования об обучении, образовательная политика",
-    related: ["demography", "science", "ai-infra"],
+    related: ["demography", "science", "ai-infra", "parenting"],
     feeds: [
       { kind: "rss", url: "https://www.edsurge.com/articles_rss", label: "EdSurge" },
       { kind: "rss", url: "https://hechingerreport.org/feed/", label: "The Hechinger Report" },
@@ -319,9 +319,9 @@ export const STARTER_TOPICS: StarterTopic[] = [
   },
   {
     slug: "transport",
-    label: "Транспорт и электромобили",
+    label: "Транспорт",
     hint: "электромобили и зарядная сеть, автопилот, поезда и городской транспорт, авиация, логистика",
-    related: ["energy", "hardware", "travel"],
+    related: ["energy", "hardware", "travel", "cars"],
     feeds: [
       { kind: "rss", url: "https://electrek.co/feed/", label: "Electrek" },
       { kind: "rss", url: "https://insideevs.com/rss/articles/all/", label: "InsideEVs" },
@@ -337,6 +337,48 @@ export const STARTER_TOPICS: StarterTopic[] = [
       { kind: "rss", url: "https://www.niemanlab.org/feed/", label: "Nieman Lab" },
       { kind: "rss", url: "https://pressgazette.co.uk/feed/", label: "Press Gazette" },
       { kind: "rss", url: "https://www.platformer.news/rss/", label: "Platformer" },
+    ],
+  },
+  {
+    slug: "career",
+    label: "Карьера",
+    hint: "найм и увольнения, зарплаты и грейды, собеседования, удалёнка, выгорание, рынок труда в отрасли",
+    related: ["programming", "design", "startups", "money"],
+    feeds: [
+      { kind: "rss", url: "https://newsletter.pragmaticengineer.com/feed", label: "The Pragmatic Engineer" },
+      { kind: "rss", url: "https://leaddev.com/rss.xml", label: "LeadDev" },
+    ],
+  },
+  {
+    slug: "money",
+    label: "Личные финансы",
+    hint: "накопления и инвестиции для себя, ипотека и кредиты, налоги, пенсия, семейный бюджет",
+    related: ["economy", "career", "blockchain", "demography"],
+    feeds: [
+      { kind: "rss", url: "https://awealthofcommonsense.com/feed/", label: "A Wealth of Common Sense" },
+      { kind: "rss", url: "https://ofdollarsanddata.com/feed/", label: "Of Dollars And Data" },
+      { kind: "rss", url: "https://www.nerdwallet.com/blog/feed/", label: "NerdWallet" },
+    ],
+  },
+  {
+    slug: "parenting",
+    label: "Родительство",
+    hint: "беременность и роды, развитие детей, школа и садик, подростки, исследования о воспитании",
+    related: ["health", "education", "mental-health", "demography"],
+    feeds: [
+      { kind: "rss", url: "https://childmind.org/feed/", label: "Child Mind Institute" },
+      { kind: "rss", url: "https://www.scarymommy.com/feed", label: "Scary Mommy" },
+    ],
+  },
+  {
+    slug: "cars",
+    label: "Автомобили",
+    hint: "новые модели и тест-драйвы, автопром и его заводы, цены и рынок, автоспорт",
+    related: ["transport", "hardware", "sport"],
+    feeds: [
+      { kind: "rss", url: "https://www.motor1.com/rss/articles/all/", label: "Motor1" },
+      { kind: "rss", url: "https://www.caranddriver.com/rss/all.xml/", label: "Car and Driver" },
+      { kind: "rss", url: "https://jalopnik.com/rss", label: "Jalopnik" },
     ],
   },
 ];
