@@ -343,8 +343,9 @@ export function OverviewDialog({
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-4 pb-4">
           {/* Поле названия держит кегль заголовка: это первая строка того,
               что уйдёт в чат, и читаться она должна как заголовок, а не как
-              первая графа анкеты. Отступ справа — под крестик закрытия:
-              без него название уезжало бы под кнопку.
+              первая графа анкеты. Поле кончается раньше крестика закрытия,
+              а не подсовывает под него отступ: серая подложка под курсором
+              доезжала до самой кнопки и читалась как поле, накрывшее её.
 
               Поле текста, а не поле ввода: однострочное поле прячет конец
               названия за своим краем, и «Обзор за 21 сентября 2026 г.»
@@ -358,7 +359,7 @@ export function OverviewDialog({
             value={overview.title}
             onChange={(event) => update({ title: event.target.value })}
             onKeyDown={(event) => event.key === "Enter" && event.preventDefault()}
-            className={cn(FIELD, "min-h-0 pr-10 text-xl font-semibold leading-snug tracking-[-0.011em] md:text-xl")}
+            className={cn(FIELD, "min-h-0 w-[calc(100%-1.25rem)] text-xl font-semibold leading-snug tracking-[-0.011em] md:text-xl")}
           />
           {/* Вступление пишет человек. Дописать его за него — значит
               вложить в его уста вывод, которого он не делал. */}
