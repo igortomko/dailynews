@@ -89,6 +89,7 @@ import {
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { STING_MP3 } from "./sting";
+import { coverFiles, coverFor } from "../src/lib/podcast-cover";
 import { DEFAULT_WEIGHTS, kindlePeriodOf } from "../src/lib/types";
 import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, langTagFor, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
@@ -4255,6 +4256,50 @@ for (const [name, table] of [
     // Длина берётся из байтов, а не числом рядом: 48 кбит/с — это ровно
     // 6000 байт в секунде, и деление обязано быть целым.
     assert.ok(STING_MP3.length % 6 === 0, "длина не делится на кадр — файл обрезан");
+  }
+
+  // Обложки выпуска голосом: Telegram принимает JPEG не больше 200 КБ
+  // и не больше 320 по стороне. Нарушение отваливает не картинку, а всё
+  // сообщение — поэтому размеры читаются из самих файлов, а не записаны
+  // числом рядом с ними: добавят иллюстрацию — проверка посмотрит и на неё.
+  {
+    const files = coverFiles();
+    assert.ok(files.length >= 20, `обложек ${files.length} — папка не собралась`);
+    for (const file of files) {
+      assert.ok(file.endsWith(".jpg"), `${file} — обложка обязана быть JPEG`);
+    }
+    // Круг по дням: соседние дни дают разные обложки, а один и тот же день —
+    // одну и ту же. Случайная картинка делала бы переотправленный выпуск
+    // другим, а одинаковая — не отличала бы вчерашний подкаст от сегодняшнего.
+    const first = coverFor("2026-01-01");
+    assert.ok(first, "на день не нашлось обложки");
+    assert.ok(first!.equals(coverFor("2026-01-01")!), "один день — две разные обложки");
+    assert.ok(!first!.equals(coverFor("2026-01-02")!), "соседние дни получили одну обложку");
+    // Полный круг возвращается к началу: остаток считается по числу файлов.
+    assert.ok(
+      first!.equals(coverFor(new Date(Date.parse("2026-01-01T12:00:00Z") + files.length * 86_400_000).toISOString().slice(0, 10))!),
+      "круг по дням не замкнулся на числе обложек",
+    );
+    for (const day of ["2026-01-01", "2026-06-15", "2026-12-31"]) {
+      const jpeg = coverFor(day)!;
+      assert.equal(jpeg[0], 0xff, `${day}: обложка начинается не с маркера JPEG`);
+      assert.equal(jpeg[1], 0xd8, `${day}: обложка не JPEG`);
+      assert.ok(jpeg.length <= 200 * 1024, `${day}: обложка ${jpeg.length} Б — Telegram берёт до 200 КБ`);
+      // Размер лежит в первом кадре SOF (0xC0–0xCF, кроме 0xC4/0xC8/0xCC):
+      // два байта высоты, следом два ширины.
+      let at = 2;
+      let size: [number, number] | null = null;
+      while (at < jpeg.length - 9 && !size) {
+        if (jpeg[at] !== 0xff) { at += 1; continue; }
+        const marker = jpeg[at + 1];
+        const length = jpeg.readUInt16BE(at + 2);
+        const isSof = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
+        if (isSof) size = [jpeg.readUInt16BE(at + 7), jpeg.readUInt16BE(at + 5)];
+        at += 2 + length;
+      }
+      assert.ok(size, `${day}: в обложке не нашлось кадра с размерами`);
+      assert.ok(size![0] <= 320 && size![1] <= 320, `${day}: обложка ${size![0]}×${size![1]} — Telegram берёт до 320×320`);
+    }
   }
 
   // День приходит строкой «ГГГГ-ММ-ДД», и пояс разбора не должен её сдвигать.

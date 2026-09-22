@@ -67,12 +67,12 @@ export const onboarding = {
     signInWithPassword: "Sign in with a password",
   },
   channels: {
-    lastStepTitle: "Last step: where you post",
+    lastStepTitle: "Last step: social networks",
     // Две разные вещи, и раньше они стояли в одном списке: где он публикует
     // (галочка даёт таб в черновике) и откуда мы читаем его тексты (ссылка
     // или вставленные посты). Теперь это два блока, и каждый назван тем,
     // на что отвечает, — «мои площадки» не отвечало ни на один из вопросов.
-    postingTitle: "Where you post",
+    postingTitle: "Social networks",
     postingDescription:
       "Tick the networks you post to. Each one gets its own tab in a draft, written to its own length and shape.",
     charLimit: (limit: number) => `up to ${limit} characters`,

@@ -86,8 +86,8 @@ export const onboarding: typeof En = {
     signInWithPassword: "Войти паролем",
   },
   channels: {
-    lastStepTitle: "Последний шаг: где ты публикуешь",
-    postingTitle: "Где ты публикуешь",
+    lastStepTitle: "Последний шаг: соцсети",
+    postingTitle: "Соцсети",
     postingDescription:
       "Отметь свои сети. У каждой отмеченной будет свой таб в черновике: он пишется её длиной и её подачей.",
     charLimit: (limit) => `до ${limit} символов`,
