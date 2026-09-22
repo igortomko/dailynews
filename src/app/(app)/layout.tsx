@@ -18,6 +18,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <I18nProvider locale={locale}>
     <div
+      // Язык интерфейса на подписях, кнопках и подсказках. Текст выпуска
+      // объявляет свой отдельно: интерфейс может быть английским,
+      // а выпуск русским, и одно на оба врало бы половине страницы.
+      lang={locale}
       className="min-h-svh"
       data-brand-colors={brandColorsV2Enabled(reader) ? "v2" : "default"}
     >

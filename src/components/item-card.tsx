@@ -202,6 +202,7 @@ export function ItemCard({
   selected,
   selecting,
   onSelectedChange,
+  textLang,
 }: {
   item: FeedCard;
   showTopic: boolean;
@@ -219,6 +220,12 @@ export function ItemCard({
   /** Идёт ли выбор: пока в выпуске есть хоть одна отметка, чекбоксы видны у всех. */
   selecting: boolean;
   onSelectedChange: (next: boolean) => void;
+  /**
+   * Язык текста выпуска — заголовка и описания, а не подписей вокруг них.
+   * Переносы берутся по нему же: правила переноса у каждого языка свои,
+   * и чужими словами они рвутся не там. Неизвестен — не переносим.
+   */
+  textLang?: string | null;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -623,7 +630,7 @@ export function ItemCard({
   const menuIcon =
     vote === "up" ? <ThumbsUpIcon className="size-4 text-foreground" /> : <EllipsisIcon className="size-4" />;
   const menuButton =
-    "flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
+    "flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
 
   if (vote === "down") {
     return (
@@ -773,7 +780,11 @@ export function ItemCard({
         // собирает, но стиль и раскладка полусотни карточек — заметная доля
         // времени переключения дня. Размер-заготовка — под обычную карточку;
         // после первого показа браузер помнит настоящий.
-        "group border-b py-5 transition-[opacity,background-color] duration-150 last:border-0 [content-visibility:auto] [contain-intrinsic-size:auto_220px]",
+        // py-7, а не py-5: между абзацами внутри карточки 16 пикселей, и при
+        // py-5 соседнюю карточку отделяло 41 — всего вдвое с небольшим больше,
+        // хотя внутри лежит текст на двести слов. Теперь 57, и граница
+        // читается как граница, а не как ещё один абзац.
+        "group border-b py-7 transition-[opacity,background-color] duration-150 last:border-0 [content-visibility:auto] [contain-intrinsic-size:auto_220px]",
         // Долгое нажатие на телефоне не выделяет текст и не зовёт системное
         // меню: у карточки свои действия по тапу.
         "[@media(hover:none)]:select-none [@media(hover:none)]:[-webkit-touch-callout:none]",
@@ -1000,7 +1011,7 @@ export function ItemCard({
                   type="button"
                   aria-label={t.feed.item.audioRateAria}
                   onClick={() => nextRate()}
-                  className="flex h-7 cursor-pointer items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground"
+                  className="flex h-7 cursor-pointer items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-muted-foreground/70 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground"
                 />
               }
             >
@@ -1030,7 +1041,7 @@ export function ItemCard({
                   // Готовность — это не занятость: чёрный треугольник
                   // рядом с серыми соседями читался приоритетом,
                   // которого у озвучки нет.
-                  busy === "working" ? "text-foreground" : "cursor-pointer text-muted-foreground/50",
+                  busy === "working" ? "text-foreground" : "cursor-pointer text-muted-foreground/70",
                 )}
               />
             }
@@ -1056,7 +1067,7 @@ export function ItemCard({
                 className={cn(
                   "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
                   kindle === "idle"
-                    ? "cursor-pointer text-muted-foreground/50"
+                    ? "cursor-pointer text-muted-foreground/70"
                     : "text-foreground",
                 )}
               />
@@ -1089,7 +1100,7 @@ export function ItemCard({
                   }
                   setOpinion(true);
                 }}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
               />
             }
           >
@@ -1115,7 +1126,7 @@ export function ItemCard({
                 }}
                 className={cn(
                   "flex size-7 cursor-pointer items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
-                  vote === "up" ? "text-foreground" : "text-muted-foreground/50",
+                  vote === "up" ? "text-foreground" : "text-muted-foreground/70",
                 )}
               />
             }
@@ -1134,7 +1145,7 @@ export function ItemCard({
                 type="button"
                 aria-label={t.feed.item.downvoteLabel}
                 onClick={hide}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-destructive/10 hover:text-destructive"
               />
             }
           >
@@ -1158,7 +1169,10 @@ export function ItemCard({
               в полный цвет, и заголовок на 70 % уступал собственному
               акценту — карточка начиналась с числа. Сигнал «уже открывал»
               этим снят; возвращать его — не цветом заголовка. */}
-          <h3 className="mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
+          {/* Заголовок не переносится: перенос на крупном кегле читается
+              как опечатка, а строк тут две-три — рвать нечего. Язык всё
+              равно объявлен: по нему говорит скринридер. */}
+          <h3 lang={textLang ?? undefined} className="mt-1.5 text-pretty text-xl font-semibold leading-[1.3] tracking-[-0.011em]">
             <a
               href={item.url}
               target="_blank"
@@ -1170,8 +1184,9 @@ export function ItemCard({
             </a>
           </h3>
 
-          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} /></div> : hasSummary ? (
+          {reading ? <div onClick={() => setExpanded((value) => !value)}><ReadingSummary reading={reading} labels={t.feed.reading} lang={textLang} /></div> : hasSummary ? (
             <p
+              lang={textLang ?? undefined}
               onClick={() => setExpanded((value) => !value)}
               // 16 пикселей, а не 15: описание — единственный сплошной текст
               // в карточке, и на нём экономить кегль незачем. Колонка — 60ch:
@@ -1181,7 +1196,13 @@ export function ItemCard({
               // Цвет текста — полный, а не 80%: описание здесь и есть
               // материал, всё остальное в карточке к нему подпись.
               // Приглушённый основной текст читается как черновик.
-              className="mt-2 max-w-[60ch] cursor-text text-pretty text-base leading-[1.6] text-foreground"
+              // Переносы только при известном языке: правила у каждого свои,
+              // и русскими словами немецкий рвётся не там. Рваность правого
+              // края на колонке в 60 знаков доходила до 20% ширины.
+              className={cn(
+                "mt-2 max-w-[60ch] cursor-text text-pretty text-base leading-[1.6] text-foreground",
+                textLang && "hyphens-auto",
+              )}
             >
               {typography(item.summary ?? "")}
             </p>

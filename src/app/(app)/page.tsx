@@ -7,6 +7,7 @@ import { parseStoredReading } from "@/lib/reading-document";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { langTagFor } from "@/lib/voice";
 import { sourcesForPlan } from "@/lib/plans";
 import { minutesOf } from "@/lib/reading-time";
 import { tabsOf } from "@/lib/networks";
@@ -166,6 +167,11 @@ export default async function FeedPage({
       // «сегодня больше действительно важного нет», и на выпуске недельной
       // давности она рассказывала бы про сегодня, глядя на позавчера.
       reading={{ minutes, target: day === days[0] ? digest.target : null }}
+      // Язык, которым написан текст карточек. Берётся у действующего тарифа,
+      // а не из колонки: без перевода выпуск остаётся на языке источника,
+      // и там тега нет — переносить чужой язык русскими правилами хуже,
+      // чем не переносить вовсе.
+      textLang={langTagFor(effectiveVoice(reader).language)}
       // key на элементах, уезжающих в проп: шапка ленты ставит left и right
       // соседями, а элемент, приехавший сюда через полезную нагрузку сервера,
       // теряет пометку «детей ровно столько, сколько написано». React считает

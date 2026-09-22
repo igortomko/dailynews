@@ -85,7 +85,7 @@ import {
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { DEFAULT_WEIGHTS } from "../src/lib/types";
-import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, styleOf } from "../src/lib/voice";
+import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, langTagFor, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
@@ -548,6 +548,21 @@ assert.ok(
   LANGUAGES.every((entry) => flagOf(entry).length > 0),
   "язык без флажка: словарь разъехался со списком",
 );
+// Тот же разъезд, что и с флажком, но цена выше: язык без тега уходит
+// в разметку без `lang`, а без него скринридер читает его фонемами соседа
+// и переносы идут чужими правилами. Язык источника — единственное
+// исключение, и оно названо: на чём написан материал, заранее не знает никто.
+for (const language of LANGUAGES) {
+  if (language === SOURCE_LANGUAGE) continue;
+  assert.ok(langTagFor(language), `язык без тега разметки: ${language}`);
+}
+assert.equal(
+  langTagFor(SOURCE_LANGUAGE), null,
+  "непереведённому выпуску тег не выдумывается: языка его материалов мы не знаем",
+);
+assert.equal(langTagFor("клингонском"), null, "незнакомый язык — без тега, а не с чужим");
+assert.equal(langTagFor("португальском (бразильский)"), "pt-BR", "язык с регионом сохраняет регион");
+
 assert.equal(complexityAt(9).key, "5", "значение вне шкалы прижимается к краю, а не ломает промпт");
 assert.equal(complexityAt(0).key, "1", "ноль прижимается к первому делению");
 assert.equal(styleOf("выдуманная").key, "нейтральный", "незнакомая манера читается как нейтральная");

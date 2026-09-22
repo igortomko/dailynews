@@ -138,6 +138,7 @@ export function FeedTabs({
   plan,
   networks,
   reading,
+  textLang,
   left,
   right,
 }: {
@@ -163,6 +164,8 @@ export function FeedTabs({
    * по сегодняшней настройке.
    */
   reading: { minutes: number; target: number | null };
+  /** Тег языка текста выпуска, null — если выпуск не переводится. */
+  textLang: string | null;
   left: React.ReactNode;
   right: React.ReactNode;
 }) {
@@ -661,6 +664,7 @@ export function FeedTabs({
               list.map((item, index) => (
                 <Fragment key={`${item.day}-${item.id}`}>
                   <ItemCard
+                    textLang={textLang}
                     item={item}
                     showTopic={tab.slug === "all"}
                     plan={plan}
