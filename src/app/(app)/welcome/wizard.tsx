@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightIcon, CheckIcon, PlusIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ExternalLinkIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -16,6 +16,7 @@ import {
 } from "@/lib/actions";
 import { NameRules } from "@/components/name-rules";
 import { BrandIllustration } from "@/components/brand-illustration";
+import { openUrlOf, SourceIcon } from "@/components/source-icon";
 import type { Names } from "@/lib/rules";
 
 /**
@@ -278,7 +279,7 @@ export function InterestsStep({
               addMine();
             }}
           />
-          <Button type="button" variant="outline" onClick={addMine} disabled={full}>
+          <Button type="button" variant="raised" onClick={addMine} disabled={full}>
             <PlusIcon data-icon="inline-start" />
             {t.onboarding.wizard.interests.add}
           </Button>
@@ -291,8 +292,8 @@ export function InterestsStep({
         {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
             а отдельный экран стал бы решением, которое нельзя пропустить. */}
         <div className="mt-2 flex flex-col gap-6 border-t pt-6">
-          <NameRules kind="follow" initial={follow} optional onChange={setFollow} />
-          <NameRules kind="exclude" initial={exclude} optional onChange={setExclude} />
+          <NameRules kind="follow" initial={follow} optional raised onChange={setFollow} />
+          <NameRules kind="exclude" initial={exclude} optional raised onChange={setExclude} />
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
@@ -401,39 +402,10 @@ export function SourcesStep({
       }
     >
       <div className="flex flex-col gap-1">
-        {list.map((suggestion) => {
-          const on = picked.includes(suggestion.key);
-          return (
-            <button
-              key={suggestion.key}
-              type="button"
-              onClick={() => toggle(suggestion.key)}
-              aria-pressed={on}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                on ? "border-foreground/30 bg-foreground/[0.04]" : "border-transparent hover:bg-muted",
-              )}
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  "flex size-5 shrink-0 items-center justify-center rounded-md border",
-                  on ? "border-foreground/40 bg-foreground/80 text-background" : "border-border",
-                )}
-              >
-                {on ? <CheckIcon className="size-3.5" /> : null}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{suggestion.label}</span>
-                <span className="block truncate text-xs text-muted-foreground">{suggestion.why}</span>
-              </span>
-            </button>
-          );
-        })}
-
-        {/* Поле внизу, под подобранным: сверху то, из чего можно выбрать,
-            а не пустая строка. Тот же порядок, что у интересов. */}
-        <div className="mt-3 flex gap-2">
+        {/* Поле над подобранным, а не под ним: список длиннее экрана, и внизу
+            поле находят, только долистав до конца — то есть уже согласившись
+            с чужим выбором. Своё называют до того, как разбирают чужое. */}
+        <div className="flex gap-2 pb-1">
           <Input
             value={draft}
             aria-label={t.onboarding.wizard.sources.addPlaceholder}
@@ -446,13 +418,67 @@ export function SourcesStep({
               paste();
             }}
           />
-          <Button type="button" variant="outline" onClick={paste} disabled={adding || !draft.trim()}>
+          <Button type="button" variant="raised" onClick={paste} disabled={adding || !draft.trim()}>
             {adding ? <Spinner /> : <PlusIcon data-icon="inline-start" />}
             {adding ? t.onboarding.wizard.sources.checking : t.onboarding.wizard.sources.add}
           </Button>
         </div>
 
-        {note ? <p className="mt-2 text-sm text-muted-foreground">{note}</p> : null}
+        {note ? <p className="pb-1 text-sm text-muted-foreground">{note}</p> : null}
+
+        {list.map((suggestion) => {
+          const on = picked.includes(suggestion.key);
+          return (
+            <div key={suggestion.key} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => toggle(suggestion.key)}
+                aria-pressed={on}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  on ? "border-foreground/30 bg-foreground/[0.04]" : "border-transparent hover:bg-muted",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md border",
+                    on ? "border-foreground/40 bg-foreground/80 text-background" : "border-border",
+                  )}
+                >
+                  {on ? <CheckIcon className="size-3.5" /> : null}
+                </span>
+                {/* Значок тот же, что в настройках: список источников человек
+                    узнаёт по логотипам раньше, чем прочитывает названия. */}
+                <SourceIcon kind={suggestion.kind} url={suggestion.url} className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{suggestion.label}</span>
+                  {/* Вид источника через точку: «rss» и «telegram» — это разные
+                      обещания о том, что придёт, и стоят они одного слова. */}
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {suggestion.kind} · {suggestion.why}
+                  </span>
+                </span>
+              </button>
+              {/* Ссылка отдельной кнопкой, а не внутри переключателя: ссылка
+                  внутри кнопки — это два разных действия в одной цели.
+                  Открывать нечего у почты и у листинга — тогда её нет вовсе. */}
+              {openUrlOf(suggestion) ? (
+                <a
+                  href={openUrlOf(suggestion)!}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  aria-label={suggestion.url}
+                  title={suggestion.url}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <ExternalLinkIcon className="size-4" />
+                </a>
+              ) : null}
+            </div>
+          );
+        })}
+
         {full ? (
           <p className="mt-2 text-sm text-muted-foreground">
             {t.onboarding.wizard.sources.full(t.plans.label[plan.id], plan.maxSources)}

@@ -34,7 +34,7 @@ export const onboarding: typeof En = {
     sources: {
       title: "Откуда читать",
       lead: (topics) =>
-        `Подобрал под ${topics.length > 1 ? "интересы" : "интерес"}: ${topics.join(", ")}. Снимай лишнее, добавляй своё — вставь ссылку внизу.`,
+        `Подобрал под ${topics.length > 1 ? "интересы" : "интерес"}: ${topics.join(", ")}. Снимай лишнее, добавляй своё — вставь ссылку сверху.`,
       full: (planLabel, maxSources) =>
         `Я читаю ${maxSources} источников — это весь тариф «${planLabel}». Сними один, чтобы взять другой.`,
       addPlaceholder: "Ссылка на блог, канал или рассылку",
