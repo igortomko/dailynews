@@ -76,6 +76,9 @@ export async function POST(request: NextRequest) {
     ok: true,
     send_ids: sendIds,
     included: included.length,
+    // Номера материалов, а не только их число: по ним лента зажигает
+    // загрузку на тех самых карточках, которые сейчас озвучиваются.
+    included_ids: included,
     asked: ordered.length,
     // Отказ по части карточек — не ошибка запроса, но и не молчание:
     // читатель отметил пять, а услышит три, и узнать об этом он должен

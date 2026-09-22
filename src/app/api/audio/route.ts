@@ -85,6 +85,28 @@ export async function GET(request: NextRequest) {
   const t = dictOf(reader?.ui_language).errors;
   if (!readerId) return NextResponse.json({ error: t.noSession }, { status: 401 });
 
+  // Пачкой, а не по одной: подкаст из десяти карточек иначе означал бы
+  // десять запросов каждые две секунды ради десяти слов.
+  const many = request.nextUrl.searchParams.get("send_ids");
+  if (many) {
+    const ids = many.split(",").map(Number).filter((id) => Number.isInteger(id) && id > 0);
+    if (ids.length === 0) return NextResponse.json({ error: t.badRequest }, { status: 400 });
+    const rows = await sql<
+      { id: number; item_id: number; status: string; error: string | null }[]
+    >`
+      select id, item_id, status, error from dailynews.audio_sends
+       where id = any(${ids}) and reader_id = ${readerId}
+    `;
+    return NextResponse.json({
+      sends: rows.map((row) => ({
+        id: Number(row.id),
+        item_id: Number(row.item_id),
+        status: row.status,
+        error: row.error,
+      })),
+    });
+  }
+
   const sendId = Number(request.nextUrl.searchParams.get("send_id"));
   if (!Number.isInteger(sendId) || sendId <= 0) {
     return NextResponse.json({ error: t.badRequest }, { status: 400 });

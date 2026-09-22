@@ -118,9 +118,24 @@ function siteOf(url: string): string | null {
  */
 type AudioState = "idle" | "working" | "sent" | "playing";
 
+/**
+ * Шаг озвучки словами. Один список на тост, на тултип и на подкаст:
+ * три копии одних и тех же четырёх слов разъехались бы молча, а читатель
+ * увидел бы «Читаю вслух» в одном месте и «Отправляю» в другом
+ * про одну и ту же работу.
+ */
+export const AUDIO_STEP = (
+  t: ReturnType<typeof useT>,
+): Record<string, string | undefined> => ({
+  queued: t.feed.item.audioQueued,
+  translating: t.feed.item.audioTranslating,
+  speaking: t.feed.item.audioSpeaking,
+  sending: t.feed.item.audioSending,
+});
+
 /** Как часто спрашиваем шаг и сколько всего ждём: пять минут. */
-const AUDIO_POLL_MS = 2000;
-const AUDIO_POLL_TIMES = 150;
+export const AUDIO_POLL_MS = 2000;
+export const AUDIO_POLL_TIMES = 150;
 
 // Размер задан здесь: обёртка `size-3.5` собственный размер значка
 // не уменьшает, а кнопка в панели, в отличие от DropdownMenuItem,
@@ -181,6 +196,7 @@ export function ItemCard({
   item,
   showTopic,
   plan,
+  voicing,
   networks,
   selected,
   selecting,
@@ -189,6 +205,12 @@ export function ItemCard({
   item: FeedCard;
   showTopic: boolean;
   plan: Plan;
+  /**
+   * Шаг озвучки, идущей не от этой кнопки: карточку озвучивает подкаст.
+   * Работа одна и та же, и показать её надо там же, где её и просили бы
+   * поштучно, — иначе кнопка выглядит бездействующей ровно пока работает.
+   */
+  voicing?: string;
   /** Сети, отмеченные в «Моих площадках»: сколько их — столько табов. */
   networks: NetworkId[];
   /** Отмечена ли карточка для обзора. Состояние держит лента, не карточка. */
@@ -213,7 +235,11 @@ export function ItemCard({
   // индекса и честно об этом говорит.
   // Начальное состояние приходит из базы, а не всегда «ещё не отправляли»:
   // отправка идёт минуту, и перезагрузка посреди неё стирала весь след.
-  const [audio, setAudio] = useState<AudioState>("idle");
+  // Готовая озвучка переживает перезагрузку: состояние приходит с сервера,
+  // как у читалки. Без этого кнопка возвращалась в «озвучить», и нажатие
+  // синтезировало заново то, что уже лежит в Telegram.
+  const [audio, setAudio] = useState<AudioState>(item.voiced ? "sent" : "idle");
+  const [step, setStep] = useState<string | null>(null);
   // Живость карточки — ref, а не состояние: цикл опроса читает её между
   // запросами, и перерисовка ему для этого не нужна.
   const aliveRef = useRef(true);
@@ -409,6 +435,9 @@ export function ItemCard({
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
   const canListen = FEATURES.audio.has(plan);
+  // Озвучка подкастом выглядит на кнопке ровно как своя: работа одна.
+  const busy: AudioState = voicing ? "working" : audio;
+  const busyStep = voicing ?? step;
   const audioPaywall = usePaywall("audio", plan);
 
   /**
@@ -453,7 +482,10 @@ export function ItemCard({
     const alive = aliveRef;
     // Без явной длительности sonner погасит тост сам, и прогресс исчезнет
     // на середине работы — ровно так же, как у перестройки выпуска.
-    const toastId = toast.loading(t.feed.item.audioStart, { duration: Infinity });
+    const toastId = toast.loading(t.feed.item.audioStart, {
+      duration: Infinity,
+      icon: <HeadphonesIcon className="size-4" />,
+    });
     try {
       const res = await fetch("/api/audio", {
         method: "POST",
@@ -465,12 +497,7 @@ export function ItemCard({
       // `send_id=undefined` и кончался бы «ещё готовится» на пустом месте.
       if (!body?.send_id) throw new Error(t.feed.item.audioError);
 
-      const WORDS: Record<string, string> = {
-        queued: t.feed.item.audioQueued,
-        translating: t.feed.item.audioTranslating,
-        speaking: t.feed.item.audioSpeaking,
-        sending: t.feed.item.audioSending,
-      };
+      const WORDS = AUDIO_STEP(t);
       // Опрос, а не сокет: одна кнопка на карточку и минуты работы —
       // держать соединение ради четырёх слов дороже, чем спросить раз
       // в две секунды.
@@ -491,8 +518,15 @@ export function ItemCard({
         if (!tick.ok) throw new Error(state?.error ?? t.feed.item.audioError);
         if (state.status === "sent") {
           setAudio("sent");
+          setStep(null);
           toast.success(t.feed.item.audioDoneTitle, {
             id: toastId,
+            duration: 8000,
+            // Тост наследует настройки того, который обновляет: без явной
+            // длительности готовый живёт с `Infinity` от загрузочного
+            // и не гаснет никогда, а закрыть его нечем.
+            closeButton: true,
+            icon: <HeadphonesIcon className="size-4" />,
             description: t.feed.item.audioDoneDescription(
               Math.max(1, Math.round((state.seconds ?? 0) / 60)),
             ),
@@ -502,7 +536,13 @@ export function ItemCard({
         if (state.status === "failed") {
           throw new Error(state.error ?? t.feed.item.audioError);
         }
-        if (WORDS[state.status]) toast.loading(WORDS[state.status], { id: toastId });
+        if (WORDS[state.status]) {
+          setStep(state.status);
+          toast.loading(WORDS[state.status], {
+            id: toastId,
+            icon: <HeadphonesIcon className="size-4" />,
+          });
+        }
       }
       // Пять минут без ответа — это не «ещё чуть-чуть». Молчащий спиннер
       // читается как поломка, и лучше сказать правду: работа идёт, а мы
@@ -510,14 +550,20 @@ export function ItemCard({
       if (!alive.current) return;
       toast.info(t.feed.item.audioSlowTitle, {
         id: toastId,
+        duration: 8000,
+        closeButton: true,
+        icon: <HeadphonesIcon className="size-4" />,
         description: t.feed.item.audioSlowDescription,
       });
       setAudio("idle");
     } catch (error) {
       if (!alive.current) return;
       setAudio("idle");
+      setStep(null);
       toast.error(error instanceof Error ? error.message : t.feed.item.audioError, {
         id: toastId,
+        duration: 8000,
+        closeButton: true,
       });
     }
   };
@@ -835,11 +881,11 @@ export function ItemCard({
                   на телефоне не существует вовсе. Порядок и черта — те же,
                   что в ряду под курсором: два места, один договор. */}
               <DropdownMenuItem
-                disabled={audio === "working"}
-                onClick={audio === "working" ? undefined : speak}
+                disabled={busy === "working"}
+                onClick={busy === "working" ? undefined : speak}
               >
-                {AUDIO_ICON[audio]}
-                {AUDIO_LABEL(t)[audio]}
+                {AUDIO_ICON[busy]}
+                {AUDIO_LABEL(t)[busy]}
                 {canListen ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -931,16 +977,17 @@ export function ItemCard({
             tip={
               !canListen
                 ? t.feed.item.audioTooltipLocked
-                : audio === "idle"
-                  ? t.feed.item.audioTooltipReady
-                  : AUDIO_LABEL(t)[audio]
+                : // Шаг важнее состояния: «Читаю вслух» отвечает на вопрос,
+                  // который задают, глядя на спиннер, а «Озвучиваю…» — нет.
+                  (busyStep ? AUDIO_STEP(t)[busyStep] : undefined) ??
+                  (busy === "idle" ? t.feed.item.audioTooltipReady : AUDIO_LABEL(t)[busy])
             }
             button={
               <button
                 type="button"
                 aria-label={t.feed.item.audioAria}
-                aria-disabled={audio === "working"}
-                onClick={audio === "working" ? undefined : speak}
+                aria-disabled={busy === "working"}
+                onClick={busy === "working" ? undefined : speak}
                 className={cn(
                   "flex size-7 items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",
                   audio === "idle"

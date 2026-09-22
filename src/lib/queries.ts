@@ -57,6 +57,14 @@ export type FeedItem = {
    */
   kindled: boolean;
   /**
+   * Озвучка этой карточки уже готова.
+   *
+   * Приходит с сервера, а не живёт в памяти вкладки: без этого перезагрузка
+   * теряла кнопку «слушать», и нажатие озвучивало заново то, что уже лежит
+   * в Telegram, — второй раз тратя квоту на ту же минуту звука.
+   */
+  voiced: boolean;
+  /**
    * Попадался ли материал на глаза до этого захода. Лента идёт по убыванию
    * скора, а читают её сверху вниз — значит виденное лежит подряд с начала,
    * и граница между ним и остальным отвечает на «докуда я вчера дочитал».
@@ -214,7 +222,9 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
                       and r.event = 'seen') as seen,
            exists (select 1 from dailynews.kindle_sends ks
                     where ks.item_id = i.id and ks.reader_id = ${readerId}
-                      and ks.status in ('queued', 'sent')) as kindled
+                      and ks.status in ('queued', 'sent')) as kindled,
+           exists (select 1 from dailynews.card_audio ca
+                    where ca.digest_id = d.id and ca.item_id = i.id) as voiced
       from dailynews.digests d
       join dailynews.digest_items di on di.digest_id = d.id
       join dailynews.items i on i.id = di.item_id
