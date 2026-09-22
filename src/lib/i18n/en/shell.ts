@@ -7,7 +7,7 @@ export const nav = {
   sources: "Sources",
   interests: "Interests",
   delivery: "Delivery",
-  channels: "My channels",
+  channels: "Post drafts",
   subscription: "Subscription",
   about: "About",
 };
