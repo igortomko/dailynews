@@ -307,10 +307,12 @@ export function DeliveryForm({
 
                 <Field orientation="horizontal">
                   <Switch id="kindle_digest" name="kindle_digest" defaultChecked={kindleDigest} disabled={locked} />
-                  <FieldLabel htmlFor="kindle_digest" className="font-normal">
-                    {k.sendToKindle}
+                  <FieldContent>
+                    <FieldLabel htmlFor="kindle_digest" className="font-normal">
+                      {k.sendToKindle}
+                    </FieldLabel>
                     <FieldDescription>{k.sendToKindleHint}</FieldDescription>
-                  </FieldLabel>
+                  </FieldContent>
                 </Field>
 
                 <div className="flex flex-wrap items-center gap-4">

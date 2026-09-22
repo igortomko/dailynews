@@ -15,7 +15,7 @@ import { documentText, type StoredReading } from "../src/lib/reading-document";
 import { typography } from "../src/lib/typography";
 import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
-import { FEATURES } from "../src/lib/plans";
+import { cheapestFor, FEATURES, type Plan } from "../src/lib/plans";
 import { effectivePlan } from "../src/lib/lemon";
 /** Домен отправителя. Переменная старше константы: она уже есть
  *  в окружении, и константа рядом с ней — настройка, которой никто
@@ -213,12 +213,23 @@ export function articleBlocker(
     kindle_approved: boolean;
     daily_cap_usd: number;
   },
+  /**
+   * Действующий тариф. Проверяется здесь, а не только на кнопке: адрес
+   * читалки переживает понижение тарифа, и без этой строки отправка статьи
+   * продолжала бы стоить цент за нажатие на тарифе, где читалки нет вовсе.
+   * У выпуска книгой такая проверка стоит своя (`kindleDigestVerdict`),
+   * а у отдельной статьи не стояло нигде.
+   */
+  plan: Plan,
   spent: number,
   // Словарь необязателен и по умолчанию русский: эту же проверку зовёт
   // ночной прогон, где спрашивать язык не у кого, — а веб передаёт язык
   // своего читателя и получает отказ на нём.
   t: Dict["errors"] = ru.errors,
 ): string {
+  // Тариф — первым: без него отказ называл бы недостающий адрес, который
+  // на закрытом тарифе и вписать-то негде.
+  if (!FEATURES.delivery.has(plan)) return t.kindleOnPlan(cheapestFor("delivery").label);
   if (!reader.kindle_address) return t.kindleNoAddress;
   if (!reader.kindle_sender) return t.kindleNoSender;
   // Пока отправитель не одобрен у Amazon, письмо уходит и исчезает: код

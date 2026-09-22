@@ -96,13 +96,18 @@ export const feed: typeof En = {
     opinion: "Своё мнение",
     opinionAria: "Своё мнение: готовый пост твоим голосом",
     opinionTooltipReady: "Пост твоим голосом для твоих сетей",
-    opinionTooltipLocked: "Своё мнение — на тарифе «Pro»",
+    // Имя тарифа приходит из `cheapestFor`, а не написано в строке:
+    // читалка уже переезжала с Pro на Plus, и подпись, живущая отдельно
+    // от правила, после такого переезда врёт — в единственном месте,
+    // где читатель спрашивает, сколько это стоит.
+    opinionTooltipLocked: (plan: string) => `Своё мнение — на тарифе «${plan}»`,
     pickNetworksFirst: "Сначала отметь, где ты публикуешь",
     kindleSending: "Отправляю…",
     kindleSent: "Уже на читалке",
     kindleSend: "Отправить на читалку",
     kindleAria: "Отправить на Kindle",
     kindleTooltip: "Отправить статью на читалку",
+    kindleTooltipLocked: (plan: string) => `Читалка — на тарифе «${plan}»`,
     kindleToastTitle: "Статья ушла на Kindle",
     kindleToastDescription: "Придёт примерно через минуту",
     kindleError: "Не отправилось на Kindle — попробуй ещё раз",
@@ -116,7 +121,7 @@ export const feed: typeof En = {
     audioRateAria: "Скорость воспроизведения",
     audioAria: "Озвучить статью",
     audioTooltipReady: "Слушать статью в Telegram",
-    audioTooltipLocked: "Озвучка — на тарифе «Pro»",
+    audioTooltipLocked: (plan: string) => `Озвучка — на тарифе «${plan}»`,
     audioStart: "Готовлю озвучку…",
     audioQueued: "Встала в очередь…",
     audioTranslating: "Перевожу статью…",

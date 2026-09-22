@@ -47,6 +47,7 @@ export const errors = {
 
   // Отправка статьи на читалку: строки собираются в `pipeline/kindle.ts`
   // и показываются тостом в ленте — там же, где и остальные отказы.
+  kindleOnPlan: (plan: string) => `Kindle comes with the ${plan} plan`,
   kindleNoAddress: "Set up Kindle in Delivery first: we need your reader's address",
   kindleNoSender: "That one is on us. Write to the bot on Telegram",
   kindleNotApproved: "Amazon hasn't approved our address yet. Finish the setup in Delivery",

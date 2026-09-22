@@ -38,7 +38,7 @@ import { parseStoredReading } from "@/lib/reading-document";
 import { ReadingSummary, hasDetails } from "@/components/reading-summary";
 import { typography, summaryTime } from "@/lib/typography";
 import { cardChars, DEFAULT_CHARS_PER_MINUTE } from "@/lib/reading-time";
-import { FEATURES, type Plan } from "@/lib/plans";
+import { cheapestFor, FEATURES, type Plan } from "@/lib/plans";
 import { usePaywall } from "@/components/paywall";
 import { useLocale, useT } from "@/components/i18n-provider";
 import { OpinionDialog } from "@/components/opinion-dialog";
@@ -432,6 +432,15 @@ export function ItemCard({
   }, [expanded, item.id]);
 
   const sendToKindle = async () => {
+    // Проверка стоит в самой отправке, а не у каждой кнопки: зовут её
+    // и ряд под курсором, и строка меню, и обе обязаны упираться в одно
+    // и то же. Без неё нажатие уходило на сервер и возвращалось отказом
+    // «сначала настрой Kindle в „Доставке“» — про раздел, который на этом
+    // тарифе тоже закрыт: тупик, объясняющий не ту причину.
+    if (!canKindle) {
+      kindlePaywall.open();
+      return;
+    }
     setKindle("sending");
     try {
       const res = await fetch("/api/kindle", {
@@ -455,6 +464,10 @@ export function ItemCard({
   const canPost = FEATURES.posts.has(plan);
   const paywall = usePaywall("posts", plan);
   const canListen = FEATURES.audio.has(plan);
+  // Читалка — та же `FEATURES.delivery`, по которой открыт раздел
+  // «Доставка» и по которой прогон решает, слать ли выпуск книгой.
+  const canKindle = FEATURES.delivery.has(plan);
+  const kindlePaywall = usePaywall("delivery", plan);
   // Озвучка подкастом выглядит на кнопке ровно как своя: работа одна.
   const busy: AudioState = voicing ? "working" : audio;
   const busyStep = voicing ?? step;
@@ -940,6 +953,7 @@ export function ItemCard({
                   : kindle === "sent"
                     ? t.feed.item.kindleSent
                     : t.feed.item.kindleSend}
+                {canKindle ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
@@ -1032,7 +1046,7 @@ export function ItemCard({
             live={hot}
             tip={
               !canListen
-                ? t.feed.item.audioTooltipLocked
+                ? t.feed.item.audioTooltipLocked(cheapestFor("audio").label)
                 : // Шаг важнее состояния: «Читаю вслух» отвечает на вопрос,
                   // который задают, глядя на спиннер, а «Озвучиваю…» — нет.
                   (busyStep ? AUDIO_STEP(t)[busyStep] : undefined) ??
@@ -1062,7 +1076,11 @@ export function ItemCard({
 
           <Hint
             live={hot}
-            tip={t.feed.item.kindleTooltip}
+            tip={
+              canKindle
+                ? t.feed.item.kindleTooltip
+                : t.feed.item.kindleTooltipLocked(cheapestFor("delivery").label)
+            }
             button={
               <button
                 type="button"
@@ -1091,7 +1109,11 @@ export function ItemCard({
 
           <Hint
             live={hot}
-            tip={canPost ? t.feed.item.opinionTooltipReady : t.feed.item.opinionTooltipLocked}
+            tip={
+              canPost
+                ? t.feed.item.opinionTooltipReady
+                : t.feed.item.opinionTooltipLocked(cheapestFor("posts").label)
+            }
             button={
               <button
                 type="button"
@@ -1321,6 +1343,7 @@ export function ItemCard({
 
       {paywall.dialog}
       {audioPaywall.dialog}
+      {kindlePaywall.dialog}
       {/* Мотатка монтируется только после нажатия: она пишет пост при открытии,
           и держать её на каждой карточке значило бы сорок запросов на ленту. */}
       {opinion ? (
