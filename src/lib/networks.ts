@@ -103,6 +103,16 @@ export const NETWORKS: Record<NetworkId, Network> = {
 export const networkOf = (id: string): Network | null =>
   NETWORKS[id as NetworkId] ?? null;
 
+/**
+ * Сети, отмеченные «публикую здесь».
+ *
+ * Строка площадки без отметки — это адрес, который мы читаем ради голоса,
+ * а не таб в черновике: два разных ответа с тех пор, как снятая галочка
+ * перестала уносить адрес с собой (0058).
+ */
+export const publishedIn = (channels: { network: string; publishes: boolean }[]): string[] =>
+  channels.filter((channel) => channel.publishes).map((channel) => channel.network);
+
 /** Табы в мотатке: сети, которые читатель добавил, в порядке справочника. */
 export const tabsOf = (added: string[]): Network[] =>
   NETWORK_IDS.map((id) => NETWORKS[id]).filter(

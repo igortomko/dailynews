@@ -5,7 +5,7 @@ import { classifyDrop } from "@/lib/drops";
 import { dropSourceFor, saveDrafts } from "@/lib/posts";
 import { asCard, cardFromVoice } from "../../../../pipeline/voice-card";
 import { writePost } from "../../../../pipeline/post";
-import { tabsOf } from "@/lib/networks";
+import { publishedIn, tabsOf } from "@/lib/networks";
 import { sql } from "@/lib/db";
 
 /**
@@ -125,7 +125,7 @@ async function reply(incoming: Incoming): Promise<void> {
   if (!drop) return;
 
   const channels = await getChannels(readerId);
-  const networks = tabsOf(channels.map((channel) => channel.network));
+  const networks = tabsOf(publishedIn(channels));
   if (networks.length === 0) {
     return void (await send(incoming.chatId, "Сначала отметь в настройках, где ты публикуешь."));
   }

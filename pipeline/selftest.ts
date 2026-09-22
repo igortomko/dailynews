@@ -69,7 +69,7 @@ import {
   applyRules, asNames, cleanRules, compile, mentionText, mergeDraft, NO_RULES, RULE_LIMITS, rulesOf,
   splitNames, withVariants,
 } from "../src/lib/rules";
-import { digestHtml, kindleDigestVerdict } from "./kindle";
+import { digestHtml, isWeeklyDay, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { issuesToday } from "../src/lib/plans";
@@ -89,7 +89,8 @@ import {
 import { kindleSenderName, kindleSetupStep } from "../src/lib/kindle-setup";
 import { llmCost } from "./cost";
 import { STING_MP3 } from "./sting";
-import { DEFAULT_WEIGHTS } from "../src/lib/types";
+import { coverFiles, coverFor } from "../src/lib/podcast-cover";
+import { DEFAULT_WEIGHTS, kindlePeriodOf } from "../src/lib/types";
 import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, langTagFor, styleOf } from "../src/lib/voice";
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
@@ -103,7 +104,7 @@ import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./d
 import { tweetLink } from "./fetch";
 import { countOf, explain, parseTelegram } from "./fetch";
 import {
-  NETWORK_IDS, NETWORKS, overLimit, postLength, readableOf, tabsOf,
+  NETWORK_IDS, NETWORKS, overLimit, postLength, publishedIn, readableOf, tabsOf,
 } from "../src/lib/networks";
 import { parseDrafts, unverifiedNumbers } from "./post";
 import { asCard, cardBlock, cardFromVoice, corpusOf, medianViews, parseCard } from "./voice-card";
@@ -1060,14 +1061,53 @@ assert.equal(
 );
 
 // --- выпуск для Kindle ----------------------------------------------------------
-const book = digestHtml("2026-09-19", "интро", [
-  { title: "Заголовок & <тег>", summary: "описание", url: "https://example.com/a", source_label: "И", topic_label: "Т" },
-]);
+const article = (title: string) => ({
+  title, summary: "описание", url: "https://example.com/a", source_label: "И", topic_label: "Т",
+});
+const book = digestHtml([{ day: "2026-09-19", intro: "интро", articles: [article("Заголовок & <тег>")] }]);
 // Без объявленной кодировки Kindle читает кириллицу как мусор,
 // и выпуск приходит целым на вид.
 assert.ok(book.includes('<meta charset="utf-8">'), "кодировка должна быть объявлена");
 assert.ok(book.includes("Заголовок &amp; &lt;тег&gt;"), "разметка из заголовка должна экранироваться");
 assert.ok(!book.includes("<тег>"), "сырой тег из источника не должен попасть в книгу");
+assert.ok(book.includes("<h2>Заголовок"), "в книге одного дня глава — это статья");
+assert.ok(!book.includes("<h3>"), "второго уровня в дневной книге нет: делить нечего");
+
+// Недельная книга: те же выпуски, что пришли бы письмами, в одном файле.
+// День становится главой, статья — разделом внутри неё: оглавление читалки
+// строится по заголовкам, и статья на уровне дня развалила бы семь дней
+// в плоский список из сотни строк.
+const week = digestHtml([
+  { day: "2026-09-16", intro: "вступление среды", articles: [article("Среда")] },
+  { day: "2026-09-22", intro: "вступление вторника", articles: [article("Вторник")] },
+]);
+assert.ok(week.includes("<h1>Reporta, 2026-09-16 — 2026-09-22</h1>"), "заголовок книги — диапазон дат");
+assert.ok(week.includes("<h2>2026-09-16</h2>") && week.includes("<h2>2026-09-22</h2>"), "каждый день — своя глава");
+assert.ok(week.includes("<h3>Среда</h3>"), "статья внутри дня уходит уровнем ниже");
+assert.ok(
+  week.indexOf("вступление среды") < week.indexOf("Среда"),
+  "вступление дня стоит при своём дне, а не вынесено наверх книги",
+);
+assert.ok(
+  week.indexOf("2026-09-16") < week.indexOf("2026-09-22"),
+  "дни идут от старого к новому: книгу читают подряд",
+);
+// Разрыв страницы на обоих уровнях: без него день начинался бы посреди
+// страницы предыдущего, и в читалке это видно только на живом файле.
+assert.ok(week.includes("h2,h3{page-break-before:always}"), "разрыв страницы у дня и у статьи");
+
+// Суббота выбрана днём недельной книги, и считается она в полдень UTC:
+// у полуночи в отрицательном поясе суббота становится пятницей.
+assert.equal(isWeeklyDay("2026-09-19"), true, "19 сентября 2026 — суббота");
+assert.equal(isWeeklyDay("2026-09-20"), false, "воскресенье — не день недельной книги");
+assert.equal(isWeeklyDay("2026-09-22"), false, "вторник — не день недельной книги");
+
+// Незнакомое значение колонки читается как «каждый день»: не слать ничего
+// из-за нечитаемой строки значит подарить читателю неделю тишины.
+assert.equal(kindlePeriodOf("weekly"), "weekly");
+assert.equal(kindlePeriodOf("daily"), "daily");
+assert.equal(kindlePeriodOf(null), "daily", "пустая колонка — это ежедневная доставка");
+assert.equal(kindlePeriodOf("еженедельно"), "daily", "незнакомое значение не выключает доставку");
 
 // --- цена вызова --------------------------------------------------------------
 // Без верной цены событие о расходе — выдумка, а дневной потолок читателя
@@ -1284,10 +1324,12 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // здесь не падает и не видна: выпуск приходит, просто не на то время,
 // которое заказано, — а узнаётся это от читателя через месяц.
 import {
-  CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
-  flowSplit, formatDuration, formatMinutesLong, isShort, itemsForMinutes, minutesOf,
-  savedMinutes, streamMinutes,
+  CARD_CHARS, cardChars, cardMinutes, charsForMinutes, charsPerMinute, fitCards,
+  formatMinutes, flowSplit, formatDuration, formatMinutesLong, isShort, itemsForMinutes,
+  minutesOf, savedMinutes, streamMinutes,
 } from "../src/lib/reading-time";
+import { FEED_DAYS_MAX, FEED_MINUTES, feedHref, feedWindow, windowStart } from "../src/lib/day";
+import { formatDayRange } from "../src/lib/relative-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
 
 const minutesOfChars = (chars: number) => minutesOf(chars, DEFAULT_VOICE);
@@ -1348,7 +1390,12 @@ assert.equal(
 
 // Округление показывается только читателю. «~0 мин» на непустом выпуске
 // выглядит как пустой выпуск — отказ, похожий на успех.
-assert.equal(formatMinutes(0.2, RU_DICT.feed.time), "~1 мин", "меньше минуты не показывается нулём");
+assert.equal(formatMinutes(0.2, RU_DICT.feed.time), "1 мин", "меньше минуты не показывается нулём");
+// Волна снята намеренно: число стоит на кнопке заказа, и «примерно»
+// рядом с меню «10 / 20 / 30 минут» читается как «заказ сработает
+// как-нибудь». В развёрнутых формах она остаётся — там рядом нет ручки.
+assert.doesNotMatch(formatMinutes(21, RU_DICT.feed.time), /~/, "у минут на кнопке заказа волны нет");
+assert.match(formatMinutesLong(21, RU_DICT.feed.time), /~/, "в тексте волна остаётся");
 assert.equal(formatMinutesLong(1, RU_DICT.feed.time), "~1 минута", "единица склоняется");
 assert.equal(formatMinutesLong(3, RU_DICT.feed.time), "~3 минуты", "тройка склоняется");
 assert.equal(formatMinutesLong(11, RU_DICT.feed.time), "~11 минут", "одиннадцать берёт форму множественного");
@@ -1387,6 +1434,120 @@ assert.deepEqual(
   flowSplit(0, 18), { kept: 0, dropped: 0 },
   "пустые сутки: до читателя не дошло ничего, и отброшено тоже ничего",
 );
+
+// --- окно и заказ времени -----------------------------------------------------
+// Читатель просит минуты, а режет их знаками база. Ошибка здесь не падает:
+// лента приходит, просто не того размера, о котором её спросили.
+
+// Заказ в знаки и обратно — одна и та же мерка, иначе «двадцать минут»
+// означало бы разное до запроса и после него.
+assert.equal(
+  minutesOf(charsForMinutes(20, DEFAULT_VOICE), DEFAULT_VOICE), 20,
+  "знаки заказа и минуты показанного считаются одной меркой",
+);
+assert.ok(
+  charsForMinutes(20, { ...DEFAULT_VOICE, language: "японском" }) <
+    charsForMinutes(20, { ...DEFAULT_VOICE, language: "русском" }),
+  "двадцать минут иероглифов — это меньше знаков, чем двадцать минут кириллицы",
+);
+assert.equal(charsForMinutes(-5, DEFAULT_VOICE), 0, "отрицательный заказ — это ноль, а не отрицательные знаки");
+
+// Отсечка окна: спецификация того, что считает оконная сумма в getFeed.
+// Равенство двух формул проверяет npm run verify:db на настоящем Postgres.
+assert.equal(fitCards([], 1000), 0, "пустое окно отсекать нечего");
+assert.equal(fitCards([300, 300, 300], null), 3, "заказ «всё время» не режет ничего");
+assert.equal(
+  fitCards([400, 400, 400, 400], 1000), 3,
+  "берутся подряд, пока сумма стоящих перед карточкой меньше заказа",
+);
+assert.equal(
+  fitCards([5000], 1000), 1,
+  "единственная длинная карточка проходит: пустая лента хуже перебора по времени",
+);
+assert.equal(
+  fitCards([5000, 100], 1000), 1,
+  "перебравшая карточка закрывает окно за собой, а не тянет за собой хвост",
+);
+assert.equal(
+  fitCards([500, 500], 1000), 2,
+  "ровно уложившийся заказ берёт обе: отсечка смотрит на стоящих перед, а не вместе",
+);
+assert.equal(
+  fitCards([250, 250, 250, 250], 10_000), 4,
+  "заказ больше окна не выдумывает карточек, которых нет",
+);
+
+// Дата на сервере и в браузере обязана совпадать до символа. ICU у Node
+// и у Chrome расходятся невидимо: узкий неразрывный пробел перед «г.»
+// ставит только formatRange в Node, и гидрация ленты падала на строке,
+// которую глазом не отличить от верной.
+for (const label of [
+  formatDay("2026-09-22", "ru"),
+  formatDayRange("2026-09-19", "2026-09-22", "ru"),
+  formatDay("2026-09-22", "en"),
+  formatDayRange("2026-09-19", "2026-09-22", "en"),
+]) {
+  assert.doesNotMatch(label, /[\u202f\u2009\u00a0]/, `в дате «${label}» остался пробел ICU`);
+}
+assert.match(formatDayRange("2026-09-19", "2026-09-22", "ru"), /^19.22 сент\.$/,
+  "окно называется одним месяцем, а не двумя датами подряд");
+// Шапка зовёт эту же функцию и на одном дне: две формы записи одной кнопки
+// разъехались бы при первой правке любой из них.
+assert.equal(
+  formatDayRange("2026-09-22", "2026-09-22", "ru"), "22 сент.",
+  "окно в один день — это обычная дата, а не «22–22»",
+);
+assert.equal(formatDayRange("2026-09-22", "2026-09-22", "en"), "Sep 22");
+// Ширина шапки: на телефоне под дату остаётся около семидесяти пикселей,
+// и окно, что длиннее одиночного дня, выдавливает кнопки из её высоты.
+assert.ok(
+  formatDayRange("2026-09-19", "2026-09-22", "ru").length <= formatDay("2026-09-22", "ru").length,
+  "окно в шапке не длиннее одиночного дня",
+);
+// Год не выброшен, а отдан Intl: на границе лет он различает даты,
+// и тогда обязан появиться сам.
+assert.match(
+  formatDayRange("2025-12-30", "2026-01-02", "ru"), /2025.+2026/,
+  "окно через новый год называет оба года",
+);
+
+// Адрес — это и есть режим чтения. Забытый параметр не падает и не светится:
+// «следующий день» просто молча выбрасывает из окна на пять дней.
+assert.equal(feedHref("2026-09-22"), "/?day=2026-09-22", "умолчания в адрес не пишутся");
+assert.equal(
+  feedHref("2026-09-22", 5, 10), "/?day=2026-09-22&days=5&minutes=10",
+  "окно и заказ едут в адрес вместе с днём",
+);
+assert.deepEqual(
+  feedWindow({}), { days: 1, minutes: null },
+  "адрес без параметров — это обычный выпуск целиком",
+);
+assert.deepEqual(
+  feedWindow({ days: "5", minutes: "20" }), { days: 5, minutes: 20 },
+  "окно и заказ читаются из адреса",
+);
+assert.deepEqual(
+  feedWindow({ days: "900", minutes: "7" }), { days: FEED_DAYS_MAX, minutes: null },
+  "окно прижимается неделей, а заказ вне списка — это «всё время», а не одна карточка",
+);
+assert.deepEqual(
+  // Повторённый параметр приезжает массивом: урок поиска, где `trim`
+  // на массиве отдавал 500 вместо выдачи.
+  feedWindow({ days: ["3", "9"], minutes: ["10", "30"] }), { days: 3, minutes: 10 },
+  "повторённый параметр не роняет ленту",
+);
+assert.deepEqual(
+  feedWindow({ days: "2.5" }), { days: 1, minutes: null },
+  "дробное окно — это не окно",
+);
+for (const entry of FEED_MINUTES) {
+  assert.equal(feedWindow({ minutes: String(entry) }).minutes, entry, `заказ ${entry} мин читается из адреса`);
+}
+// Якорь — конец окна, и растёт оно назад: «следующий день» двигает одну
+// границу, а не две.
+assert.equal(windowStart("2026-09-22", 1), "2026-09-22", "окно в один день начинается собой");
+assert.equal(windowStart("2026-09-22", 5), "2026-09-18", "пять дней — это якорь и четыре перед ним");
+assert.equal(windowStart("2026-03-02", 5), "2026-02-26", "окно переходит через границу месяца");
 
 // «Лента сэкономила тебе час» — это разница между просмотром всего потока
 // и заказанным выпуском. Замер на живом потоке: 89 новостей за сутки —
@@ -1793,37 +1954,73 @@ for (const file of ["0019_plan", "0020_readers"]) {
 {
   const full = {
     kindle_address: "a@kindle.com", kindle_sender: "igor_x1", kindle_digest: true,
+    kindle_period: "daily", kindle_weekly_at: null,
     plan: "pro", subscription_id: "sub_1", subscription_status: "active", plan_ends_at: null,
   };
-  const ok = kindleDigestVerdict(full);
+  // Вторник: у ежедневной доставки день ничего не решает, у недельной решает всё.
+  const TUE = "2026-09-22";
+  const SAT = "2026-09-19";
+  const ok = kindleDigestVerdict(full, TUE);
   assert.equal(ok.send, true, "адрес, отправитель и переключатель — шлём");
   assert.equal(ok.send && ok.to, "a@kindle.com", "вердикт несёт адрес, уже сужённый");
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_digest: false }),
+    kindleDigestVerdict({ ...full, kindle_digest: false }, TUE),
     { send: false, reason: "switched-off" },
     "выключенный переключатель отменяет выпуск, хотя адрес на месте",
   );
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_address: null }),
+    kindleDigestVerdict({ ...full, kindle_address: null }, TUE),
     { send: false, reason: "no-address" },
     "без адреса слать некуда, и говорить об этом не о чем",
   );
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, kindle_sender: null }),
+    kindleDigestVerdict({ ...full, kindle_sender: null }, TUE),
     { send: false, reason: "no-sender" },
     "вписанный адрес без обратного — сбой, о нём сообщают в лог",
   );
   // Переключатель мог остаться включённым с прежнего тарифа, а письмо —
   // это чужой лимит у Amazon и счёт у Resend.
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, plan: "free" }),
+    kindleDigestVerdict({ ...full, plan: "free" }, TUE),
     { send: false, reason: "plan" },
     "на тарифе без читалки выпуск книгой не уходит",
   );
   assert.deepEqual(
-    kindleDigestVerdict({ ...full, subscription_status: "expired", plan_ends_at: null }),
+    kindleDigestVerdict({ ...full, subscription_status: "expired", plan_ends_at: null }, TUE),
     { send: false, reason: "plan" },
     "истёкшая подписка перестаёт слать на читалку в ту же секунду",
+  );
+
+  // Недельная: шесть дней из семи прогон не шлёт ничего и молчит об этом,
+  // в субботу шлёт книгу за неделю.
+  const weekly = { ...full, kindle_period: "weekly" };
+  assert.deepEqual(
+    kindleDigestVerdict(weekly, TUE),
+    { send: false, reason: "weekly-other-day" },
+    "в будний день недельная книга не уходит",
+  );
+  const sat = kindleDigestVerdict(weekly, SAT);
+  assert.equal(sat.send && sat.period, "weekly", "в субботу уходит именно недельная");
+  // Прогон запускают дважды за сутки, а Amazon считает объём по адресу
+  // отправителя и гасит его без предупреждения читателю.
+  assert.deepEqual(
+    kindleDigestVerdict({ ...weekly, kindle_weekly_at: SAT }, SAT),
+    { send: false, reason: "weekly-sent" },
+    "вторая книга за те же сутки не уходит",
+  );
+  assert.equal(
+    kindleDigestVerdict({ ...weekly, kindle_weekly_at: "2026-09-12" }, SAT).send,
+    true,
+    "отметка прошлой субботы этой не мешает",
+  );
+  // Ежедневная от дня не зависит: она приходит и в субботу тоже.
+  assert.equal(kindleDigestVerdict(full, SAT).send, true, "дневная книга уходит и в субботу");
+  // Незнакомое значение колонки — это «каждый день»: не слать ничего
+  // из-за нечитаемой строки хуже, чем прислать привычное.
+  assert.equal(
+    kindleDigestVerdict({ ...full, kindle_period: "раз в месяц" }, TUE).send,
+    true,
+    "незнакомая периодичность не выключает доставку",
   );
 }
 
@@ -2633,6 +2830,16 @@ assert.deepEqual(
 );
 assert.deepEqual(readableOf(["linkedin", "threads"]).map((n) => n.id), [],
   "из LinkedIn и Threads читать нечего: они наружу не отдают ничего");
+// Площадка без отметки — это адрес, который мы читаем, а не таб в черновике.
+// Пока это был один ответ, снятая галочка удаляла канал вместе с голосом.
+assert.deepEqual(
+  tabsOf(publishedIn([
+    { network: "telegram", publishes: false },
+    { network: "x", publishes: true },
+  ])).map((network) => network.id),
+  ["x"],
+  "таб рисуется у сети, с которой снята отметка «публикую здесь»",
+);
 
 // Выдуманное число под его именем — самая дорогая ошибка этой возможности,
 // и запрет в промпте на неё протекает (проверено живым прогоном).
@@ -3154,17 +3361,18 @@ const feedPage = feedSource.slice(feedSource.indexOf("<FeedTabs"));
 // Переименовали компонент — проверка обязана упасть, а не замолчать на пустом
 // срезе: тест, ничего не нашедший, зелёный ровно так же, как тест успешный.
 assert.ok(feedPage.startsWith("<FeedTabs"), "ленту рисует FeedTabs");
-for (const prop of ["left", "right"]) {
-  const at = feedPage.indexOf(`${prop}={`);
-  assert.ok(at >= 0, `${prop} должен передаваться в FeedTabs`);
+{
+  const at = feedPage.indexOf("left={");
+  assert.ok(at >= 0, "left должен передаваться в FeedTabs");
   const tag = feedPage.slice(at).match(/<[A-Za-z][^>]*/)?.[0] ?? "";
-  assert.match(tag, /\skey=/, `${prop} уезжает соседом и обязан нести key`);
+  assert.match(tag, /\skey=/, "left уезжает соседом и обязан нести key");
 }
-// А требование key держится на том, что каждый стоит не один. Соседями
-// они быть перестали, когда между ними встал поиск: left соседствует
-// со временем выпуска, right — с кнопкой поиска. Останется который-нибудь
-// из них единственным ребёнком — проверка выше станет суеверием,
-// и упасть она должна здесь.
+// А требование key держится на том, что left стоит не один: рядом с ним
+// в той же строке кнопка заказа времени. Правая половина шапки пропом
+// больше не приходит — тема, поиск и настройки собираются в самой шапке,
+// потому что на телефоне прячутся под одну кнопку, а о ширине экрана
+// серверная страница не знает ничего. Останется left единственным
+// ребёнком — проверка выше станет суеверием, и упасть она должна здесь.
 const tabsSource = readFileSync("src/components/feed-tabs.tsx", "utf8");
 const rowFrom = tabsSource.indexOf("{left}");
 const rowTo = tabsSource.indexOf("</header>");
@@ -3172,12 +3380,25 @@ const rowTo = tabsSource.indexOf("</header>");
 // хвост файла — проверка осталась бы зелёной, не посмотрев на шапку вовсе.
 assert.ok(rowFrom >= 0 && rowTo > rowFrom, "шапку ленты рисует feed-tabs");
 const headerRow = tabsSource.slice(rowFrom, rowTo);
-assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left стоит рядом с кнопками");
-assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
+assert.match(headerRow, /\{left\}[\s\S]*<MinutesSelect/, "left стоит соседом кнопки заказа");
+assert.match(headerRow, /<SearchButton[\s\S]*<ThemeToggle[\s\S]*\/settings\//, "на широком экране поиск, тема и настройки стоят подряд");
+// На телефоне те же три — под одной кнопкой: три иконки подряд отнимали
+// у строки треть ширины, и дате не оставалось места даже на «22 сент.».
+assert.match(headerRow, /<FeedMenu[^>]*sm:hidden/, "на телефоне действия шапки прячутся под «⋯»");
+assert.match(headerRow, /hidden items-center gap-2 sm:flex/, "а на широком экране меню не показывается");
 assert.match(
   headerRow,
-  /formatMinutes\(reading\.minutes[^)]*\)/,
-  "время выпуска стоит рядом с его датой: это два факта об одном выпуске",
+  /<MinutesSelect[^>]*shown=\{reading\.minutes\}/,
+  "время стоит рядом с датой и оно же — ручка заказа: два факта об одном выпуске",
+);
+// Заказ работает и на одном дне тоже: одно нажатие не может означать
+// разное в двух местах одного экрана (урок nudgeTopic). Спрятать ручку
+// на телефоне значит выключить её там, где сценарий «пропустил три дня»
+// и живёт.
+assert.doesNotMatch(
+  headerRow.slice(headerRow.indexOf("<MinutesSelect"), headerRow.indexOf("<MinutesSelect") + 200),
+  /hidden\s+[^>]*sm:inline/,
+  "выбор времени виден и на телефоне",
 );
 
 
@@ -4180,6 +4401,50 @@ for (const [name, table] of [
     // Длина берётся из байтов, а не числом рядом: 48 кбит/с — это ровно
     // 6000 байт в секунде, и деление обязано быть целым.
     assert.ok(STING_MP3.length % 6 === 0, "длина не делится на кадр — файл обрезан");
+  }
+
+  // Обложки выпуска голосом: Telegram принимает JPEG не больше 200 КБ
+  // и не больше 320 по стороне. Нарушение отваливает не картинку, а всё
+  // сообщение — поэтому размеры читаются из самих файлов, а не записаны
+  // числом рядом с ними: добавят иллюстрацию — проверка посмотрит и на неё.
+  {
+    const files = coverFiles();
+    assert.ok(files.length >= 20, `обложек ${files.length} — папка не собралась`);
+    for (const file of files) {
+      assert.ok(file.endsWith(".jpg"), `${file} — обложка обязана быть JPEG`);
+    }
+    // Круг по дням: соседние дни дают разные обложки, а один и тот же день —
+    // одну и ту же. Случайная картинка делала бы переотправленный выпуск
+    // другим, а одинаковая — не отличала бы вчерашний подкаст от сегодняшнего.
+    const first = coverFor("2026-01-01");
+    assert.ok(first, "на день не нашлось обложки");
+    assert.ok(first!.equals(coverFor("2026-01-01")!), "один день — две разные обложки");
+    assert.ok(!first!.equals(coverFor("2026-01-02")!), "соседние дни получили одну обложку");
+    // Полный круг возвращается к началу: остаток считается по числу файлов.
+    assert.ok(
+      first!.equals(coverFor(new Date(Date.parse("2026-01-01T12:00:00Z") + files.length * 86_400_000).toISOString().slice(0, 10))!),
+      "круг по дням не замкнулся на числе обложек",
+    );
+    for (const day of ["2026-01-01", "2026-06-15", "2026-12-31"]) {
+      const jpeg = coverFor(day)!;
+      assert.equal(jpeg[0], 0xff, `${day}: обложка начинается не с маркера JPEG`);
+      assert.equal(jpeg[1], 0xd8, `${day}: обложка не JPEG`);
+      assert.ok(jpeg.length <= 200 * 1024, `${day}: обложка ${jpeg.length} Б — Telegram берёт до 200 КБ`);
+      // Размер лежит в первом кадре SOF (0xC0–0xCF, кроме 0xC4/0xC8/0xCC):
+      // два байта высоты, следом два ширины.
+      let at = 2;
+      let size: [number, number] | null = null;
+      while (at < jpeg.length - 9 && !size) {
+        if (jpeg[at] !== 0xff) { at += 1; continue; }
+        const marker = jpeg[at + 1];
+        const length = jpeg.readUInt16BE(at + 2);
+        const isSof = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
+        if (isSof) size = [jpeg.readUInt16BE(at + 7), jpeg.readUInt16BE(at + 5)];
+        at += 2 + length;
+      }
+      assert.ok(size, `${day}: в обложке не нашлось кадра с размерами`);
+      assert.ok(size![0] <= 320 && size![1] <= 320, `${day}: обложка ${size![0]}×${size![1]} — Telegram берёт до 320×320`);
+    }
   }
 
   // День приходит строкой «ГГГГ-ММ-ДД», и пояс разбора не должен её сдвигать.

@@ -72,12 +72,8 @@ Ordinary curiosity needs no task. Do not invent medical or investment advice fro
 Evidence is null when the body already conveys source type and limits. Otherwise 1 short useful method/credibility note, no 'Основание' label.
 For narrative/argument/investigation preserve the development and relationships in 4–6 short paragraphs where useful.
 Keep one or two meaningful details; no invented feelings/dialogues/motives or universally applicable advice from an anecdote.
-<<<<<<< HEAD
-Prefer 1–3 body blocks, allowing up to 6 for a complex article. Do not split every sentence into a separate block. Length: TARGET 80–130 words for ordinary articles; HARD MAXIMUM 170 words including title and evidence. Narrative/argument/investigation TARGET 150–200 words, HARD MAXIMUM 240.
+Prefer 1–3 body blocks, allowing up to 6 for a complex article. Do not split every sentence into a separate block. Length: TARGET 80–130 words for ordinary articles; HARD MAXIMUM 170 words. Narrative/argument/investigation TARGET 150–200 words, HARD MAXIMUM 240. The count includes EVERYTHING the reader sees: title, answer, lead, every block including the values, labels and context of an accent, evidence and application. A 35–60-word answer leaves about 100 words for all the rest of an ordinary card; budget the body accordingly instead of writing it in full and trusting a trim.
 When the article is itself a roundup of many unrelated stories, do not retell all of them: name what actually changed in the one or two that matter to this reader, and say in one clause that the source covers more. A card that lists eight subjects teaches none of them.
-=======
-Prefer 1–4 body blocks, allowing up to 8 for a complex article. Do not split every sentence into a separate block. Length: TARGET 80–140 words for ordinary articles; HARD MAXIMUM 220 words. Narrative/argument/investigation TARGET 170–250 words, HARD MAXIMUM 320. The count includes EVERYTHING the reader sees: title, answer, lead, every block including the values, labels and context of an accent, evidence and application. A 35–60-word answer leaves about 150 words for all the rest of an ordinary card; budget the body accordingly instead of writing it in full and trusting a trim.
->>>>>>> origin/main
 Summarize developments from the whole article, not every detail. Use omitted for secondary details rather than cramming them all into the text.
 Do not include biographies, long product/algorithm names, affiliations, tool commands, hyperparameters or every minor result unless explicitly relevant to this reader.
 A researcher reading to reproduce a method needs different details than a product founder interested in its implications.

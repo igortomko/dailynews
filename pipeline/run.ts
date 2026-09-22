@@ -30,7 +30,7 @@ import {
 import { feed as ruFeed } from "../src/lib/i18n/ru/feed";
 import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
 import { botMayUpsell, upgradeNote, upgradeReason } from "../src/lib/upgrade";
-import { getUpgradeFacts } from "../src/lib/queries";
+import { getUpgradeFacts, weekIssues } from "../src/lib/queries";
 import { SEARCH_CONFIG, tsConfigFor } from "../src/lib/search";
 import { sleepVerdict } from "../src/lib/sleep";
 import { jevVersionNote } from "../src/lib/jev-version";
@@ -630,37 +630,69 @@ async function deliver(
     }
   }
 
-  const kindle = kindleDigestVerdict(reader);
+  const kindle = kindleDigestVerdict(reader, day);
   if (!kindle.send) {
-    // Пустой адрес — читатель не просил, говорить не о чем. Остальные две
-    // причины он должен увидеть: одна сбой, другая его собственный выбор.
+    // Пустой адрес — читатель не просил, говорить не о чем. Остальные
+    // причины он должен увидеть: одни сбой, другие его собственный выбор.
+    // «Не суббота» молчит: это шесть дней из семи, и строка о ней в логе
+    // означала бы, что каждый прогон отчитывается о том, чего не делал.
     if (kindle.reason === "no-sender") {
       log(`  ${name}: Kindle — обратный адрес не выдан, отправка пропущена`);
     } else if (kindle.reason === "switched-off") {
       log(`  ${name}: Kindle — выпуск выключен в настройках`);
+    } else if (kindle.reason === "weekly-sent") {
+      log(`  ${name}: Kindle — недельная книга за ${day} уже уходила`);
     }
     return;
   }
   try {
-    const sent = await sendToKindle({
-      to: kindle.to,
-      sender: kindle.sender,
-      day,
-      intro,
-      articles: survivors.map((s) => ({
-        title: titleOf(s),
-        summary: writtenById.get(String(s.id))?.summary ?? s.excerpt,
-        reading: writtenById.get(String(s.id))?.reading,
-        url: s.url,
-        source_label: s.source_label,
-        topic_label: s.topic_label,
-      })),
-    });
-    log(sent ? `  ${name}: Kindle отправлен` : `  ${name}: RESEND_API_KEY не задан — Kindle пропущен`);
+    // Дневная книга собирается из того, что только что написано, недельная
+    // — из базы: шесть предыдущих выпусков уже лежат там, и сегодняшний
+    // тоже (digest_items записаны до доставки). Второй путь чтения
+    // сегодняшнего выпуска разошёлся бы с первым ровно в тот день, когда
+    // это никто не проверит.
+    const issues =
+      kindle.period === "weekly"
+        ? await weekIssues(reader.id, day)
+        : [{
+            day,
+            intro,
+            articles: survivors.map((s) => ({
+              title: titleOf(s),
+              summary: writtenById.get(String(s.id))?.summary ?? s.excerpt,
+              reading: writtenById.get(String(s.id))?.reading,
+              url: s.url,
+              source_label: s.source_label,
+              topic_label: s.topic_label,
+            })),
+          }];
+
+    if (issues.length === 0) {
+      // Неделя без единого выпуска — это пауза, отпуск или сбой прогона,
+      // и пустая книга в библиотеке читалки выглядела бы ответом «новостей
+      // не было».
+      log(`  ${name}: Kindle — за неделю до ${day} выпусков нет, книга не отправлена`);
+      return;
+    }
+
+    const sent = await sendToKindle({ to: kindle.to, sender: kindle.sender, issues });
+    if (sent && kindle.period === "weekly") {
+      // Отметка по факту отправки, а не по факту сборки: упавшее письмо
+      // не должно запирать книгу на неделю.
+      await sql`
+        update dailynews.readers set kindle_weekly_at = ${day}::date where id = ${reader.id}
+      `;
+    }
+    const what =
+      kindle.period === "weekly"
+        ? `Kindle: книга за неделю, ${issues.length} выпуска(ов)`
+        : "Kindle отправлен";
+    log(sent ? `  ${name}: ${what}` : `  ${name}: RESEND_API_KEY не задан — Kindle пропущен`);
   } catch (error) {
     log(`  ${name}: Kindle — ${(error as Error).message}`);
   }
 }
+
 
 /**
  * Спросить про вчерашние отправки на читалку: дочитал или не пошло.

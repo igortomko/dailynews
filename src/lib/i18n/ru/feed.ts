@@ -18,12 +18,22 @@ export const feed: typeof En = {
       collectNow: "Собрать прямо сейчас:",
     },
     settingsHint: "Настройки: интересы, источники, доставка",
+    moreActions: "Поиск, тема, настройки",
   },
 
   dateNav: {
     previous: "Предыдущий выпуск",
     next: "Следующий выпуск",
     pickDate: "Выбрать дату",
+  },
+
+  minutes: {
+    label: "Сколько есть времени",
+    option: (n: number) => `${n} минут`,
+    all: "Всё время",
+    cut: (n: number) =>
+      `Ещё ${count(n, "карточка не влезла", "карточки не влезли", "карточек не влезло")} во время —`,
+    cutLink: "показать всё",
   },
 
   tabs: {
@@ -255,7 +265,7 @@ export const feed: typeof En = {
     minutesAgo: (n: number) => `${n}м`,
     hoursAgo: (n: number) => `${n}ч`,
     daysAgo: (n: number) => `${n}д`,
-    readingMinutes: (n: number) => `~${n} мин`,
+    readingMinutes: (n: number) => `${n} мин`,
     minutesLong: (n: number): string => `~${n} ${plural(n, "минута", "минуты", "минут")}`,
     // Экономия за сутки переваливает за час почти всегда (86 и 120 минут
     // на живом потоке), и «~86 минут» читатель делит в уме сам. Волна та же,

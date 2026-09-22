@@ -32,6 +32,7 @@ const COLUMNS = sql`
   id::int as id, telegram_id::text as telegram_id, username, owner,
   reader_context, reading_v2_enabled, digest_minutes, weights, language, ui_language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved, podcast,
+  kindle_period, kindle_weekly_at::text as kindle_weekly_at,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
   paused_at, sleep_asked_at, resume_at, upsell_at,
@@ -516,7 +517,7 @@ export async function lastActivityAt(readerId: number): Promise<string | null> {
  */
 export async function getChannels(readerId: number): Promise<ReaderChannel[]> {
   return sql<ReaderChannel[]>`
-    select network, handle, input_url, label, created_at
+    select network, handle, input_url, label, publishes, created_at
       from dailynews.reader_channels
      where reader_id = ${readerId}
      order by created_at, network
@@ -542,6 +543,36 @@ export async function saveChannel(
       set handle    = coalesce(excluded.handle, dailynews.reader_channels.handle),
           input_url = coalesce(excluded.input_url, dailynews.reader_channels.input_url),
           label     = coalesce(excluded.label, dailynews.reader_channels.label)
+  `;
+}
+
+/**
+ * Отметить или снять «публикую здесь». Адрес при этом не трогается —
+ * ради этого и заведена колонка: снятая галочка уносила канал с собой.
+ */
+export async function setChannelPublishes(
+  readerId: number,
+  network: string,
+  publishes: boolean,
+): Promise<void> {
+  await sql`
+    insert into dailynews.reader_channels (reader_id, network, publishes)
+    values (${readerId}, ${network}, ${publishes})
+    on conflict (reader_id, network) do update set publishes = excluded.publishes
+  `;
+}
+
+/**
+ * Забыть адрес, оставив саму площадку.
+ *
+ * `coalesce` в `saveChannel` бережёт прежний адрес от галочки, поэтому
+ * стереть его тем же запросом нельзя — нужен свой.
+ */
+export async function clearChannelAddress(readerId: number, network: string): Promise<void> {
+  await sql`
+    update dailynews.reader_channels
+       set handle = null, input_url = null, label = null
+     where reader_id = ${readerId} and network = ${network}
   `;
 }
 

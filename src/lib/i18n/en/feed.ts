@@ -17,6 +17,8 @@ export const feed = {
       collectNow: "Collect right now:",
     },
     settingsHint: "Settings: interests, sources, delivery",
+    // The one button that holds search, theme and settings on a phone.
+    moreActions: "Search, theme, settings",
   },
 
   /** src/components/date-nav.tsx */
@@ -24,6 +26,17 @@ export const feed = {
     previous: "Previous digest",
     next: "Next digest",
     pickDate: "Pick a date",
+  },
+
+  /** src/components/minutes-select.tsx */
+  minutes: {
+    label: "How much time you have",
+    option: (n: number) => `${n} minutes`,
+    all: "All of it",
+    // Named, not swept under the rug: showing six cards out of forty in
+    // silence passes a slice of the digest off as the digest.
+    cut: (n: number) => `${n} more ${n === 1 ? "card" : "cards"} didn't fit the time —`,
+    cutLink: "show everything",
   },
 
   /** src/components/feed-tabs.tsx */
@@ -256,7 +269,7 @@ export const feed = {
     minutesAgo: (n: number) => `${n}m`,
     hoursAgo: (n: number) => `${n}h`,
     daysAgo: (n: number) => `${n}d`,
-    readingMinutes: (n: number) => `~${n} min`,
+    readingMinutes: (n: number) => `${n} min`,
     // Дальше недели — дата. Форматтер свой у каждого языка: месяц называется
     // словом, и «сент.» рядом с английским текстом читается как опечатка,
     // а не как перевод, которого не хватило.

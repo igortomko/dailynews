@@ -1,8 +1,10 @@
 import "server-only";
 import { sql } from "./db";
 import { anyOf, HL_END, HL_OPTIONS, HL_START, SEARCH_CONFIG } from "./search";
-import { isDay } from "./day";
+import { FEED_DAYS_MAX, isDay } from "./day";
 import { stripHtml } from "../../pipeline/fetch";
+import { WEEK_DAYS, type Issue } from "../../pipeline/kindle";
+import { parseStoredReading } from "./reading-document";
 import type { SourceYield } from "./source-health";
 import type { Axes, Source } from "./types";
 import type { Publication } from "./story";
@@ -197,12 +199,52 @@ export async function getDigestDays(readerId: number): Promise<string[]> {
  * список, а потом ленту: два круга до базы вместо одного на каждом показе.
  * Страница сверяет день с тем же списком уже после и за день, за который
  * выпуска нет, спрашивает ещё раз.
+ *
+ * `days` — окно, растущее назад от этого дня: пропустил три дня, выбрал
+ * их в календаре и получил одну ленту вместо трёх. Повторов между днями
+ * быть не может — отбор исключает уже уходившее по сюжету
+ * (`coalesce(dup_of, id)` в `pipeline/select.ts`), а не по материалу.
+ *
+ * `maxChars` — заказ времени, переведённый в знаки (`charsForMinutes`).
+ * Режется в самом запросе оконной суммой, а не фильтром в браузере: пять
+ * дней по сорок карточек — это впятеро больший HTML ровно у того, кто
+ * просил десять минут. `cut` — сколько карточек осталось за отсечкой:
+ * молча показать шесть из сорока значит выдать часть выпуска за выпуск.
+ *
+ * `chars` — длина показанного, той же меркой, какой считает отсечку сам
+ * запрос. Складывать её потом в браузере значило бы завести вторую формулу
+ * одного числа: у карточки без перевода заголовок в базе пуст, и «время
+ * показанного» разошлось бы с тем, по чему резали.
  */
-export async function getFeed(readerId: number, day: string | null): Promise<FeedItem[]> {
+export async function getFeed(
+  readerId: number,
+  day: string | null,
+  { days = 1, maxChars = null }: { days?: number; maxChars?: number | null } = {},
+): Promise<{ items: FeedItem[]; cut: number; chars: number }> {
   // Проверка повторяется здесь, а не только у вызывающего: параметр назван
   // как в адресе, и однажды сюда придёт сырой — в каст к date он уйти не должен.
   const safeDay = isDay(day) ? day : null;
-  const rows = await sql<(FeedItem & { rule_body: string | null })[]>`
+  // Прижимается здесь, а не только у адреса: запрос зовут ещё книга Kindle
+  // и проверки, и окно в тысячу дней стоило бы страницы, а не ошибки.
+  const span = Number.isInteger(days) ? Math.min(FEED_DAYS_MAX, Math.max(1, days)) : 1;
+  const limit = typeof maxChars === "number" && maxChars > 0 ? Math.round(maxChars) : null;
+  const rows = await sql<
+    (FeedItem & {
+      rule_body: string | null;
+      card_chars: number;
+      before_chars: string | null;
+      window_cards: string;
+    })[]
+  >`
+    -- Якорь считается один раз: подставленный в два условия подзапрос
+    -- за максимальным днём выполнялся бы дважды на каждый показ ленты.
+    with anchor as (
+      select coalesce(
+        ${safeDay}::date,
+        (select max(x.day) from dailynews.digests x where x.reader_id = ${readerId})
+      ) as day
+    ),
+    cards as (
     select i.id, i.url, i.title, i.excerpt, di.title as title_ru, di.summary, di.summary_document, i.image_url,
            case when exists(select 1 from dailynews.readers r
              where r.id=${readerId} and jsonb_array_length(r.exclude_rules)>0)
@@ -224,25 +266,29 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
                     where ks.item_id = i.id and ks.reader_id = ${readerId}
                       and ks.status in ('queued', 'sent')) as kindled,
            exists (select 1 from dailynews.card_audio ca
-                    where ca.digest_id = d.id and ca.item_id = i.id) as voiced
+                    where ca.digest_id = d.id and ca.item_id = i.id) as voiced,
+           -- Ровно та же сумма, что в digestProgress и в cardChars:
+           -- заголовок и описание, без разделителя. Разойдись они — заказ
+           -- считался бы одним числом, а показанное время другим.
+           (char_length(coalesce(di.title, '')) + char_length(coalesce(di.summary, ''))) as card_chars
       from dailynews.digests d
       join dailynews.digest_items di on di.digest_id = d.id
       join dailynews.items i on i.id = di.item_id
       join dailynews.scores sc on sc.item_id = i.id
       join dailynews.sources s on s.id = i.source_id
  left join dailynews.topics t on t.id = sc.topic_id
-     -- Один день, а не окно: лента листается датами, и смешивать выпуски
-     -- значит показывать вчерашнее как сегодняшнее.
+     cross join anchor a
+     -- Окно, а не равенство дню: якорь плюс длина назад. Смешивать выпуски
+     -- можно ровно потому, что день назван на самой карточке, — без подписи
+     -- вчерашнее читалось бы как сегодняшнее.
      --
      -- Каст обязателен: у нетипизированного параметра Postgres выбирает
-     -- date - date -> integer вместо date - integer -> date. Null — последний
-     -- выпуск этого читателя; сам день проверен до запроса (isDay), иначе
-     -- «2026-02-31» из чужой ссылки ронял бы запрос вместо ленты.
+     -- date - date -> integer вместо date - integer -> date. Null вместо дня —
+     -- последний выпуск этого читателя; сам день проверен до запроса (isDay),
+     -- иначе «2026-02-31» из чужой ссылки ронял бы запрос вместо ленты.
      where d.reader_id = ${readerId}
-       and d.day = coalesce(
-         ${safeDay}::date,
-         (select max(x.day) from dailynews.digests x where x.reader_id = ${readerId})
-       )
+       and d.day <= a.day
+       and d.day > a.day - ${span}::int
        -- Скрытое рукой не возвращается: иначе палец вниз означал бы
        -- «скрыть до перезагрузки страницы».
        and not exists (
@@ -255,7 +301,29 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
        -- их уже не считают, и лента не должна быть единственным местом,
        -- где они видны.
        and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
-     order by di.total desc
+    )
+    -- Оконная сумма стоящих ПЕРЕД карточкой, а не вместе с ней: первая
+    -- проходит всегда (перед ней ноль), и выпуск с одной длинной карточкой
+    -- не оборачивается пустой лентой. Та же спецификация — fitCards,
+    -- и их равенство проверяет npm run verify:db.
+    --
+    -- i.id вторым в порядке: при равном скоре порядок окна и порядок
+    -- выдачи обязаны совпадать, иначе отсечка режет не тот хвост.
+    -- window_cards считается внутри подзапроса, а не снаружи: WHERE
+    -- отрабатывает раньше оконных функций своего уровня, и счёт, взятый
+    -- рядом с отсечкой, посчитал бы ровно то, что после неё осталось.
+    select *
+      from (
+        select *,
+               count(*) over () as window_cards,
+               sum(card_chars) over (
+                 order by total desc, id
+                 rows between unbounded preceding and 1 preceding
+               ) as before_chars
+          from cards
+      ) counted
+     where ${limit}::int is null or coalesce(before_chars, 0) < ${limit}::int
+     order by total desc, id
   `;
 
   // Драйвер разбирает jsonb сам, но не во всех формах запроса отдаёт
@@ -269,13 +337,24 @@ export async function getFeed(readerId: number, day: string | null): Promise<Fee
   // в запросе: каст сузил бы bigint до int4 и однажды уронил бы всю ленту
   // целиком, а глобальная подмена типа в драйвере уже ломала запись
   // («to: 20 шлёт int8 в колонки int»).
-  return rows.map(({ rule_body, ...row }) => ({
+  // Служебные колонки снимаются с карточки здесь: длина и оконная сумма
+  // нужны были запросу, а в браузер ехать им незачем.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- снимаются с карточки, а не читаются
+  const items = rows.map(({ rule_body, card_chars, before_chars, window_cards, ...row }) => ({
     ...row,
     excerpt: [row.excerpt, rule_body ? stripHtml(rule_body) : null].filter(Boolean).join("\n"),
     id: Number(row.id),
     source_id: Number(row.source_id),
     axes: typeof row.axes === "string" ? JSON.parse(row.axes) : row.axes,
   }));
+  // Счёт окна приезжает из bigint строкой, как и id. Пустое окно — ноль
+  // отрезанных, а не NaN: строка над лентой считается из этого числа.
+  const inWindow = rows.length > 0 ? Number(rows[0].window_cards) : 0;
+  return {
+    items,
+    cut: Math.max(0, inWindow - items.length),
+    chars: rows.reduce((sum, row) => sum + Number(row.card_chars), 0),
+  };
 }
 
 /**
@@ -731,3 +810,64 @@ export async function archiveSize(readerId: number): Promise<{ items: number; da
   return row ?? { items: 0, days: 0 };
 }
 
+/**
+ * Выпуски недели для книги: семь дней по сегодняшний включительно.
+ *
+ * Читателем первым аргументом, как всякий запрос о содержимом: без него
+ * книга придёт вовремя, целой и с чужими выпусками. Дни — от старого
+ * к новому, карточки внутри дня — в порядке отбора, тем же `total desc`,
+ * что и в ленте: книга обязана совпадать с тем, что читатель видел.
+ *
+ * Скрытое пальцем вниз в книгу не едет: «убрать из ленты» не может означать
+ * «убрать с одного экрана из двух». Заглушки несобравшихся карточек — тоже,
+ * по той же причине, по которой их не показывает лента.
+ */
+export async function weekIssues(readerId: number, endDay: string): Promise<Issue[]> {
+  const rows = await sql<{
+    day: string;
+    intro: string;
+    title: string;
+    summary: string;
+    summary_document: unknown;
+    url: string;
+    source_label: string;
+    topic_label: string;
+  }[]>`
+    select d.day::text as day, d.intro,
+           di.title, di.summary, di.summary_document,
+           i.url, s.label as source_label,
+           coalesce(t.label, '') as topic_label
+      from dailynews.digests d
+      join dailynews.digest_items di on di.digest_id = d.id
+      join dailynews.items i on i.id = di.item_id
+      join dailynews.sources s on s.id = i.source_id
+ left join dailynews.scores sc on sc.item_id = i.id
+ left join dailynews.topics t on t.id = sc.topic_id
+     -- Каст обязателен: у нетипизированного параметра Postgres выбирает
+     -- date - date -> integer вместо date - integer -> date.
+     where d.reader_id = ${readerId}
+       and d.day <= ${endDay}::date
+       and d.day > ${endDay}::date - ${WEEK_DAYS}::int
+       and coalesce(di.summary_document->>'status', 'verified') <> 'unavailable'
+       and not exists (
+         select 1 from dailynews.reads r
+          where r.item_id = i.id and r.reader_id = ${readerId} and r.event = 'down'
+       )
+     order by d.day asc, di.total desc
+  `;
+
+  const byDay = new Map<string, Issue>();
+  for (const row of rows) {
+    const issue = byDay.get(row.day) ?? { day: row.day, intro: row.intro, articles: [] };
+    issue.articles.push({
+      title: row.title,
+      summary: row.summary,
+      reading: parseStoredReading(row.summary_document) ?? undefined,
+      url: row.url,
+      source_label: row.source_label,
+      topic_label: row.topic_label,
+    });
+    byDay.set(row.day, issue);
+  }
+  return [...byDay.values()];
+}

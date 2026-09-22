@@ -15,17 +15,17 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, deleteChannel, digestProgress, freezeKindleSender, getChannels,
-  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules,
+  addReaderSource, clearChannelAddress, deleteChannel, digestProgress, freezeKindleSender, getChannels,
+  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelPublishes,
   saveVoiceCard, saveVoiceSample, spentToday, upsertTopic,
 } from "./readers";
 import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { asCard, buildVoiceCard, cardFromVoice, readOwnPosts } from "../../pipeline/voice-card";
 import { writePost } from "../../pipeline/post";
-import { NETWORK_IDS, tabsOf, type NetworkId } from "./networks";
+import { NETWORK_IDS, networkOf, publishedIn, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
-import type { Reader, Source } from "./types";
+import { KINDLE_PERIODS, type KindlePeriod, type Reader, type Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestFor, cheapestWith, FEATURES, kindDenial, MIN_READING_MINUTES, minutesCap,
@@ -392,6 +392,37 @@ export async function saveKindleDigest(digest: boolean) {
   // Без `revalidatePath`, как и у подкаста: тумблер управляемый и уже стоит
   // в новом положении, а перерисовка рождала бы соседний с новым начальным
   // значением.
+  return { ok: true as const };
+}
+
+/**
+ * Как часто выпуск уходит книгой: каждое утро или в субботу за неделю.
+ *
+ * Своим действием, а не полем при тумблере: переключатель уже сохраняется
+ * сам, и «частота, которая ждёт кнопку» рядом с «тумблером, который
+ * не ждёт», читалась бы как забытое сохранение.
+ *
+ * Незнакомое значение отвергается здесь, а не поправляется молча:
+ * ограничение в базе всё равно его не пустит, а упасть на своей проверке
+ * понятнее, чем на чужой. Предел тарифа проверяет `denyBySection` — ровно
+ * тот же, что у самого тумблера: закрытая доставка не должна настраиваться
+ * в обход формы.
+ */
+export async function saveKindlePeriod(period: string) {
+  const denied = await denyBySection("delivery");
+  if (denied) return denied;
+
+  if (!KINDLE_PERIODS.includes(period as KindlePeriod)) {
+    return { error: "неизвестная периодичность" };
+  }
+
+  const readerId = await currentReaderId();
+
+  await sql`
+    update dailynews.readers
+       set kindle_period = ${period}, updated_at = now()
+     where id = ${readerId}
+  `;
   return { ok: true as const };
 }
 
@@ -995,14 +1026,42 @@ export async function addChannel(input: string): Promise<{ ok: true; network: Ne
   return { ok: true as const, network, label: found.found.label };
 }
 
-/** Отметить сеть, куда он публикует. Адрес при этом не трогается. */
+/**
+ * Отметить сеть, куда он публикует. Адрес при этом не трогается.
+ *
+ * Раньше снятая галочка удаляла строку целиком, а с ней и разобранный
+ * адрес канала: 22 сентября 2026 владелец снял и вернул галочку Telegram,
+ * разглядывая экран, и `@publicigor` исчез молча — перечитать голос стало
+ * нечем. Теперь галочка гасит только таб (0058).
+ */
 export async function toggleChannel(network: string, on: boolean) {
   const denied = await denyBySection("posts");
   if (denied) return denied;
   const readerId = await currentReaderId();
   if (!NETWORK_IDS.includes(network as NetworkId)) return { error: (await getDict()).errors.unknownNetwork };
 
-  if (on) await saveChannel(readerId, network);
+  await setChannelPublishes(readerId, network, on);
+  revalidatePath("/settings/channels");
+  return { ok: true as const };
+}
+
+/**
+ * Перестать читать площадку.
+ *
+ * Своё действие, а не побочный эффект галочки: «не публикую в Telegram»
+ * и «не читайте мой Telegram» — разные ответы, и кнопка стоит там же,
+ * где показан адрес. У сетей без таба (блог) забытый адрес не оставляет
+ * от строки ничего — её и удаляем, иначе в базе осталась бы площадка,
+ * которой нет ни в одном списке.
+ */
+export async function forgetChannel(network: string) {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+  const known = networkOf(network);
+  if (!known) return { error: (await getDict()).errors.unknownNetwork };
+
+  if (known.tab) await clearChannelAddress(readerId, network);
   else await deleteChannel(readerId, network);
   revalidatePath("/settings/channels");
   return { ok: true as const };
@@ -1095,7 +1154,7 @@ export async function writeOpinion(itemId: number): Promise<
   if (!item) return { error: (await getDict()).errors.itemNotYours };
 
   const channels = await getChannels(reader.id);
-  const networks = tabsOf(channels.map((channel) => channel.network));
+  const networks = tabsOf(publishedIn(channels));
   if (networks.length === 0) {
     return { error: (await getDict()).errors.noChannelsYet };
   }

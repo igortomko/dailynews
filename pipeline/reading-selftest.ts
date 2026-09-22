@@ -80,7 +80,7 @@ assert.ok(validateQuotes(quotation, 'Accuracy improved.').length > 0, 'invented 
 assert.ok(documentText(quotation).includes('“No effect on accuracy”\n— Author'));
 const sixSteps = { ...valid, blocks: [{ kind: 'list', numbering: 'facts', items: Array.from({length:6}, (_,i)=>evidence(`Step ${i+1}`, 's1-b')) }] };
 assert.ok(documentSchema.safeParse(sixSteps).success, 'preserve all six steps rather than merging the source sequence');
-const kindle = digestHtml('2026-09-21','',[{ title:'<unsafe>',summary:'First\n\nSecond',url:'https://example.com/?a="x"',source_label:'Source',topic_label:'Topic' }]);
+const kindle = digestHtml([{ day:'2026-09-21', intro:'', articles:[{ title:'<unsafe>',summary:'First\n\nSecond',url:'https://example.com/?a="x"',source_label:'Source',topic_label:'Topic' }] }]);
 assert.ok(kindle.includes('&lt;unsafe&gt;'));
 assert.ok(kindle.includes('<p>First</p>') && kindle.includes('<p>Second</p>'));
 assert.ok(kindle.includes('&quot;'));

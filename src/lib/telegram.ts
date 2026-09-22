@@ -10,6 +10,7 @@ import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 import { plans as ruPlans } from "@/lib/i18n/ru/plans";
 import type { Plan } from "@/lib/plans";
 import { upgradeLines, type UpgradeNote } from "@/lib/upgrade";
+import { coverToday } from "./podcast-cover";
 
 /**
  * Бот здесь делает две вещи: заводит читателя по /start и присылает ему
@@ -308,6 +309,10 @@ export async function sendRichMessage(
   } = {},
 ): Promise<void> {
   const { button, audio } = options;
+  // Обложка берётся один раз: её наличие решает и поле в разметке медиа,
+  // и файл в форме. Разойдись они — `attach://` указывал бы в пустоту,
+  // и Telegram отверг бы не картинку, а всё сообщение.
+  const cover = audio ? coverToday() : null;
   const rich: Record<string, unknown> = { html, skip_entity_detection: true };
   if (audio) {
     rich.media = [{
@@ -315,6 +320,10 @@ export async function sendRichMessage(
       media: {
         type: "audio",
         media: `attach://${audio.id}`,
+        // Без обложки плеер Telegram рисует серую ноту во весь экран —
+        // первое, что видит открывший подкаст. Она уезжает тем же
+        // multipart, вторым файлом.
+        ...(cover ? { thumbnail: `attach://${COVER_FIELD}` } : {}),
         duration: Math.round(audio.seconds),
         title: audio.title.slice(0, 120),
         performer: "Reporta",
@@ -345,6 +354,7 @@ export async function sendRichMessage(
     new Blob([new Uint8Array(audio.audio)], { type: "audio/mpeg" }),
     `${slugOf(audio.title)}.mp3`,
   );
+  if (cover) appendCover(form, cover);
   const res = await fetch(`${apiBase(token)}/sendRichMessage`, {
     method: "POST",
     body: form,
@@ -404,6 +414,9 @@ export async function sendAudio(
   if (meta.duration) fields.duration = String(Math.round(meta.duration));
 
   if (typeof audio === "string") {
+    // Обложки здесь нет намеренно: `thumbnail` переживает заливку вместе
+    // с файлом, а повторно её не прикрепить — Telegram принимает её только
+    // загруженной, и при пересылке по `file_id` прикладывать нечего.
     // Пересылка готового — обычный вызов, и делает его общий `call`:
     // токен, адрес и разбор отказа живут там в одном экземпляре.
     const result = await call<{ message_id: number; audio?: { file_id: string } }>(
@@ -422,6 +435,11 @@ export async function sendAudio(
     new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }),
     `${slugOf(meta.title)}.mp3`,
   );
+  const cover = coverToday();
+  if (cover) {
+    form.append("thumbnail", `attach://${COVER_FIELD}`);
+    appendCover(form, cover);
+  }
   const res = await fetch(`${apiBase(token)}/sendAudio`, {
     method: "POST",
     body: form,
@@ -484,6 +502,23 @@ export async function audioUrl(fileId: string): Promise<string> {
 }
 
 /** Имя файла для Telegram: кириллицу он принимает, а служебные знаки — нет. */
+/**
+ * Обложка в multipart-форму под своим именем.
+ *
+ * Имя одно на оба метода: на него ссылается `attach://` внутри JSON,
+ * и разъехавшись, ссылка указала бы в пустоту — Telegram отвечает отказом
+ * на всё сообщение, а не на картинку.
+ */
+const COVER_FIELD = "cover";
+
+const appendCover = (form: FormData, cover: Buffer): void => {
+  form.append(
+    COVER_FIELD,
+    new Blob([new Uint8Array(cover)], { type: "image/jpeg" }),
+    "reporta.jpg",
+  );
+};
+
 const slugOf = (title: string) =>
   title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 60) || "audio";
 

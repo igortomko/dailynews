@@ -9,7 +9,7 @@ export const nav: typeof Nav = {
   sources: "Источники",
   interests: "Интересы",
   delivery: "Доставка",
-  channels: "Мои площадки",
+  channels: "Черновики постов",
   subscription: "Подписка",
   about: "О проекте",
 };

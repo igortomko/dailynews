@@ -19,12 +19,17 @@ import { OverviewDialog, SelectionBar } from "@/components/overview";
 import { useLocale, useT } from "@/components/i18n-provider";
 import { blockOf, reconcile, type Overview } from "@/lib/overview";
 import { formatDay } from "@/lib/relative-time";
+import { feedHref } from "@/lib/day";
 import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { UpgradeNote } from "@/lib/upgrade";
 import { UpgradeLine } from "@/components/upgrade-note";
-import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
+import { isShort, shortfallNote } from "@/lib/reading-time";
+import { MinutesSelect } from "@/components/minutes-select";
+import { FeedMenu } from "@/components/feed-menu";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { SettingsIcon } from "lucide-react";
 import type { NetworkId } from "@/lib/networks";
 
 /**
@@ -136,6 +141,8 @@ type Picked = { day: string; ids: number[]; draft: Overview | null };
 
 export function FeedTabs({
   day,
+  days,
+  minutes,
   topics,
   items,
   hidden,
@@ -145,10 +152,17 @@ export function FeedTabs({
   upgrade,
   textLang,
   left,
-  right,
 }: {
-  /** День выпуска: к нему привязаны выбор карточек и черновик обзора. */
+  /** Якорь окна: к нему привязаны выбор карточек и черновик обзора. */
   day: string;
+  /**
+   * Длина окна в днях. Больше единицы — на экране несколько выпусков сразу,
+   * и тогда каждая карточка называет свой день: без подписи вчерашнее
+   * читалось бы как сегодняшнее.
+   */
+  days: number;
+  /** Заказанные минуты или null — «всё время». Уходит в адрес вместе с окном. */
+  minutes: number | null;
   topics: ReaderTopic[];
   items: FeedCard[];
   /**
@@ -168,7 +182,7 @@ export function FeedTabs({
    * которые его не сохранили: о недоборе тогда молчим, а не считаем его
    * по сегодняшней настройке.
    */
-  reading: { minutes: number; target: number | null };
+  reading: { minutes: number; target: number | null; cut: number };
   /**
    * Предел, в который читатель упёрся сегодня, или null. Считает сервер
    * (`upgradeReason`) — тем же правилом, каким про тариф говорит бот.
@@ -176,8 +190,16 @@ export function FeedTabs({
   upgrade: UpgradeNote | null;
   /** Тег языка текста выпуска, null — если выпуск не переводится. */
   textLang: string | null;
+  /**
+   * Стрелки дат и календарь. Пропом, а не своим импортом: списком дней
+   * с выпусками владеет страница, и клиенту его отдаёт она.
+   *
+   * Правая половина шапки пропом больше не приходит: тема, поиск
+   * и настройки ничего серверного не знают, а на телефоне они прячутся
+   * под одну кнопку — развилка по ширине не может жить в серверном
+   * компоненте, который о ширине не знает ничего.
+   */
   left: React.ReactNode;
-  right: React.ReactNode;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -515,12 +537,12 @@ export function FeedTabs({
           >
               <div className="col-start-1 row-start-2 flex min-w-0 items-center gap-2 [&>div]:gap-0 sm:[&>div]:gap-2 lg:row-start-1">
                 {left}
-                {/* Время выпуска — рядом с его датой: это две вещи об одном
-                    и том же выпуске. Число карточек осталось на вкладках,
-                    где оно и отвечает на свой вопрос — «сколько в этой теме». */}
-                <span className="hidden shrink-0 text-sm text-muted-foreground tabular-nums sm:inline">
-                  {formatMinutes(reading.minutes, t.feed.time)}
-                </span>
+                {/* Время — рядом с датой: это две вещи об одном и том же.
+                    И это же ручка: «сколько это читать» и «сколько у меня
+                    есть» спрашивают в одном месте. Число карточек осталось
+                    на вкладках, где отвечает на свой вопрос — «сколько
+                    в этой теме». */}
+                <MinutesSelect day={day} days={days} minutes={minutes} shown={reading.minutes} />
               </div>
               <Link
                 href="/"
@@ -537,8 +559,38 @@ export function FeedTabs({
                   до прошлого выпуска. Стрелками к соседнему, календарём
                   к дальнему, поиском — когда помнишь слово, а не дату. */}
               <div className="col-start-2 row-start-2 flex items-center justify-self-end gap-2 lg:col-start-3 lg:row-start-1">
-                <SearchButton ref={trigger} onOpen={() => setSearching(true)} />
-                {right}
+                {/* На телефоне три кнопки подряд отнимали у строки около ста
+                    двадцати пикселей из трёхсот семидесяти пяти, и дате
+                    не оставалось места даже на «22 сент.». Из трёх нажимают
+                    по одной за раз, поэтому там они под «⋯», а на широком
+                    экране стоят как стояли: лишнее нажатие ради того,
+                    что и так видно, — плата без покупки. */}
+                <div className="hidden items-center gap-2 sm:flex">
+                  <SearchButton ref={trigger} onOpen={() => setSearching(true)} />
+                  <ThemeToggle className="size-10 sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4" />
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          nativeButton={false}
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t.nav.settings}
+                          className="size-10 text-muted-foreground/50 transition-colors hover:text-foreground focus-visible:text-foreground sm:size-8 [&_svg]:size-5 sm:[&_svg]:size-4"
+                          // Настройки подгружаются заранее, пока читают ленту:
+                          // страница динамическая, и без этого каждое нажатие
+                          // на шестерёнку ждало бы сервер. Раскладка и первый
+                          // раздел — это один запрос о читателе, дёшево.
+                          render={<Link href="/settings/personalization" prefetch={true} />}
+                        />
+                      }
+                    >
+                      <SettingsIcon />
+                    </TooltipTrigger>
+                    <TooltipContent>{t.feed.page.settingsHint}</TooltipContent>
+                  </Tooltip>
+                </div>
+                <FeedMenu className="sm:hidden" onSearch={() => setSearching(true)} />
               </div>
           </div>
           {/* Ширина ряда — по колонке текста, как на странице результатов:
@@ -576,7 +628,14 @@ export function FeedTabs({
             полоса прижимается к левому краю и прокручивается.
             justify-center здесь не годится: при переполнении он прячет
             левый край так, что до него не докрутить. */}
-        <div className="flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
+        {/* overflow-y-hidden обязателен рядом с overflow-x-auto, и это
+            не перестраховка: по спеке `visible` по одной оси рядом
+            с `auto` по другой вычисляется в `auto`, то есть полоса вкладок
+            получала вертикальную прокрутку, которой у неё нет содержимого.
+            На iOS это значит, что полосу можно оттянуть пальцем вверх —
+            вкладки уезжали под строку даты и срезались наполовину,
+            а вернуть их можно было только тем же жестом обратно. */}
+        <div className="flex overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
           {/* Штатный вариант line: подчёркивание в два пикселя через ::after.
               Самодельные рамки здесь не годились — состояние называется
               data-active, и перекрытия по data-[state=active] не совпадали,
@@ -638,6 +697,19 @@ export function FeedTabs({
         {reading.target !== null && isShort(reading.minutes, reading.target) ? (
           <p className="mb-3 text-sm text-muted-foreground">
             {shortfallNote(reading.minutes, reading.target, t.feed.time)}.
+          </p>
+        ) : null}
+        {/* Отрезанное заказом названо так же, как скрытое правилами: молча
+            показать шесть карточек из сорока — значит выдать часть выпуска
+            за выпуск. Выход стоит тут же: «Всё» снимает предел, не уводя
+            со страницы. */}
+        {reading.cut > 0 ? (
+          <p className="mb-3 text-sm text-muted-foreground">
+            {t.feed.minutes.cut(reading.cut)}{" "}
+            <Link href={feedHref(day, days, null)} className="underline underline-offset-4">
+              {t.feed.minutes.cutLink}
+            </Link>
+            .
           </p>
         ) : null}
         {/* Скрытое исключениями названо, а не заметено: правило работает
@@ -711,6 +783,7 @@ export function FeedTabs({
                   <ItemCard
                     textLang={textLang}
                     item={item}
+                    showDay={days > 1}
                     showTopic={tab.slug === "all"}
                     plan={plan}
                     networks={networks}
