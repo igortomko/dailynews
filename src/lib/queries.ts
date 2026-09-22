@@ -462,16 +462,27 @@ export async function getCalibration(readerId: number): Promise<{
  * (`sourcesForPlan`), поэтому список источников передаётся снаружи: счёт
  * по всему каталогу завысил бы число у всякого, кто не на Pro, — и подпись
  * «у твоих источников» стала бы неправдой.
+ *
+ * Знаки идут вторым числом того же запроса, а не вторым кругом до базы:
+ * из них считается, сколько заняло бы просмотреть весь поток, а значит
+ * и сколько времени лента сняла. Сумма та же, что у карточки выпуска
+ * (`cardChars`), — заголовок и анонс, всё, что читатель прошёл бы глазами
+ * в своей читалке.
  */
-export async function getCollectedLast24h(sourceIds: number[]): Promise<number> {
-  if (sourceIds.length === 0) return 0;
-  const [row] = await sql<{ n: number }[]>`
-    select count(*)::int as n
+export async function getCollectedLast24h(
+  sourceIds: number[],
+): Promise<{ count: number; chars: number }> {
+  if (sourceIds.length === 0) return { count: 0, chars: 0 };
+  const [row] = await sql<{ n: number; chars: number }[]>`
+    select count(*)::int as n,
+           coalesce(sum(
+             char_length(coalesce(title, '')) + char_length(coalesce(excerpt, ''))
+           ), 0)::int as chars
       from dailynews.items
      where collected_at >= now() - interval '24 hours'
        and source_id = any(${sourceIds}::bigint[])
   `;
-  return row?.n ?? 0;
+  return { count: row?.n ?? 0, chars: row?.chars ?? 0 };
 }
 
 /**

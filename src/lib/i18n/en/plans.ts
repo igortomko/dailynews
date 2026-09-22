@@ -149,8 +149,9 @@ export const plans = {
     // Число приходит уже со своим словом («89 stories»): по-русски оно
     // стоит после глагола, по-английски — в начале, и склейка на стороне
     // страницы держала бы один порядок на оба языка.
-    flowLead: (collected: string, kept: string, minutes: string): string =>
-      `${collected} came in from your sources over the last day. The feed reads all of them and keeps ~${kept} — your ${minutes}.`,
+    flowSaved: (saved: string): string => `The feed saved you ${saved} over the last day.`,
+    flowBasis: (collected: string, stream: string, minutes: string): string =>
+      `${collected} came in from your sources — skimming it all is ${stream}. Your digest is ${minutes}.`,
     // Пустые сутки — не ноль в той же фразе: «came in 0 stories, keeps ~18»
     // обещает выпуск из того, чего нет.
     flowLeadEmpty: (kept: string, minutes: string): string =>

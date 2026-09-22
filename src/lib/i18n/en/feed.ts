@@ -229,6 +229,10 @@ export const feed = {
     // словом, и «сент.» рядом с английским текстом читается как опечатка,
     // а не как перевод, которого не хватило.
     minutesLong: (n: number): string => `~${n} ${n === 1 ? "minute" : "minutes"}`,
+    hoursLong: (h: number, m: number): string =>
+      m > 0
+        ? `~${h} ${h === 1 ? "hour" : "hours"} ${m} ${m === 1 ? "minute" : "minutes"}`
+        : `~${h} ${h === 1 ? "hour" : "hours"}`,
     shortfall: (have: string, target: number): string =>
       `${have} of ${target}: there is nothing more that really matters today`,
     monthDay: (date: Date): string => MONTH.format(date),

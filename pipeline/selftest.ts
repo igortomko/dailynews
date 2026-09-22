@@ -1255,7 +1255,8 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // которое заказано, — а узнаётся это от читателя через месяц.
 import {
   CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
-  flowSplit, formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+  flowSplit, formatDuration, formatMinutesLong, isShort, itemsForMinutes, minutesOf,
+  savedMinutes, streamMinutes,
 } from "../src/lib/reading-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
 
@@ -1356,6 +1357,37 @@ assert.deepEqual(
   flowSplit(0, 18), { kept: 0, dropped: 0 },
   "пустые сутки: до читателя не дошло ничего, и отброшено тоже ничего",
 );
+
+// «Лента сэкономила тебе час» — это разница между просмотром всего потока
+// и заказанным выпуском. Замер на живом потоке: 89 новостей за сутки —
+// 90 590 знаков, то есть около полутора часов у читалки.
+assert.equal(
+  Math.round(streamMinutes(90_590)), 86,
+  "сутки потока меряются скоростью исходного языка: поток лежит на нём",
+);
+assert.equal(
+  Math.round(savedMinutes(90_590, 10)), 76,
+  "сэкономлено — это просмотр всего потока минус заказанный выпуск",
+);
+// Тихий день: вышло меньше, чем заказано. Отрицательная экономия — это
+// не «лента отняла время», а число, которое нельзя показывать.
+assert.equal(
+  savedMinutes(3_000, 20), 0,
+  "поток короче заказа — экономии нет, и она не уходит в минус",
+);
+assert.equal(
+  savedMinutes(0, 10), 0,
+  "пустые сутки не экономят ничего",
+);
+
+// Час называется часом: экономия переваливает за шестьдесят почти каждый
+// день, и «~86 минут» читатель делит в уме ровно в той строке, ради которой
+// всё считалось.
+const timeRu = RU_DICT.feed.time;
+assert.equal(formatDuration(45, timeRu), "~45 минут", "до часа — минутами");
+assert.equal(formatDuration(86, timeRu), "~1 час 26 минут", "за часом — часами и минутами");
+assert.equal(formatDuration(120, timeRu), "~2 часа", "ровный час не тянет за собой «0 минут»");
+assert.equal(formatDuration(0.4, timeRu), "~1 минута", "меньше минуты не показывается нулём");
 
 // --- тарифы -----------------------------------------------------------------
 // Предел тарифа проверяется в двух местах — в форме и в прогоне, — и разойтись

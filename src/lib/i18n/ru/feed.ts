@@ -218,6 +218,13 @@ export const feed: typeof En = {
     daysAgo: (n: number) => `${n}д`,
     readingMinutes: (n: number) => `~${n} мин`,
     minutesLong: (n: number): string => `~${n} ${plural(n, "минута", "минуты", "минут")}`,
+    // Экономия за сутки переваливает за час почти всегда (86 и 120 минут
+    // на живом потоке), и «~86 минут» читатель делит в уме сам. Волна та же,
+    // что у минут: число считается нашей меркой скорости, а не замерено.
+    hoursLong: (h: number, m: number): string =>
+      m > 0
+        ? `~${h} ${plural(h, "час", "часа", "часов")} ${m} ${plural(m, "минута", "минуты", "минут")}`
+        : `~${h} ${plural(h, "час", "часа", "часов")}`,
     shortfall: (have: string, target: number): string =>
       `${have} из ${target}: сегодня больше действительно важного нет`,
     monthDay: (date: Date): string => MONTH.format(date),
