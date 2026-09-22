@@ -25,6 +25,7 @@
  * неотличим от заброшенного.
  */
 import type { Source } from "./types";
+import { toSlug } from "./slug";
 
 export type StarterFeed = { kind: Source["kind"]; url: string; label: string };
 
@@ -350,6 +351,13 @@ export const starterBySlug = new Map(STARTER_TOPICS.map((topic) => [topic.slug, 
  * сервер отбросит. Проверяется в `npm test`.
  */
 export const catalogSlug = (slug: string): boolean => starterBySlug.has(slug);
+
+/**
+ * Своя ли тема по имени, набранному руками: имя, сводящееся к каталожному
+ * слагу («AI-инфра» → `ai-infra`), — уже не своя. Слаг из имени выводится
+ * тем же `toSlug`, что и на сервере при записи.
+ */
+export const ownLabel = (label: string): boolean => !catalogSlug(toSlug(label));
 
 /**
  * Порядок показа: сначала то, что уже выбрано соседями по выбору, потом

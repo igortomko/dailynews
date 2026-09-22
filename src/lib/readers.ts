@@ -53,15 +53,19 @@ export async function allReaders(): Promise<Reader[]> {
 }
 
 export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> {
+  // «Взял ли ещё кто-то» — соединением, а не подзапросом в списке колонок:
+  // коррелированный exists считался бы заново на каждую строку и без индекса
+  // по topic_id читал бы таблицу связок целиком, а эта функция зовётся
+  // на каждого читателя каждым прогоном.
   return sql<ReaderTopic[]>`
     select t.id::int as id, t.slug, t.label, t.hint, rt.weight, rt.position,
-           exists (
-             select 1 from dailynews.reader_topics o
-              where o.topic_id = t.id and o.reader_id <> rt.reader_id
-           ) as shared
+           bool_or(o.reader_id is not null) as shared
       from dailynews.reader_topics rt
       join dailynews.topics t on t.id = rt.topic_id
+ left join dailynews.reader_topics o
+        on o.topic_id = rt.topic_id and o.reader_id <> rt.reader_id
      where rt.reader_id = ${readerId}
+     group by t.id, t.slug, t.label, t.hint, rt.weight, rt.position
      order by rt.position, t.id
   `;
 }
@@ -87,13 +91,19 @@ export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> 
  * держит, пустая подсказка — это стёртая им самим: форма показывала
  * сохранённую, и он её убрал.
  *
+ * `joining` приходит от формы (чип без слага — новый в этом сеансе),
+ * а не читается из связок: связки переписываются после этого шага
+ * и отражают прошлое сохранение, а не присланный чип — тема, убранная
+ * и добавленная снова в одном заходе, числилась бы «взятой» и теряла
+ * подсказку.
+ *
  * Отдаёт id темы в любом случае: связка читателя с темой заводится по нему.
  */
 export async function upsertTopic(
   db: Sql | TransactionSql,
   readerId: number,
   topic: { slug: string; label: string; hint: string; position: number },
-  catalog: boolean,
+  flags: { catalog: boolean; joining: boolean },
 ): Promise<number> {
   const [row] = await db<{ id: number }[]>`
     insert into dailynews.topics (slug, label, hint, position)
@@ -101,15 +111,9 @@ export async function upsertTopic(
     on conflict (slug) do update set slug = excluded.slug
     returning id::int as id
   `;
-  if (!catalog) {
-    const [{ held }] = await db<{ held: boolean }[]>`
-      select exists (
-        select 1 from dailynews.reader_topics mine
-         where mine.topic_id = ${row.id} and mine.reader_id = ${readerId}
-      ) as held
-    `;
+  if (!flags.catalog) {
     // null — оставить сохранённую: присоединение с пустой подсказкой.
-    const hint = topic.hint === "" && !held ? null : topic.hint;
+    const hint = topic.hint === "" && flags.joining ? null : topic.hint;
     await db`
       update dailynews.topics t
          set label = ${topic.label}, hint = coalesce(${hint}::text, t.hint)

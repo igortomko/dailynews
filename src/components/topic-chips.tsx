@@ -17,8 +17,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type ChipInput } from "@/lib/actions";
 import { rulesAnchor } from "@/lib/rules";
-import { toSlug } from "@/lib/slug";
-import { catalogSlug } from "@/lib/starter-topics";
+import { ownLabel } from "@/lib/starter-topics";
 import { queueRebuild } from "@/components/rebuild-queue";
 import { useT } from "@/components/i18n-provider";
 
@@ -139,8 +138,7 @@ export function TopicChips({
     // Совпадёт со взятой соседом — сервер правку отбросит, а после
     // перезагрузки чип придёт уже общим.
     const next = [...chips, {
-      slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC,
-      own: !catalogSlug(toSlug(trimmed)),
+      slug: "", label: trimmed, hint: "", count: MIN_PER_TOPIC, own: ownLabel(trimmed),
     }];
     // Новая тема берёт место у самой крупной, а не растит выпуск:
     // сколько читать, читатель задал отдельно и сам.
@@ -174,7 +172,7 @@ export function TopicChips({
     const chip = chips[index];
     // У темы со слагом имя на слаг не влияет — пересчитывать нечего.
     if (!chip || chip.slug) return;
-    const own = !catalogSlug(toSlug(chip.label));
+    const own = ownLabel(chip.label);
     // Без изменений — без записи: setChips зовёт `touch`, и одно наведение
     // на имя с уходом зажигало бы «Сохранить» и сторожа ухода впустую.
     if (own === chip.own) return;

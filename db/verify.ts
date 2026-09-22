@@ -1403,19 +1403,25 @@ async function main() {
     // что это «из каталога», и перепутанный случай прошёл бы проверку молча.
     const CATALOG = true;
     const NOT_CATALOG = false;
-    // Тема, которую держит только владелец: «дизайн» к этому месту взят
-    // и вторым читателем, и запись отбило бы условие про соседа, а не про
-    // каталог, — проверка каталожной ветки прошла бы и без неё.
+    // Тема, которую держит только владелец, — `blockchain`. «Дизайн»
+    // не годится: к этому месту он взят и вторым читателем, и запись отбило
+    // бы условие про соседа, а не про каталог, — проверка каталожной ветки
+    // прошла бы и без неё.
     const [{ holders }] = await sql<{ holders: number }[]>`
       select count(*)::int as holders from dailynews.reader_topics rt
         join dailynews.topics t on t.id = rt.topic_id where t.slug = 'blockchain'
     `;
-    assert.equal(holders, 1, "проверка каталожной ветки держится на теме, взятой только владельцем");
+    assert.equal(holders, 1, "проверка каталожной ветки держится на теме, взятой только одним читателем");
+    assert.ok(
+      (await readers.getReaderTopics(owner.id)).some((topic) => topic.slug === "blockchain"),
+      "и держит её именно владелец, а не сосед",
+    );
     const [chainBefore] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where slug = 'blockchain'
     `;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 }, CATALOG,
+      sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
+      { catalog: CATALOG, joining: false },
     );
     const [chainAfter] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where slug = 'blockchain'
@@ -1423,7 +1429,8 @@ async function main() {
     assert.deepEqual(chainAfter, chainBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
 
     const ownId = await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 }, NOT_CATALOG,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "", position: 9 },
+      { catalog: NOT_CATALOG, joining: true },
     );
     await sql`
       insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
@@ -1431,7 +1438,8 @@ async function main() {
     `;
     assert.equal(
       await readers.upsertTopic(
-        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, NOT_CATALOG,
+        sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 },
+        { catalog: NOT_CATALOG, joining: false },
       ),
       ownId,
       "повторная запись отдаёт ту же тему",
@@ -1449,7 +1457,8 @@ async function main() {
     // и присоединение к ничьей теме не должно стирать сохранённую.
     await sql`delete from dailynews.reader_topics where topic_id = ${ownId}`;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 }, NOT_CATALOG,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 },
+      { catalog: NOT_CATALOG, joining: true },
     );
     const [rejoined] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where id = ${ownId}
@@ -1457,7 +1466,8 @@ async function main() {
     assert.deepEqual(rejoined, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "повторное взятие не стирает подсказку");
     // А набранное при повторном взятии сохраняется: читатель ждёт именно этого.
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "Nubank, Pix, Inter", position: 9 }, NOT_CATALOG,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "Nubank, Pix, Inter", position: 9 },
+      { catalog: NOT_CATALOG, joining: true },
     );
     const [rejoinedTyped] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where id = ${ownId}
@@ -1469,12 +1479,14 @@ async function main() {
     `;
     // Держащий тему читатель стирает подсказку осознанно: пустая — это стёртая.
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 }, NOT_CATALOG,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 },
+      { catalog: NOT_CATALOG, joining: false },
     );
     const [cleared] = await sql<{ hint: string }[]>`select hint from dailynews.topics where id = ${ownId}`;
     assert.equal(cleared.hint, "", "у своей темы пустая подсказка — стёртая, а не пропущенная");
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 }, NOT_CATALOG,
+      sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "Nubank, Pix", position: 9 },
+      { catalog: NOT_CATALOG, joining: false },
     );
 
     await sql`
@@ -1482,7 +1494,8 @@ async function main() {
       values (${second.id}, ${ownId}, 1, 1)
     `;
     await readers.upsertTopic(
-      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 }, NOT_CATALOG,
+      sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 },
+      { catalog: NOT_CATALOG, joining: false },
     );
     const [sharedTopic] = await sql<{ label: string; hint: string }[]>`
       select label, hint from dailynews.topics where id = ${ownId}

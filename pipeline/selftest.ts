@@ -81,7 +81,7 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, s
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
-import { catalogSlug, STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
+import { catalogSlug, ownLabel, STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { countOf, explain, parseTelegram } from "./fetch";
@@ -764,6 +764,8 @@ assert.equal(catalogSlug("design"), true, "тема из стартового н
 assert.equal(catalogSlug(toSlug("AI-инфра")), true, "имя, сводящееся к каталожному слагу, — тоже каталожная");
 assert.equal(catalogSlug(toSlug("Финтех Бразилии")), false, "своя тема — не каталожная");
 assert.equal(catalogSlug(""), false, "пустой слаг — не каталожная");
+assert.equal(ownLabel("AI-инфра"), false, "имя каталожной темы, набранное руками, — не своя тема");
+assert.equal(ownLabel("Финтех Бразилии"), true, "своё имя — своя тема");
 
 // --- личные правила: за чем следить и что исключать ----------------------------
 // Правило — список написаний одного и того же. Ищется буквально, с границей

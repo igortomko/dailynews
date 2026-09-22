@@ -272,7 +272,9 @@ async function writeTopics(
         tx,
         readerId,
         { slug: slugs[index], label: chip.label, hint: chip.hint ?? "", position: index + 1 },
-        catalogSlug(slugs[index]),
+        // Чип без слага — новый в этом сеансе формы: он присоединяется
+        // к теме, а не правит её. Форма заводит такие с пустым слагом.
+        { catalog: catalogSlug(slugs[index]), joining: !chip.slug },
       ));
     }
 
