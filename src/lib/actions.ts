@@ -35,7 +35,7 @@ import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
-import { formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
+import { clampTopicText, formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
 import { resolveSuggestions } from "./onboarding";
 
 /**
@@ -173,8 +173,8 @@ export async function saveInterests(
     ...chip,
     // Имя и подсказка уходят в общий справочник и в промпт всем читателям:
     // режется тем же пределом, что и поле, — форму рисует браузер.
-    label: String(chip.label ?? "").trim().slice(0, TOPIC_LIMITS.label),
-    hint: String(chip.hint ?? "").trim().slice(0, TOPIC_LIMITS.hint),
+    label: clampTopicText(chip.label, TOPIC_LIMITS.label),
+    hint: clampTopicText(chip.hint, TOPIC_LIMITS.hint),
   }));
   if (chips.length === 0) return { error: (await getDict()).errors.pickOneTopic };
   // Имя уходит в общий справочник и в вопрос Jev как вариант ответа:
@@ -1118,7 +1118,7 @@ export async function saveOnboardingInterests(
   // Вписанное руками: подсказки у него нет, и это нормально — Jev получит
   // само название. Пустая тема в справочник не уезжает.
   const mine = custom
-    .map((label) => label.trim().slice(0, TOPIC_LIMITS.label))
+    .map((label) => clampTopicText(label, TOPIC_LIMITS.label))
     .filter(Boolean)
     .map((label) => ({ slug: toSlug(label), label, hint: "", count: MIN_PER_TOPIC }));
 

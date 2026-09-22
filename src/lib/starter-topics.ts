@@ -352,6 +352,13 @@ export const starterBySlug = new Map(STARTER_TOPICS.map((topic) => [topic.slug, 
 export const TOPIC_LIMITS = { label: 60, hint: 200 } as const;
 
 /**
+ * Имя или подсказка по пределу: обрезается, а не отвергается — поле дальше
+ * и не пускает, длиннее приходит только мимо формы. Нестроковое — пусто.
+ */
+export const clampTopicText = (text: unknown, limit: number): string =>
+  String(text ?? "").trim().slice(0, limit);
+
+/**
  * Каталожная ли тема: её имя и подсказка — критерий классификации для всех,
  * и править их читателю нельзя. Одно правило на сервер (`upsertTopic`
  * через `writeTopics`), страницу интересов и форму чипов: три копии

@@ -1484,15 +1484,18 @@ async function main() {
       (await readers.getReaderTopics(owner.id)).some((topic) => topic.slug === "blockchain"),
       "и держит её именно владелец, а не сосед",
     );
-    const [chainBefore] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where slug = 'blockchain'
-    `;
+    /** Имя и подсказка темы — то, о чём здесь каждое утверждение. */
+    const textOf = async (topic: { slug: string } | { id: number }) => {
+      const rows = "slug" in topic
+        ? await sql<{ label: string; hint: string }[]>`select label, hint from dailynews.topics where slug = ${topic.slug}`
+        : await sql<{ label: string; hint: string }[]>`select label, hint from dailynews.topics where id = ${topic.id}`;
+      return rows[0];
+    };
+    const chainBefore = await textOf({ slug: "blockchain" });
     await readers.upsertTopic(
       sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
     );
-    const [chainAfter] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where slug = 'blockchain'
-    `;
+    const chainAfter = await textOf({ slug: "blockchain" });
     assert.deepEqual(chainAfter, chainBefore, "каталожная тема не переписывается ни именем, ни подсказкой");
     // Каталожная строка, разошедшаяся с набором (набрана руками до каталога
     // или переименована в базе), сходится к нему при следующей записи: иначе
@@ -1503,9 +1506,7 @@ async function main() {
     await readers.upsertTopic(
       sql, owner.id, { slug: "blockchain", label: "Крипта", hint: "Bitcoin", position: 1 },
     );
-    const [chainRestored] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where slug = 'blockchain'
-    `;
+    const chainRestored = await textOf({ slug: "blockchain" });
     assert.deepEqual(chainRestored, chainBefore, "каталожная тема, разошедшаяся с набором, возвращается к нему при записи");
 
     // Каталожная тема, которой в сиде ещё нет, заводится из стартового
@@ -1520,9 +1521,7 @@ async function main() {
     const musicId = await readers.upsertTopic(
       sql, owner.id, { slug: "music", label: "Мой музон", hint: "только винил", position: 1 },
     );
-    const [musicRow] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where id = ${musicId}
-    `;
+    const musicRow = await textOf({ id: musicId });
     assert.deepEqual(musicRow, { label: music.label, hint: music.hint }, "заведённая каталожная тема — из набора, а не от вызвавшего");
     await sql`delete from dailynews.topics where id = ${musicId}`;
 
@@ -1540,9 +1539,7 @@ async function main() {
       ownId,
       "повторная запись отдаёт ту же тему",
     );
-    const [ownTopic] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where id = ${ownId}
-    `;
+    const ownTopic = await textOf({ id: ownId });
     assert.deepEqual(ownTopic, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "своя тема правится");
     assert.equal(
       (await readers.getReaderTopics(owner.id)).find((topic) => topic.id === ownId)?.shared, false,
@@ -1565,16 +1562,12 @@ async function main() {
     await readers.upsertTopic(
       sql, owner.id, { slug: "fintech-brazil", label: "Финтех Бразилии", hint: "", position: 9 },
     );
-    const [rejoined] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where id = ${ownId}
-    `;
+    const rejoined = await textOf({ id: ownId });
     assert.deepEqual(rejoined, { label: "Финтех Бразилии", hint: "Nubank, Pix" }, "повторное взятие не стирает подсказку");
     await readers.upsertTopic(
       sql, owner.id, { slug: "fintech-brazil", label: "Финтех", hint: "Nubank, Pix, Inter", position: 9 },
     );
-    const [rejoinedTyped] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where id = ${ownId}
-    `;
+    const rejoinedTyped = await textOf({ id: ownId });
     assert.deepEqual(rejoinedTyped, { label: "Финтех", hint: "Nubank, Pix, Inter" }, "набранное при повторном взятии применяется");
     await sql`
       insert into dailynews.reader_topics (reader_id, topic_id, weight, position)
@@ -1588,9 +1581,7 @@ async function main() {
     await readers.upsertTopic(
       sql, owner.id, { slug: "fintech-brazil", label: "Чужое имя", hint: "чужая подсказка", position: 9 },
     );
-    const [sharedTopic] = await sql<{ label: string; hint: string }[]>`
-      select label, hint from dailynews.topics where id = ${ownId}
-    `;
+    const sharedTopic = await textOf({ id: ownId });
     assert.deepEqual(
       sharedTopic, { label: "Финтех", hint: "Nubank, Pix, Inter" },
       "тема, взятая соседом, больше не правится никем",

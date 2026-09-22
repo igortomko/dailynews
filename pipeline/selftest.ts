@@ -83,7 +83,10 @@ import { COMPLEXITY, LANGUAGES, SOURCE_LANGUAGE, STYLES, complexityAt, flagOf, s
 import { firstSet } from "./digest";
 import { relativeTime } from "../src/lib/relative-time";
 import { toSlug } from "../src/lib/slug";
-import { catalogSlug, formChipOf, ownLabel, STARTER_TOPICS, starterBySlug, suggestOrder } from "../src/lib/starter-topics";
+import {
+  catalogSlug, clampTopicText, formChipOf, ownLabel, STARTER_TOPICS, starterBySlug, suggestOrder,
+  TOPIC_LIMITS,
+} from "../src/lib/starter-topics";
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { countOf, explain, parseTelegram } from "./fetch";
@@ -774,6 +777,13 @@ const fintech = { id: 1, slug: "fintech-brazil", label: "Финтех", hint: ""
 assert.equal(formChipOf({ ...fintech, shared: false }).own, true, "свою тему форма показывает с полем правки");
 assert.equal(formChipOf({ ...fintech, shared: true }).own, false, "взятую соседом — уже нет");
 assert.equal(formChipOf({ ...fintech, slug: "design", shared: false }).own, false, "каталожную — тоже нет, даже ничью");
+// Предел имени и подсказки — один на поле и оба пути записи: длиннее приходит
+// только мимо формы, и режется, а не отвергается.
+assert.equal(clampTopicText("  Финтех Бразилии  ", TOPIC_LIMITS.label), "Финтех Бразилии", "имя обрезается по краям");
+assert.equal(clampTopicText("x".repeat(TOPIC_LIMITS.label), TOPIC_LIMITS.label).length, TOPIC_LIMITS.label, "ровно в предел — целиком");
+assert.equal(clampTopicText("x".repeat(TOPIC_LIMITS.label + 1), TOPIC_LIMITS.label).length, TOPIC_LIMITS.label, "длиннее предела — по предел");
+assert.equal(clampTopicText("y".repeat(500), TOPIC_LIMITS.hint).length, TOPIC_LIMITS.hint, "подсказка режется своим пределом");
+assert.equal(clampTopicText(null, TOPIC_LIMITS.hint), "", "нестроковое — пустая строка, а не «null»");
 
 // --- личные правила: за чем следить и что исключать ----------------------------
 // Правило — список написаний одного и того же. Ищется буквально, с границей

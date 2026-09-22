@@ -506,6 +506,12 @@ export function TopicChips({
             aria-label={tc.newTopicAria}
             placeholder={tc.newTopicPlaceholder}
             onChange={(event) => setDraft(event.target.value)}
+            // Уход из поля добавляет набранное, как в «За чем следить»:
+            // «Сохранить» гасит фокус до снимка формы, и набранное, но
+            // не добавленное имя иначе стиралось бы пересевом молча.
+            // Кнопка рядом фокус на mousedown не забирает — иначе первый
+            // клик уходил бы в пустоту под съехавшим полем.
+            onBlur={() => add(draft)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -516,6 +522,7 @@ export function TopicChips({
           <Button
             type="button"
             variant="outline"
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => (full ? topicsPaywall.open() : add(draft))}
           >
             <PlusIcon data-icon="inline-start" />

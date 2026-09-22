@@ -54,19 +54,19 @@ export async function allReaders(): Promise<Reader[]> {
 }
 
 export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> {
-  // «Взял ли ещё кто-то» — соединением, а не подзапросом в списке колонок:
-  // коррелированный exists считался бы заново на каждую строку и без индекса
-  // по topic_id читал бы таблицу связок целиком, а эта функция зовётся
-  // на каждого читателя каждым прогоном.
+  // «Взял ли ещё кто-то» — exists по индексу reader_topics(topic_id) (0051):
+  // одна проба на тему, выход на первом соседе. Соединение с bool_or собирало
+  // бы строку на каждого держателя каждой моей темы — тем дольше, чем тема
+  // популярнее, — а эта функция зовётся на каждого читателя каждым прогоном.
   return sql<ReaderTopic[]>`
     select t.id::int as id, t.slug, t.label, t.hint, rt.weight, rt.position,
-           bool_or(o.reader_id is not null) as shared
+           exists (
+             select 1 from dailynews.reader_topics o
+              where o.topic_id = rt.topic_id and o.reader_id <> rt.reader_id
+           ) as shared
       from dailynews.reader_topics rt
       join dailynews.topics t on t.id = rt.topic_id
- left join dailynews.reader_topics o
-        on o.topic_id = rt.topic_id and o.reader_id <> rt.reader_id
      where rt.reader_id = ${readerId}
-     group by t.id, t.slug, t.label, t.hint, rt.weight, rt.position
      order by rt.position, t.id
   `;
 }
