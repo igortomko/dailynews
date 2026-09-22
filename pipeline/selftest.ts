@@ -104,7 +104,7 @@ import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./d
 import { tweetLink } from "./fetch";
 import { countOf, explain, parseTelegram } from "./fetch";
 import {
-  NETWORK_IDS, NETWORKS, overLimit, postLength, readableOf, tabsOf,
+  NETWORK_IDS, NETWORKS, overLimit, postLength, publishedIn, readableOf, tabsOf,
 } from "../src/lib/networks";
 import { parseDrafts, unverifiedNumbers } from "./post";
 import { asCard, cardBlock, cardFromVoice, corpusOf, medianViews, parseCard } from "./voice-card";
@@ -2818,6 +2818,16 @@ assert.deepEqual(
 );
 assert.deepEqual(readableOf(["linkedin", "threads"]).map((n) => n.id), [],
   "из LinkedIn и Threads читать нечего: они наружу не отдают ничего");
+// Площадка без отметки — это адрес, который мы читаем, а не таб в черновике.
+// Пока это был один ответ, снятая галочка удаляла канал вместе с голосом.
+assert.deepEqual(
+  tabsOf(publishedIn([
+    { network: "telegram", publishes: false },
+    { network: "x", publishes: true },
+  ])).map((network) => network.id),
+  ["x"],
+  "таб рисуется у сети, с которой снята отметка «публикую здесь»",
+);
 
 // Выдуманное число под его именем — самая дорогая ошибка этой возможности,
 // и запрет в промпте на неё протекает (проверено живым прогоном).

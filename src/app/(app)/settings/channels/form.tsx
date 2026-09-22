@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
-import { addChannel, rebuildVoice, saveSample, toggleChannel } from "@/lib/actions";
+import { addChannel, forgetChannel, rebuildVoice, saveSample, toggleChannel } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -111,6 +111,17 @@ export function ChannelsForm({
     });
   };
 
+  // Убрать адрес — не то же самое, что снять галочку: галочка гасит таб
+  // в черновике, а это говорит «не читайте меня отсюда». Пока это было
+  // одним действием, снятая галочка уносила канал вместе с голосом.
+  const forget = (network: string) => {
+    startTransition(async () => {
+      const result = await forgetChannel(network);
+      if ("error" in result) toast.error(result.error);
+      else router.refresh();
+    });
+  };
+
   const build = async () => {
     setBuilding(true);
     const result = await rebuildVoice();
@@ -145,7 +156,7 @@ export function ChannelsForm({
               после него, а не до. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {NETWORK_IDS.filter((id) => NETWORKS[id].tab).map((id) => {
-              const on = byNetwork.has(id);
+              const on = Boolean(byNetwork.get(id)?.publishes);
               return (
                 // Плитка целиком — ярлык отметки: попасть в квадрат 16×16
                 // пальцем можно, но промах здесь ничего не говорит о том,
@@ -227,21 +238,18 @@ export function ChannelsForm({
                       <span className="text-sm font-medium">{t.onboarding.networks[id]}</span>
                       <span className="truncate text-xs text-muted-foreground">{address}</span>
                     </div>
-                    {/* Убрать можно только блог: у остальных сетей это
-                        делает та же отметка сверху, и вторая кнопка с тем
-                        же смыслом читалась бы как другая. Адрес меняется
-                        новой ссылкой — она заменяет прежнюю. */}
-                    {NETWORKS[id]?.tab ? null : (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={t.onboarding.channels.removeBlog}
-                        onClick={() => toggle(id, false)}
-                        disabled={busy}
-                      >
-                        <TrashIcon />
-                      </Button>
-                    )}
+                    {/* Кнопка стоит там же, где показан адрес, и говорит
+                        ровно про него: отметка сверху отвечает на «публикую
+                        ли я здесь», а это — на «читать ли меня отсюда». */}
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t.onboarding.channels.stopReading(t.onboarding.networks[id])}
+                      onClick={() => forget(id)}
+                      disabled={busy}
+                    >
+                      <TrashIcon />
+                    </Button>
                   </div>
                 );
               })}

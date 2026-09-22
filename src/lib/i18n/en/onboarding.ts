@@ -79,14 +79,14 @@ export const onboarding = {
     publishingIn: (network: string) => `Posting to ${network}`,
     sourcesTitle: "Let us read your posts",
     sourcesDescription:
-      "A draft sounds like you once the feed has read a dozen of your posts. A public Telegram channel, an RSS blog and an X account are read from a link. LinkedIn and Threads expose nothing — paste posts from there as text.",
+      "A draft sounds like you once the feed has read a dozen of your posts. A public Telegram channel, an RSS blog and an X account are read from a link. LinkedIn and Threads expose nothing — paste posts from there as text. The ticks above don't affect reading: they say where you post.",
     addPlaceholder: "t.me/channel, x.com/handle, or your blog's address",
     add: "Add",
     addDescription:
       "The address goes through the same check as sources: only something that answered with at least one post gets saved.",
     readingFrom: "Read from",
     pasteTitle: "Or paste posts as text",
-    removeBlog: "Remove blog",
+    stopReading: (network: string) => `Stop reading ${network}`,
     toFeed: "Go to feed",
     voiceTitle: "How you write",
     voiceDescription:

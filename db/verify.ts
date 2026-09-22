@@ -1847,6 +1847,7 @@ async function main() {
     // Пост уходит под именем читателя, поэтому чужой здесь дороже, чем
     // в ленте: сосед опубликовал бы наш черновик по нашему же промаху.
     const posts = await import("../src/lib/posts");
+    const networks = await import("../src/lib/networks");
 
     await readers.saveChannel(owner.id, "telegram", {
       handle: "ownerchannel", input_url: "t.me/ownerchannel", label: "Канал владельца",
@@ -1878,6 +1879,41 @@ async function main() {
       "ownerchannel",
       "повторная отметка сети не стирает канал",
     );
+
+    // Снятая галочка гасит таб, но адрес оставляет. До 0058 она удаляла
+    // строку целиком: один промах пальцем — и голос перечитать нечем,
+    // а сказано об этом не было нигде. Ровно так 22 сентября 2026
+    // у владельца пропал @publicigor.
+    await readers.setChannelPublishes(owner.id, "telegram", false);
+    const unticked = (await readers.getChannels(owner.id)).find((c) => c.network === "telegram");
+    assert.equal(unticked?.handle, "ownerchannel", "снятая галочка стёрла адрес канала");
+    assert.equal(unticked?.publishes, false, "снятая галочка не сохранилась");
+    assert.deepEqual(
+      networks.tabsOf(networks.publishedIn(await readers.getChannels(owner.id))).map((n) => n.id),
+      ["linkedin"],
+      "таб рисуется у сети, с которой снята отметка",
+    );
+    await readers.setChannelPublishes(owner.id, "telegram", true);
+    assert.equal(
+      (await readers.getChannels(owner.id)).find((c) => c.network === "telegram")?.handle,
+      "ownerchannel",
+      "возвращённая галочка завела площадку заново, потеряв адрес",
+    );
+
+    // «Не читать отсюда» — своё действие: адрес забыт, отметка цела.
+    await readers.clearChannelAddress(owner.id, "telegram");
+    const forgotten = (await readers.getChannels(owner.id)).find((c) => c.network === "telegram");
+    assert.equal(forgotten?.handle, null, "адрес остался после «не читать»");
+    assert.equal(forgotten?.input_url, null, "вставленная ссылка осталась после «не читать»");
+    assert.equal(forgotten?.publishes, true, "«не читать» погасило и таб в черновике");
+    assert.equal(
+      (await readers.getChannels(second.id)).find((c) => c.network === "telegram")?.handle,
+      "verachannel",
+      "чужой канал забылся вместе со своим",
+    );
+    await readers.saveChannel(owner.id, "telegram", {
+      handle: "ownerchannel", input_url: "t.me/ownerchannel", label: "Канал владельца",
+    });
 
     // Карточка автора кладётся объектом, а не строкой: JSON.stringify в jsonb
     // сохраняет строку, и voice_card->'voice' молча становится null (0005).
