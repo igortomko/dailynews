@@ -25,7 +25,7 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { assertOwn, startLocalPg } from "./free-port";
 import { pendingArticles, SHORT_EXCERPT } from "../pipeline/enrich";
 import { WINDOW_DAYS } from "../pipeline/select";
-import { cardChars } from "../src/lib/reading-time";
+import { cardChars, fitCards } from "../src/lib/reading-time";
 import { otherSources, storyLines } from "../src/lib/story";
 import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { cleanupOf } from "../src/lib/source-health";
@@ -473,8 +473,8 @@ async function main() {
     `;
 
     // --- лента: каждому своя ----------------------------------------------------
-    const ownerFeed = await queries.getFeed(owner.id, today);
-    const secondFeed = await queries.getFeed(second.id, today);
+    const ownerFeed = (await queries.getFeed(owner.id, today)).items;
+    const secondFeed = (await queries.getFeed(second.id, today)).items;
     assert.equal(ownerFeed.length, 2, `в ленте владельца ${ownerFeed.length}, ожидалось 2`);
     assert.equal(secondFeed.length, 1, `в ленте второго ${secondFeed.length}, ожидался 1`);
     assert.equal(ownerFeed[0].total, 120, "лента должна идти по убыванию скора");
@@ -488,6 +488,132 @@ async function main() {
       !secondFeed.some((item) => String(item.id) === String(ids[0])),
       "второй читатель не должен видеть выпуск владельца",
     );
+    // --- лента окном: несколько дней разом --------------------------------------
+    // Окно вместо равенства дню — это три условия, которые запрос обязан
+    // сохранить: чужого читателя не отдавать, скрытое пальцем вниз
+    // не возвращать, заглушки «выжимку подготовить не удалось» не тащить.
+    // Каждое из них ломается молча: лента приходит вовремя и выглядит целой.
+    {
+      const yesterday = new Date(`${today}T12:00:00Z`);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const before = yesterday.toISOString().slice(0, 10);
+      // Оценка обязательна: лента берёт материал внутренним join к scores,
+      // а ids[1] и ids[4] помечены повторами — в Jev они не уезжали и потому
+      // строк там не имеют. Без этой вставки окно молча вышло бы пустым,
+      // и проверка доказывала бы отсутствие оценки, а не отсутствие окна.
+      for (const [itemId, slug, total] of [[ids[1], "ai-infra", 110], [ids[4], "energy", 40]] as const) {
+        await sql`
+          insert into dailynews.scores (item_id, topic_id, total, confidence, axes, model)
+          values (
+            ${itemId}, ${topicBy(slug).id}, ${total}, 0.8,
+            ${sql.json(axes(slug, "fact") as unknown as Parameters<typeof sql.json>[0])}, 'jev-latest'
+          )
+          on conflict (item_id) do nothing
+        `;
+      }
+      await makeDigest(owner.id, before, [
+        { id: ids[1], total: 110, title: "Владелец: вчера" },
+        { id: ids[4], total: 40, title: "Владелец: вчера, слабое" },
+      ]);
+      await makeDigest(second.id, before, [{ id: ids[3], total: 200, title: "Vera: вчера" }]);
+
+      const oneDay = await queries.getFeed(owner.id, today, { days: 1 });
+      assert.equal(oneDay.items.length, 2, "окно в один день — это тот же выпуск, что и был");
+
+      const window = await queries.getFeed(owner.id, today, { days: 2 });
+      assert.deepEqual(
+        window.items.map((card) => card.title_ru),
+        ["Владелец: GPT-6", "Владелец: вчера", "Владелец: уран", "Владелец: вчера, слабое"],
+        "окно смешивает выпуски по скору, а не по дням",
+      );
+      assert.deepEqual(
+        [...new Set(window.items.map((card) => card.day))].sort(),
+        [before, today],
+        "в окно попадают оба дня, и каждая карточка называет свой",
+      );
+      assert.ok(
+        !window.items.some((card) => String(card.title_ru).startsWith("Vera")),
+        "окно не открывает чужой выпуск: соседский выпуск того же дня остаётся соседским",
+      );
+      assert.equal(
+        (await queries.getFeed(second.id, today, { days: 2 })).items.length, 2,
+        "у второго читателя своё окно и свои два дня",
+      );
+      // Якорь — конец окна: день перед окном в него не попадает.
+      assert.deepEqual(
+        (await queries.getFeed(owner.id, before, { days: 1 })).items.map((card) => card.day),
+        [before, before],
+        "якорь позавчера отдаёт позавчерашний выпуск, а не сегодняшний",
+      );
+
+      // Скрытое рукой не возвращается ни на одном дне окна: иначе палец вниз
+      // означал бы «скрыть, пока не откроешь два дня сразу».
+      await sql`
+        insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
+        values (${owner.id}, ${ids[1]}, 'down', 110, 0.8)
+      `;
+      const hidden = await queries.getFeed(owner.id, today, { days: 2 });
+      assert.ok(
+        !hidden.items.some((card) => String(card.id) === String(ids[1])),
+        "скрытое пальцем вниз не возвращается окном",
+      );
+      await sql`
+        delete from dailynews.reads
+         where reader_id = ${owner.id} and item_id = ${ids[1]} and event = 'down'
+      `;
+
+      // Заглушка «проверенную выжимку подготовить не удалось» — не карточка
+      // ни в один из дней окна.
+      await sql`
+        update dailynews.digest_items
+           set summary_document = ${sql.json({ status: "unavailable" })}
+         where item_id = ${ids[4]}
+      `;
+      assert.ok(
+        !(await queries.getFeed(owner.id, today, { days: 2 })).items
+          .some((card) => String(card.id) === String(ids[4])),
+        "заглушка не становится карточкой и в окне",
+      );
+      await sql`update dailynews.digest_items set summary_document = null where item_id = ${ids[4]}`;
+
+      // Отсечка по знакам считается оконной суммой в SQL, а `fitCards` —
+      // её спецификация. Две формулы одного числа расходятся молча: заказ
+      // резался бы одним правилом, а строка «ещё N не влезло» считалась
+      // другим. Меряем на настоящих карточках настоящего Postgres.
+      const full = await queries.getFeed(owner.id, today, { days: 2 });
+      const lengths = full.items.map((card) => cardChars(card.title_ru ?? "", card.summary));
+      assert.equal(
+        full.chars, lengths.reduce((sum, n) => sum + n, 0),
+        "длина показанного считается в базе и в коде одинаково",
+      );
+      for (const maxChars of [1, lengths[0], lengths[0] + 1, full.chars, full.chars + 100]) {
+        const cut = await queries.getFeed(owner.id, today, { days: 2, maxChars });
+        assert.equal(
+          cut.items.length, fitCards(lengths, maxChars),
+          `отсечка в ${maxChars} знаков: база и fitCards расходятся`,
+        );
+        assert.equal(
+          cut.cut, full.items.length - cut.items.length,
+          `отрезанное названо числом, а не молчанием (${maxChars})`,
+        );
+        assert.deepEqual(
+          cut.items.map((card) => card.title_ru),
+          full.items.slice(0, cut.items.length).map((card) => card.title_ru),
+          `отсечка режет хвост по скору, а не середину (${maxChars})`,
+        );
+      }
+      assert.equal(
+        (await queries.getFeed(owner.id, today, { days: 2, maxChars: 1 })).items.length, 1,
+        "единственная влезшая карточка всё равно приходит: пустая лента хуже перебора",
+      );
+
+      // Убираем за собой: дальше проверяются выпуски одного дня, и лишний
+      // день сделал бы чужой провал необъяснимым.
+      await sql`delete from dailynews.digests where day = ${before}`;
+      await sql`delete from dailynews.scores where item_id in (${ids[1]}, ${ids[4]})`;
+      console.log("  лента окном: чужого нет, скрытое не всплывает, отсечка сходится с fitCards");
+    }
+
     // --- недельная книга: те же выпуски, что пришли бы письмами ------------------
     // Запрос про содержимое, значит читатель первым аргументом: без него книга
     // приходит вовремя, целой и с чужими выпусками.
@@ -659,13 +785,13 @@ async function main() {
     // Граница «досюда дочитал» держится на этом поле: материал, попадавшийся
     // на глаза, отмечен, остальные нет. Если запрос начнёт отдавать true всем
     // подряд, граница уедет в начало ленты и будет врать молча.
-    const seenFlags = (await queries.getFeed(owner.id, today)).map((item) => item.seen);
+    const seenFlags = (await queries.getFeed(owner.id, today)).items.map((item) => item.seen);
     assert.deepEqual(seenFlags, [false, false], "до события seen ни один материал не отмечен");
     await sql`
       insert into dailynews.reads (reader_id, item_id, event, score_snap, conf_snap)
       values (${owner.id}, ${ids[0]}, 'seen', 120, 0.8)
     `;
-    const withSeen = await queries.getFeed(owner.id, today);
+    const withSeen = (await queries.getFeed(owner.id, today)).items;
     assert.equal(withSeen[0].seen, true, "показанный материал должен быть отмечен");
     assert.equal(withSeen[1].seen, false, "чужой строке события seen взяться неоткуда");
 
@@ -679,7 +805,7 @@ async function main() {
       insert into dailynews.kindle_sends (reader_id, item_id, status)
       values (${owner.id}, ${ids[0]}, 'sent'), (${owner.id}, ${ids[2]}, 'failed')
     `;
-    const withKindle = await queries.getFeed(owner.id, today);
+    const withKindle = (await queries.getFeed(owner.id, today)).items;
     assert.equal(withKindle[0].kindled, true, "отправленный материал должен быть отмечен");
     assert.equal(
       withKindle.find((item) => String(item.id) === String(ids[2]))?.kindled,
@@ -688,7 +814,7 @@ async function main() {
     );
     await sql`delete from dailynews.kindle_sends where reader_id = ${owner.id}`;
 
-    const afterRead = await queries.getFeed(owner.id, today);
+    const afterRead = (await queries.getFeed(owner.id, today)).items;
     assert.equal(afterRead[0].read_count, 2, "счётчик чтений должен вырасти");
 
     const ownerCalibration = await queries.getCalibration(owner.id);
@@ -1510,17 +1636,17 @@ async function main() {
     ];
     await makeDigest(owner.id, rulesDay, ruleCards);
     await makeDigest(second.id, rulesDay, ruleCards);
-    const ownerShown = applyRules(await queries.getFeed(owner.id, rulesDay), rulesOf(ownerRuled));
+    const ownerShown = applyRules((await queries.getFeed(owner.id, rulesDay)).items, rulesOf(ownerRuled));
     assert.deepEqual(ownerShown.visible.map((c) => Number(c.id)), [figmaItem], "исключённая карточка спрятана из готового выпуска");
     assert.equal(ownerShown.hidden, 1, "скрытое посчитано");
     assert.equal(ownerShown.visible[0].followed, "Figma", "пометка называет первое написание правила");
-    const secondShown = applyRules(await queries.getFeed(second.id, rulesDay), rulesOf(secondRuled));
+    const secondShown = applyRules((await queries.getFeed(second.id, rulesDay)).items, rulesOf(secondRuled));
     assert.equal(secondShown.hidden, 0, "у соседа ничего не спрятано");
     assert.equal(secondShown.visible.length, 2, "у соседа обе карточки на месте");
     // Снятое правило возвращает карточку как была — без пересборки.
     await readers.saveRules(sql, owner.id, { follow: [], exclude: [] });
     const ownerFreed = applyRules(
-      await queries.getFeed(owner.id, rulesDay), rulesOf((await readers.getReader(owner.id))!),
+      (await queries.getFeed(owner.id, rulesDay)).items, rulesOf((await readers.getReader(owner.id))!),
     );
     assert.equal(ownerFreed.visible.length, 2, "снятое исключение возвращает карточку");
     assert.equal(ownerFreed.visible[0].followed, null, "без слежения пометки нет");
@@ -2159,7 +2285,7 @@ async function main() {
 
     const storyDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
     await makeDigest(owner.id, storyDay, [{ id: myItem, total: 130, title: "Владелец: GPU" }]);
-    const storyFeed = await queries.getFeed(owner.id, storyDay);
+    const storyFeed = (await queries.getFeed(owner.id, storyDay)).items;
     assert.deepEqual(
       storyFeed.map((row) => Number(row.id)), [myItem],
       "материал сюжета виден в ленте, а не теряется на join со scores",
@@ -2310,7 +2436,7 @@ async function main() {
       // Выпуски, собранные прежней версией, держат заглушки. Отбор и прогресс
       // их не считают — лента и поиск не должны быть единственным местом,
       // где читатель встречает «выжимку подготовить не удалось».
-      assert.ok(!(await queries.getFeed(owner.id, null)).some(card => card.id === placeholder.item_id), "a stored placeholder never reaches the feed");
+      assert.ok(!(await queries.getFeed(owner.id, null)).items.some(card => card.id === placeholder.item_id), "a stored placeholder never reaches the feed");
       assert.ok(!(await queries.searchArchive(owner.id, 'выжимку')).hits.some(hit => hit.item_id === placeholder.item_id), "a stored placeholder never answers a search");
       await sql`update dailynews.digest_items set summary_document=null where digest_id=${latestDigest.id} and item_id=${placeholder.item_id}`;
     }
@@ -2334,7 +2460,7 @@ async function main() {
     assert.equal(filtered.usage.requests, 0, "excluded sources do not spend the generation budget");
     if (placeholder) {
       await sql`update dailynews.items set body='<p>FictionalBlockedVendor appears only here.</p>' where id=${placeholder.item_id}`;
-      const feed = await queries.getFeed(owner.id, null);
+      const feed = (await queries.getFeed(owner.id, null)).items;
       const visibility = applyReadingRules(feed, { follow: noReadingMatch, exclude: compileReadingRules(excludedNames) });
       assert.ok(feed.some(item => item.id === placeholder.item_id), "the existing card remains stored");
       assert.ok(!visibility.visible.some(item => item.id === placeholder.item_id), "full-source exclusions also hide existing cards");

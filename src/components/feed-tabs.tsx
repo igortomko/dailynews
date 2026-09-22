@@ -19,12 +19,14 @@ import { OverviewDialog, SelectionBar } from "@/components/overview";
 import { useLocale, useT } from "@/components/i18n-provider";
 import { blockOf, reconcile, type Overview } from "@/lib/overview";
 import { formatDay } from "@/lib/relative-time";
+import { feedHref } from "@/lib/day";
 import type { FeedCard } from "@/lib/queries";
 import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { UpgradeNote } from "@/lib/upgrade";
 import { UpgradeLine } from "@/components/upgrade-note";
-import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
+import { isShort, shortfallNote } from "@/lib/reading-time";
+import { MinutesSelect } from "@/components/minutes-select";
 import type { NetworkId } from "@/lib/networks";
 
 /**
@@ -136,6 +138,8 @@ type Picked = { day: string; ids: number[]; draft: Overview | null };
 
 export function FeedTabs({
   day,
+  days,
+  minutes,
   topics,
   items,
   hidden,
@@ -147,8 +151,16 @@ export function FeedTabs({
   left,
   right,
 }: {
-  /** День выпуска: к нему привязаны выбор карточек и черновик обзора. */
+  /** Якорь окна: к нему привязаны выбор карточек и черновик обзора. */
   day: string;
+  /**
+   * Длина окна в днях. Больше единицы — на экране несколько выпусков сразу,
+   * и тогда каждая карточка называет свой день: без подписи вчерашнее
+   * читалось бы как сегодняшнее.
+   */
+  days: number;
+  /** Заказанные минуты или null — «всё время». Уходит в адрес вместе с окном. */
+  minutes: number | null;
   topics: ReaderTopic[];
   items: FeedCard[];
   /**
@@ -168,7 +180,7 @@ export function FeedTabs({
    * которые его не сохранили: о недоборе тогда молчим, а не считаем его
    * по сегодняшней настройке.
    */
-  reading: { minutes: number; target: number | null };
+  reading: { minutes: number; target: number | null; cut: number };
   /**
    * Предел, в который читатель упёрся сегодня, или null. Считает сервер
    * (`upgradeReason`) — тем же правилом, каким про тариф говорит бот.
@@ -515,12 +527,12 @@ export function FeedTabs({
           >
               <div className="col-start-1 row-start-2 flex min-w-0 items-center gap-2 [&>div]:gap-0 sm:[&>div]:gap-2 lg:row-start-1">
                 {left}
-                {/* Время выпуска — рядом с его датой: это две вещи об одном
-                    и том же выпуске. Число карточек осталось на вкладках,
-                    где оно и отвечает на свой вопрос — «сколько в этой теме». */}
-                <span className="hidden shrink-0 text-sm text-muted-foreground tabular-nums sm:inline">
-                  {formatMinutes(reading.minutes, t.feed.time)}
-                </span>
+                {/* Время — рядом с датой: это две вещи об одном и том же.
+                    И это же ручка: «сколько это читать» и «сколько у меня
+                    есть» спрашивают в одном месте. Число карточек осталось
+                    на вкладках, где отвечает на свой вопрос — «сколько
+                    в этой теме». */}
+                <MinutesSelect day={day} days={days} minutes={minutes} shown={reading.minutes} />
               </div>
               <Link
                 href="/"
@@ -640,6 +652,19 @@ export function FeedTabs({
             {shortfallNote(reading.minutes, reading.target, t.feed.time)}.
           </p>
         ) : null}
+        {/* Отрезанное заказом названо так же, как скрытое правилами: молча
+            показать шесть карточек из сорока — значит выдать часть выпуска
+            за выпуск. Выход стоит тут же: «Всё» снимает предел, не уводя
+            со страницы. */}
+        {reading.cut > 0 ? (
+          <p className="mb-3 text-sm text-muted-foreground">
+            {t.feed.minutes.cut(reading.cut)}{" "}
+            <Link href={feedHref(day, days, null)} className="underline underline-offset-4">
+              {t.feed.minutes.cutLink}
+            </Link>
+            .
+          </p>
+        ) : null}
         {/* Скрытое исключениями названо, а не заметено: правило работает
             молча, и без строки читатель видел бы выпуск короче заказанного
             и шёл бы чинить отбор, где всё исправно. Только когда есть что
@@ -711,6 +736,7 @@ export function FeedTabs({
                   <ItemCard
                     textLang={textLang}
                     item={item}
+                    showDay={days > 1}
                     showTopic={tab.slug === "all"}
                     plan={plan}
                     networks={networks}

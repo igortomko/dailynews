@@ -10,7 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useT, useLocale } from "@/components/i18n-provider";
-import { formatDay } from "@/lib/relative-time";
+import { formatDay, formatDayRange } from "@/lib/relative-time";
+import { feedHref, windowStart } from "@/lib/day";
 
 /**
  * Стрелка, которая сообщает о работе. Выпуск — серверная страница, и между
@@ -50,8 +51,25 @@ const DayPicker = dynamic(() => import("@/components/day-picker").then((m) => m.
  *
  * Дни без выпуска в календаре выключены: выбор даты, за которую ничего нет,
  * приводит на пустую страницу и выглядит поломкой.
+ *
+ * Стрелки двигают якорь, а длину окна и заказ времени несут дальше —
+ * в том числе в prefetch. Без этого «следующий день» молча выбрасывал бы
+ * из режима «читаю по три дня», и вернуться в него можно было бы только
+ * через календарь.
  */
-export function DateNav({ day, days }: { day: string; days: string[] }) {
+export function DateNav({
+  day,
+  days,
+  span,
+  minutes,
+}: {
+  day: string;
+  days: string[];
+  /** Длина окна в днях: 1 — обычный выпуск. */
+  span: number;
+  /** Заказанные минуты или null — «всё время». */
+  minutes: number | null;
+}) {
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
@@ -62,6 +80,9 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
   const newer = index > 0 ? days[index - 1] : null;
   const older = index >= 0 && index < days.length - 1 ? days[index + 1] : null;
   const available = new Set(days);
+  // Окно называется целиком, а не одним якорем: «22 сентября» над лентой
+  // из пяти выпусков — это дата, которая не отвечает за то, что под ней.
+  const label = span > 1 ? formatDayRange(windowStart(day, span), day, locale) : formatDay(day, locale);
 
   // 40 пикселей на телефоне против 28 на мыши: под палец меньшая цель
   // промахивается, а на указателе лишний размер только разъезжается.
@@ -79,7 +100,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
           <TooltipTrigger
             render={
               <Link
-                href={`/?day=${older}`}
+                href={feedHref(older, span, minutes)}
                 // Соседний выпуск подгружается сразу, пока читают этот:
                 // переключение дня становится мгновенным, а не ждёт сервер.
                 // Цена — один-два фоновых рендера ленты на показ. Скрытая
@@ -112,7 +133,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
           }
         >
             {going ? <Spinner className="size-4" /> : null}
-          {formatDay(day, locale)}
+          {label}
         </PopoverTrigger>
         {/* Календарь прибит к экрану, а не к странице: кнопка даты живёт
             в прибитой шапке и при прокрутке остаётся на месте, а слежение
@@ -127,14 +148,17 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
         >
           <DayPicker
             day={day}
+            days={span}
             available={available}
             locale={locale}
-            onPick={(picked) => {
+            onPick={(picked, pickedDays) => {
               setOpen(false);
               // Переход в переходе: выпуск за другой день собирается
               // на сервере, и до его прихода страница остаётся прежней.
               // Без признака работы это выглядит как «календарь не сработал».
-              startGoing(() => router.push(`/?day=${picked}`));
+              // Заказ времени переживает выбор окна: это две разные ручки
+              // одного экрана, и одна не должна сбрасывать другую.
+              startGoing(() => router.push(feedHref(picked, pickedDays, minutes)));
             }}
           />
         </PopoverContent>
@@ -145,7 +169,7 @@ export function DateNav({ day, days }: { day: string; days: string[] }) {
           <TooltipTrigger
             render={
               <Link
-                href={`/?day=${newer}`}
+                href={feedHref(newer, span, minutes)}
                 prefetch={true}
                 aria-label={t.feed.dateNav.next}
                 className={cn(arrow, "hover:bg-muted")}

@@ -3,12 +3,13 @@ import { ChevronLeftIcon } from "lucide-react";
 import { archiveSize, searchArchive, type ArchiveHit } from "@/lib/queries";
 import { highlight } from "@/lib/search";
 import { currentReader } from "@/lib/session";
-import { dayInWords } from "@/lib/telegram";
+import { formatDay } from "@/lib/relative-time";
 import { PageHeader } from "@/components/page-header";
 import { SearchForm } from "@/components/search-form";
 import { RememberQuery } from "@/components/search-memory";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { getDict } from "@/lib/i18n/server";
+import { localeOf } from "@/lib/i18n";
 import type { Dict } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -17,30 +18,27 @@ type Archive = { items: number; days: number };
 type Found = { hits: ArchiveHit[]; loose: boolean };
 
 /**
- * Дата выпуска в выдаче. `dayInWords` намеренно не пишет год — выпуск
- * приходит в день выпуска, — но здесь смысл обратный: ищут как раз то,
- * что было давно, и «19 сентября» без года у прошлогоднего материала
- * выглядит свежим.
+ * Дата выпуска в выдаче — тем же `formatDay`, каким её пишет шапка ленты
+ * и карточка в окне из нескольких дней. Своей формулы здесь больше нет:
+ * три копии одной подписи разъезжаются с первой правкой любой из них.
  *
- * Год пишется всегда, а не только у прошлых лет. Сравнивать было бы
- * не с чем: «нынешний год» на сервере считается по UTC, а читатель живёт
- * в своём часовом поясе, и под Новый год у половины земного шара это
- * разные годы. Лишний год в архиве — это лишнее слово, недостающий —
- * неверная дата.
+ * Год в ней есть, и это здесь важно: выпуск приходит в день выпуска, а ищут
+ * как раз то, что было давно, — «19 сентября» без года у прошлогоднего
+ * материала выглядит свежим. Всегда, а не только у прошлых лет: «нынешний
+ * год» на сервере считается по UTC, а читатель живёт в своём поясе,
+ * и под Новый год у половины земного шара это разные годы.
+ *
+ * Заодно ушла русская дата у английского читателя: прежняя подпись
+ * собиралась из месяцев бота, а они написаны по-русски целиком.
  */
-function dayLabel(day: string): string {
-  const words = dayInWords(day);
-  return words === day ? day : `${words} ${day.slice(0, 4)}`;
-}
-
-function Hit({ hit, t }: { hit: ArchiveHit; t: Dict }) {
+function Hit({ hit, t, locale }: { hit: ArchiveHit; t: Dict; locale: string }) {
   return (
     <article className="border-b py-4 last:border-0">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         {/* Выпуск, а не только статья: «где я это видел» — вопрос и про
             соседние новости того дня тоже. */}
         <Link href={`/?day=${hit.day}`} className="hover:text-foreground">
-          {t.feed.searchPage.digestOf(dayLabel(hit.day))}
+          {t.feed.searchPage.digestOf(formatDay(hit.day, locale))}
         </Link>
         <span aria-hidden>·</span>
         <span>{hit.source_label}</span>
@@ -93,11 +91,13 @@ function Results({
   query,
   found,
   t,
+  locale,
 }: {
   archive: Archive;
   query: string;
   found: Found | null;
   t: Dict;
+  locale: string;
 }) {
   if (archive.items === 0) {
     return (
@@ -160,7 +160,7 @@ function Results({
       </p>
       <div className="rounded-xl bg-card px-4 shadow-(--shadow-border) sm:px-6">
         {found.hits.map((hit) => (
-          <Hit key={`${hit.day}-${hit.item_id}`} hit={hit} t={t} />
+          <Hit key={`${hit.day}-${hit.item_id}`} hit={hit} t={t} locale={locale} />
         ))}
       </div>
     </>
@@ -183,6 +183,9 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string | string[] }>;
 }) {
   const [reader, { q }, t] = await Promise.all([currentReader(), searchParams, getDict()]);
+  // Язык берётся у уже загруженной строки читателя, а не отдельным вызовом:
+  // `currentLocale` спросил бы того же `currentReader`, который уже в руках.
+  const locale = localeOf(reader.ui_language);
   const query = ((Array.isArray(q) ? q[0] : q) ?? "").trim();
   const [archive, found] = await Promise.all([
     archiveSize(reader.id),
@@ -222,7 +225,7 @@ export default async function SearchPage({
       />
 
       <div className="mx-auto w-full max-w-page px-4 py-4 sm:py-6">
-        <Results archive={archive} query={query} found={found} t={t} />
+        <Results archive={archive} query={query} found={found} t={t} locale={locale} />
       </div>
     </>
   );

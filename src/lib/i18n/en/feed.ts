@@ -26,6 +26,17 @@ export const feed = {
     pickDate: "Pick a date",
   },
 
+  /** src/components/minutes-select.tsx */
+  minutes: {
+    label: "How much time you have",
+    option: (n: number) => `${n} minutes`,
+    all: "All of it",
+    // Named, not swept under the rug: showing six cards out of forty in
+    // silence passes a slice of the digest off as the digest.
+    cut: (n: number) => `${n} more ${n === 1 ? "card" : "cards"} didn't fit the time —`,
+    cutLink: "show everything",
+  },
+
   /** src/components/feed-tabs.tsx */
   tabs: {
     all: "All",

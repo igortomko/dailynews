@@ -1323,10 +1323,12 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 // здесь не падает и не видна: выпуск приходит, просто не на то время,
 // которое заказано, — а узнаётся это от читателя через месяц.
 import {
-  CARD_CHARS, cardChars, cardMinutes, charsPerMinute, formatMinutes,
-  flowSplit, formatDuration, formatMinutesLong, isShort, itemsForMinutes, minutesOf,
-  savedMinutes, streamMinutes,
+  CARD_CHARS, cardChars, cardMinutes, charsForMinutes, charsPerMinute, fitCards,
+  formatMinutes, flowSplit, formatDuration, formatMinutesLong, isShort, itemsForMinutes,
+  minutesOf, savedMinutes, streamMinutes,
 } from "../src/lib/reading-time";
+import { FEED_DAYS_MAX, FEED_MINUTES, feedHref, feedWindow, windowStart } from "../src/lib/day";
+import { formatDayRange } from "../src/lib/relative-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
 
 const minutesOfChars = (chars: number) => minutesOf(chars, DEFAULT_VOICE);
@@ -1426,6 +1428,113 @@ assert.deepEqual(
   flowSplit(0, 18), { kept: 0, dropped: 0 },
   "пустые сутки: до читателя не дошло ничего, и отброшено тоже ничего",
 );
+
+// --- окно и заказ времени -----------------------------------------------------
+// Читатель просит минуты, а режет их знаками база. Ошибка здесь не падает:
+// лента приходит, просто не того размера, о котором её спросили.
+
+// Заказ в знаки и обратно — одна и та же мерка, иначе «двадцать минут»
+// означало бы разное до запроса и после него.
+assert.equal(
+  minutesOf(charsForMinutes(20, DEFAULT_VOICE), DEFAULT_VOICE), 20,
+  "знаки заказа и минуты показанного считаются одной меркой",
+);
+assert.ok(
+  charsForMinutes(20, { ...DEFAULT_VOICE, language: "японском" }) <
+    charsForMinutes(20, { ...DEFAULT_VOICE, language: "русском" }),
+  "двадцать минут иероглифов — это меньше знаков, чем двадцать минут кириллицы",
+);
+assert.equal(charsForMinutes(-5, DEFAULT_VOICE), 0, "отрицательный заказ — это ноль, а не отрицательные знаки");
+
+// Отсечка окна: спецификация того, что считает оконная сумма в getFeed.
+// Равенство двух формул проверяет npm run verify:db на настоящем Postgres.
+assert.equal(fitCards([], 1000), 0, "пустое окно отсекать нечего");
+assert.equal(fitCards([300, 300, 300], null), 3, "заказ «всё время» не режет ничего");
+assert.equal(
+  fitCards([400, 400, 400, 400], 1000), 3,
+  "берутся подряд, пока сумма стоящих перед карточкой меньше заказа",
+);
+assert.equal(
+  fitCards([5000], 1000), 1,
+  "единственная длинная карточка проходит: пустая лента хуже перебора по времени",
+);
+assert.equal(
+  fitCards([5000, 100], 1000), 1,
+  "перебравшая карточка закрывает окно за собой, а не тянет за собой хвост",
+);
+assert.equal(
+  fitCards([500, 500], 1000), 2,
+  "ровно уложившийся заказ берёт обе: отсечка смотрит на стоящих перед, а не вместе",
+);
+assert.equal(
+  fitCards([250, 250, 250, 250], 10_000), 4,
+  "заказ больше окна не выдумывает карточек, которых нет",
+);
+
+// Дата на сервере и в браузере обязана совпадать до символа. ICU у Node
+// и у Chrome расходятся невидимо: узкий неразрывный пробел перед «г.»
+// ставит только formatRange в Node, и гидрация ленты падала на строке,
+// которую глазом не отличить от верной.
+for (const label of [
+  formatDay("2026-09-22", "ru"),
+  formatDayRange("2026-09-19", "2026-09-22", "ru"),
+  formatDay("2026-09-22", "en"),
+  formatDayRange("2026-09-19", "2026-09-22", "en"),
+]) {
+  assert.doesNotMatch(label, /[\u202f\u2009\u00a0]/, `в дате «${label}» остался пробел ICU`);
+}
+assert.match(formatDayRange("2026-09-19", "2026-09-22", "ru"), /^19.22 сент\.$/,
+  "окно называется одним месяцем, а не двумя датами подряд");
+// Ширина шапки: на телефоне под дату остаётся около семидесяти пикселей,
+// и окно, что длиннее одиночного дня, выдавливает кнопки из её высоты.
+assert.ok(
+  formatDayRange("2026-09-19", "2026-09-22", "ru").length <= formatDay("2026-09-22", "ru").length,
+  "окно в шапке не длиннее одиночного дня",
+);
+// Год не выброшен, а отдан Intl: на границе лет он различает даты,
+// и тогда обязан появиться сам.
+assert.match(
+  formatDayRange("2025-12-30", "2026-01-02", "ru"), /2025.+2026/,
+  "окно через новый год называет оба года",
+);
+
+// Адрес — это и есть режим чтения. Забытый параметр не падает и не светится:
+// «следующий день» просто молча выбрасывает из окна на пять дней.
+assert.equal(feedHref("2026-09-22"), "/?day=2026-09-22", "умолчания в адрес не пишутся");
+assert.equal(
+  feedHref("2026-09-22", 5, 10), "/?day=2026-09-22&days=5&minutes=10",
+  "окно и заказ едут в адрес вместе с днём",
+);
+assert.deepEqual(
+  feedWindow({}), { days: 1, minutes: null },
+  "адрес без параметров — это обычный выпуск целиком",
+);
+assert.deepEqual(
+  feedWindow({ days: "5", minutes: "20" }), { days: 5, minutes: 20 },
+  "окно и заказ читаются из адреса",
+);
+assert.deepEqual(
+  feedWindow({ days: "900", minutes: "7" }), { days: FEED_DAYS_MAX, minutes: null },
+  "окно прижимается неделей, а заказ вне списка — это «всё время», а не одна карточка",
+);
+assert.deepEqual(
+  // Повторённый параметр приезжает массивом: урок поиска, где `trim`
+  // на массиве отдавал 500 вместо выдачи.
+  feedWindow({ days: ["3", "9"], minutes: ["10", "30"] }), { days: 3, minutes: 10 },
+  "повторённый параметр не роняет ленту",
+);
+assert.deepEqual(
+  feedWindow({ days: "2.5" }), { days: 1, minutes: null },
+  "дробное окно — это не окно",
+);
+for (const entry of FEED_MINUTES) {
+  assert.equal(feedWindow({ minutes: String(entry) }).minutes, entry, `заказ ${entry} мин читается из адреса`);
+}
+// Якорь — конец окна, и растёт оно назад: «следующий день» двигает одну
+// границу, а не две.
+assert.equal(windowStart("2026-09-22", 1), "2026-09-22", "окно в один день начинается собой");
+assert.equal(windowStart("2026-09-22", 5), "2026-09-18", "пять дней — это якорь и четыре перед ним");
+assert.equal(windowStart("2026-03-02", 5), "2026-02-26", "окно переходит через границу месяца");
 
 // «Лента сэкономила тебе час» — это разница между просмотром всего потока
 // и заказанным выпуском. Замер на живом потоке: 89 новостей за сутки —
@@ -3251,8 +3360,17 @@ assert.match(headerRow, /\{left\}[\s\S]*<div[^>]*>[\s\S]*<SearchButton/, "left �
 assert.match(headerRow, /<SearchButton[\s\S]*\{right\}/, "right стоит рядом с кнопкой поиска");
 assert.match(
   headerRow,
-  /formatMinutes\(reading\.minutes[^)]*\)/,
-  "время выпуска стоит рядом с его датой: это два факта об одном выпуске",
+  /<MinutesSelect[^>]*shown=\{reading\.minutes\}/,
+  "время стоит рядом с датой и оно же — ручка заказа: два факта об одном выпуске",
+);
+// Заказ работает и на одном дне тоже: одно нажатие не может означать
+// разное в двух местах одного экрана (урок nudgeTopic). Спрятать ручку
+// на телефоне значит выключить её там, где сценарий «пропустил три дня»
+// и живёт.
+assert.doesNotMatch(
+  headerRow.slice(headerRow.indexOf("<MinutesSelect"), headerRow.indexOf("<MinutesSelect") + 200),
+  /hidden\s+[^>]*sm:inline/,
+  "выбор времени виден и на телефоне",
 );
 
 

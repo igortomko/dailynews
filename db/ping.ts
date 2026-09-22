@@ -52,7 +52,7 @@ async function main() {
   for (const reader of readers) {
     const topics = await getReaderTopics(reader.id);
     const [latestDay] = await getDigestDays(reader.id);
-    const feed = latestDay ? await getFeed(reader.id, latestDay) : [];
+    const feed = latestDay ? (await getFeed(reader.id, latestDay)).items : [];
     const who = reader.username ? `@${reader.username}` : `читатель ${reader.id}`;
     console.log(
       `  ${who}${reader.owner ? " (владелец)" : ""}: выпуск на ${reader.digest_minutes} мин, ` +

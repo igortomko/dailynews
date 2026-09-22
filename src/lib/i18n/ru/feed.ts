@@ -26,6 +26,15 @@ export const feed: typeof En = {
     pickDate: "Выбрать дату",
   },
 
+  minutes: {
+    label: "Сколько есть времени",
+    option: (n: number) => `${n} минут`,
+    all: "Всё время",
+    cut: (n: number) =>
+      `Ещё ${count(n, "карточка не влезла", "карточки не влезли", "карточек не влезло")} во время —`,
+    cutLink: "показать всё",
+  },
+
   tabs: {
     all: "Все",
     other: "Прочее",
