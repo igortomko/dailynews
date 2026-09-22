@@ -222,12 +222,27 @@ async function call<T = unknown>(method: string, body: object): Promise<T> {
   return ((await res.json()) as { result: T }).result;
 }
 
-export async function sendMessage(chatId: number, text: string): Promise<void> {
+/**
+ * Сообщение, при нужде со ссылкой-кнопкой под ним.
+ *
+ * Ссылка в тексте — это строка, по которой надо попасть пальцем, и среди
+ * остального текста она ничем не выделена, кроме цвета. Кнопка рисуется
+ * во всю ширину сообщения: её видно, и мимо неё не промахиваются.
+ *
+ * Текст при этом не сокращается до одной кнопки: «Открыть» не говорит,
+ * что открывать и почему сейчас, а кнопка не место для объяснений.
+ */
+export async function sendMessage(
+  chatId: number,
+  text: string,
+  button?: { text: string; url: string },
+): Promise<void> {
   await call("sendMessage", {
     chat_id: chatId,
     text: text.slice(0, 4000),
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
+    ...(button ? { reply_markup: { inline_keyboard: [[button]] } } : {}),
   });
 }
 
@@ -495,10 +510,11 @@ export async function notify(
     `<b>Выпуск за ${escapeHtml(dayInWords(day))}</b> — ${escapeHtml(size)}`,
     intro ? escapeHtml(intro) : "",
     body,
-    `<a href="${escapeHtml(appUrl)}">Читать</a>`,
   ].filter(Boolean).join("\n\n");
 
-  await sendMessage(chatId, text);
+  // Кнопкой, а не строкой в конце: выпуск приходит с десятком заголовков,
+  // и ссылка последней строкой тонет в них ровно там, где её и ищут.
+  await sendMessage(chatId, text, { text: "Читать выпуск", url: appUrl });
 }
 
 export const loginLink = (appUrl: string, token: string) =>

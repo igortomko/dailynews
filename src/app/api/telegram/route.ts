@@ -39,25 +39,32 @@ const PITCH = [
 const gateText = (handle: string) =>
   [...PITCH, "", `Перед входом подпишись на ${escapeHtml(handle)} — там я рассказываю, что в Ленте меняется.`].join("\n");
 
-const welcomeText = (link: string) =>
-  [
-    ...PITCH,
-    "",
-    `<a href="${link}">Выбрать интересы</a>`,
-    "",
-    "Ссылка живёт 10 минут; новую всегда даёт /start.",
-  ].join("\n");
-
-const continueText = (link: string) =>
-  [
-    "Настройка не закончена — без интересов выпуск не из чего собирать.",
-    "",
-    `<a href="${link}">Продолжить</a>`,
-    "",
-    "Ссылка живёт 10 минут.",
-  ].join("\n");
-
-const feedText = (link: string) => `<a href="${link}">Открыть ленту</a>\n\nСсылка действует 10 минут.`;
+/**
+ * Вход — кнопкой под сообщением, а не ссылкой внутри него.
+ *
+ * Подпись кнопки и текст рядом решаются вместе: кнопка называет действие,
+ * текст — почему именно это. Порознь они разъехались бы, и «Продолжить»
+ * оказалось бы под приглашением, которое зовёт начать.
+ */
+const entry = (reader: Reader): { text: string; button: string } =>
+  reader.onboarded_at
+    ? { text: "Ссылка действует 10 минут.", button: "Открыть ленту" }
+    // Прошедший гейт видит приглашение целиком, а вернувшийся на середине
+    // настройки — только то, что ему осталось: заново читать, что такое
+    // Лента, он не станет.
+    : reader.channel_checked_at
+      ? {
+          text: [
+            "Настройка не закончена — без интересов выпуск не из чего собирать.",
+            "",
+            "Ссылка живёт 10 минут.",
+          ].join("\n"),
+          button: "Продолжить",
+        }
+      : {
+          text: [...PITCH, "", "Ссылка живёт 10 минут; новую всегда даёт /start."].join("\n"),
+          button: "Выбрать интересы",
+        };
 
 /**
  * Гейт стоит на входе, а не над лентой.
@@ -208,17 +215,8 @@ export async function POST(request: NextRequest) {
     const appUrl = appOrigin(request.nextUrl.origin);
     const link = loginLink(appUrl, await issueLoginToken(reader.id));
 
-    await sendMessage(
-      command.chatId,
-      reader.onboarded_at
-        ? feedText(link)
-        // Прошедший гейт видит приглашение целиком, а вернувшийся на середине
-        // настройки — только то, что ему осталось: заново читать, что такое
-        // Лента, он не станет.
-        : reader.channel_checked_at
-          ? continueText(link)
-          : welcomeText(link),
-    );
+    const invite = entry(reader);
+    await sendMessage(command.chatId, invite.text, { text: invite.button, url: link });
   } catch (error) {
     console.error(`telegram webhook: ${(error as Error).message}`);
   }

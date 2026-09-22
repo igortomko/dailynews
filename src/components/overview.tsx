@@ -187,9 +187,14 @@ function Bar({
  *
  * Отрицательные поля — чтобы текст поля стоял вровень со строкой над ним,
  * а серая подложка выходила за него на восемь пикселей в обе стороны.
+ *
+ * `shrink-0` обязателен: тело окна — флекс-колонка с прокруткой, и без него
+ * поля сжимаются под её высоту раньше, чем она начинает прокручиваться.
+ * Заголовок обзора так становился высотой в 30 пикселей вместо сорока —
+ * ровно там, где под палец и нужны сорок.
  */
 const FIELD =
-  "-mx-2 w-[calc(100%+1rem)] rounded-md border-transparent bg-transparent px-2 shadow-none transition-colors hover:bg-muted focus-visible:border-transparent focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent dark:hover:bg-muted dark:focus-visible:bg-muted";
+  "-mx-2 w-[calc(100%+1rem)] shrink-0 rounded-md border-transparent bg-transparent px-2 shadow-none transition-colors hover:bg-muted focus-visible:border-transparent focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent dark:hover:bg-muted dark:focus-visible:bg-muted";
 
 /**
  * Кнопка в строке блока: стрелка или крестик, с подсказкой.
@@ -221,7 +226,7 @@ function BlockAction({
             aria-disabled={disabled}
             onClick={disabled ? undefined : onClick}
             className={cn(
-              "flex size-7 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              "flex size-7 items-center justify-center rounded-md transition-colors outline-none touch:size-10 focus-visible:ring-3 focus-visible:ring-ring/50",
               disabled && "text-muted-foreground/30",
               !disabled && "cursor-pointer text-muted-foreground/60",
               !disabled && destructive && "hover:bg-destructive/10 hover:text-destructive",

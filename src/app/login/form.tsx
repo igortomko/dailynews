@@ -36,7 +36,7 @@ export function LoginForm({
       <CardContent>
         <FieldGroup>
           {bot ? (
-            <Button nativeButton={false} render={<a href={`https://t.me/${bot}?start=login`} />}>
+            <Button size="lg" nativeButton={false} render={<a href={`https://t.me/${bot}?start=login`} />}>
               <SendIcon data-icon="inline-start" />
               {t.onboarding.login.viaTelegram}
             </Button>

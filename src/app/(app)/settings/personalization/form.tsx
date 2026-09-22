@@ -215,7 +215,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   touch();
                 }}
                 variant="outline"
-                className="grid w-full grid-cols-2 items-stretch sm:grid-cols-5"
+                className="personalization-choice-group grid w-full grid-cols-2 items-stretch sm:grid-cols-5"
               >
                 {COMPLEXITY.map((entry) => (
                   <ToggleGroupItem
@@ -248,7 +248,7 @@ export function PersonalizationForm({ profile, plan }: { profile: Reader; plan: 
                   touch();
                 }}
                 variant="outline"
-                className="grid w-full grid-cols-1 items-stretch sm:grid-cols-2 lg:grid-cols-4"
+                className="personalization-choice-group grid w-full grid-cols-1 items-stretch sm:grid-cols-2 lg:grid-cols-4"
               >
                 {STYLES.map((entry) => (
                   <ToggleGroupItem

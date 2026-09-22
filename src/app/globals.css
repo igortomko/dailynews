@@ -4,6 +4,19 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+  Под палец. Сорок пикселей — не вкус, а замер: Apple называет сорок
+  четыре, Google сорок восемь, и обе цифры про палец, а не про курсор.
+  Интерфейс собран из компонентов shadcn, а они нарисованы под мышь:
+  кнопка и поле там 32 пиксела высотой, и на телефоне в них промахиваются.
+
+  Вариант, а не «max-sm»: дело не в ширине экрана, а в том, чем указывают.
+  У планшета экран широкий, а палец тот же; у ноутбука с сенсорным экраном
+  наоборот — основной указатель мышь, и лишняя высота ему ни к чему.
+  Тем же условием в коде уже прячется ряд иконок на карточке.
+*/
+@custom-variant touch (@media (hover: none));
+
 @theme inline {
   --container-page: 60rem;
   --color-background: var(--background);
@@ -164,6 +177,64 @@
   --sidebar-accent-foreground: oklch(0.96 0.006 80);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.56 0.008 80);
+}
+
+/* Brand color v2 is scoped to the server-selected rollout wrapper. */
+[data-brand-colors="v2"] {
+  --accent: #e5f3f5;
+  --accent-foreground: #2d6874;
+  --secondary: #e5f3f5;
+  --secondary-foreground: #2d6874;
+  --ring: #69b8c6;
+  --sidebar-accent: #e5f3f5;
+  --sidebar-accent-foreground: #2d6874;
+  --sidebar-ring: #69b8c6;
+}
+
+.dark [data-brand-colors="v2"] {
+  --accent: #263c3f;
+  --accent-foreground: #e5f3f5;
+  --secondary: #263c3f;
+  --secondary-foreground: #e5f3f5;
+  --ring: #69b8c6;
+  --sidebar-accent: #263c3f;
+  --sidebar-accent-foreground: #e5f3f5;
+  --sidebar-ring: #69b8c6;
+}
+
+[data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active] {
+  color: #c94736;
+}
+
+[data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active]::after {
+  background: #e6533f;
+}
+
+[data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active] > span {
+  color: currentColor;
+  opacity: 0.72;
+}
+
+.dark [data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active] {
+  color: #ff8a78;
+}
+
+.dark [data-brand-colors="v2"] [data-slot="tabs-trigger"][data-active]::after {
+  background: #e6533f;
+}
+
+[data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][aria-pressed="true"],
+[data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][data-state="on"] {
+  background: #e5f3f5 !important;
+  border-color: #69b8c6 !important;
+  color: #2d6874 !important;
+}
+
+.dark [data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][aria-pressed="true"],
+.dark [data-brand-colors="v2"] .personalization-choice-group [data-slot="toggle-group-item"][data-state="on"] {
+  background: #263c3f !important;
+  border-color: #69b8c6 !important;
+  color: #e5f3f5 !important;
 }
 
 @layer base {

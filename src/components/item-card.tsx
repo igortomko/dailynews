@@ -28,6 +28,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -560,7 +561,7 @@ export function ItemCard({
   const menuIcon =
     vote === "up" ? <ThumbsUpIcon className="size-4 text-foreground" /> : <EllipsisIcon className="size-4" />;
   const menuButton =
-    "flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
+    "flex size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 aria-expanded:bg-muted aria-expanded:text-foreground sm:hidden [@media(hover:none)]:flex";
 
   if (vote === "down") {
     return (
@@ -757,8 +758,6 @@ export function ItemCard({
               aria-label={selected ? t.feed.overview.remove(title) : t.feed.overview.add(title)}
               className={cn(
                 "size-4 bg-card transition-[opacity,background-color,border-color] duration-150",
-                // На тапе цель под палец — сорок пикселей вокруг.
-                "[@media(hover:none)]:after:-inset-3",
                 selected || selecting ? "opacity-100" : QUIET,
               )}
             />
@@ -833,27 +832,8 @@ export function ItemCard({
             <DropdownMenuContent align="end" className="min-w-max">
               {/* На тапе действия живут только здесь, поэтому «Своё мнение»
                   обязано быть и в меню: кнопка, существующая лишь под курсором,
-                  на телефоне не существует вовсе. Первым пунктом по той же
-                  причине, по какой первой стоит иконка в ряду. */}
-              <DropdownMenuItem
-                onClick={() => {
-                  if (!canPost) {
-                    paywall.open();
-                    return;
-                  }
-                  if (networks.length === 0) {
-                    toast.info(t.feed.item.pickNetworksFirst, {
-                      description: `${t.nav.settings} → ${t.nav.channels}`,
-                    });
-                    return;
-                  }
-                  setOpinion(true);
-                }}
-              >
-                <PenLineIcon />
-                {t.feed.item.opinion}
-                {canPost ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
-              </DropdownMenuItem>
+                  на телефоне не существует вовсе. Порядок и черта — те же,
+                  что в ряду под курсором: два места, один договор. */}
               <DropdownMenuItem
                 disabled={audio === "working"}
                 onClick={audio === "working" ? undefined : speak}
@@ -879,6 +859,26 @@ export function ItemCard({
                     ? t.feed.item.kindleSent
                     : t.feed.item.kindleSend}
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  if (!canPost) {
+                    paywall.open();
+                    return;
+                  }
+                  if (networks.length === 0) {
+                    toast.info(t.feed.item.pickNetworksFirst, {
+                      description: `${t.nav.settings} → ${t.nav.channels}`,
+                    });
+                    return;
+                  }
+                  setOpinion(true);
+                }}
+              >
+                <PenLineIcon />
+                {t.feed.item.opinion}
+                {canPost ? null : <CrownIcon className="ml-1 size-3.5 text-amber-500" />}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuCheckboxItem
                 checked={vote === "up"}
                 onCheckedChange={(next: boolean) => {
@@ -921,36 +921,10 @@ export function ItemCard({
           {/* Иконка без подписи опознаётся только по догадке. Подпись
               для экранного диктора у них была и раньше; всплывающая
               говорит то же самое глазами — на курсоре и на фокусе. */}
-          {/* «Своё мнение» стоит первым среди действий: это то, за что Pro
-              и берут деньги, и искать его в конце ряда пришлось бы глазами.
-              Не положено тарифом — та же иконка с короной, а не спрятанная
-              кнопка: спрятанное не даёт понять, за что предлагают платить. */}
-          <Hint
-            live={hot}
-            tip={canPost ? t.feed.item.opinionTooltipReady : t.feed.item.opinionTooltipLocked}
-            button={
-              <button
-                type="button"
-                aria-label={t.feed.item.opinionAria}
-                onClick={() => {
-                  if (!canPost) {
-                    paywall.open();
-                    return;
-                  }
-                  if (networks.length === 0) {
-                    toast.info(t.feed.item.pickNetworksFirst, {
-                      description: `${t.nav.settings} → ${t.nav.channels}`,
-                    });
-                    return;
-                  }
-                  setOpinion(true);
-                }}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
-              />
-            }
-          >
-            <PenLineIcon className="size-3.5" />
-          </Hint>
+          {/* Порядок — по тому, что делают с материалом: сначала послушать,
+              потом отправить на читалку, потом написать о нём пост. Оценка
+              отделена чертой: она не про этот материал, а про следующие
+              выпуски, и стоять с ними в одном ряду ей не по чину. */}
 
           <Hint
             live={hot}
@@ -1009,6 +983,38 @@ export function ItemCard({
               <BookOpenIcon className={swap(kindle === "idle")} />
             </span>
           </Hint>
+
+          <Hint
+            live={hot}
+            tip={canPost ? t.feed.item.opinionTooltipReady : t.feed.item.opinionTooltipLocked}
+            button={
+              <button
+                type="button"
+                aria-label={t.feed.item.opinionAria}
+                onClick={() => {
+                  if (!canPost) {
+                    paywall.open();
+                    return;
+                  }
+                  if (networks.length === 0) {
+                    toast.info(t.feed.item.pickNetworksFirst, {
+                      description: `${t.nav.settings} → ${t.nav.channels}`,
+                    });
+                    return;
+                  }
+                  setOpinion(true);
+                }}
+                className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+              />
+            }
+          >
+            <PenLineIcon className="size-3.5" />
+          </Hint>
+
+          {/* Волосок в четырнадцать пикселей, а не отступ: пустое место
+              между иконками читается как случайное, а черта говорит,
+              что дальше другое. */}
+          <span aria-hidden className="mx-1 h-3.5 w-px shrink-0 bg-border" />
 
           <Hint
             live={hot}
