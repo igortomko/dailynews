@@ -164,6 +164,17 @@ export function TopicChips({
     });
   };
 
+  /**
+   * Своя ли тема после правки имени. Только у чипа без слага: у него слаг
+   * выведет сервер из имени (`chip.slug || toSlug(chip.label)`), и совпадение
+   * с каталожным делает тему каталожной — тем же правилом, что и `add`.
+   * У темы со слагом имя на слаг не влияет.
+   */
+  const settleOwn = (index: number) =>
+    setChips(chips.map((chip, i) =>
+      i !== index || chip.slug ? chip : { ...chip, own: !starterBySlug.has(toSlug(chip.label)) },
+    ));
+
   const patch = (index: number, fields: Partial<Pick<ChipInput, "label" | "hint">>) =>
     setChips(chips.map((chip, i) => (i === index ? { ...chip, ...fields } : chip)));
 
@@ -350,6 +361,12 @@ export function TopicChips({
                     value={chip.label}
                     aria-label={tc.topicNameAria}
                     onChange={(event) => patch(index, { label: event.target.value })}
+                    // Сервер выводит слаг новой темы из имени при записи,
+                    // и новое имя может сделать её каталожной («Крипта» →
+                    // «Blockchain»). Признак пересчитывается, когда правка
+                    // закончена, а не на каждую букву: иначе поле исчезало бы
+                    // под пальцами на полуслове.
+                    onBlur={() => settleOwn(index)}
                     onClick={(event) => event.stopPropagation()}
                     size={Math.max(chip.label.length, 4)}
                     className="min-w-0 bg-transparent outline-none"
@@ -412,7 +429,7 @@ export function TopicChips({
                     <p className="text-xs text-muted-foreground">
                       {tc.sharedNote}{" "}
                       <a href={`#${rulesAnchor("follow")}`} className="underline underline-offset-4">
-                        {tc.sharedLink}
+                        {tc.sharedLink(t.rules.follow.label)}
                       </a>
                       .
                     </p>

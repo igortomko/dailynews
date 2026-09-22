@@ -98,7 +98,7 @@ export const settings: typeof En = {
     hintHelp: "Чем точнее, тем меньше лишнего в выпуске",
     sharedNote:
       "Тема общая — её описание одно на всех, кто её взял. Конкретные имена и продукты —",
-    sharedLink: "в «За чем следить»",
+    sharedLink: (section: string) => `в «${section}»`,
     lessAria: "На одну новость меньше",
     lessTooltip: "Меньше новостей по этой теме",
     moreAria: "На одну новость больше",
