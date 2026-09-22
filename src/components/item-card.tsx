@@ -201,6 +201,7 @@ export function ItemCard({
   networks,
   selected,
   selecting,
+  asked,
   onSelectedChange,
   textLang,
 }: {
@@ -219,6 +220,15 @@ export function ItemCard({
   selected: boolean;
   /** Идёт ли выбор: пока в выпуске есть хоть одна отметка, чекбоксы видны у всех. */
   selecting: boolean;
+  /**
+   * Пришли именно за этой карточкой: `?play=<id>` из «слушать» в Telegram.
+   *
+   * Воспроизведение пробуется, но не обещается: браузер имеет право
+   * отказать звуку без жеста, и отказ здесь молчит — карточка всё равно
+   * под курсором, а её кнопка на месте. Обещать в сообщении то, что
+   * решает политика автозапуска, нельзя.
+   */
+  asked?: boolean;
   onSelectedChange: (next: boolean) => void;
   /**
    * Язык текста выпуска — заголовка и описания, а не подписей вокруг них.
@@ -488,6 +498,24 @@ export function ItemCard({
     else pauseIfPlaying(player.current);
   };
 
+  /**
+   * Пришли по «слушать» из сообщения бота (`?play=<id>`).
+   *
+   * Один раз за жизнь карточки и только если озвучка уже лежит: синтез
+   * по переходу означал бы минуту ожидания там, где обещано готовое.
+   * Отказ браузера в звуке без жеста здесь молчит (`playOnly` его гасит) —
+   * карточка всё равно прокручена к себе, и кнопка под рукой.
+   */
+  const autoplayed = useRef(false);
+  useEffect(() => {
+    if (!asked || autoplayed.current || !item.voiced) return;
+    autoplayed.current = true;
+    play();
+    // play пересобирается каждым рендером, а запуск нужен ровно один:
+    // в зависимости он превратил бы эффект в цикл.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked, item.voiced]);
+
   const speak = async () => {
     if (!canListen) {
       audioPaywall.open();
@@ -634,7 +662,10 @@ export function ItemCard({
 
   if (vote === "down") {
     return (
-      <article className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0">
+      <article
+        id={`item-${item.id}`}
+        className="flex items-center gap-3 border-b py-3 text-sm text-muted-foreground last:border-0"
+      >
         <span className="truncate">{t.feed.item.hidden(title)}</span>
         <button
           type="button"
@@ -742,6 +773,12 @@ export function ItemCard({
   return (
     <article
       ref={article}
+      // Якорь для ссылки из Telegram: сообщение ведёт на `#item-<id>`,
+      // а не на день целиком — в выпуске бывает сто карточек, и «открой
+      // выпуск и найди третью в энергетике» это не ссылка на статью.
+      // Отступ под липкую шапку считает лента: он равен её высоте,
+      // а высота у шапки на телефоне и на широком экране разная.
+      id={`item-${item.id}`}
       // Только курсор: на тапе ряд с подсказками скрыт, и собирать их
       // значило бы платить за то, чего на экране не бывает.
       onPointerEnter={(event) => {

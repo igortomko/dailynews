@@ -133,9 +133,12 @@ export const settings = {
 
   delivery: {
     telegram: {
-      description: "Every morning, a link to your fresh personal digest arrives in your Telegram.",
+      description: "Every morning your digest arrives in Telegram: a subtitle, every headline by topic, and a link to each story.",
       connected: (username: string | null) => `Connected${username ? ` as @${username}` : ""}.`,
       notConnected: "Not connected — message the bot /start, and it'll link this account.",
+      podcast: "Digest as audio",
+      podcastHint: "The whole digest as one recording in the same message, with each story's timestamp next to its headline. Synthesis runs at night and takes minutes.",
+      podcastSaved: "Saved",
     },
     kindle: {
       descriptionDone: "The digest arrives as a book on your e-reader.",

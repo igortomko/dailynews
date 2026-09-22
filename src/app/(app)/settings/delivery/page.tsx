@@ -12,6 +12,7 @@ export default async function DeliveryPage() {
       username={reader.username}
       kindleAddress={reader.kindle_address ?? ""}
       kindleDigest={reader.kindle_digest}
+      podcast={reader.podcast}
       kindleApproved={reader.kindle_approved}
       sender={reader.kindle_sender}
       plan={effectivePlan(reader)}

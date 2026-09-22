@@ -17,7 +17,7 @@ import {
   podcastIntro, spokenMap, unabbreviate, unknownRuns, voiceFor, voiceForText,
   type AudioErrors,
 } from "../src/lib/speech";
-import { audioUrl, sendAudio } from "../src/lib/telegram";
+import { audioUrl, deleteMessage, sendAudio } from "../src/lib/telegram";
 import { cardForReader, recordCall } from "../src/lib/readers";
 import { appOrigin } from "../src/lib/auth";
 import { SOURCE_LANGUAGE } from "../src/lib/voice";
@@ -461,10 +461,20 @@ async function cardAudio(
   const audio = await synthesize(spoken, voice);
   const seconds = secondsOf(audio);
 
+  // Заливка ради `file_id`, а не ради доставки: слушать читатель будет
+  // подкаст целиком и карточку на странице, а шестьдесят аудиосообщений
+  // в чате — это чат, засыпанный до самого подкаста. Поэтому сообщение
+  // удаляется сразу: `file_id` его переживает (замер 22 сентября 2026).
+  //
+  // Удаление не обязано получиться. Не вышло — в чате останется лишнее
+  // аудио, и это хуже тишины, но лучше потерянного подкаста.
   const sent = await sendAudio(Number(reader.telegram_id), audio, {
     title: card.title,
     url: card.url,
     duration: seconds,
+  });
+  await deleteMessage(Number(reader.telegram_id), sent.messageId).catch((error) => {
+    console.log(`  ~ служебное аудио ${itemId} не удалилось: ${(error as Error).message}`);
   });
   await sql`
     insert into dailynews.card_audio (digest_id, item_id, file_id, seconds, voice)
@@ -503,6 +513,81 @@ async function introAudio(
 }
 
 /**
+ * Склеить подкаст: байты, длина и место каждой карточки внутри записи.
+ *
+ * Отдельно от отправки, потому что отправок две и они разные. Ночной выпуск
+ * везёт подкаст блоком внутри самого сообщения — ему нужны байты и метки
+ * времени, а расход квоты не нужен вовсе. Кнопка в вебе везёт его отдельным
+ * файлом и списывает квоту построчно. Одна функция на обе — и запись,
+ * которую слушает читатель, собрана одним кодом.
+ *
+ * Порядок — тот, в котором карточки идут в выпуске, а не в котором их
+ * отмечали: подкаст слушают как выпуск, а отмечают сверху вниз и вразнобой.
+ */
+export async function buildPodcast(
+  reader: Reader,
+  itemIds: number[],
+  usage: Usage,
+): Promise<{ audio: Buffer; seconds: number; titles: string[]; at: Map<number, number> }> {
+  const parts: Buffer[] = [];
+  const titles: string[] = [];
+  // Секунда, с которой карточка начинается в готовом файле. Считается
+  // здесь, а не суммой `card_audio.seconds` запросом: пропущенная карточка
+  // сдвигает всё, что за ней, и сумма по таблице назвала бы чужое место.
+  const at = new Map<number, number>();
+  let first: { voice: string; day: string } | null = null;
+  let seconds = 0;
+  let lost = 0;
+  for (const itemId of itemIds) {
+    // Карточка, которая не далась, стоит записи одной новости, а не всей
+    // записи. Без этого один оборванный запрос из шестидесяти выбрасывал
+    // десять минут синтеза: замер 22 сентября 2026 — ECONNRESET на 31-й
+    // заливке, и подкаста не стало вовсе.
+    //
+    // Повтора здесь нет намеренно: пропущенная карточка не попадёт
+    // ни в «слушать», ни в метки времени — про неё просто не сказано,
+    // что её можно послушать, и это честно. Повтор понадобится, когда
+    // окажется, что рвётся не одна из шестидесяти, а каждая пятая.
+    const piece = await cardAudio(reader, itemId, usage).catch((error) => {
+      console.log(`  ~ карточка ${itemId} без озвучки: ${(error as Error).message}`);
+      lost++;
+      return null;
+    });
+    if (!piece) continue;
+    // Пауза между новостями, но не перед первой и не после последней:
+    // тишина в начале файла читается как «не загрузилось».
+    if (parts.length > 0) {
+      parts.push(GAP_MP3);
+      seconds += GAP_SECONDS;
+    }
+    at.set(itemId, Math.round(seconds));
+    parts.push(piece.audio);
+    titles.push(piece.title);
+    seconds += piece.seconds;
+    first ??= { voice: piece.voice, day: piece.day };
+  }
+  if (parts.length === 0 || !first) throw new Error("ни одной карточки озвучить не вышло");
+  // Недобор называется вслух и здесь: запись короче выпуска — это не сбой
+  // синтеза вообще, но и не то, о чём стоит молчать.
+  if (lost > 0) console.log(`  ~ в записи нет ${lost} из ${itemIds.length} карточек`);
+
+  // Вступление впереди и через ту же паузу, что между новостями: тишина
+  // в начале файла читается как «не загрузилось», а её отсутствие делает
+  // из «Reporta, двадцать первое сентября» первую фразу первой новости.
+  const intro = await introAudio(reader, first, usage);
+  if (intro) {
+    const lead = secondsOf(intro) + GAP_SECONDS;
+    parts.unshift(intro, GAP_MP3);
+    seconds += lead;
+    // Метки времени сдвигаются вместе с новостями. Оставь их на месте —
+    // и «слушать · 12:34» в сообщении указывало бы на соседнюю новость,
+    // причём тем вернее, чем длиннее вступление.
+    for (const [itemId, at0] of at) at.set(itemId, Math.round(at0 + lead));
+  }
+  return { audio: Buffer.concat(parts), seconds: Math.round(seconds), titles, at };
+}
+
+/**
  * Подкаст из нескольких карточек.
  *
  * Синтезируется по карточке, склеивается буфером: кадры mp3 стыкуются
@@ -525,33 +610,7 @@ export async function runPodcast(
   let delivered = false;
   try {
     await mark("speaking");
-    const parts: Buffer[] = [];
-    const titles: string[] = [];
-    let first: { voice: string; day: string } | null = null;
-    let seconds = 0;
-    for (const itemId of itemIds) {
-      const piece = await cardAudio(reader, itemId, usage);
-      if (!piece) continue;
-      // Пауза между новостями, но не после последней.
-      if (parts.length > 0) {
-        parts.push(GAP_MP3);
-        seconds += GAP_SECONDS;
-      }
-      parts.push(piece.audio);
-      titles.push(piece.title);
-      seconds += piece.seconds;
-      first ??= { voice: piece.voice, day: piece.day };
-    }
-    if (parts.length === 0 || !first) throw new Error("ни одной карточки озвучить не вышло");
-
-    // Вступление впереди и через ту же паузу, что между новостями: тишина
-    // в начале файла читается как «не загрузилось», а её отсутствие делает
-    // из «Reporta, двадцать первое сентября» первую фразу первой новости.
-    const intro = await introAudio(reader, first, usage);
-    if (intro) {
-      parts.unshift(intro, GAP_MP3);
-      seconds += secondsOf(intro) + GAP_SECONDS;
-    }
+    const { audio, seconds, titles } = await buildPodcast(reader, itemIds, usage);
 
     if (usage.requests > 0) {
       await recordCall({
@@ -563,7 +622,7 @@ export async function runPodcast(
     await mark("sending");
     // Заголовок — сколько внутри и чем начинается: «Подкаст» без этого
     // неотличим от вчерашнего в списке файлов Telegram.
-    await sendAudio(Number(reader.telegram_id), Buffer.concat(parts), {
+    await sendAudio(Number(reader.telegram_id), audio, {
       title: `${titles.length} · ${titles[0]}`,
       url: appOrigin("https://news.tomko.io"),
       duration: seconds,
@@ -576,7 +635,7 @@ export async function runPodcast(
       update dailynews.audio_sends set status = 'sent', seconds = ${each}
        where id = any(${sendIds})
     `;
-    console.log(`  подкаст: ${parts.length} карточек, ${seconds} с`);
+    console.log(`  подкаст: ${titles.length} карточек, ${seconds} с`);
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     if (delivered) {
