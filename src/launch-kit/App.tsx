@@ -55,6 +55,7 @@ import {
 } from "@launch-kit/components/dashboard-widgets";
 import { LinkBuilder } from "@launch-kit/components/link-builder";
 import { CostsPanel } from "@launch-kit/components/costs-panel";
+import { DashboardSkeleton } from "@launch-kit/components/dashboard-skeleton";
 import { PlacementsPanel } from "@launch-kit/components/placements-panel";
 import { buildCosts } from "@launch-kit/lib/costs";
 import { buildDashboard, formatAmount, validateDataset } from "@launch-kit/lib/data";
@@ -410,7 +411,9 @@ export default function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  // On by default: an owner leaves this tab open, and a dashboard that needs a
+  // click to show today's numbers shows yesterday's. Runs only while visible.
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const refreshBusy = useRef(false);
   async function refresh(fromSource = false) {
     if (refreshBusy.current) return;
@@ -490,6 +493,7 @@ export default function App() {
     }
   }, [dataset, filters]);
   const { report, unfiltered } = calculated;
+  if ((!config || !dataset) && !error) return <DashboardSkeleton />;
   if (!config || !dataset || !report || !unfiltered)
     return (
       <div className="flex min-h-screen items-center justify-center p-8">

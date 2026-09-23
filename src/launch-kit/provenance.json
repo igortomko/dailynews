@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": {
     "name": "Launch Kit analytics-dashboard",
-    "commit": "a75d51c86826a84fcc0d5f09ed2871a933e16a7f",
+    "commit": "8e3300bc551e65835a17fb23c2fef33b1b7a8b94",
     "path": "launch-kit/components/analytics-dashboard/src/"
   },
   "transformations": [
@@ -19,8 +19,9 @@
     }
   },
   "files": {
-    "App.tsx": "92ad89e0bbf1a7bacfabe4741b3c657b64eca465bc774c8676faf1f8659f71ce",
+    "App.tsx": "40bcb6de1906fa98891a2c072ac8209c6edf5d40c3a0f4efe5de3be52e2ec61d",
     "components/costs-panel.tsx": "23d1393bda23b635d3f7da0164e9d1a50058fbc78da7e71a88c9b7d230fbdc6f",
+    "components/dashboard-skeleton.tsx": "99276292e13bf612bb3b6723282bbf29579450e7482f2e318b8106cacd4dc0c6",
     "components/dashboard-widgets.tsx": "394d86069049c9ed3bc9e830fb43b5b7449d06880befdf6de981967ae3640188",
     "components/link-builder.tsx": "fc4bb566b66a32097d790e731e8a3975a03d076e6ec24d7abd8b78a713133f80",
     "components/placements-panel.tsx": "ae7427b2832ad78a92cf9b6d5e424c249e17fad0603d5978c9af62b8c8b1b466",
