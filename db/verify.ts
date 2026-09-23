@@ -2604,6 +2604,23 @@ async function main() {
     }
     console.log("  reading: an unverified summary is dropped instead of shown as a placeholder");
 
+    // Дашборд владельца: снимок проходит проверку самого Launch Kit, первая
+    // польза — одна на читателя, а расход сходится с суммой model_calls.
+    {
+      const { buildDataset } = await import("../src/lib/analytics/dataset");
+      const { loadCosts } = await import("../src/lib/analytics/costs");
+      const dataset = await buildDataset();
+      const firsts = dataset.events.filter((e) => e.name === "first_value").map((e) => e.subjectId);
+      assert.equal(new Set(firsts).size, firsts.length, "first_value is counted once per reader");
+      const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from dailynews.readers`;
+      assert.equal(dataset.events.filter((e) => e.name === "product_entered").length, n, "every reader enters once");
+      const costs = await loadCosts();
+      const [{ total }] = await sql<{ total: number }[]>`select coalesce(sum(cost_usd), 0)::float as total from dailynews.model_calls`;
+      const split = costs.readers.reduce((sum: number, r: { all: number }) => sum + r.all, 0) + (costs.shared as { all: number }).all;
+      assert.ok(Math.abs(split - total) < 1e-6, "per-reader and shared costs add up to model_calls");
+      console.log(`  дашборд: ${dataset.events.length} событий, расход $${total.toFixed(4)} сходится`);
+    }
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});

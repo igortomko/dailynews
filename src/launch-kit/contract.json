@@ -1,0 +1,161 @@
+{
+  "contract_version": "product-analytics-v1",
+  "status": "specification-only",
+  "executable_schema": false,
+  "default_inclusion": "every-product-unless-user-excludes",
+  "runtime_implemented": false,
+  "defaults": {
+    "reporting_timezone": "UTC",
+    "range_days": 30,
+    "funnel_window_days": 7,
+    "return_window_hours": [
+      24,
+      168
+    ],
+    "attribution": "first-observed-acquisition-at-product-entry",
+    "currency_conversion": "none",
+    "anonymous_persistence": "disabled-until-product-consent-policy-defined",
+    "raw_retention_days_proposal": 90
+  },
+  "required_project_decisions": [
+    "counting_unit",
+    "entry_trigger",
+    "first_value_trigger",
+    "repeat_value_trigger",
+    "funnel_step_order",
+    "owner_access_boundary",
+    "identity_and_consent_policy"
+  ],
+  "event_envelope": {
+    "event_id": "stable opaque ID; preserve on retry",
+    "name": "allowed canonical event name",
+    "occurred_at": "UTC occurrence timestamp",
+    "received_at": "server receipt timestamp",
+    "project_id": "resolved by collector configuration, not trusted from client",
+    "environment": "server-resolved local, test or production",
+    "subject_id": "project-scoped pseudonymous person/account or permitted anonymous identity",
+    "surface": "landing, web, mobile, telegram, desktop or api",
+    "properties": "validated per-event allowlist; never arbitrary payloads"
+  },
+  "events": [
+    {
+      "name": "page_viewed",
+      "when": "included landing or allowlisted public route actually viewed",
+      "trust": "client-diagnostic",
+      "properties": [
+        "route_key",
+        "campaign_id"
+      ]
+    },
+    {
+      "name": "product_entered",
+      "when": "usable product entry; first occurrence starts the entry cohort",
+      "trust": "session-bound or explicitly client-reported",
+      "properties": [
+        "entry_kind",
+        "campaign_id"
+      ]
+    },
+    {
+      "name": "registered",
+      "when": "identity or account creation committed; optional when no registration",
+      "trust": "server",
+      "properties": []
+    },
+    {
+      "name": "first_value",
+      "when": "brief-defined useful result completed successfully for the first time",
+      "trust": "authoritative product operation; native-local trust disclosed",
+      "unique_by": [
+        "project_id",
+        "environment",
+        "subject_id",
+        "name"
+      ],
+      "properties": [
+        "operation_id",
+        "result_kind"
+      ]
+    },
+    {
+      "name": "value_repeated",
+      "when": "a subsequent distinct useful product result completed",
+      "trust": "same operation boundary as first_value",
+      "properties": [
+        "operation_id",
+        "result_kind"
+      ]
+    },
+    {
+      "name": "checkout_started",
+      "when": "checkout session created; optional for monetized products",
+      "trust": "server preferred; client diagnostic never payment proof",
+      "properties": [
+        "plan_key",
+        "provider"
+      ]
+    },
+    {
+      "name": "payment_succeeded",
+      "when": "verified successful charge recorded once in provider ledger",
+      "trust": "verified-provider-only",
+      "properties": [
+        "provider",
+        "payment_id",
+        "amount_minor",
+        "currency",
+        "currency_exponent"
+      ]
+    },
+    {
+      "name": "payment_refunded",
+      "when": "verified partial or full refund recorded once against original charge",
+      "trust": "verified-provider-only",
+      "properties": [
+        "provider",
+        "payment_id",
+        "refund_id",
+        "amount_minor",
+        "currency",
+        "currency_exponent"
+      ]
+    }
+  ],
+  "lifecycle_compatibility": {
+    "source": "../lifecycle-email/events.json",
+    "shared_facts": [
+      "registered",
+      "first_value"
+    ],
+    "repeat_success_may_feed": "active",
+    "analytics_grants_marketing_consent": false
+  },
+  "view_states": [
+    "loading",
+    "no-data",
+    "ready",
+    "limited-coverage",
+    "not-connected",
+    "not-applicable",
+    "error",
+    "stale",
+    "demo"
+  ],
+  "acceptance_stages": [
+    "specification",
+    "ui-demo",
+    "local-real-events",
+    "provider-sandbox",
+    "production"
+  ],
+  "excluded_from_minimum": [
+    "session-replay",
+    "generic-drag-and-drop-dashboard-builder",
+    "ad-spend-import",
+    "multi-touch-attribution",
+    "MRR-LTV-CAC-predictions",
+    "AI-generated-recommendations"
+  ],
+  "module_catalog": "modules.json",
+  "event_registry_policy": "Listed events are the canonical core. Extend with typed, allowlisted events only for selected module needs; never accept arbitrary client goals as privileged facts."
+}

@@ -1,0 +1,75 @@
+/*
+  Стили Launch Kit без его :root и @theme. Его index.css переопределяет
+  токены глобально, и подключённый на /admin он перекрасил бы ленту при
+  переходе назад: CSS, загруженный клиентской навигацией, не выгружается.
+  Токены здесь общие с Reporta; свои у кита только цвета графиков, и они
+  ставятся на обёртку `.launch-kit`, а не на :root.
+*/
+.launch-kit {
+  /*
+    Кит нарисован только светлым: у него белые подложки прямо в классах,
+    и в тёмной теме это белые карточки с бледным текстом. Поэтому обёртка
+    держит светлые токены Reporta при любой теме системы.
+  */
+  color-scheme: light;
+  background: var(--background);
+  color: var(--foreground);
+  --background: oklch(0.969 0.005 80);
+  --foreground: oklch(0.15 0.01 80);
+  --card: oklch(0.995 0.004 80);
+  --card-foreground: oklch(0.15 0.01 80);
+  --popover: oklch(0.995 0.004 80);
+  --popover-foreground: oklch(0.15 0.01 80);
+  --primary: oklch(0.21 0.012 80);
+  --primary-foreground: oklch(0.985 0.004 80);
+  --secondary: oklch(0.938 0.006 80);
+  --secondary-foreground: oklch(0.21 0.012 80);
+  --muted: oklch(0.938 0.006 80);
+  --muted-foreground: oklch(0.47 0.012 80);
+  --accent: oklch(0.938 0.006 80);
+  --accent-foreground: oklch(0.21 0.012 80);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.903 0.006 80);
+  --input: oklch(0.903 0.006 80);
+  --ring: oklch(0.68 0.012 80);
+  --chart-1: #89bff0;
+  --chart-2: #e88970;
+  --chart-3: #8f9dba;
+  --chart-4: #9fd3a8;
+  --chart-5: #e6c36a;
+  font-size: 14px;
+}
+.launch-kit .tabular { font-variant-numeric: tabular-nums; }
+.launch-kit .soft-card { box-shadow: 0 2px 3px -3px #1a271430; }
+.launch-kit .recharts-wrapper:focus-visible { outline: 2px solid #89bff0; outline-offset: 4px; }
+.launch-kit .dashboard-context [data-slot="select-trigger"] {
+  height: 26px; width: auto; max-width: 180px; border: 0; padding: 0 4px;
+  background: transparent; box-shadow: none; font-size: 11px; color: var(--muted-foreground);
+}
+.launch-kit .analytics-page > header > div > [data-slot="select-trigger"] { border: 0; box-shadow: none; border-radius: 0; }
+.launch-kit .reference-pair > :only-child { grid-column: 1 / -1; }
+.launch-kit [data-slot="tabs-list"] {
+  height: 36px; padding: 3px; background: var(--muted); border: 1px solid var(--border); border-radius: 14px;
+}
+.launch-kit [data-slot="tabs-trigger"] { border-radius: 10px; color: var(--muted-foreground); font-size: 12px; padding: 6px 10px; }
+.launch-kit [data-slot="tabs-trigger"][data-state="active"] {
+  background: var(--card); color: var(--foreground); box-shadow: 0 1px 3px #0000000d; border-color: var(--border);
+}
+@media print {
+  @page { size: landscape; margin: 8mm; }
+  html, body, main { min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; }
+  body { background: white; }
+  body * { visibility: hidden; }
+  #summary, #summary * { visibility: visible; }
+  nav, header, footer, .summary-launch, .dashboard-context, [data-no-export] { display: none !important; }
+  .analytics-content { display: contents !important; }
+  .analytics-content > :not(#summary) { display: none !important; }
+  #summary { position: static; width: 100%; padding: 0; zoom: 0.8; }
+  #summary .summary-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  #summary .summary-tables { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  #summary [data-slot="card"] { break-inside: avoid; }
+  #summary button[aria-label^="Определение"] { display: none; }
+  #summary[data-columns="3"] > div:first-child { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  #summary[data-columns="2"] > div:first-child { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  #summary > div:first-child > div { order: initial !important; }
+}

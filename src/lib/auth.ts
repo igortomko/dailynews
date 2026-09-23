@@ -30,7 +30,7 @@ async function key(): Promise<CryptoKey> {
   );
 }
 
-async function sign(payload: string): Promise<string> {
+export async function sign(payload: string): Promise<string> {
   const signature = await crypto.subtle.sign("HMAC", await key(), encoder.encode(payload));
   return [...new Uint8Array(signature)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

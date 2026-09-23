@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@launch-kit/*": ["./src/launch-kit/*"]
     }
   },
   "include": [

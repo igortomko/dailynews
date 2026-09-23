@@ -1,0 +1,646 @@
+{
+  "catalog_version": "product-analytics-modules-v1",
+  "status": "local-evaluation-runtime",
+  "modules": [
+    {
+      "id": "overview",
+      "views": [
+        "visitors",
+        "revenue",
+        "conversion",
+        "revenue_per_visitor",
+        "bounce",
+        "session_time",
+        "activation",
+        "trend",
+        "pageviews",
+        "pages_per_visitor",
+        "new_returning",
+        "returning_share"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "events",
+        "sessions",
+        "optional_verified_payments"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "visitors",
+        "revenue",
+        "conversion",
+        "revenue_per_visitor",
+        "bounce",
+        "session_time",
+        "activation",
+        "trend",
+        "pageviews",
+        "pages_per_visitor",
+        "new_returning",
+        "returning_share"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "channels",
+      "views": [
+        "channel_share",
+        "channel_table"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "acquisition"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "channel_share",
+        "channel_table"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "referrers",
+      "views": [
+        "referrer_table"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "acquisition"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "referrer_table"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "campaigns",
+      "views": [
+        "source",
+        "medium",
+        "campaign",
+        "content"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "campaign_parameters"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "source",
+        "medium",
+        "campaign",
+        "content"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "keywords",
+      "views": [
+        "campaign_terms",
+        "search_terms"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "campaign_terms_or_search_connector"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "campaign_terms"
+      ],
+      "planned_views": [
+        "search_terms"
+      ]
+    },
+    {
+      "id": "geography",
+      "views": [
+        "map",
+        "country",
+        "region",
+        "city"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "coarse_geography"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "country",
+        "region",
+        "city"
+      ],
+      "planned_views": [
+        "map"
+      ]
+    },
+    {
+      "id": "pages",
+      "views": [
+        "hostname",
+        "page",
+        "entry_page",
+        "exit_link"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "page_events",
+        "sessions",
+        "outbound_clicks"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "hostname",
+        "page"
+      ],
+      "planned_views": [
+        "entry_page",
+        "exit_link"
+      ]
+    },
+    {
+      "id": "technology",
+      "views": [
+        "browser",
+        "os",
+        "device"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "coarse_client_dimensions"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "browser",
+        "os",
+        "device"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "goals",
+      "views": [
+        "goal_list",
+        "goal_trend",
+        "goal_properties"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "typed_goal_registry"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "goal_list",
+        "goal_trend"
+      ],
+      "planned_views": [
+        "goal_properties"
+      ]
+    },
+    {
+      "id": "funnels",
+      "views": [
+        "landing_engagement",
+        "product_activation_payment",
+        "step_details"
+      ],
+      "depends_on": [
+        "goals"
+      ],
+      "data_prerequisites": [
+        "ordered_events"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "product_activation_payment",
+        "step_details"
+      ],
+      "planned_views": [
+        "landing_engagement"
+      ]
+    },
+    {
+      "id": "users",
+      "views": [
+        "user_list",
+        "user_card"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "verified_identity",
+        "owner_access"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "user_list",
+        "user_card"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "journeys",
+      "views": [
+        "goal_completers",
+        "timeline"
+      ],
+      "depends_on": [
+        "goals",
+        "users"
+      ],
+      "data_prerequisites": [
+        "ordered_events",
+        "verified_identity"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "timeline"
+      ],
+      "planned_views": [
+        "goal_completers"
+      ]
+    },
+    {
+      "id": "ai_crawlers",
+      "views": [
+        "ai_answers",
+        "indexing",
+        "training",
+        "crawlers",
+        "requested_pages"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "server_request_collector",
+        "bot_classifier"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "ai_answers",
+        "indexing",
+        "training",
+        "crawlers",
+        "requested_pages"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "link_builder",
+      "views": [
+        "simple_ref",
+        "utm_builder",
+        "saved_links",
+        "campaign_result"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "owned_destinations"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "simple_ref",
+        "utm_builder",
+        "saved_links"
+      ],
+      "planned_views": [
+        "campaign_result"
+      ]
+    },
+    {
+      "id": "summary",
+      "views": [
+        "identity_period",
+        "daily_averages",
+        "conversion",
+        "revenue_per_visitor_growth",
+        "device_os_browser_revenue",
+        "top_sources",
+        "top_countries",
+        "visits_to_purchase",
+        "time_to_purchase",
+        "top_converting_goals",
+        "conversion_heatmap",
+        "activation",
+        "seven_day_return",
+        "lifecycle_results"
+      ],
+      "depends_on": [
+        "overview"
+      ],
+      "data_prerequisites": [
+        "selected_card_aggregates"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "view_dependencies": {
+        "activation": [
+          "goals"
+        ],
+        "seven_day_return": [
+          "retention"
+        ],
+        "lifecycle_results": [
+          "lifecycle"
+        ]
+      },
+      "runtime_views": [
+        "identity_period",
+        "daily_averages",
+        "conversion",
+        "revenue_per_visitor_growth",
+        "device_os_browser_revenue",
+        "top_sources",
+        "top_countries",
+        "visits_to_purchase",
+        "time_to_purchase",
+        "activation",
+        "seven_day_return"
+      ],
+      "planned_views": [
+        "top_converting_goals",
+        "conversion_heatmap",
+        "lifecycle_results"
+      ]
+    },
+    {
+      "id": "sharing",
+      "views": [
+        "export_png",
+        "export_pdf",
+        "snapshot_link",
+        "revoke"
+      ],
+      "depends_on": [
+        "summary"
+      ],
+      "data_prerequisites": [
+        "redacted_snapshot",
+        "optional_hosted_access_control"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "export_png",
+        "export_pdf"
+      ],
+      "planned_views": [
+        "snapshot_link",
+        "revoke"
+      ]
+    },
+    {
+      "id": "retention",
+      "views": [
+        "seven_day_return",
+        "repeat_value_trend",
+        "source_cohorts",
+        "retention_windows"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "first_value",
+        "repeat_value",
+        "mature_identity_cohort"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "seven_day_return",
+        "retention_windows"
+      ],
+      "planned_views": [
+        "repeat_value_trend",
+        "source_cohorts"
+      ]
+    },
+    {
+      "id": "lifecycle",
+      "views": [
+        "welcome",
+        "activation",
+        "return",
+        "delivery_health"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "consent_scoped_lifecycle",
+        "resend_events"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "delivery_health"
+      ],
+      "planned_views": [
+        "welcome",
+        "activation",
+        "return"
+      ]
+    },
+    {
+      "id": "data_health",
+      "views": [
+        "ingestion",
+        "coverage",
+        "provider_sync",
+        "redacted_debug"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "collector_health"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "ingestion",
+        "coverage",
+        "redacted_debug"
+      ],
+      "planned_views": [
+        "provider_sync"
+      ]
+    },
+    {
+      "id": "activity",
+      "views": [
+        "active_windows",
+        "activity_trend"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "activity_events",
+        "stable_identity"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "active_windows",
+        "activity_trend"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "source_quality",
+      "views": [
+        "cohort_table"
+      ],
+      "depends_on": [],
+      "data_prerequisites": [
+        "activity_events",
+        "stable_identity",
+        "first_touch_attribution"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "cohort_table"
+      ],
+      "planned_views": []
+    },
+    {
+      "id": "learning",
+      "views": [
+        "learning_overview",
+        "learner_progress"
+      ],
+      "depends_on": [
+        "users"
+      ],
+      "data_prerequisites": [
+        "learning_snapshot",
+        "stable_identity"
+      ],
+      "implementation_status": "local-evaluation; see runtime_views for implemented subset",
+      "runtime_views": [
+        "learning_overview",
+        "learner_progress"
+      ],
+      "planned_views": []
+    }
+  ],
+  "presets": {
+    "minimum": [
+      "overview",
+      "channels",
+      "referrers",
+      "campaigns",
+      "pages",
+      "goals",
+      "funnels",
+      "link_builder",
+      "retention",
+      "data_health",
+      "activity",
+      "source_quality"
+    ],
+    "acquisition": [
+      "overview",
+      "channels",
+      "referrers",
+      "campaigns",
+      "pages",
+      "goals",
+      "funnels",
+      "link_builder",
+      "retention",
+      "data_health",
+      "keywords",
+      "geography",
+      "technology",
+      "users",
+      "journeys",
+      "ai_crawlers",
+      "summary",
+      "sharing",
+      "activity",
+      "source_quality"
+    ],
+    "all": [
+      "overview",
+      "channels",
+      "referrers",
+      "campaigns",
+      "keywords",
+      "geography",
+      "pages",
+      "technology",
+      "goals",
+      "funnels",
+      "users",
+      "journeys",
+      "ai_crawlers",
+      "link_builder",
+      "summary",
+      "sharing",
+      "retention",
+      "lifecycle",
+      "data_health",
+      "activity",
+      "source_quality",
+      "learning"
+    ]
+  },
+  "selection_file": "analytics/selection.json",
+  "unspecified_views": "all-views-of-selected-module",
+  "selected_is_not_connected": true,
+  "shared_view_features": [
+    "range",
+    "comparison",
+    "granularity",
+    "metric_sort",
+    "details",
+    "search",
+    "pagination",
+    "filters",
+    "saved_segments",
+    "annotations"
+  ],
+  "selection_example": {
+    "contract_version": "product-analytics-v1",
+    "preset": "custom",
+    "selected_modules": [
+      "overview",
+      "channels",
+      "link_builder",
+      "summary"
+    ],
+    "view_choices": {
+      "overview": [
+        "visitors",
+        "activation",
+        "trend"
+      ],
+      "summary": [
+        "identity_period",
+        "daily_averages"
+      ]
+    },
+    "excluded_modules": {
+      "sharing": "Owner wants local review only"
+    },
+    "provenance": "user"
+  },
+  "preset_view_choices": {
+    "acquisition": {
+      "summary": [
+        "identity_period",
+        "daily_averages",
+        "conversion",
+        "revenue_per_visitor_growth",
+        "device_os_browser_revenue",
+        "top_sources",
+        "top_countries",
+        "visits_to_purchase",
+        "time_to_purchase",
+        "top_converting_goals",
+        "conversion_heatmap",
+        "activation",
+        "seven_day_return"
+      ]
+    }
+  },
+  "removed_modules": {
+    "realtime": "Removed by product decision: no globe, online count or live event feed"
+  },
+  "runtime_shared_features": [
+    "range",
+    "currency",
+    "metric_sort",
+    "details",
+    "search",
+    "pagination",
+    "filters"
+  ]
+}

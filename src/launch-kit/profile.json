@@ -1,0 +1,33 @@
+{
+  "product": {
+    "name": "Reporta",
+    "profile": "telegram",
+    "firstValueLabel": "Открыл карточку",
+    "currency": "USD"
+  },
+  "measurement": {
+    "audienceLabel": "Читатели",
+    "activationLabel": "Открыл карточку за 72 ч",
+    "description": "Вход — /start в боте. Активность — события чтения на сайте: показ карточки, раскрытие, переход к источнику, оценка. Выпуск, который мы прислали, активностью не считается: это наше действие, а не читателя. Источник привлечения не пишется, поэтому все входы — Unknown. Оплата не подключена. Расходы на модель — во вкладке «Расходы на LLM».",
+    "activationWindowHours": 72,
+    "funnel": {
+      "label": "От /start до чтения",
+      "mode": "independent",
+      "steps": [
+        {"key": "started", "label": "/start в боте", "event": "product_entered"},
+        {"key": "onboarded", "label": "Онбординг пройден", "event": "goal_completed", "goal": "onboarded"},
+        {"key": "seen", "label": "Увидел ленту", "event": "goal_completed", "goal": "seen"},
+        {"key": "opened", "label": "Открыл карточку", "event": "first_value"},
+        {"key": "outbound", "label": "Перешёл к источнику", "event": "outbound_clicked"},
+        {"key": "rated", "label": "Оценил карточку", "event": "goal_completed", "goal": "rated"}
+      ]
+    },
+    "retention": {
+      "label": "D7 · открывают карточки",
+      "anchor": "product_entered",
+      "event": "value_repeated",
+      "startHours": 144,
+      "endHours": 192
+    }
+  }
+}
