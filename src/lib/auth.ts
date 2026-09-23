@@ -130,6 +130,65 @@ export async function verifyEmailToken(token: string | null): Promise<string | n
   return Buffer.from(address, "base64url").toString("utf8");
 }
 
+/**
+ * Привязка Telegram: полезная нагрузка `/start a_<номер>_<срок>_<подпись>`.
+ *
+ * Telegram пропускает в нагрузку 64 знака из `[A-Za-z0-9_-]`, поэтому
+ * числа в base36, а подпись урезана до 96 бит — подбирать её за полчаса
+ * жизни ссылки нечем.
+ */
+export async function issueBindPayload(readerId: number): Promise<string> {
+  const payload = `${readerId.toString(36)}_${(Date.now() + EMAIL_LINK_TTL_MS).toString(36)}`;
+  return `a_${payload}_${(await sign(`bind:${payload}`)).slice(0, 24)}`;
+}
+
+export async function verifyBindPayload(value: string | undefined): Promise<number | null> {
+  const match = /^a_([0-9a-z]+)_([0-9a-z]+)_([0-9a-f]{24})$/.exec(value ?? "");
+  if (!match) return null;
+  const [, id, expires, signature] = match;
+  if (Date.now() > parseInt(expires, 36)) return null;
+  if (!equal(signature, (await sign(`bind:${id}_${expires}`)).slice(0, 24))) return null;
+  const readerId = parseInt(id, 36);
+  return Number.isSafeInteger(readerId) && readerId > 0 ? readerId : null;
+}
+
+/**
+ * Подтверждение почты, добавленной в настройках. Несёт и номер читателя,
+ * и адрес: клик доказывает, что ящик свой, а номер — к какому профилю
+ * его привязать. Оба внутри подписи.
+ */
+export async function issueConfirmToken(readerId: number, email: string): Promise<string> {
+  const payload = `${readerId}.${Buffer.from(email).toString("base64url")}.${Date.now() + EMAIL_LINK_TTL_MS}`;
+  return `${payload}.${await sign(`email-confirm:${payload}`)}`;
+}
+
+export async function verifyConfirmToken(token: string | null): Promise<{ readerId: number; email: string } | null> {
+  const [id, address, expires, signature] = (token ?? "").split(".");
+  if (!id || !address || !expires || !signature) return null;
+  if (Date.now() > Number(expires)) return null;
+  if (!equal(signature, await sign(`email-confirm:${id}.${address}.${expires}`))) return null;
+  const readerId = Number(id);
+  if (!Number.isSafeInteger(readerId) || readerId <= 0) return null;
+  return { readerId, email: Buffer.from(address, "base64url").toString("utf8") };
+}
+
+/**
+ * Отписка в один клик (`List-Unsubscribe`, RFC 8058). Бессрочная: письмо
+ * с выпуском открывают и через месяц, и отписка из него обязана сработать.
+ * Она только выключает письма — вред от подобранной подписи ровно такой же.
+ */
+export async function unsubscribeToken(readerId: number): Promise<string> {
+  return `${readerId}.${(await sign(`unsubscribe:${readerId}`)).slice(0, 32)}`;
+}
+
+export async function verifyUnsubscribeToken(token: string | null): Promise<number | null> {
+  const [id, signature] = (token ?? "").split(".");
+  if (!id || !signature) return null;
+  if (!equal(signature, (await sign(`unsubscribe:${id}`)).slice(0, 32))) return null;
+  const readerId = Number(id);
+  return Number.isSafeInteger(readerId) && readerId > 0 ? readerId : null;
+}
+
 export async function checkPassword(candidate: string): Promise<boolean> {
   const expected = process.env.APP_PASSWORD;
   if (!expected) throw new Error("APP_PASSWORD не задан");

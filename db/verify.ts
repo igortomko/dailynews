@@ -2724,6 +2724,36 @@ async function main() {
       const reborn = await readers.ensureEmailReader("mail.reader@example.com");
       assert.notEqual(reborn.id, first.id, "вход по почте вернул удалённый профиль");
       console.log("  вход по почте: один ящик — один читатель, удаление освобождает адрес");
+
+      // Направления: пришедшему по почте письмо включено сразу, путь входа
+      // записан; Telegram привязывается к нему, а занятый не отбирается.
+      const byMail = await readers.ensureEmailReader("channels@example.com", undefined, "google");
+      assert.equal(byMail.email_digest, true, "пришедшему по почте письмо не включилось");
+      assert.equal(byMail.entered_via, "google");
+      const tgReader = await readers.ensureReader(BIG_TELEGRAM_ID + 400, "tg_first");
+      assert.equal(tgReader.entered_via, "telegram");
+      assert.equal(tgReader.email_digest, false);
+      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 400, "tg_first"), "taken", "чужой Telegram отобран");
+      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "ok");
+      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "same");
+      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 402, "other"), "busy", "второй Telegram поверх первого");
+      const attached = (await readers.getReader(byMail.id))!;
+      assert.equal(attached.telegram_id, String(BIG_TELEGRAM_ID + 401));
+      assert.equal(attached.entered_via, "google", "привязка переписала путь входа");
+
+      // Почта у Telegram-читателя: занятый адрес не отдаётся, свой включает письма.
+      assert.equal(await readers.confirmEmail(tgReader.id, "CHANNELS@example.com"), "taken", "адрес чужого входа отдан");
+      assert.equal(await readers.confirmEmail(tgReader.id, "Tg.First@example.com"), "ok");
+      const withMail = (await readers.getReader(tgReader.id))!;
+      assert.equal(withMail.email, "tg.first@example.com");
+      assert.equal(withMail.email_digest, true, "подтверждённая почта не включила письма");
+      await readers.setEmailDigest(tgReader.id, false);
+      assert.equal((await readers.getReader(tgReader.id))!.email_digest, false, "отписка не выключила письма");
+      assert.equal(await readers.removeEmail(tgReader.id), true);
+      assert.equal((await readers.getReader(tgReader.id))!.email, null);
+      const onlyMail = await readers.ensureEmailReader("only@example.com");
+      assert.equal(await readers.removeEmail(onlyMail.id), false, "убрана почта — единственный вход");
+      console.log("  направления: письмо, привязка Telegram, подтверждение и отписка");
     }
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

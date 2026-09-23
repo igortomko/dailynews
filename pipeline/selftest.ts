@@ -43,7 +43,10 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
 import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt, trialDaysFor,
 } from "../src/lib/lemon";
-import { appOrigin, issueEmailToken, verifyEmailToken } from "../src/lib/auth";
+import {
+  appOrigin, issueBindPayload, issueConfirmToken, issueEmailToken, unsubscribeToken,
+  verifyBindPayload, verifyConfirmToken, verifyEmailToken, verifyUnsubscribeToken,
+} from "../src/lib/auth";
 import { digestEmail, looksLikeEmail, normalizeEmail } from "../src/lib/email";
 import { emailFromIdToken } from "../src/lib/google";
 import * as bus from "../src/lib/audio-bus";
@@ -73,7 +76,7 @@ import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
-  botUpsellLine, channelHandle, founderBotLine, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
+  botUpsellLine, channelHandle, founderBotLine, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate, podcastParts,
   splitClassic, stamp, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -5360,7 +5363,46 @@ void (async () => {
   const mail = digestEmail({
     day: "2026-09-23", appUrl: "https://news.example", size: "~12 минут", picked: null, upsell: null,
     headlines: [{ id: 7, title: "R&D <растёт>", topic: "ИИ", at: null }],
+    unsubscribe: "https://news.example/api/unsubscribe?token=1.x",
   });
+  assert.equal(mail.headers["List-Unsubscribe"], "<https://news.example/api/unsubscribe?token=1.x>");
+  assert.equal(mail.headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+  assert.ok(!mail.html.includes("Слушать"), "без записи ссылки «Слушать» нет");
+  const withAudio = digestEmail({
+    day: "2026-09-23", appUrl: "https://news.example", size: "~12 минут", picked: null, upsell: null,
+    headlines: [], unsubscribe: "u", listen: "https://news.example/api/audio/day?day=2026-09-23",
+  });
+  assert.ok(withAudio.html.includes("/api/audio/day?day=2026-09-23") && withAudio.text.includes("Слушать:"));
+
+  // Привязка Telegram: нагрузка /start укладывается в 64 знака Telegram,
+  // чужой номер под своей подписью не проходит.
+  const bind = await issueBindPayload(123456789);
+  assert.ok(bind.length <= 64 && /^[A-Za-z0-9_-]+$/.test(bind), `нагрузка /start: ${bind}`);
+  assert.equal(await verifyBindPayload(bind), 123456789);
+  const [, , ...tail] = bind.split("_");
+  assert.equal(await verifyBindPayload(`a_${(5).toString(36)}_${tail.join("_")}`), null, "чужой номер");
+  assert.equal(await verifyBindPayload("a_1_2_x"), null);
+  assert.equal(await verifyBindPayload(undefined), null);
+  const attach = parseUpdate({
+    message: { text: `/start ${bind}`, chat: { id: 5, type: "private" }, from: { id: 5, username: "u" } },
+  });
+  assert.equal(attach.kind, "attach", "/start a_… — привязка, а не вход");
+
+  // Подтверждение почты несёт и профиль, и адрес внутри подписи.
+  const confirm = await issueConfirmToken(42, "new@mail.example");
+  assert.deepEqual(await verifyConfirmToken(confirm), { readerId: 42, email: "new@mail.example" });
+  assert.equal(await verifyConfirmToken(confirm.replace(/^42\./, "43.")), null, "чужой профиль");
+
+  // Отписка бессрочная и подписана номером.
+  const unsub = await unsubscribeToken(42);
+  assert.equal(await verifyUnsubscribeToken(unsub), 42);
+  assert.equal(await verifyUnsubscribeToken(unsub.replace(/^42\./, "43.")), null);
+
+  // Подкаст режется по 19 МБ и склеивается обратно тем же файлом.
+  const audio = Buffer.alloc(45, 7);
+  const parts = podcastParts(audio, 20);
+  assert.deepEqual(parts.map((part) => part.length), [20, 20, 5]);
+  assert.ok(Buffer.concat(parts).equals(audio));
   assert.ok(mail.subject.startsWith("Выпуск за") && !mail.subject.includes("<"));
   assert.ok(mail.html.includes("https://news.example/?day=2026-09-23#item-7"), "заголовок ведёт на карточку");
   assert.ok(mail.text.includes("R&D <растёт>") && !mail.text.includes("&amp;"), "сущности раскрыты в тексте");

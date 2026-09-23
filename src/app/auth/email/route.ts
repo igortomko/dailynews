@@ -8,5 +8,5 @@ import { landByEmail } from "@/lib/email-login";
  * и одноразовая сгорала бы у них.
  */
 export async function GET(request: NextRequest) {
-  return landByEmail(request, await verifyEmailToken(request.nextUrl.searchParams.get("token")));
+  return landByEmail(request, await verifyEmailToken(request.nextUrl.searchParams.get("token")), "email");
 }

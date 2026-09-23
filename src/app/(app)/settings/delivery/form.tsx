@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   approveKindleSender,
+  dropEmail,
+  requestEmailConfirm,
   resetKindleSetup,
+  saveEmailDigest,
   saveKindleDigest,
   saveKindlePeriod,
   saveKindleAddress,
   savePodcast,
   saveTimezone,
+  telegramBindLink,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { PaywallCrown } from "@/components/paywall";
@@ -110,6 +114,8 @@ export function DeliveryForm({
   connected,
   username,
   email,
+  emailDigest,
+  emailResult,
   kindleAddress,
   kindleDigest,
   kindlePeriod,
@@ -123,8 +129,12 @@ export function DeliveryForm({
   plan: Plan;
   connected: boolean;
   username: string | null;
-  /** Почта, на которую уходит выпуск, если Telegram нет. */
+  /** Подтверждённая почта: вход и направление доставки. */
   email: string | null;
+  /** Присылать ли выпуск письмом. */
+  emailDigest: boolean;
+  /** Чем кончился клик по письму подтверждения, если пришли с него. */
+  emailResult: "ok" | "taken" | "expired" | null;
   kindleAddress: string;
   kindleDigest: boolean;
   /** Как часто уходит книга: каждое утро или в субботу за неделю. */
@@ -199,21 +209,15 @@ export function DeliveryForm({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Общее — то, что верно для всех направлений сразу: когда собирается
+          выпуск и есть ли у него запись. Направления ниже решают только,
+          куда он приходит. */}
       <Card>
         <CardHeader>
-          {/* Имя раздела, а не «Telegram»: экран открывается тем, куда
-              пришли, — как «Интересы», «Мои площадки» и «Подписка». Канал
-              называет первая же фраза описания. */}
           <CardTitle>{t.nav.delivery}</CardTitle>
-          <CardDescription>{t.settings.delivery.telegram.description}</CardDescription>
+          <CardDescription>{t.settings.delivery.general}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 text-sm text-muted-foreground">
-          {connected
-            ? t.settings.delivery.telegram.connected(username)
-            : email
-              ? t.settings.delivery.telegram.byEmail(email)
-              : t.settings.delivery.telegram.notConnected}
-
           {/* Пояс, а не время: выпуск собирается в два ночи по нему и к утру
               уже лежит в чате. Своё время доставки ничего не добавило бы —
               просыпаются позже двух почти все. */}
@@ -276,6 +280,47 @@ export function DeliveryForm({
           </Field>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Telegram</CardTitle>
+          <CardDescription>{t.settings.delivery.telegram.description}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
+          {connected ? (
+            t.settings.delivery.telegram.connected(username)
+          ) : (
+            <>
+              {/* Ссылка собирается по нажатию, а не при показе: в ней
+                  подписанный номер читателя со сроком, и лежать в разметке
+                  страницы ей незачем. */}
+              <Button
+                type="button"
+                variant="outline"
+                className="self-start"
+                disabled={pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const result = await telegramBindLink();
+                    if ("error" in result) return void toast.error(result.error);
+                    window.location.href = result.url;
+                  })
+                }
+              >
+                {t.settings.delivery.telegram.connect}
+              </Button>
+              <p>{t.settings.delivery.telegram.connectHint}</p>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <EmailCard
+        email={email}
+        digest={emailDigest}
+        canRemove={connected}
+        result={emailResult}
+      />
 
       <Card>
         {/* border-b карточка предусматривает сама: он добавляет шапке нижний
@@ -463,5 +508,146 @@ export function DeliveryForm({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Почта как направление. Адрес появляется только подтверждённым —
+ * до клика по письму его нет ни в базе, ни здесь: вписанный чужой ящик
+ * иначе получал бы наши письма каждую ночь.
+ */
+function EmailCard({
+  email,
+  digest,
+  canRemove,
+  result,
+}: {
+  email: string | null;
+  digest: boolean;
+  /** Убрать можно, только если есть Telegram: иначе почта — единственный вход. */
+  canRemove: boolean;
+  result: "ok" | "taken" | "expired" | null;
+}) {
+  const t = useT();
+  const e = t.settings.delivery.email;
+  const [pending, startTransition] = useTransition();
+  const [on, setOn] = useState(digest);
+  const [editing, setEditing] = useState(!email);
+  const [error, setError] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+
+  // Ответ подтверждения — один раз, при приходе со ссылки.
+  const told = useRef(false);
+  useEffect(() => {
+    if (!result || told.current) return;
+    told.current = true;
+    if (result === "ok") toast.success(e.confirmed);
+    else toast.error(result === "taken" ? e.confirmTaken : e.confirmExpired);
+  }, [result, e]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{e.title}</CardTitle>
+        <CardDescription>{e.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4 text-sm text-muted-foreground">
+        {email ? (
+          <>
+            <p>{e.address(email)}</p>
+            <Field orientation="horizontal">
+              <Switch
+                id="email_digest"
+                checked={on}
+                disabled={pending}
+                onCheckedChange={(next: boolean) => {
+                  setOn(next);
+                  startTransition(async () => {
+                    const saved = await saveEmailDigest(next);
+                    if ("error" in saved && saved.error) {
+                      setOn(!next);
+                      toast.error(saved.error);
+                    } else toast.success(next ? e.digestOn : e.digestOff);
+                  });
+                }}
+              />
+              <FieldContent>
+                <FieldLabel htmlFor="email_digest" className="text-foreground">{e.digest}</FieldLabel>
+                <FieldDescription>{e.digestHint}</FieldDescription>
+              </FieldContent>
+            </Field>
+          </>
+        ) : null}
+
+        {sentTo ? (
+          <p role="status">{e.sent(sentTo)}</p>
+        ) : editing ? (
+          <form
+            action={(fd) =>
+              startTransition(async () => {
+                const address = String(fd.get("email") ?? "");
+                const sent = await requestEmailConfirm(address);
+                if ("error" in sent) return void setError(sent.error);
+                setError(null);
+                setSentTo(address.trim());
+              })
+            }
+          >
+            <FieldGroup>
+              <Field data-invalid={error ? true : undefined}>
+                <FieldLabel htmlFor="email" className="text-foreground">{e.label}</FieldLabel>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  placeholder={e.placeholder}
+                  aria-invalid={error ? true : undefined}
+                  className="max-w-xs"
+                />
+                {error ? <FieldError>{error}</FieldError> : null}
+              </Field>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" variant="outline" disabled={pending}>
+                  {e.confirm}
+                </Button>
+                {email ? (
+                  <Button type="button" variant="ghost" onClick={() => { setEditing(false); setError(null); }}>
+                    {e.cancel}
+                  </Button>
+                ) : null}
+              </div>
+            </FieldGroup>
+          </form>
+        ) : (
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
+            >
+              {e.change}
+            </button>
+            {canRemove ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const dropped = await dropEmail();
+                    if ("error" in dropped) toast.error(dropped.error);
+                    else toast.success(e.removed);
+                  })
+                }
+                className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
+              >
+                {e.remove}
+              </button>
+            ) : null}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

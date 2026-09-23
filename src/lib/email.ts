@@ -28,7 +28,13 @@ const escapeHtml = (s: string) =>
 const plain = (s: string) =>
   s.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 
-export async function sendEmail(input: { to: string; subject: string; html: string; text: string }) {
+export async function sendEmail(input: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  headers?: Record<string, string>;
+}) {
   const key = process.env.RESEND_API_KEY;
   // Незаданный ключ — отказ вслух: молча не отправленная ссылка входа
   // выглядит для читателя как письмо, застрявшее в спаме.
@@ -36,7 +42,10 @@ export async function sendEmail(input: { to: string; subject: string; html: stri
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ from: FROM, to: [input.to], subject: input.subject, html: input.html, text: input.text }),
+    body: JSON.stringify({
+      from: FROM, to: [input.to], subject: input.subject, html: input.html, text: input.text,
+      ...(input.headers ? { headers: input.headers } : {}),
+    }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`Resend HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -54,11 +63,21 @@ export function loginEmail(link: string, t: { subject: string; intro: string; bu
   };
 }
 
+/** Запись выпуска на сайте: браузер играет mp3 сам, своего плеера не нужно. */
+export const podcastUrl = (appUrl: string, day: string) =>
+  `${appUrl.replace(/\/$/, "")}/api/audio/day?day=${encodeURIComponent(day)}`;
+
 /**
  * Выпуск письмом. Тело — то же, что у rich message в Telegram
  * (`digestMessage`): заголовки, темы, ссылка на каждую карточку.
  * Вторая вёрстка того же списка разошлась бы с первой на первой правке.
- * Подкаста здесь нет: он едет блоком аудио, а у письма его места нет.
+ *
+ * Подкаст — ссылкой «Слушать», а не вложением: час речи весит двадцать
+ * мегабайт, и такое письмо каждое утро ящик не простит.
+ *
+ * Отписка — и заголовком `List-Unsubscribe` в один клик (так её требуют
+ * Gmail и Yahoo от рассылок), и строкой внизу: письмо приходит само
+ * каждую ночь, и выключить его должно быть можно не заходя в настройки.
  */
 export function digestEmail(input: {
   day: string;
@@ -67,14 +86,32 @@ export function digestEmail(input: {
   size: string;
   picked: string | null;
   upsell: string | null;
+  /** Адрес записи выпуска, или ничего. */
+  listen?: string | null;
+  /** Адрес отписки в один клик. */
+  unsubscribe: string;
 }) {
   const { html, classic } = digestMessage({ ...input, podcast: false });
   const subject = plain(classic.split("\n")[0]);
   const url = dayUrl(input.appUrl, input.day);
+  const settings = `${input.appUrl.replace(/\/$/, "")}/settings/delivery`;
+  const listen = input.listen
+    ? `<p><a href="${escapeHtml(input.listen)}">🎧 Слушать выпуск</a></p>`
+    : "";
+  const footer =
+    `<p style="color:#888;font-size:13px;margin-top:32px">Выпуск приходит письмом, потому что так настроено в ` +
+    `<a href="${escapeHtml(settings)}" style="color:#888">«Доставке»</a>. ` +
+    `<a href="${escapeHtml(input.unsubscribe)}" style="color:#888">Не присылать письмом</a></p>`;
   return {
     subject,
-    html: `<div style="font-family:system-ui,sans-serif;font-size:16px;line-height:1.5;max-width:640px">${html}${button(url, "Читать выпуск")}</div>`,
-    text: `${plain(classic)}\n\n${url}`,
+    html: `<div style="font-family:system-ui,sans-serif;font-size:16px;line-height:1.5;max-width:640px">${listen}${html}${button(url, "Читать выпуск")}${footer}</div>`,
+    text:
+      `${input.listen ? `Слушать: ${input.listen}\n\n` : ""}${plain(classic)}\n\n${url}\n\n` +
+      `Не присылать письмом: ${input.unsubscribe}`,
+    headers: {
+      "List-Unsubscribe": `<${input.unsubscribe}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
   };
 }
 
@@ -91,5 +128,22 @@ export function pauseEmail(appUrl: string, silentDays: number) {
     subject: "Reporta на паузе",
     html: `<p>${escapeHtml(intro)}</p>${button(appUrl, "Вернуть ленту")}`,
     text: `${intro}\n\n${appUrl}`,
+  };
+}
+
+/**
+ * Подтверждение почты, добавленной в «Доставке». Имя профиля в тексте
+ * нарочно: чужой человек мог вписать этот адрес к себе, и письмо должно
+ * сказать, к чему именно привязывают ящик.
+ */
+export function confirmEmailMessage(link: string, profile: string) {
+  const intro =
+    `Подтверди, что на этот адрес можно присылать выпуски Reporta профиля ${profile}. ` +
+    "Ссылка работает 30 минут.";
+  const outro = "Если это не твой профиль, просто не нажимай — ничего не изменится.";
+  return {
+    subject: "Подтверди почту для Reporta",
+    html: `<p>${escapeHtml(intro)}</p>${button(link, "Подтвердить")}<p style="color:#666">${escapeHtml(outro)}</p>`,
+    text: `${intro}\n\n${link}\n\n${outro}`,
   };
 }
