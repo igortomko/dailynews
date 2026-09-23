@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { MailIcon, SendIcon } from "lucide-react";
 import { requestEmailLink } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ export function LoginForm({
   google,
 }: { expired: boolean; bot: string | null; google: boolean }) {
   const [mail, mailAction, mailPending] = useActionState(requestEmailLink, null);
+  const [emailOpen, setEmailOpen] = useState(false);
   const t = useT();
 
   return (
@@ -65,38 +66,38 @@ export function LoginForm({
             </Button>
           ) : null}
 
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            {t.onboarding.login.or}
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
+          {/* Почта свёрнута в кнопку: полем на первом экране она спорила бы
+              с Telegram за внимание, а выбирают её реже. */}
           {mail?.sent ? (
             <FieldDescription role="status">{t.onboarding.login.linkSent(mail.sent)}</FieldDescription>
-          ) : (
+          ) : emailOpen ? (
             <form action={mailAction}>
               <FieldGroup>
                 <Field data-invalid={mail?.error ? true : undefined}>
-                  <FieldLabel htmlFor="email">{t.onboarding.login.emailLabel}</FieldLabel>
+                  <FieldLabel htmlFor="email" className="sr-only">{t.onboarding.login.emailLabel}</FieldLabel>
                   <Input
                     id="email"
                     name="email"
                     type="email"
                     required
+                    autoFocus
                     autoComplete="email"
                     placeholder={t.onboarding.login.emailPlaceholder}
                     aria-invalid={mail?.error ? true : undefined}
                   />
                   {mail?.error ? <FieldError>{mail.error}</FieldError> : null}
                 </Field>
-                <Button type="submit" variant="outline" disabled={mailPending}>
-                  <MailIcon data-icon="inline-start" />
+                <Button type="submit" size="lg" disabled={mailPending}>
                   {t.onboarding.login.sendLink}
                 </Button>
               </FieldGroup>
             </form>
+          ) : (
+            <Button type="button" size="lg" variant="outline" onClick={() => setEmailOpen(true)}>
+              <MailIcon data-icon="inline-start" />
+              {t.onboarding.login.viaEmail}
+            </Button>
           )}
-
         </FieldGroup>
       </CardContent>
     </Card>
