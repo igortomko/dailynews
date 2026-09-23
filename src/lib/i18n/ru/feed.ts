@@ -277,8 +277,6 @@ export const feed: typeof En = {
       m > 0
         ? `~${h} ${plural(h, "час", "часа", "часов")} ${m} ${plural(m, "минута", "минуты", "минут")}`
         : `~${h} ${plural(h, "час", "часа", "часов")}`,
-    shortfall: (have: string, target: number): string =>
-      `${have} из ${target}: сегодня больше действительно важного нет`,
     picked: (kept: number, collected: number): string =>
       `Отобрали ${kept} ${plural(kept, "самый важный материал", "самых важных материала", "самых важных материалов")} из ${collected}.`,
     savedToday: (duration: string): string => `Сэкономили сегодня ${duration}.`,

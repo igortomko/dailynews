@@ -17,7 +17,7 @@ import { formOf } from "../src/lib/reading-evaluation";
 import { jevCost, llmCost } from "./cost";
 import { FEATURES, issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
 import {
-  cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf,
+  cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf, pickedNote, savedMinutes,
 } from "../src/lib/reading-time";
 // Лог прогона владельческий и русский: «набран», «материалов», «пропуск».
 // Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
@@ -476,21 +476,29 @@ async function deliver(
      *
      * Отказ здесь не стоит выпуска — предложение это не доставка.
      */
+    //
+    // Те же факты дают и строку отбора под заголовком («Отобрали 14 из 95»):
+    // один запрос на обе, и считаются они так же, как в ленте.
     let upsell: string | null = null;
+    let picked: string | null = null;
     try {
+      const plan = effectivePlan(reader);
+      const mine = sourcesForPlan(await readerSources(reader.id), plan).map((one) => Number(one.id));
+      // `issuesToday` здесь всегда истина: сообщение шлётся только в тот
+      // день, когда выпуск собрался. Про частоту в чате говорить нечего —
+      // читатель как раз получает выпуск.
+      const facts = { ...(await getUpgradeFacts(reader.id, mine)), kept: survivors.length, issuesToday: true };
+      picked = pickedNote(
+        survivors.length, facts.collected, savedMinutes(facts.streamChars, reading.minutes), ruFeed.time,
+      );
       if (botMayUpsell(reader.upsell_at)) {
-        const plan = effectivePlan(reader);
-        const mine = sourcesForPlan(await readerSources(reader.id), plan).map((one) => Number(one.id));
-        // `issuesToday` здесь всегда истина: сообщение шлётся только в тот
-        // день, когда выпуск собрался. Про частоту в чате говорить нечего —
-        // читатель как раз получает выпуск.
-        const facts = { ...(await getUpgradeFacts(reader.id, mine)), kept: survivors.length, issuesToday: true };
         const found = upgradeReason(plan, facts);
         if (found) upsell = botUpsellLine(plan, upgradeNote(plan, found, facts), appUrl);
       }
     } catch (error) {
-      // Предложение — не доставка: не посчиталось, уходит выпуск без него.
-      log(`  ${name}: предложение тарифа не посчиталось — ${(error as Error).message}`);
+      // Ни отбор, ни предложение — не доставка: не посчитались, уходит
+      // выпуск без них.
+      log(`  ${name}: отбор дня и предложение тарифа не посчитались — ${(error as Error).message}`);
     }
 
     try {
@@ -503,7 +511,7 @@ async function deliver(
           at: podcast?.at.get(Number(s.id)) ?? null,
         })),
         appUrl,
-        reading,
+        { minutes: reading.minutes, picked },
         podcast,
         upsell,
       );

@@ -1,6 +1,6 @@
 import { equal } from "./auth";
 import { localeOf, type Locale } from "./i18n/locale";
-import { formatMinutesLong, isShort, shortfallNote } from "./reading-time";
+import { formatMinutesLong } from "./reading-time";
 // Сообщение бота написано по-русски целиком — «Выпуск за…», «Читать», —
 // и время выпуска стоит внутри русской фразы. Словарь читателя дал бы
 // «Выпуск за 21 сентября — 19 min read»: полперевода заметнее, чем его
@@ -681,8 +681,14 @@ export function digestMessage(input: {
   day: string;
   headlines: Headline[];
   appUrl: string;
-  /** Уже собранная фраза про время: «19 мин» или объяснение недобора. */
+  /** Уже собранная фраза про время: «~19 минут». */
   size: string;
+  /**
+   * Отбор дня обычным текстом под заголовком (`pickedNote`), или ничего.
+   * Над записью и темами: это ответ на «стоит ли открывать», и в сгиб
+   * он обязан попасть.
+   */
+  picked?: string | null;
   /** Есть ли запись. Нет — нет ни блока аудио, ни меток времени. */
   podcast: boolean;
   /**
@@ -695,7 +701,7 @@ export function digestMessage(input: {
    */
   upsell?: string | null;
 }): { html: string; classic: string } {
-  const { day, headlines, appUrl, size, podcast, upsell } = input;
+  const { day, headlines, appUrl, size, picked, podcast, upsell } = input;
 
   const byTopic = new Map<string, Headline[]>();
   for (const h of headlines) {
@@ -716,6 +722,10 @@ export function digestMessage(input: {
   // текстом, а не перед списком.
   const html: string[] = [`<h2>${escapeHtml(title)}</h2>`];
   const classic: string[] = [`<b>${escapeHtml(title)}</b>`];
+  if (picked) {
+    html.push(`<p>${escapeHtml(picked)}</p>`);
+    classic.push(escapeHtml(picked), "");
+  }
   // Плеер без подписи: Telegram сам пишет на нём имя и длину записи,
   // а «время у заголовка — его место в записи» объясняет то, что видно
   // и так, — и стоит это строки над первой новостью.
@@ -724,7 +734,7 @@ export function digestMessage(input: {
   for (const [topic, list] of byTopic) {
     // Разделитель между темами, а не перед каждой: первой он достался бы
     // сразу под заголовком, отделяя его от пустоты.
-    if (html.length > 1 + (podcast ? 1 : 0)) html.push("<hr>");
+    if (html.length > 1 + (picked ? 1 : 0) + (podcast ? 1 : 0)) html.push("<hr>");
     html.push(`<h3>${escapeHtml(topic)}</h3>`);
     classic.push(`<b>${escapeHtml(topic)}</b>`);
     const items: string[] = [];
@@ -808,23 +818,21 @@ export async function notify(
   headlines: Headline[],
   appUrl: string,
   /**
-   * Заказано и вышло. Обещание выпуска — время, а не число карточек:
-   * «40 новостей» не отвечает на вопрос, который задают перед чтением.
+   * Время выпуска и отбор дня. Обещание выпуска — время, а не число
+   * карточек: «40 новостей» не отвечает на вопрос, который задают перед
+   * чтением. Недобор в заголовок не выносится: короткий выпуск объясняет
+   * строка отбора под ним.
    */
-  reading: { minutes: number; target: number },
+  reading: { minutes: number; picked: string | null },
   /** Выпуск голосом. Едет тем же сообщением — отдельным блоком аудио. */
   podcast?: { audio: Buffer; seconds: number } | null,
   /** Готовая строка про упёртый предел, или ничего. Решает прогон. */
   upsell?: string | null,
 ): Promise<void> {
-  // Недобор называется вслух, а не заметается добором слабого материала:
-  // короткий выпуск без объяснения читается как поломка отбора.
-  const size = isShort(reading.minutes, reading.target)
-    ? shortfallNote(reading.minutes, reading.target, ruFeed.time)
-    : formatMinutesLong(reading.minutes, ruFeed.time);
+  const size = formatMinutesLong(reading.minutes, ruFeed.time);
 
   const { html, classic } = digestMessage({
-    day, headlines, appUrl, size, podcast: Boolean(podcast), upsell,
+    day, headlines, appUrl, size, picked: reading.picked, podcast: Boolean(podcast), upsell,
   });
 
   // Кнопкой, а не строкой в конце: выпуск приходит с десятком заголовков,

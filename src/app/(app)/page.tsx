@@ -204,13 +204,12 @@ export default async function FeedPage({
       networks={networks}
       // Отбор дня — только для последнего выпуска: «из 89 отобрали 12»
       // считается по потоку последних суток, и на выпуске недельной давности
-      // рассказывало бы про сегодня, глядя на позавчера. Молчит, когда
-      // отбирать было не из чего: «12 из 9» — не отбор.
+      // рассказывало бы про сегодня, глядя на позавчера.
       reading={{
         minutes,
         cut,
         picked:
-          whole && day === days[0] && facts.collected > feed.length
+          whole && day === days[0]
             ? { kept: feed.length, collected: facts.collected, saved: savedMinutes(facts.streamChars, minutes) }
             : null,
       }}

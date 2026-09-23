@@ -25,7 +25,7 @@ import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { UpgradeNote } from "@/lib/upgrade";
 import { UpgradeLine } from "@/components/upgrade-note";
-import { formatDuration, formatMinutes } from "@/lib/reading-time";
+import { formatMinutes, pickedNote } from "@/lib/reading-time";
 import { MinutesSelect } from "@/components/minutes-select";
 import { FeedMenu } from "@/components/feed-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -206,6 +206,9 @@ export function FeedTabs({
   left: React.ReactNode;
 }) {
   const t = useT();
+  const pickedLine = reading.picked
+    ? pickedNote(reading.picked.kept, reading.picked.collected, reading.picked.saved, t.feed.time)
+    : null;
   const locale = useLocale();
   // «Прочее» показывается вкладкой, только если туда что-то попало: пустая
   // вкладка сообщает о системе, а не о новостях.
@@ -822,19 +825,11 @@ export function FeedTabs({
         );
       })}
         </div>
-        {/* Отбор дня называется пользой, а не недобором: сколько отобрано
-            из скольких и сколько времени это сняло. Короткий выпуск
-            объясняет себя тем же — «12 из 89» говорит, что остальное
-            отсеяно, а не потеряно. Экономия меньше минуты не называется,
-            как и в «О проекте». Под панелью и по центру: это итог дочитанного
-            выпуска, а наверху он стоял бы между читателем и первой новостью. */}
-        {reading.picked && items.length > 0 ? (
-          <p className="pt-5 text-center text-sm text-muted-foreground">
-            {t.feed.time.picked(reading.picked.kept, reading.picked.collected)}
-            {reading.picked.saved >= 1
-              ? ` ${t.feed.time.savedToday(formatDuration(reading.picked.saved, t.feed.time))}`
-              : null}
-          </p>
+        {/* Отбор дня — под панелью и по центру: это итог дочитанного
+            выпуска, а наверху он стоял бы между читателем и первой новостью.
+            Слова и условия — в `pickedNote`, общей с сообщением бота. */}
+        {pickedLine && items.length > 0 ? (
+          <p className="pt-5 text-center text-sm text-muted-foreground">{pickedLine}</p>
         ) : null}
         {/* Выход из заказа — под лентой и кнопкой, а не ссылкой в строке
             сверху. «Хочу ещё» решают, дочитав заказанные десять минут,

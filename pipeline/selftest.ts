@@ -1328,8 +1328,9 @@ assert.ok(!existsSync("middleware.ts"), "middleware в корне не подк�
 import {
   CARD_CHARS, cardChars, cardMinutes, charsForMinutes, charsPerMinute, fitCards,
   formatMinutes, flowSplit, formatDuration, formatMinutesLong, isShort, itemsForMinutes,
-  minutesOf, savedMinutes, streamMinutes,
+  minutesOf, pickedNote, savedMinutes, streamMinutes,
 } from "../src/lib/reading-time";
+import { feed as ruTimeFeed } from "../src/lib/i18n/ru/feed";
 import { FEED_DAYS_MAX, FEED_MINUTES, feedHref, feedWindow, windowStart } from "../src/lib/day";
 import { formatDayRange } from "../src/lib/relative-time";
 import { DEFAULT_VOICE } from "../src/lib/voice";
@@ -4902,6 +4903,23 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
     noAudio.html,
     "без предложения сообщение не меняется ни на знак",
   );
+
+  // Отбор дня — обычным текстом сразу под заголовком, до записи и тем;
+  // заголовок несёт только время, фразы недобора в нём нет.
+  const note = pickedNote(14, 95, 74, ruTimeFeed.time);
+  assert.equal(note, "Отобрали 14 самых важных материалов из 95. Сэкономили сегодня ~1 час 14 минут.");
+  assert.equal(pickedNote(1, 3, 0.4, ruTimeFeed.time), "Отобрали 1 самый важный материал из 3.", "экономию меньше минуты не называем");
+  assert.equal(pickedNote(12, 9, 5, ruTimeFeed.time), null, "«12 из 9» — не отбор");
+  const withPicked = digestMessage({
+    day: "2026-09-21", headlines: heads, appUrl: APP, size: "~19 минут", picked: note, podcast: true,
+  });
+  assert.match(
+    withPicked.html,
+    /^<h2>Выпуск за 21 сентября — ~19 минут<\/h2>\n<p>Отобрали 14 самых важных материалов из 95\. Сэкономили сегодня ~1 час 14 минут\.<\/p>\n<audio/,
+    "отбор стоит под заголовком и над записью",
+  );
+  assert.ok(withPicked.classic.startsWith("<b>Выпуск за 21 сентября — ~19 минут</b>\nОтобрали 14"), "и в классическом пути");
+  assert.ok(!withPicked.html.includes("<hr>\n<h3>" + heads[0].topic), "над первой темой разделителя нет");
 
   // Ничего не обрезается: старое сообщение упиралось в 4000 знаков
   // и обрывалось на полуслове у двух выпусков из трёх.
