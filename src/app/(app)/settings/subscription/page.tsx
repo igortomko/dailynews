@@ -1,7 +1,6 @@
-import { notFound } from "next/navigation";
 import { currentReader } from "@/lib/session";
 import { effectivePlan, hasFounderDiscount } from "@/lib/billing";
-import { FOUNDER_DISCOUNT, billingOn, founderGraceEnds, isFounder } from "@/lib/plans";
+import { FOUNDER_DISCOUNT, founderGraceEnds, isFounder } from "@/lib/plans";
 import { currentLocale, getDict } from "@/lib/i18n/server";
 import { PlanTable } from "@/components/plan-table";
 
@@ -11,15 +10,15 @@ export const dynamic = "force-dynamic";
  * Страница открыта на любом тарифе: прайс за замком — это предложение,
  * которого не видит ровно тот, кому оно адресовано.
  *
- * Пока оплата не включена (`BILLING_FROM`), страницы нет вовсе: у всех Pro,
- * и таблица с кнопками «Выбрать» предлагала бы купить то, что уже есть.
+ * Видна и до включения оплаты (`BILLING_FROM`): у всех тогда Pro, и таблица
+ * работает сравнением — что даёт каждый тариф и что останется после
+ * включения. Кнопок «Выбрать» при этом нет по построению: выше Pro нечего.
  *
  * Своего ключа здесь больше нет. Он лежал в базе открытым текстом, и раздел
  * убран вместе с ним: хранить чужой секрет ради настройки, которой никто
  * не пользовался, незачем. Модель дайджеста задаётся окружением.
  */
 export default async function SubscriptionPage() {
-  if (!billingOn()) notFound();
   const [reader, t, locale] = await Promise.all([currentReader(), getDict(), currentLocale()]);
   // Ранним — сколько ещё Pro и какая скидка: без этой строки месяц Pro
   // после включения выглядел бы как чужой тариф, а скидка — как её отсутствие.

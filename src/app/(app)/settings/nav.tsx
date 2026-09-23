@@ -4,7 +4,7 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { FEATURES, billingOn, type FeatureId, type Plan } from "@/lib/plans";
+import { FEATURES, type FeatureId, type Plan } from "@/lib/plans";
 import { PaywallCrown } from "@/components/paywall";
 import { useT } from "@/components/i18n-provider";
 import type { Dict } from "@/lib/i18n";
@@ -54,8 +54,7 @@ export function SettingsNav({ plan }: { plan: Plan }) {
 
   return (
     <nav className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
-      {/* «Подписки» нет, пока оплата не включена: у всех Pro, и продавать нечего. */}
-      {SECTIONS.filter((section) => billingOn() || section.href !== "/settings/subscription").map((section) => {
+      {SECTIONS.map((section) => {
         const active = pathname === section.href;
         const locked = section.feature !== undefined && !FEATURES[section.feature].has(plan);
         return (
