@@ -87,9 +87,9 @@ export const onboarding: typeof En = {
   },
   channels: {
     lastStepTitle: "Последний шаг: соцсети",
-    postingTitle: "Соцсети",
+    postingTitle: "Твои соцсети",
     postingDescription:
-      "Подключи сети, куда пишешь. У каждой подключённой будет свой таб в черновике: он пишется её длиной и её подачей.",
+      "Подключи сети, куда будешь делиться постами.",
     connect: "Подключить",
     connected: "Подключено",
     disconnect: "Отключить",
