@@ -86,6 +86,8 @@ export const onboarding: typeof En = {
     emailLabel: "Почта",
     emailPlaceholder: "you@example.com",
     sendLink: "Прислать ссылку",
+    back: "Назад",
+    changeEmail: "Изменить адрес",
     linkSent: (email: string) => `Отправили ссылку на ${email}. Она работает 30 минут.`,
     emailInvalid: "Это не похоже на адрес почты",
     emailFailed: "Не получилось отправить письмо. Попробуй через минуту",

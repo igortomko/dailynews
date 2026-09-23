@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { MailIcon, SendIcon } from "lucide-react";
+import { ArrowLeftIcon, MailIcon, SendIcon } from "lucide-react";
 import { requestEmailLink } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,13 @@ export function LoginForm({
 }: { expired: boolean; bot: string | null; google: boolean }) {
   const [mail, mailAction, mailPending] = useActionState(requestEmailLink, null);
   const [emailOpen, setEmailOpen] = useState(false);
+  // Ответ формы живёт в useActionState и сам не сбрасывается. «Изменить
+  // адрес» и «Назад» запоминают ответ, который надо забыть: показывается
+  // только ответ новее него.
+  const [changing, setChanging] = useState<typeof mail>(null);
+  const fresh = mail !== changing ? mail : null;
+  const sent = fresh?.sent ?? null;
+  const error = fresh?.error ?? null;
   const t = useT();
 
   return (
@@ -48,34 +55,22 @@ export function LoginForm({
         {/* Кнопки входа — один выбор из трёх, а не три поля формы: зазор
             кнопочный, а не межполевой (gap-7 у FieldGroup). */}
         <FieldGroup className="gap-3">
-          {bot ? (
-            <Button size="lg" nativeButton={false} render={<a href={`https://t.me/${bot}?start=login`} />}>
-              <SendIcon data-icon="inline-start" />
-              {t.onboarding.login.viaTelegram}
-            </Button>
-          ) : (
-            <FieldDescription>
-              {t.onboarding.login.botHintBefore}
-              <code className="font-mono">/start</code>
-              {t.onboarding.login.botHintAfter}
-            </FieldDescription>
-          )}
-
-          {google ? (
-            <Button size="lg" variant="outline" nativeButton={false} render={<a href="/auth/google" />}>
-              <GoogleMark />
-              {t.onboarding.login.viaGoogle}
-            </Button>
-          ) : null}
-
-          {/* Почта свёрнута в кнопку: полем на первом экране она спорила бы
-              с Telegram за внимание, а выбирают её реже. */}
-          {mail?.sent ? (
-            <FieldDescription role="status">{t.onboarding.login.linkSent(mail.sent)}</FieldDescription>
+          {sent ? (
+            // Отправлено: другие входы здесь уже не выбор, а шум. Выход один —
+            // поправить адрес, если в нём ошиблись.
+            <>
+              <FieldDescription role="status" className="text-center">
+                {t.onboarding.login.linkSent(sent)}
+              </FieldDescription>
+              <Button type="button" size="lg" variant="outline" onClick={() => setChanging(mail)}>
+                {t.onboarding.login.changeEmail}
+              </Button>
+            </>
           ) : emailOpen ? (
+            // Почта открыта — остальные кнопки прячутся, внизу «Назад» к ним.
             <form action={mailAction}>
               <FieldGroup className="gap-3">
-                <Field data-invalid={mail?.error ? true : undefined}>
+                <Field data-invalid={error ? true : undefined}>
                   <FieldLabel htmlFor="email" className="sr-only">{t.onboarding.login.emailLabel}</FieldLabel>
                   <Input
                     id="email"
@@ -84,21 +79,58 @@ export function LoginForm({
                     required
                     autoFocus
                     autoComplete="email"
+                    defaultValue={mail?.sent ?? ""}
                     placeholder={t.onboarding.login.emailPlaceholder}
-                    aria-invalid={mail?.error ? true : undefined}
+                    aria-invalid={error ? true : undefined}
                   />
-                  {mail?.error ? <FieldError>{mail.error}</FieldError> : null}
+                  {error ? <FieldError>{error}</FieldError> : null}
                 </Field>
                 <Button type="submit" size="lg" disabled={mailPending}>
                   {t.onboarding.login.sendLink}
                 </Button>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="ghost"
+                  onClick={() => {
+                    setEmailOpen(false);
+                    setChanging(mail);
+                  }}
+                >
+                  <ArrowLeftIcon data-icon="inline-start" />
+                  {t.onboarding.login.back}
+                </Button>
               </FieldGroup>
             </form>
           ) : (
-            <Button type="button" size="lg" variant="outline" onClick={() => setEmailOpen(true)}>
-              <MailIcon data-icon="inline-start" />
-              {t.onboarding.login.viaEmail}
-            </Button>
+            <>
+              {bot ? (
+                <Button size="lg" nativeButton={false} render={<a href={`https://t.me/${bot}?start=login`} />}>
+                  <SendIcon data-icon="inline-start" />
+                  {t.onboarding.login.viaTelegram}
+                </Button>
+              ) : (
+                <FieldDescription>
+                  {t.onboarding.login.botHintBefore}
+                  <code className="font-mono">/start</code>
+                  {t.onboarding.login.botHintAfter}
+                </FieldDescription>
+              )}
+
+              {google ? (
+                <Button size="lg" variant="outline" nativeButton={false} render={<a href="/auth/google" />}>
+                  <GoogleMark />
+                  {t.onboarding.login.viaGoogle}
+                </Button>
+              ) : null}
+
+              {/* Почта свёрнута в кнопку: полем на первом экране она спорила бы
+                  с Telegram за внимание, а выбирают её реже. */}
+              <Button type="button" size="lg" variant="outline" onClick={() => setEmailOpen(true)}>
+                <MailIcon data-icon="inline-start" />
+                {t.onboarding.login.viaEmail}
+              </Button>
+            </>
           )}
         </FieldGroup>
       </CardContent>

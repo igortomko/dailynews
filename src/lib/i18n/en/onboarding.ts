@@ -67,6 +67,8 @@ export const onboarding = {
     emailLabel: "Email",
     emailPlaceholder: "you@example.com",
     sendLink: "Send link",
+    back: "Back",
+    changeEmail: "Change email",
     linkSent: (email: string) => `We sent a link to ${email}. It works for 30 minutes.`,
     emailInvalid: "That doesn't look like an email address",
     emailFailed: "Couldn't send the email. Try again in a minute",
