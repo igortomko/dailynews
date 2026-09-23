@@ -16,15 +16,15 @@ import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
   addReaderSource, deleteReader, digestProgress, freezeKindleSender, getChannels,
-  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelPublishes,
+  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelLanguage, setChannelPublishes,
   saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
 import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { buildVoiceCard, cardText, cleanStyle, draftStyle, readOwnPosts } from "../../pipeline/voice-card";
-import { hasStyle, STYLE_LIMIT } from "./voice";
+import { hasStyle, LANGUAGES, SOURCE_LANGUAGE, STYLE_LIMIT } from "./voice";
 import { writePost } from "../../pipeline/post";
-import { NETWORK_IDS, publishedIn, tabsOf, type NetworkId } from "./networks";
+import { languagesOf, NETWORK_IDS, publishedIn, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import { KINDLE_PERIODS, type KindlePeriod, type Reader, type Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
@@ -1090,6 +1090,25 @@ export async function toggleChannel(network: string, on: boolean) {
 }
 
 /**
+ * Язык постов для одной сети. Пусто — не называть: пишется как в стиле.
+ * Список проверяется здесь, а не только селектом: строка уходит в промпт,
+ * и прислать туда можно что угодно мимо формы.
+ */
+export async function saveChannelLanguage(network: string, language: string) {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: (await getDict()).errors.unknownNetwork };
+  const value = String(language ?? "").trim();
+  if (value && (value === SOURCE_LANGUAGE || !LANGUAGES.includes(value))) {
+    return { error: (await getDict()).errors.unknownLanguage };
+  }
+  await setChannelLanguage(readerId, network, value || null);
+  revalidatePath("/settings/channels");
+  return { ok: true as const };
+}
+
+/**
  * «Писать черновики в моём стиле»: свитчер и текст одной записью.
  * Включить можно только с текстом — пустой стиль молча писал бы
  * настройками подачи под видом «моего стиля».
@@ -1203,7 +1222,9 @@ export async function writeOpinion(itemId: number): Promise<
   const style = draftStyle(reader);
 
   try {
-    const written = await writePost(item, style.block, networks.map((network) => network.id), reader.id);
+    const written = await writePost(
+      item, style.block, networks.map((network) => network.id), reader.id, languagesOf(channels),
+    );
     const saved = await saveDrafts(reader.id, item.id, written.drafts);
     return {
       ok: true as const,

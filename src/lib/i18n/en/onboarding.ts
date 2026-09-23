@@ -80,6 +80,8 @@ export const onboarding = {
     disconnect: "Disconnect",
     connectNamed: (network: string) => `Connect ${network}`,
     disconnectNamed: (network: string) => `Disconnect ${network}`,
+    postLanguageNamed: (network: string) => `Post language on ${network}`,
+    languageAsStyle: "language: as in style",
     channelPlaceholder: "t.me/channel",
     channelDialogTitle: "Connect a Telegram channel",
     channelDialogText:

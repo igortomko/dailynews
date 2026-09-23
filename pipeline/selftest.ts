@@ -112,12 +112,12 @@ import {
 import type { Axes, Weights } from "../src/lib/types";
 import { asUrl, diagnose, feedLinks, guesses, looksLikeFeed, planFor } from "./discover";
 import { tweetLink } from "./fetch";
-import { countOf, explain, parseTelegram } from "./fetch";
+import { countOf, explain, parseTelegram, sharesInTelegram } from "./fetch";
 import {
-  NETWORK_IDS, NETWORKS, overLimit, postLength, publishedIn, readableOf, tabsOf,
+  languagesOf, NETWORK_IDS, NETWORKS, overLimit, postLength, publishedIn, readableOf, tabsOf,
 } from "../src/lib/networks";
-import { parseDrafts, unverifiedNumbers } from "./post";
-import { asCard, cardBlock, cardFromVoice, corpusOf, medianViews, parseCard } from "./voice-card";
+import { parseDrafts, promptFor, unverifiedNumbers } from "./post";
+import { asCard, cardBlock, cardFromVoice, cardText, corpusOf, MIN_SHARES, medianViews, parseCard, samplesOf } from "./voice-card";
 import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 
 const weights: Weights = {
@@ -3049,7 +3049,7 @@ assert.deepEqual(
   assert.ok(
     cardBlock({
       voice: ["а"], structure: [], hooks: [], samples: [], frame: ["б"], taboo: [],
-      built_from: 9, sources: [], ranked: true,
+      words: [], from_shares: false, built_from: 9, sources: [], ranked: true,
     }).includes("сравнением его же постов по просмотрам"),
     "каркас в промпте назван тем, чем он является: сравнением его постов",
   );
@@ -3087,7 +3087,7 @@ assert.deepEqual(
 // «верхние по просмотрам» означало бы «самые старые».
 {
   const old = (views: number, daysAgo: number) => ({
-    text: "я".repeat(50), views, where: "telegram" as const,
+    text: "я".repeat(50), views, where: "telegram" as const, shares: false,
     at: new Date(Date.now() - daysAgo * 86_400_000),
   });
   const posts = [10, 20, 30, 40, 50, 60, 70, 80].map((v, i) => old(v * 1000, i + 3));
@@ -3097,10 +3097,76 @@ assert.deepEqual(
   assert.ok(!corpus.text.includes("просмотров 1 "), "пост, которому нет двух суток, в корпус не идёт");
   assert.ok(corpus.text.includes("выше медианы"), "каждый пост помечен относительно медианы");
   assert.equal(
-    corpusOf([{ text: "я".repeat(50), views: null, at: null, where: "blog" }]).ranked,
+    corpusOf([{ text: "я".repeat(50), views: null, at: null, where: "blog", shares: false }]).ranked,
     false,
     "у вставленного текста просмотров нет — каркас не считается",
   );
+}
+
+// Форма карточки — из того, как он делится чужим: черновик всегда пишется
+// по чужой новости, и форма его эссе показала бы модели не то.
+{
+  const tgChunk = (inner: string) => `<div class="tgme_widget_message">${inner}</div>`;
+  assert.ok(
+    sharesInTelegram(tgChunk('<div class="tgme_widget_message_forwarded_from">x</div>'), "", "me"),
+    "пересланный пост — это «делюсь чужим»",
+  );
+  assert.ok(
+    sharesInTelegram("", 'читайте <a href="https://www.ft.com/content/1">тут</a>', "me"),
+    "ссылка наружу — это «делюсь чужим»",
+  );
+  assert.ok(
+    sharesInTelegram("", '<a href="https://t.me/other/12">пост</a>', "me"),
+    "ссылка на чужой канал — тоже чужое",
+  );
+  assert.ok(
+    !sharesInTelegram("", '<a href="https://t.me/s/Me/40">раньше</a> я писал', "@me"),
+    "ссылка на свой канал — это «как я писал раньше», а не чужой материал",
+  );
+  assert.ok(!sharesInTelegram("", "просто мысль", "me"), "пост без ссылок — своя мысль");
+
+  const post = (text: string, shares: boolean, views: number) =>
+    ({ text, views, at: null, where: "telegram" as const, shares });
+  const essays = Array.from({ length: 5 }, (_, i) => post(`эссе ${i} `.repeat(40), false, 90_000));
+  const shared = Array.from({ length: MIN_SHARES }, (_, i) => post(`делюсь ${i} `.repeat(40), true, 1_000));
+  assert.ok(
+    samplesOf([...essays, ...shared]).every((text) => text.startsWith("делюсь")),
+    "образцы формы — посты «делюсь чужим», даже если эссе набрали больше просмотров",
+  );
+  assert.ok(
+    samplesOf([...essays, shared[0]]).every((text) => text.startsWith("эссе")),
+    "одного поста со ссылкой мало: делится он редко, и образец — по всем постам",
+  );
+  const corpus = corpusOf([...essays, ...shared]);
+  assert.equal(corpus.shares, MIN_SHARES, "корпус считает посты «делюсь чужим»");
+  assert.ok(corpus.text.includes("делится чужим материалом"), "такие посты помечены для модели");
+
+  const card = parseCard(
+    JSON.stringify({ voice: ["а"], structure: ["б"], words: ["«бах»", "«внезапно»"] }),
+    { built_from: 8, sources: [], ranked: false, from_shares: true },
+  );
+  assert.deepEqual(card.words, ["«бах»", "«внезапно»"], "словечки разбираются");
+  assert.ok(cardText(card).includes("Как я делюсь чужим материалом"), "в поле форма названа тем, из чего собрана");
+  assert.ok(cardBlock(card).includes("«внезапно»"), "словечки доезжают до промпта");
+  assert.deepEqual(asCard({ voice: ["а"] })!.words, [], "старая карточка без словечек читается пустым списком");
+}
+
+// Язык — свойство площадки: «X по-английски» в тексте стиля пропадал
+// с каждой загрузкой нового skill-файла.
+{
+  const languages = languagesOf([
+    { network: "x", language: "английском" },
+    { network: "telegram", language: null },
+    { network: "мусор", language: "немецком" },
+  ]);
+  assert.deepEqual(languages, { x: "английском" }, "пустой язык и чужая сеть в промпт не попадают");
+  const item = { id: 1, title: "t", summary: "s", excerpt: "e", url: "https://a.b", source_label: "a" };
+  const both = [NETWORKS.telegram, NETWORKS.x];
+  const prompt = promptFor(item, "СТИЛЬ", both, languages);
+  assert.ok(prompt.includes("— x: на английском"), "язык сети назван в промпте");
+  assert.ok(!prompt.includes("— telegram: на"), "сеть без языка не получает строки");
+  assert.ok(prompt.indexOf("СТИЛЬ") < prompt.indexOf("— x: на английском"), "язык после стиля — личное не рвёт кэш общего");
+  assert.ok(!promptFor(item, "СТИЛЬ", both).includes("Язык по сетям"), "без языков блока нет вовсе");
 }
 
 // «49.3K» — это 49 300, а пусто — это null, а не ноль: ноль означал бы

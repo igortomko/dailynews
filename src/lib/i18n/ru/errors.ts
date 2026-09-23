@@ -34,6 +34,7 @@ export const errors: typeof En = {
     "Это похоже на рассылку, а не на твой канал: нужен канал Telegram, аккаунт X или блог",
   notATelegramChannel: "Нужна ссылка на публичный канал Telegram: t.me/канал",
   unknownNetwork: "Неизвестная сеть",
+  unknownLanguage: "Такого языка нет в списке",
   itemNotYours: "Этого материала в твоих выпусках нет",
   noChannelsYet: "Сначала отметь в настройках, где ты публикуешь",
   draftNotFound: "Черновик не найден",

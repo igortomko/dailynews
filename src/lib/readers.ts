@@ -525,7 +525,7 @@ export async function lastActivityAt(readerId: number): Promise<string | null> {
  */
 export async function getChannels(readerId: number): Promise<ReaderChannel[]> {
   return sql<ReaderChannel[]>`
-    select network, handle, input_url, label, publishes, account, created_at
+    select network, handle, input_url, label, publishes, account, language, created_at
       from dailynews.reader_channels
      where reader_id = ${readerId}
      order by created_at, network
@@ -657,6 +657,19 @@ export async function clearChannelAddress(readerId: number, network: string): Pr
   await sql`
     update dailynews.reader_channels
        set handle = null, input_url = null, label = null
+     where reader_id = ${readerId} and network = ${network}
+  `;
+}
+
+/** Язык постов для сети. null — не называть, писать как в стиле. */
+export async function setChannelLanguage(
+  readerId: number,
+  network: string,
+  language: string | null,
+): Promise<void> {
+  await sql`
+    update dailynews.reader_channels
+       set language = ${language}
      where reader_id = ${readerId} and network = ${network}
   `;
 }

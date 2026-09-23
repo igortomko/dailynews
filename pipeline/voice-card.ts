@@ -34,6 +34,8 @@ export type OwnPost = {
   views: number | null;
   at: Date | null;
   where: NetworkId;
+  /** Делится чужим материалом: репост, ссылка наружу, цитата твита. */
+  shares: boolean;
 };
 
 export type VoiceCard = {
@@ -66,6 +68,18 @@ export type VoiceCard = {
   frame: string[];
   /** Чего у него не бывает. Запрет сильнее правила: его видно в примерах. */
   taboo: string[];
+  /**
+   * Его словечки и обороты цитатами. Голос в пересказе («разговорный,
+   * ироничный») подходит половине авторов; «бах», «внезапно», «не, так
+   * не пойдёт» — одному. Берутся из всех постов: словарь один на любую тему.
+   */
+  words: string[];
+  /**
+   * Форма и входы собраны по постам, где он делится чужим материалом.
+   * Черновик всегда пишется по чужой новости, и форма его эссе здесь чужая:
+   * как он пересказывает и где ставит своё мнение — другое умение.
+   */
+  from_shares: boolean;
   /** Сколько постов прочитано. Меньше десяти — каркасу верить нельзя. */
   built_from: number;
   /** Откуда читали: подпись в интерфейсе обязана быть честной. */
@@ -80,6 +94,13 @@ export type VoiceCard = {
  * «самые старые», а каркас собирался бы из возраста, а не из текста.
  */
 const MATURE_MS = 48 * 3600 * 1000;
+
+/**
+ * Сколько постов «делюсь чужим» нужно, чтобы форму брать из них. Меньше —
+ * он делится редко, и форма берётся по всем постам: две заметки со ссылкой
+ * это случай, а не манера.
+ */
+export const MIN_SHARES = 3;
 
 /** Меньше этого числа постов — медиану считать не на чем. */
 export const MIN_FOR_FRAME = 8;
@@ -146,7 +167,9 @@ export async function readOwnPosts(
   // пустая строка: так их и копируют из мессенджера.
   for (const block of sample.split(/\n\s*\n/)) {
     const text = block.trim();
-    if (text.length > 40) posts.push({ text, views: null, at: null, where: "blog" });
+    if (text.length > 40) {
+      posts.push({ text, views: null, at: null, where: "blog", shares: /https?:\/\//.test(text) });
+    }
   }
 
   return { posts, failed };
@@ -191,6 +214,7 @@ async function readOne(network: NetworkId, handle: string): Promise<OwnPost[]> {
       views: item.views ?? item.points ?? null,
       at: item.published_at,
       where: network,
+      shares: Boolean(item.shares),
     }))
     .filter((post) => post.text.trim().length > 40);
 }
@@ -203,7 +227,12 @@ async function readOne(network: NetworkId, handle: string): Promise<OwnPost[]> {
  * по просмотрам, а самые короткие пропускаются: пост в одну строку показывает
  * голос, но не форму, а нужна именно форма.
  */
-export function samplesOf(posts: OwnPost[], howMany = 3): string[] {
+export function samplesOf(all: OwnPost[], howMany = 3): string[] {
+  // Образец формы — из того, как он делится новостью, если таких постов
+  // хватает: черновик пишется по чужому материалу, и его эссе показало бы
+  // модели не ту форму.
+  const shared = all.filter((post) => post.shares);
+  const posts = shared.length >= MIN_SHARES ? shared : all;
   const now = Date.now();
   const ripe = posts.filter((post) => !post.at || now - post.at.getTime() > MATURE_MS);
   const pool = (ripe.length >= howMany ? ripe : posts).filter((post) => post.text.length > 200);
@@ -228,7 +257,7 @@ export function medianViews(posts: OwnPost[]): number | null {
  * арифметика, и просить её у модели значит платить за то, что посчитает
  * любой `sort`, и получить это иногда неправильно.
  */
-export function corpusOf(posts: OwnPost[]): { text: string; ranked: boolean; used: number } {
+export function corpusOf(posts: OwnPost[]): { text: string; ranked: boolean; used: number; shares: number } {
   const now = Date.now();
   const mature = posts.filter((post) => !post.at || now - post.at.getTime() > MATURE_MS);
   const pool = (mature.length >= MIN_FOR_FRAME ? mature : posts).slice(0, MAX_POSTS);
@@ -240,20 +269,43 @@ export function corpusOf(posts: OwnPost[]): { text: string; ranked: boolean; use
         median !== null && typeof post.views === "number"
           ? ` · просмотров ${post.views} (${post.views >= median ? "выше" : "ниже"} медианы ${median})`
           : "";
-      return `--- пост ${index + 1}${mark}\n${post.text}`;
+      const shared = post.shares ? " · делится чужим материалом" : "";
+      return `--- пост ${index + 1}${shared}${mark}\n${post.text}`;
     })
     .join("\n\n");
 
-  return { text, ranked: median !== null, used: pool.length };
+  const shares = pool.filter((post) => post.shares).length;
+  return { text, ranked: median !== null, used: pool.length, shares };
 }
 
 const PROMPT_HEAD = `Ниже посты одного автора из его собственных каналов.
 
 Составь его карточку: её дадут модели, чтобы она писала посты его голосом
 и его формой. Форма здесь важнее слов — пост, написанный его словами, но
-собранный новостной заметкой, читается как чужой с первой строки.
+собранный новостной заметкой, читается как чужой с первой строки.`;
 
-"structure" — из каких блоков собран его типичный пост и в каком порядке.
+/**
+ * Форма — из постов «делюсь чужим», когда их хватает. Модель пишет черновик
+ * всегда по чужой новости, и копировать ей надо то, как он делится чужим:
+ * сколько пересказывает, где ставит своё мнение, чем его открывает. Голос
+ * и словечки — из всех постов: словарь у него один на любую тему.
+ */
+const PROMPT_FROM_SHARES = `Посты с пометкой «делится чужим материалом» — это то, как он делится
+новостью, статьёй или чужим постом. Черновики по карточке будут писаться
+только так — по чужому материалу, — поэтому "structure" и "hooks" собирай
+ТОЛЬКО по этим постам, а "voice", "words" и "taboo" — по всем.
+
+В "structure" обязательно ответь: сколько он пересказывает материал (одна
+строка, абзац, почти ничего); где стоит его мнение (первой строкой, после
+факта, в конце) и какой оно формы (вердикт, ирония, личная история,
+вопрос, ставка на будущее); как подаёт источник (ссылка, имя издания,
+цитата, скриншот) и где; средняя длина таких постов в символах.`;
+
+const PROMPT_FROM_ALL = `Постов, где он делится чужим материалом, почти нет, поэтому форму собирай
+по всем постам — и первым пунктом "structure" напиши: «форма собрана
+по всем постам: чужим он делится редко».`;
+
+const PROMPT_BODY = `"structure" — из каких блоков собран его пост и в каком порядке.
 5–8 пунктов, каждый проверяемый по текстам: что стоит первой строкой
 (заголовок капсом, вопрос, цитата, сцена — назови, как есть), что идёт
 следом, чем развивается середина (список, именованные персонажи, разбор
@@ -269,6 +321,11 @@ const PROMPT_HEAD = `Ниже посты одного автора из его �
 "voice" — как он пишет: длина фраз, лицо, обращается ли к читателю и как,
 эмодзи и знаки — какие и где, типичная длина в символах, чего не делает
 никогда. 6–10 пунктов.
+
+"words" — его словечки и обороты цитатами: разговорные слова, частицы,
+связки, междометия, фирменные повороты («бах», «внезапно», «и тут»).
+8–15 штук, только дословно из текстов и только те, что встречаются больше
+одного раза или явно его. Общие слова («важно», «интересно») не в счёт.
 
 "taboo" — слова и приёмы, которых у него нет ни в одном посте, хотя у других
 авторов на ту же тему они обычны. 3–6 пунктов.
@@ -299,7 +356,8 @@ export async function buildVoiceCard(
   readerId?: number,
 ): Promise<{ card: VoiceCard; usage: Usage; model: string }> {
   const { baseUrl, model, apiKey } = resolve();
-  const { text, ranked, used } = corpusOf(posts);
+  const { text, ranked, used, shares } = corpusOf(posts);
+  const fromShares = shares >= MIN_SHARES;
   const sources = [...new Set(posts.map((post) => post.where))];
 
   if (!apiKey || used === 0) {
@@ -308,13 +366,17 @@ export async function buildVoiceCard(
 
   const prompt = `${PROMPT_HEAD}
 
+${fromShares ? PROMPT_FROM_SHARES : PROMPT_FROM_ALL}
+
+${PROMPT_BODY}
+
 ${ranked ? PROMPT_RANKED : PROMPT_UNRANKED}
 
 Посты:
 ${text}
 
 Ответь только валидным JSON, без markdown:
-{"structure": ["..."], "hooks": ["..."], "voice": ["..."], "frame": ["..."], "taboo": ["..."]}`;
+{"structure": ["..."], "hooks": ["..."], "voice": ["..."], "words": ["..."], "frame": ["..."], "taboo": ["..."]}`;
 
   const res = await budgetedFetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -349,7 +411,7 @@ ${text}
     );
   }
   const card = parseCard(answer, {
-    built_from: used, sources, ranked, samples: samplesOf(posts),
+    built_from: used, sources, ranked, samples: samplesOf(posts), from_shares: fromShares,
   });
 
   return {
@@ -378,7 +440,7 @@ ${text}
  */
 export function parseCard(
   answer: string,
-  meta: { built_from: number; sources: string[]; ranked: boolean; samples?: string[] },
+  meta: { built_from: number; sources: string[]; ranked: boolean; samples?: string[]; from_shares?: boolean },
 ): VoiceCard {
   const cleaned = answer.replace(/```(?:json)?/g, "");
   // Незакрытая скоба — это обрыв, а не «не JSON»: закрывшиеся строки из такого
@@ -418,7 +480,7 @@ export function parseCard(
       .slice(0, MAX_LINES);
   };
 
-  let parsed: Partial<Record<"voice" | "structure" | "hooks" | "frame" | "taboo", unknown>>;
+  let parsed: Partial<Record<"voice" | "structure" | "hooks" | "words" | "frame" | "taboo", unknown>>;
   try {
     parsed = JSON.parse(json) as typeof parsed;
   } catch (error) {
@@ -431,6 +493,7 @@ export function parseCard(
       voice: salvage("voice"),
       structure: salvage("structure"),
       hooks: salvage("hooks"),
+      words: salvage("words"),
       frame: salvage("frame"),
       taboo: salvage("taboo"),
     };
@@ -446,6 +509,8 @@ export function parseCard(
     samples: meta.samples ?? [],
     frame: meta.ranked ? lines(parsed.frame) : [],
     taboo: lines(parsed.taboo),
+    words: lines(parsed.words),
+    from_shares: meta.from_shares === true,
     built_from: meta.built_from,
     sources: meta.sources,
     ranked: meta.ranked,
@@ -472,6 +537,8 @@ export function cardFromVoice(voice: Voice): VoiceCard {
     samples: [],
     frame: [],
     taboo: [],
+    words: [],
+    from_shares: false,
     built_from: 0,
     sources: [],
     ranked: false,
@@ -507,6 +574,8 @@ export function asCard(row: unknown): VoiceCard | undefined {
     samples: lines(raw.samples),
     frame: lines(raw.frame),
     taboo: lines(raw.taboo),
+    words: lines(raw.words),
+    from_shares: raw.from_shares === true,
     built_from: typeof raw.built_from === "number" ? raw.built_from : 0,
     sources: lines(raw.sources),
     ranked: raw.ranked === true,
@@ -525,11 +594,12 @@ export function cardBlock(card: VoiceCard): string {
   const list = (lines: string[]) => lines.map((line) => `\n— ${line}`).join("");
   const parts = [
     card.structure.length
-      ? `Форма его поста — собирай ровно так:${list(card.structure)}`
+      ? `${card.from_shares ? "Как он делится чужим материалом" : "Форма его поста"} — собирай ровно так:${list(card.structure)}`
       : `Формы его постов мы не знаем: не выдумывай свою, держись простого
 короткого текста без заголовков и списков.`,
     card.hooks.length ? `Чем он открывает пост (бери один из его приёмов, не придумывай новый):${list(card.hooks)}` : "",
     `Голос автора:${list(card.voice)}`,
+    card.words.length ? `Его словечки и обороты — бери к месту, не все сразу:${list(card.words)}` : "",
     card.taboo.length ? `Чего у него не бывает:${list(card.taboo)}` : "",
     card.frame.length
       ? `Чем его удачные посты отличаются от средних (замечено сравнением его же постов по просмотрам):${list(card.frame)}`
@@ -552,9 +622,10 @@ export function cardText(card: VoiceCard): string {
   const section = (title: string, lines: string[]) =>
     lines.length ? `${title}\n${lines.map((line) => `- ${line}`).join("\n")}` : "";
   return [
-    section("Форма поста:", card.structure),
+    section(card.from_shares ? "Как я делюсь чужим материалом:" : "Форма поста:", card.structure),
     section("Чем открываю пост:", card.hooks),
     section("Голос:", card.voice),
+    section("Мои словечки и обороты:", card.words),
     section("Чего у меня не бывает:", card.taboo),
     section("Чем удачные посты отличаются от средних:", card.frame),
   ].filter(Boolean).join("\n\n");

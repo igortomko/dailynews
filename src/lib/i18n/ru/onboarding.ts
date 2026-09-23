@@ -95,6 +95,8 @@ export const onboarding: typeof En = {
     disconnect: "Отключить",
     connectNamed: (network) => `Подключить ${network}`,
     disconnectNamed: (network) => `Отключить ${network}`,
+    postLanguageNamed: (network) => `Язык постов в ${network}`,
+    languageAsStyle: "язык: как в стиле",
     channelPlaceholder: "t.me/канал",
     channelDialogTitle: "Подключить канал Telegram",
     channelDialogText:
