@@ -2235,8 +2235,10 @@ async function main() {
     // а колонку не тронула — переименованная, она стала бы ловушкой
     // («размер», а внутри минуты), снесённая отдельной миграцией стоила бы
     // дороже, чем не читается.
+    // deleted_at читают сами запросы (`getReader`, `allReaders`): строка
+    // с отметкой из них не выходит, и у выбранной она всегда пуста.
     const SKIP = new Set([
-      "llm", "created_at", "updated_at", "reader_context_hash", "digest_size",
+      "llm", "created_at", "updated_at", "reader_context_hash", "digest_size", "deleted_at",
     ]);
     const loaded = new Set(Object.keys((await readers.getReader(owner.id)) ?? {}));
     const missed = live.filter((column) => !SKIP.has(column) && !loaded.has(column));
@@ -2670,14 +2672,24 @@ async function main() {
       const leaving = await readers.ensureReader(BIG_TELEGRAM_ID + 300, "leaving");
       await readers.connectChannel(leaving.id, "x", "@leaving", "x-300");
       await readers.setChannelPublishes(leaving.id, "linkedin", true);
+      await readers.recordCall({ readerId: leaving.id, stage: "digest", model: "probe", tokensIn: 10, tokensOut: 10, costUsd: 0.25 });
       await readers.deleteReader(leaving.id);
-      assert.equal(await readers.getReader(leaving.id), undefined, "удалённый читатель остался в базе");
+      assert.equal(await readers.getReader(leaving.id), undefined, "удалённый читатель виден как живой");
+      assert.ok(!(await readers.allReaders()).some((r) => r.id === leaving.id), "прогон видит удалённого читателя");
       const [{ left }] = await sql<{ left: number }[]>`
         select count(*)::int as left from dailynews.reader_channels where reader_id = ${leaving.id}`;
       assert.equal(left, 0, "у удалённого читателя остались площадки");
+      const [gone] = await sql<{ telegram_id: string | null; username: string | null }[]>`
+        select telegram_id::text, username from dailynews.readers where id = ${leaving.id}`;
+      assert.deepEqual(gone, { telegram_id: null, username: null }, "личность удалённого осталась в строке");
+      const [{ spent }] = await sql<{ spent: number }[]>`
+        select coalesce(sum(cost_usd), 0)::float as spent from dailynews.model_calls where reader_id = ${leaving.id}`;
+      assert.ok(Math.abs(spent - 0.25) < 1e-6, "удаление профиля переписало расход задним числом");
+      const reborn = await readers.ensureReader(BIG_TELEGRAM_ID + 300, "leaving");
+      assert.notEqual(reborn.id, leaving.id, "повторный /start вернул удалённый профиль");
       await readers.deleteReader(owner.id);
       assert.ok(await readers.getReader(owner.id), "профиль владельца удалился");
-      console.log("  удаление профиля: личное уходит каскадом, владелец не удаляется");
+      console.log("  удаление профиля: личное стёрто, расход и строка для счёта остались, владелец не удаляется");
     }
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

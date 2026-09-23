@@ -68,9 +68,9 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
           id: "delete",
           heading: "Deleting your data",
           paragraphs: [
-            "Disconnecting a social network on the settings page removes its account name immediately. To delete everything we store about you, message " +
+            "Disconnecting a social network on the settings page removes its account name immediately. To delete your profile, use \"Delete profile\" at the bottom of Settings → About: your Telegram identity, Kindle address, issues, settings, connected networks and drafts are erased immediately. Anonymous counters (visit dates, reading events and model costs) are kept without any link to you. If you can't sign in, message " +
               CONTACT_LABEL +
-              " on Telegram from the account you signed in with; your data is deleted within 30 days. If you remove Reporta's access in X, LinkedIn or Threads settings, we stop being able to use that connection at once.",
+              " on Telegram from the account you signed in with and we'll do it within 30 days. If you remove Reporta's access in X, LinkedIn or Threads settings, we stop being able to use that connection at once.",
           ],
         },
         {
@@ -184,9 +184,9 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
           id: "delete",
           heading: "Удаление данных",
           paragraphs: [
-            "«Отключить» у соцсети в настройках сразу стирает имя её аккаунта. Чтобы удалить всё, что мы о тебе храним, напиши " +
+            "«Отключить» у соцсети в настройках сразу стирает имя её аккаунта. Чтобы удалить профиль, нажми «Удалить профиль» внизу раздела «Настройки → О проекте»: Telegram, адрес Kindle, выпуски, настройки, подключённые соцсети и черновики стираются сразу. Безымянные счётчики (даты заходов, события чтения и расход на модели) остаются без связи с тобой. Если войти не получается, напиши " +
               CONTACT_LABEL +
-              " в Telegram с того аккаунта, которым входишь; данные удаляются в течение 30 дней. Если отозвать доступ Reporta в настройках X, LinkedIn или Threads, подключением больше нельзя воспользоваться сразу.",
+              " в Telegram с того аккаунта, которым входил, — удалим в течение 30 дней. Если отозвать доступ Reporta в настройках X, LinkedIn или Threads, подключением больше нельзя воспользоваться сразу.",
           ],
         },
         {
