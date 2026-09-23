@@ -105,3 +105,36 @@ export async function changePlan(
   await applySubscription(reader.id, read.update);
   return { ok: true, plan: read.update.plan };
 }
+
+/**
+ * Полный возврат или chargeback закрывают доступ сразу: подписка
+ * отменяется немедленно, дальше `subscription.canceled` переводит читателя
+ * на бесплатный обычным путём вебхука.
+ *
+ * Только если вернули платёж **текущего** периода: возврат прошлогоднего
+ * списания не отменяет период, оплаченный отдельно. Период сверяется
+ * по транзакции: её `billing_period` начинается не раньше текущего
+ * периода подписки (доплата за повышение начинается посреди него).
+ *
+ * Повтор безопасен: отменённую подписку Paddle отменить не даст, и она
+ * пропускается проверкой статуса.
+ */
+export async function endOnRefund(subscriptionId: string, transactionId: string): Promise<string> {
+  const sub = await paddle<{ status: string; current_billing_period: { starts_at: string } | null }>(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+  );
+  if (!LIVE.has(sub.status)) return `подписка уже ${sub.status}`;
+  const txn = await paddle<{ billing_period: { starts_at: string } | null }>(
+    `/transactions/${encodeURIComponent(transactionId)}`,
+  );
+  const periodStart = sub.current_billing_period?.starts_at;
+  const paidFrom = txn.billing_period?.starts_at;
+  if (periodStart && paidFrom && new Date(paidFrom) < new Date(periodStart)) {
+    return "возврат прошлого периода — текущий оплачен отдельно";
+  }
+  await paddle(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ effective_from: "immediately" }),
+  });
+  return "подписка отменена сразу";
+}

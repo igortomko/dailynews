@@ -3,6 +3,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { sql } from "./db";
 import {
   appOrigin, issueBindPayload, issueConfirmToken, issueEmailToken, SESSION_COOKIE,
@@ -19,14 +20,14 @@ import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
   addReaderSource, deleteReader, detachTelegram, digestProgress, removeEmail, setEmailDigest, setTelegramDigest, freezeKindleSender, getChannels,
-  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelLanguage, setChannelPublishes,
+  getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelPublishes,
   saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
 import { mentionPool } from "./queries";
 import { cleanRules, countHits, rulesOf, type RuleKind, type Rules } from "./rules";
 import { postSourceFor, recentTakes, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { buildVoiceCard, cardText, cleanStyle, draftStyle, readOwnPosts } from "../../pipeline/voice-card";
-import { hasStyle, LANGUAGES, SOURCE_LANGUAGE, STYLE_LIMIT } from "./voice";
+import { hasStyle, STYLE_LIMIT } from "./voice";
 import { takesBlock, writePost } from "../../pipeline/post";
 import { languagesOf, NETWORK_IDS, publishedIn, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
@@ -1169,6 +1170,8 @@ export async function connectTelegram(input: string): Promise<{ ok: true } | { e
     label: found.found.label,
   });
   await setChannelPublishes(readerId, "telegram", true);
+  // Язык канала — по его постам, после ответа: читать канал секунды.
+  after(async () => (await import("./channel-language")).refreshLanguages(readerId));
   revalidatePath("/settings/channels");
   return { ok: true as const };
 }
@@ -1188,25 +1191,6 @@ export async function toggleChannel(network: string, on: boolean) {
   if (!NETWORK_IDS.includes(network as NetworkId)) return { error: (await getDict()).errors.unknownNetwork };
 
   await setChannelPublishes(readerId, network, on);
-  revalidatePath("/settings/channels");
-  return { ok: true as const };
-}
-
-/**
- * Язык постов для одной сети. Пусто — не называть: пишется как в стиле.
- * Список проверяется здесь, а не только селектом: строка уходит в промпт,
- * и прислать туда можно что угодно мимо формы.
- */
-export async function saveChannelLanguage(network: string, language: string) {
-  const denied = await denyBySection("posts");
-  if (denied) return denied;
-  const readerId = await currentReaderId();
-  if (!NETWORK_IDS.includes(network as NetworkId)) return { error: (await getDict()).errors.unknownNetwork };
-  const value = String(language ?? "").trim();
-  if (value && (value === SOURCE_LANGUAGE || !LANGUAGES.includes(value))) {
-    return { error: (await getDict()).errors.unknownLanguage };
-  }
-  await setChannelLanguage(readerId, network, value || null);
   revalidatePath("/settings/channels");
   return { ok: true as const };
 }
@@ -1270,6 +1254,9 @@ export async function rebuildVoice(): Promise<{ ok: true; text: string; built_fr
         : (await getDict()).errors.nothingToReadFromYou,
     };
   }
+
+  // Посты уже прочитаны — язык каждой сети определяется по ним же, даром.
+  await (await import("./channel-language")).saveLanguages(reader.id, posts);
 
   try {
     const built = await buildVoiceCard(posts, reader.id);

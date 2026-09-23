@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { readEvent, readMoney, signatureValid } from "@/lib/billing";
 import { recordBillingEvent } from "@/lib/analytics/billing-events";
-import { applySubscription } from "@/lib/plan-change";
+import { applySubscription, endOnRefund } from "@/lib/plan-change";
 
 /**
  * Вебхук Paddle: единственный путь, которым тариф меняется.
@@ -64,6 +64,16 @@ export async function POST(request: Request) {
       refundId: money.refundId,
     });
     console.log(`paddle: ${money.kind} ${money.amountMinor} ${money.currency}, читатель ${readerId ?? "?"}`);
+    if (money.kind === "payment_refunded" && money.full && money.subscriptionId) {
+      try {
+        console.log(`paddle: полный возврат ${money.refundId} — ${await endOnRefund(money.subscriptionId, money.paymentId)}`);
+      } catch (error) {
+        // Не-2xx — Paddle повторит, и отмена случится со второй попытки:
+        // запись в воронку при повторе не удваивается.
+        console.error(`paddle: полный возврат ${money.refundId}, подписку отменить не вышло — ${(error as Error).message}`);
+        return NextResponse.json({ error: "отмена не прошла" }, { status: 500 });
+      }
+    }
     return NextResponse.json({ ok: true });
   }
 

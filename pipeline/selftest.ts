@@ -89,6 +89,7 @@ import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { founderNotice, isFounder, issuesToday } from "../src/lib/plans";
 import { desiredPrices } from "../src/lib/paddle-catalog";
+import { detectLanguage, languagesFor } from "../src/lib/detect-language";
 import { upgradeLines, type UpgradeNote } from "../src/lib/upgrade";
 import { plural } from "../src/lib/plural";
 import { ru as ruDict } from "../src/lib/i18n/ru/index";
@@ -2865,6 +2866,15 @@ assert.ok(ended.ok && ended.update.pricePlan === "pro", "а воронка от�
       currency_code: "USD", totals: { total: "999" } },
   } as never);
   assert.ok(refund?.kind === "payment_refunded" && refund.refundId === "adj_1" && refund.readerId === null, "одобренный возврат — возврат, читатель ищется по подписке");
+  assert.equal(refund?.full, false, "возврат без type=full — частичный, доступ не трогает");
+  const adj = (over: Record<string, unknown>) => readMoney({
+    event_id: "evt_4", event_type: "adjustment.updated", occurred_at: "2026-10-02T00:00:00Z",
+    data: { id: "adj_3", status: "approved", transaction_id: "txn_1", subscription_id: "sub_9", currency_code: "USD", totals: { total: "999" }, ...over },
+  } as never);
+  assert.equal(adj({ action: "refund", type: "full" })?.full, true, "полный возврат закрывает доступ");
+  assert.equal(adj({ action: "chargeback" })?.full, true, "chargeback закрывает доступ, как полный возврат");
+  assert.equal(adj({ action: "chargeback_warning" }), null, "предупреждение о споре — ещё не возврат");
+  assert.equal(adj({ action: "credit", type: "full" }), null, "зачёт на баланс — не возврат");
   assert.equal(readMoney({ event_id: "evt_3", event_type: "adjustment.created",
     data: { id: "adj_2", action: "refund", status: "pending_approval", transaction_id: "txn_1", currency_code: "USD", totals: { total: "999" } },
   } as never), null, "возврат на рассмотрении — ещё не возврат");
@@ -5493,3 +5503,30 @@ void (async () => {
 });
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);
+
+// Язык сети — по постам автора, а не выбором в карточке: алфавит решает
+// почти всё, латиницу разводят частые слова. На обрывке — молчание,
+// а не догадка: черновик тогда пишется «как в статье».
+{
+  const four = (text: string) => Array(4).fill(text);
+  assert.equal(detectLanguage(four("Сегодня разбираем, как устроен новый релиз и что в нём поменялось для разработчиков. Это важно, потому что цена упала вдвое.")), "русском");
+  assert.equal(detectLanguage(four("Сьогодні розбираємо, як влаштований новий реліз і що в ньому змінилося для розробників. Це важливо, бо ціна впала вдвічі.")), "украинском", "украинский не читается русским");
+  assert.equal(detectLanguage(four("Today we look at how the new release works and what changed for developers. This is important because the price fell by half.")), "английском");
+  assert.equal(detectLanguage(four("Hoje vamos ver como funciona a nova versão e o que mudou para os desenvolvedores. Isso é importante porque o preço caiu pela metade.")), "португальском (бразильский)");
+  assert.equal(detectLanguage(four("今日は新しいリリースの仕組みと、開発者にとって何が変わったのかを見ていきます。価格が半分になったので重要です。")), "японском", "японский с иероглифами не читается китайским");
+  assert.equal(detectLanguage(["коротко"]), null, "на обрывке — молчание, а не догадка");
+  assert.equal(
+    detectLanguage(four("Разбираем релиз @openai и #gpt: https://example.com/very-long-english-looking-path-with-words — цена упала вдвое, и это меняет расчёт для всех, кто платит за токены.")),
+    "русском",
+    "адреса, упоминания и теги латиницей не тянут русский пост в английский",
+  );
+  const posts = [
+    ...four("Today we look at how the new release works and what changed for developers. This is important because the price fell by half.").map((text) => ({ text, where: "x" })),
+    ...four("Сегодня разбираем, как устроен новый релиз и что в нём поменялось для разработчиков. Это важно, потому что цена упала вдвое.").map((text) => ({ text, where: "telegram" })),
+    ...four("Сегодня разбираем, как устроен новый релиз и что в нём поменялось для разработчиков. Это важно, потому что цена упала вдвое.").map((text) => ({ text, where: "blog" })),
+  ];
+  const found = languagesFor(["x", "telegram", "linkedin"], posts);
+  assert.equal(found.x, "английском", "в X — язык его постов в X");
+  assert.equal(found.telegram, "русском", "в канале — язык канала");
+  assert.equal(found.linkedin, "русском", "нечитаемая сеть получает язык автора в целом");
+}
