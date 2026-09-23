@@ -1041,6 +1041,34 @@ export async function addChannel(input: string): Promise<{ ok: true; network: Ne
 }
 
 /**
+ * Подключить Telegram — значит назвать канал, куда он пишет: профиль
+ * здесь ничего не говорит, вход через бота уже сделан. Канал проверяется
+ * тем же разбором, что и источники: сохраняется только тот, что ответил
+ * постами. Владение не проверяется — для этого бот должен стать админом
+ * канала, и понадобится это вместе с автопостингом, не раньше.
+ */
+export async function connectTelegram(input: string): Promise<{ ok: true } | { error: string }> {
+  const denied = await denyBySection("posts");
+  if (denied) return denied;
+  const readerId = await currentReaderId();
+
+  const found = await discover(input);
+  if (!found.ok) return { error: found.error };
+  if (NETWORK_BY_KIND[found.found.kind] !== "telegram") {
+    return { error: (await getDict()).errors.notATelegramChannel };
+  }
+
+  await saveChannel(readerId, "telegram", {
+    handle: found.found.url,
+    input_url: found.found.input_url,
+    label: found.found.label,
+  });
+  await setChannelPublishes(readerId, "telegram", true);
+  revalidatePath("/settings/channels");
+  return { ok: true as const };
+}
+
+/**
  * Отметить сеть, куда он публикует. Адрес при этом не трогается.
  *
  * Раньше снятая галочка удаляла строку целиком, а с ней и разобранный
