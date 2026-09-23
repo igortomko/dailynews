@@ -457,3 +457,43 @@ export function suggestOrder(picked: string[], ranked: string[] = []): string[] 
   );
   return [...near, ...rest];
 }
+
+/**
+ * Что предложить в «За чем следить» под выбранные темы — нажатием, а не
+ * набором. Названия, которые пишут одинаково на любом языке: правило ищет
+ * буквально, и «Фигма» в примере обещала бы находку, которой не будет.
+ * И не обычные слова: «Nature», «Steam», «Wise» и «Linear» ловили бы
+ * природу, пар и линейность. Своя тема примеров не даёт — угадывать
+ * за читателя, о чём она, нечем.
+ */
+const FOLLOW_EXAMPLES: Record<string, string[]> = {
+  "ai-infra": ["OpenAI", "Anthropic", "Nvidia", "DeepSeek"],
+  programming: ["TypeScript", "Postgres", "Kubernetes", "Deno"],
+  design: ["Figma", "Framer", "Webflow", "Canva"],
+  startups: ["Y Combinator", "Sequoia", "a16z", "Stripe"],
+  energy: ["Cameco", "Kazatomprom", "OPEC", "Oklo"],
+  climate: ["IPCC", "COP31", "Climeworks"],
+  blockchain: ["Bitcoin", "Ethereum", "Solana", "Coinbase"],
+  economy: ["ECB", "IMF", "Powell"],
+  science: ["CERN", "arXiv", "JWST"],
+  space: ["SpaceX", "Starship", "NASA", "Blue Origin"],
+  biotech: ["Ozempic", "CRISPR", "Moderna", "Novo Nordisk"],
+  health: ["WHO", "FDA", "Ozempic"],
+  security: ["CVE", "CISA", "Cloudflare", "CrowdStrike"],
+  hardware: ["Apple", "TSMC", "Nvidia", "Raspberry Pi"],
+  games: ["Nintendo", "PlayStation", "Valve", "Xbox"],
+  cinema: ["A24", "Netflix", "Villeneuve", "Nolan"],
+  music: ["Spotify", "Pitchfork", "Radiohead"],
+  books: ["Booker", "Pulitzer"],
+  sport: ["NBA", "UFC", "Formula 1"],
+  transport: ["Tesla", "Waymo", "BYD", "Airbus"],
+  media: ["Substack", "YouTube", "New York Times"],
+  cars: ["Tesla", "BYD", "Porsche", "Toyota"],
+  money: ["Revolut", "Vanguard", "Robinhood"],
+};
+
+/** Примеры под темы читателя: по порядку тем, без повторов, не больше `max`. */
+export function followExamples(slugs: string[], max = 6): string[][] {
+  const names = [...new Set(slugs.flatMap((slug) => FOLLOW_EXAMPLES[slug] ?? []))];
+  return names.slice(0, max).map((name) => [name]);
+}

@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { type Plan } from "@/lib/plans";
 import { useT } from "@/components/i18n-provider";
 import { usePaywall } from "@/components/paywall";
-import { suggestOrder, TOPIC_LIMITS } from "@/lib/starter-topics";
+import { followExamples, suggestOrder, TOPIC_LIMITS } from "@/lib/starter-topics";
 import type { Suggestion, TopicOption } from "@/lib/onboarding";
 import {
   addOnboardingSource, finishOnboarding, saveOnboardingInterests, saveOnboardingSources,
@@ -325,7 +325,7 @@ export function InterestsStep({
         {/* Тот же экран, а не четвёртый шаг: пустое здесь ничего не требует,
             а отдельный экран стал бы решением, которое нельзя пропустить. */}
         <div className="mt-2 flex flex-col gap-6 border-t pt-6">
-          <NameRules kind="follow" initial={follow} optional raised onChange={setFollow} />
+          <NameRules kind="follow" initial={follow} optional raised examples={followExamples(picked)} onChange={setFollow} />
           <NameRules kind="exclude" initial={exclude} optional raised onChange={setExclude} />
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}

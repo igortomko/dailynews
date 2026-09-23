@@ -22,7 +22,8 @@ import {
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelLanguage, setChannelPublishes,
   saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
-import { cleanRules, rulesOf, type Rules } from "./rules";
+import { mentionPool } from "./queries";
+import { cleanRules, countHits, rulesOf, type RuleKind, type Rules } from "./rules";
 import { postSourceFor, recentTakes, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { buildVoiceCard, cardText, cleanStyle, draftStyle, readOwnPosts } from "../../pipeline/voice-card";
 import { hasStyle, LANGUAGES, SOURCE_LANGUAGE, STYLE_LIMIT } from "./voice";
@@ -1541,4 +1542,18 @@ export async function finishOnboarding() {
     console.error(`первый выпуск: ${(error as Error).message}`);
     return { error: (await getDict()).errors.firstIssueFailed };
   }
+}
+
+/**
+ * Сколько раз каждое правило нашлось бы в своих источниках за месяц.
+ * `null` — считать не по чему (на первом экране источников ещё нет),
+ * и чип молчит, а не называет ноль, который означал бы «не то написание».
+ * Правила проверяются тем же `cleanRules`: действие зовётся мимо формы.
+ */
+export async function countRuleHits(kind: RuleKind, raw: unknown): Promise<number[] | null> {
+  const readerId = await currentReaderId();
+  const clean = cleanRules(kind, raw);
+  if ("error" in clean) return null;
+  const pool = await mentionPool(readerId);
+  return pool.length === 0 ? null : countHits(clean.rules, pool);
 }

@@ -7,15 +7,15 @@
 export const rules = {
   follow: {
     label: "What to follow",
-    description:
-      "Companies, products, people. Mentions go first within their topic — inside the digest, not on top of it. Matched as written: “Node.js” won't find “NodeJS”, add both.",
+    description: "Companies, products, people. Mentions go first within their topic.",
     placeholder: "Figma, Framer, Webflow",
     limit: (max: number) => `You can follow up to ${max}`,
   },
   exclude: {
     label: "What to exclude",
-    description:
-      "Names, products, phrases. Mentions won't make the digest and are hidden from the one already written. Also as written, no translation.",
+    description: "Names, products, phrases. Mentions won't reach you.",
+    /** Нажатием, с формами слова: правило ищет буквально. */
+    examples: [["Elon Musk", "Musk"], ["Trump"], ["NFT", "NFTs"], ["memecoin", "memecoins"], ["spoiler", "spoilers"]] as string[][],
     placeholder: "Company name, person, phrase",
     limit: (max: number) => `Up to ${max} exclusions`,
   },
@@ -35,5 +35,10 @@ export const rules = {
   exists: (name: string) => `“${name}” is already there`,
   existsElsewhere: (name: string) => `“${name}” is already in another rule`,
   tooManyVariants: (max: number) => `No more than ${max} spellings per name`,
+  examplesLabel: "For example",
+  addExample: (name: string) => `Add ${name}`,
+  hitsTitle: (n: number, days: number) => `${n} ${n === 1 ? "mention" : "mentions"} in your sources over ${days} days`,
+  misses: (names: string[], days: number) =>
+    `${names.map((n) => `“${n}”`).join(", ")}: not found once in ${days} days. Matched as written — tap the name to add another spelling.`,
   badList: "The list didn't parse — reload the page and try again",
 };

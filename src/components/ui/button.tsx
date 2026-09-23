@@ -7,7 +7,9 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        // Заливка до края рамки: прозрачная рамка при bg-clip-padding делала
+        // тёмную кнопку на 2 px ниже соседней обведённой той же высоты.
+        default: "bg-clip-border bg-primary text-primary-foreground hover:bg-primary/80",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         // Фон страницы опущен с белого, и `outline` на нём сливается: у неё
