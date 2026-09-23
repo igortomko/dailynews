@@ -87,8 +87,6 @@ export const onboarding = {
     channelDialogCancel: "Cancel",
     styleTitle: "Write drafts in my style",
     styleOff: "Off — drafts are written neutrally, from your writing settings.",
-    styleEdit: "Edit style",
-    styleDialogTitle: "How to write drafts",
     styleDialogText:
       "Describe in your own words how to write: post shape, how you open, tone, length, emoji. Or press \"Learn my style\" — we'll read your posts in your connected networks and lay out the analysis here for you to edit. A ready skill file works too.",
     stylePlaceholder:

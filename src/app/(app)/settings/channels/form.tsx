@@ -81,9 +81,13 @@ export function ChannelsForm({
   const t = useT();
   const [busy, startTransition] = useTransition();
   const [building, setBuilding] = useState(false);
-  // Окно стиля: null — закрыто, строка — черновик текста в поле. Черновик
-  // живёт отдельно от сохранённого: «Отмена» не должна ничего менять.
-  const [styleDraft, setStyleDraft] = useState<string | null>(null);
+  // Текст стиля в поле. Отдельно от сохранённого: «Сохранить» гаснет,
+  // пока правок нет, и видно, что изменения ещё не записаны.
+  const [styleDraft, setStyleDraft] = useState(styleText);
+  // Свитчер включён, но стиль ещё не сохранён: включить пустой стиль нельзя,
+  // поэтому поле открывается сразу, а записывается включение вместе с текстом.
+  const [styleOpening, setStyleOpening] = useState(false);
+  const styleOn = styleEnabled || styleOpening;
   // Карточка приходит с сервера, а форма клиентская: без обновления она
   // осталась бы с прежними пропсами, и разобранное выглядело бы
   // как неразобранное — тот самый отказ, похожий на успех.
@@ -157,7 +161,8 @@ export function ChannelsForm({
         toast.error(result.error);
         return;
       }
-      setStyleDraft(null);
+      setStyleOpening(false);
+      setStyleDraft(text);
       if (enabled) toast.success(t.onboarding.channels.styleSaved);
       router.refresh();
     });
@@ -287,89 +292,78 @@ export function ChannelsForm({
       </Card>
 
       {/* Один блок вместо «Дай почитать свои посты» и «Как ты пишешь»:
-          читатель решает одно — писать ли его стилем, — а откуда стиль
-          взят, дело второе и живёт в окне. Текст в окне — вся инструкция:
-          что в поле, то и уходит в промпт, и править её можно руками. */}
+          читатель решает одно — писать ли его стилем. Поле открыто прямо
+          в карточке, пока свитчер включён: текст — вся инструкция, что
+          в поле, то и уходит в промпт, и править её можно руками. */}
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div className="flex flex-col gap-1.5">
               <CardTitle>{t.onboarding.channels.styleTitle}</CardTitle>
-              {styleEnabled ? null : (
-                <CardDescription>{t.onboarding.channels.styleOff}</CardDescription>
-              )}
+              <CardDescription>
+                {styleOn ? t.onboarding.channels.styleDialogText : t.onboarding.channels.styleOff}
+              </CardDescription>
             </div>
             <Switch
-              checked={styleEnabled}
+              checked={styleOn}
               disabled={busy}
               aria-label={t.onboarding.channels.styleTitle}
-              onCheckedChange={(on) => (on ? setStyleDraft(styleText) : saveStyleAs(false, styleText))}
+              onCheckedChange={(on) => {
+                if (!on) {
+                  setStyleOpening(false);
+                  if (styleEnabled) saveStyleAs(false, styleText);
+                } else if (styleText.trim()) saveStyleAs(true, styleText);
+                else setStyleOpening(true);
+              }}
             />
           </div>
         </CardHeader>
-        {styleEnabled ? (
-          <CardContent className="flex flex-col items-start gap-3">
-            <p className="line-clamp-4 whitespace-pre-line text-sm text-muted-foreground">{styleText}</p>
-            <Button variant="outline" size="sm" onClick={() => setStyleDraft(styleText)}>
-              {t.onboarding.channels.styleEdit}
-            </Button>
+        {styleOn ? (
+          <CardContent className="flex flex-col gap-3">
+            <Textarea
+              value={styleDraft}
+              onChange={(event) => setStyleDraft(event.target.value)}
+              maxLength={STYLE_LIMIT}
+              // Высота постоянная: поле, растущее под текст, на skill-файле
+              // в 6,5 тысячи знаков уносило кнопки на три экрана вниз.
+              className="h-[600px] field-sizing-fixed resize-none overflow-y-auto"
+              placeholder={t.onboarding.channels.stylePlaceholder}
+              aria-label={t.onboarding.channels.styleTitle}
+              disabled={busy || building}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={learn} disabled={busy || building}>
+                {building ? <Spinner /> : <SparklesIcon />}
+                {t.onboarding.channels.learnStyle}
+              </Button>
+              <Button variant="outline" size="sm" disabled={busy || building} render={<label />}>
+                <UploadIcon />
+                {t.onboarding.channels.uploadSkill}
+                <input
+                  type="file"
+                  accept=".md,.markdown,.txt,text/markdown,text/plain"
+                  className="sr-only"
+                  onChange={(event) => {
+                    void upload(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+              </Button>
+              <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                {styleDraft.length} / {STYLE_LIMIT}
+              </span>
+              <Button
+                size="sm"
+                onClick={() => saveStyleAs(true, styleDraft)}
+                disabled={busy || building || !styleDraft.trim() || (styleEnabled && styleDraft === styleText)}
+              >
+                {busy ? <Spinner /> : null}
+                {t.onboarding.channels.styleSave}
+              </Button>
+            </div>
           </CardContent>
         ) : null}
       </Card>
-
-      <Dialog open={styleDraft !== null} onOpenChange={(open) => !open && setStyleDraft(null)}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{t.onboarding.channels.styleDialogTitle}</DialogTitle>
-            <DialogDescription>{t.onboarding.channels.styleDialogText}</DialogDescription>
-          </DialogHeader>
-
-          <Textarea
-            value={styleDraft ?? ""}
-            onChange={(event) => setStyleDraft(event.target.value)}
-            rows={12}
-            maxLength={STYLE_LIMIT}
-            // Высота ограничена: поле растёт под текст, и на живом skill-файле
-            // в 6,5 тысячи знаков кнопки уезжали на три экрана вниз.
-            className="max-h-[45dvh] overflow-y-auto"
-            placeholder={t.onboarding.channels.stylePlaceholder}
-            aria-label={t.onboarding.channels.styleDialogTitle}
-            disabled={busy || building}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={learn} disabled={busy || building}>
-              {building ? <Spinner /> : <SparklesIcon />}
-              {t.onboarding.channels.learnStyle}
-            </Button>
-            <Button variant="outline" size="sm" disabled={busy || building} render={<label />}>
-              <UploadIcon />
-              {t.onboarding.channels.uploadSkill}
-              <input
-                type="file"
-                accept=".md,.markdown,.txt,text/markdown,text/plain"
-                className="sr-only"
-                onChange={(event) => {
-                  void upload(event.target.files?.[0]);
-                  event.target.value = "";
-                }}
-              />
-            </Button>
-            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-              {(styleDraft ?? "").length} / {STYLE_LIMIT}
-            </span>
-          </div>
-
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={busy} />}>
-              {t.onboarding.channels.channelDialogCancel}
-            </DialogClose>
-            <Button onClick={() => saveStyleAs(true, styleDraft ?? "")} disabled={busy || building || !styleDraft?.trim()}>
-              {busy ? <Spinner /> : null}
-              {t.onboarding.channels.styleSave}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Выход в ленту стоит после всех трёх блоков, а не между первым
           и вторым: посреди настройки он звал уйти раньше, чем прочитано
