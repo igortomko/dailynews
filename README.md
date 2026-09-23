@@ -135,7 +135,7 @@ db/migrations/0020_readers.sql
 ### 2. Ключи
 
 Скопировать `.env.example` в `.env` и заполнить. Обязательные —
-`DATABASE_URL`, `TYPESAFE_API_KEY`, `APP_PASSWORD`, `APP_SECRET`,
+`DATABASE_URL`, `TYPESAFE_API_KEY`, `APP_SECRET`,
 `TELEGRAM_BOT_TOKEN` и `TELEGRAM_WEBHOOK_SECRET`: без последних двух
 читатель не может ни завестись, ни войти.
 
@@ -185,7 +185,7 @@ npm run bot:webhook # поставить вебхук бота и провери
 Ежедневный прогон — `.github/workflows/digest.yml`, 07:00 BRT.
 Интерфейс: **https://dailynews-pi.vercel.app** (Vercel, проект `dailynews`).
 
-Веб-приложению нужны `DATABASE_URL`, `APP_SECRET`, `APP_PASSWORD`,
+Веб-приложению нужны `DATABASE_URL`, `APP_SECRET`,
 `TELEGRAM_BOT_TOKEN` и `TELEGRAM_WEBHOOK_SECRET`: вебхук бота живёт в том же
 контейнере. Там же второй бот — `POSTBOT_TOKEN`, `POSTBOT_WEBHOOK_SECRET`
 и `TELEGRAM_CHAT_ID`, номер владельца, единственного, кому он отвечает. Ключи моделей и источников читает один пайплайн.

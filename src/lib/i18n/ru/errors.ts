@@ -2,8 +2,6 @@ import type { errors as En } from "../en/errors";
 import { plural } from "@/lib/plural";
 
 export const errors: typeof En = {
-  wrongPassword: "Пароль не подходит",
-  noSuchEntrance: "Такого входа сейчас нет. Войди через бота",
   sectionLocked: (plan: string) => `Раздел доступен на тарифе «${plan}»`,
 
   pickOneTopic: "Добавь хотя бы один интерес",

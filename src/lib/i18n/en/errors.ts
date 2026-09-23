@@ -11,8 +11,6 @@
  * а не что делать человеку.
  */
 export const errors = {
-  wrongPassword: "That password doesn't match",
-  noSuchEntrance: "That way in is closed. Sign in through the bot",
   sectionLocked: (plan: string) => `This section comes with ${plan}`,
 
   pickOneTopic: "Add at least one interest",
