@@ -385,3 +385,62 @@ export function sourcesForPlan(sources: Source[], plan: Plan): Source[] {
     .sort((a, b) => a.id - b.id)
     .slice(0, plan.maxSources);
 }
+
+/**
+ * С какого момента работает оплата. `null` — подписка скрыта, и у всех Pro.
+ *
+ * Константа в коде, а не переменная окружения: тариф считают и веб,
+ * и прогон в Actions, а окружения у них разные — переменная, заданная
+ * в одном месте и забытая в другом, дала бы Pro в ленте и Free в выпуске.
+ * Включается правкой этой строки на дату (ISO) и развёртыванием; дату
+ * можно поставить в будущее, и оплата включится сама.
+ */
+export const BILLING_FROM: string | null = null;
+
+/**
+ * Действующая дата включения. Проверки (`npm test`, `npm run verify:db`)
+ * меряют пределы тарифов, а при выключенной оплате пределов нет ни у кого:
+ * они включают её у себя в процессе переменной `BILLING_FROM_FOR_CHECKS`.
+ * Читается на каждый вызов, а не при импорте: проверка ставит её после
+ * того, как модули уже загружены. В браузере `process.env` пуст — там
+ * решает константа.
+ */
+export const billingFrom = (): string | null =>
+  (typeof process !== "undefined" && process.env.BILLING_FROM_FOR_CHECKS) || BILLING_FROM;
+
+/**
+ * Сколько дней ранний читатель остаётся на Pro после включения оплаты.
+ * Без этого в день включения у всех гасло бы то, чем они пользовались,
+ * и узнавали бы они об этом по пропавшей кнопке, а не из сообщения.
+ */
+export const FOUNDER_GRACE_DAYS = 30;
+
+/**
+ * Скидка ранним, процентов — навсегда, пока подписка не отменена.
+ * Число здесь только для текста: сама скидка — код в Lemon Squeezy
+ * (`amount_type: percent`, `duration: forever`), его имя лежит
+ * в `LEMON_DISCOUNT_FOUNDER`, и ссылка оплаты подставляет его сама.
+ *
+ * Тридцать, а не пятьдесят, — расчёт 23 сентября 2026: при 5% + $0.50
+ * комиссии Lemon Pro за $4.99 оставлял $0.25–1.25 с активного читателя
+ * (десять разборов в день — $2.4 в месяц), а $6.99 оставляет $2–3.
+ */
+export const FOUNDER_DISCOUNT = 30;
+
+export const billingOn = (now = new Date(), from: string | null = billingFrom()): boolean =>
+  from !== null && now >= new Date(from);
+
+/**
+ * Пришёл до включения оплаты. Пока оплата не включена, ранние — все.
+ * Непрочитанная дата — не ранний: скидка и лишний месяц Pro не должны
+ * доставаться по ошибке разбора.
+ */
+export function isFounder(createdAt: string | null | undefined, from: string | null = billingFrom()): boolean {
+  if (from === null) return true;
+  const at = new Date(createdAt ?? "").getTime();
+  return Number.isFinite(at) && at < new Date(from).getTime();
+}
+
+/** Докуда ранний читатель на Pro после включения. `null` — оплата не включена. */
+export const founderGraceEnds = (from: string | null = billingFrom()): Date | null =>
+  from === null ? null : new Date(new Date(from).getTime() + FOUNDER_GRACE_DAYS * 86_400_000);

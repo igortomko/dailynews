@@ -8,21 +8,21 @@ import {
 import { resolve, writeDigest, type Survivor, type Usage } from "./digest";
 import { buildPodcast } from "./tts";
 import { selectSurvivors, targetsOf } from "./select";
-import { askFinished, askResume, botUpsellLine, notify } from "../src/lib/telegram";
+import { askFinished, askResume, botUpsellLine, founderBotLine, notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
 import { enrichImages } from "./og";
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
 import { formOf } from "../src/lib/reading-evaluation";
 import { jevCost, llmCost } from "./cost";
-import { FEATURES, issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
+import { billingFrom, FEATURES, FOUNDER_DISCOUNT, founderGraceEnds, isFounder, issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
 import {
   cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf, pickedNote, savedMinutes,
 } from "../src/lib/reading-time";
 // Лог прогона владельческий и русский: «набран», «материалов», «пропуск».
 // Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
 import { feed as ruFeed } from "../src/lib/i18n/ru/feed";
-import { effectivePlan, effectiveVoice } from "../src/lib/lemon";
+import { effectivePlan, effectiveVoice, hasFounderDiscount } from "../src/lib/lemon";
 import { botMayUpsell, upgradeNote, upgradeReason } from "../src/lib/upgrade";
 import { getUpgradeFacts, weekIssues } from "../src/lib/queries";
 import { SEARCH_CONFIG, tsConfigFor } from "../src/lib/search";
@@ -491,7 +491,17 @@ async function deliver(
       picked = pickedNote(
         survivors.length, facts.collected, savedMinutes(facts.streamChars, reading.minutes), ruFeed.time,
       );
-      if (botMayUpsell(reader.upsell_at)) {
+      // Ранним в первом выпуске после включения оплаты — одна строка про
+      // месяц Pro и скидку. «Один раз» держит та же отметка `upsell_at`:
+      // стоит позже даты включения — уже сказали.
+      const from = billingFrom();
+      const grace = founderGraceEnds();
+      if (
+        from && grace && new Date() < grace && isFounder(reader.created_at)
+        && !(reader.upsell_at && new Date(reader.upsell_at) >= new Date(from))
+      ) {
+        upsell = founderBotLine(grace, hasFounderDiscount(reader) ? FOUNDER_DISCOUNT : null, appUrl);
+      } else if (botMayUpsell(reader.upsell_at)) {
         const found = upgradeReason(plan, facts);
         if (found) upsell = botUpsellLine(plan, upgradeNote(plan, found, facts), appUrl);
       }

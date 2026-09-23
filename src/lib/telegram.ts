@@ -803,6 +803,20 @@ export function botUpsellLine(plan: Plan, note: UpgradeNote, appUrl?: string): s
 }
 
 /**
+ * Строка ранним в день включения оплаты — один раз, в сообщении о выпуске.
+ *
+ * Место то же, что у строки про предел: отдельное сообщение пришло бы
+ * вторым и без выпуска, к которому относится, а строка в каждом выпуске
+ * месяца — это спам. Скидку называем, только если она подставится сама.
+ */
+export function founderBotLine(graceEnds: Date, discount: number | null, appUrl?: string): string {
+  const date = graceEnds.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  const where = appUrl ? ` ${appUrl.replace(/\/$/, "")}/settings/subscription` : "";
+  const off = discount ? ` Дальше для тебя −${discount}% на любой тариф навсегда — скидка подставится при оплате сама.` : "";
+  return `Reporta включила подписку. Ты пришёл, когда всё было бесплатно, поэтому Pro открыт для тебя до ${date}.${off}${where}`;
+}
+
+/**
  * Имя медиа внутри сообщения. Telegram ищет по нему `tg://audio?id=`
  * в разметке и `media[].id` в запросе: разойдись они, блок приедет пустым.
  */

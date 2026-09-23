@@ -29,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
    * на ненастроенные ключи, срабатывал при настроенных.
    */
   const checkout: Partial<Record<PlanId, Checkout>> = Object.fromEntries(
-    PLAN_IDS.map((id) => [id, { buy: checkoutUrl(id, reader.id), trialDays: trialDaysFor(id) }])
+    PLAN_IDS.map((id) => [id, { buy: checkoutUrl(id, reader), trialDays: trialDaysFor(id) }])
       .filter(([, value]) => (value as Checkout).buy),
   );
   return (

@@ -5,6 +5,10 @@
  *
  *   npx tsx pipeline/selftest.ts
  */
+// Пределы тарифов меряются при включённой оплате: пока она выключена,
+// у всех Pro (`billingFrom` в src/lib/plans.ts). Читается на каждый вызов,
+// поэтому ставится здесь, после загрузки модулей, — и этого достаточно.
+process.env.BILLING_FROM_FOR_CHECKS ??= "2020-01-01T00:00:00Z";
 import assertStrict from "node:assert/strict";
 import { parseSignedRequest } from "../src/lib/social-connect";
 import { cleanStyle, draftStyle, styleBlock } from "./voice-card";
@@ -67,7 +71,7 @@ import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
-  botUpsellLine, channelHandle, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
+  botUpsellLine, channelHandle, founderBotLine, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
   splitClassic, stamp, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -78,7 +82,7 @@ import {
 import { digestHtml, isWeeklyDay, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
-import { issuesToday } from "../src/lib/plans";
+import { isFounder, issuesToday } from "../src/lib/plans";
 import { upgradeLines, type UpgradeNote } from "../src/lib/upgrade";
 import { plural } from "../src/lib/plural";
 import { ru as ruDict } from "../src/lib/i18n/ru/index";
@@ -1846,7 +1850,7 @@ assert.ok(
       effectivePlan({
         plan: "pro", owner: false, subscription_id: "sub_1",
         subscription_status: "on_trial", plan_ends_at: null,
-      } as never).id,
+      } as never, new Date(), "2020-01-01T00:00:00Z").id,
       "pro",
       "на триале действует купленный тариф, а не бесплатный",
     );
@@ -2728,40 +2732,44 @@ const paid = (over: Record<string, unknown> = {}) =>
   ({ id: 1, plan: "pro", subscription_status: "active", plan_ends_at: null,
      plan_renews_at: null, subscription_id: "sub_1", portal_url: null, ...over }) as never;
 
+// Проверки ниже меряют включённую оплату: пока `BILLING_FROM` пуст, у всех Pro.
+// Фикстуры без `created_at` — не ранние, им месяц Pro не положен.
+const BILLING_ON = "2020-01-01T00:00:00Z";
+const planNow = (reader: Reader) => effectivePlan(reader, new Date(), BILLING_ON);
 const DAY = 86_400_000;
-assert.equal(effectivePlan(paid()).id, "pro", "активная подписка даёт купленный тариф");
+assert.equal(planNow(paid()).id, "pro", "активная подписка даёт купленный тариф");
 assert.equal(
-  effectivePlan(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() + DAY).toISOString() })).id,
+  planNow(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() + DAY).toISOString() })).id,
   "pro",
   "отменённая подписка работает до конца оплаченного периода",
 );
 assert.equal(
-  effectivePlan(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() - DAY).toISOString() })).id,
+  planNow(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() - DAY).toISOString() })).id,
   "free",
   "после конца оплаченного периода тариф гаснет сразу, а не к ночному прогону",
 );
 assert.equal(
-  effectivePlan(paid({ subscription_status: "expired", plan_ends_at: null })).id,
+  planNow(paid({ subscription_status: "expired", plan_ends_at: null })).id,
   "free",
   "истёкшая подписка не даёт платного выпуска",
 );
-assert.equal(effectivePlan(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
+assert.equal(planNow(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
 
 // Владелец не покупает подписку у себя самого, и проверять её статус
 // не по чему: у него действует то, что стоит в колонке. Так там и стояло
 // «pro» — и гасло проверкой на подписку, которой нет.
 assert.equal(
-  effectivePlan(paid({ plan: "pro", owner: true, subscription_status: null, plan_ends_at: null })).id,
+  planNow(paid({ plan: "pro", owner: true, subscription_status: null, plan_ends_at: null })).id,
   "pro",
   "у владельца работает купленное без подписки",
 );
 assert.equal(
-  effectivePlan(paid({ plan: "free", owner: true, subscription_status: null })).id,
+  planNow(paid({ plan: "free", owner: true, subscription_status: null })).id,
   "free",
   "и бесплатный тоже: иначе владелец не увидит продукт глазами бесплатного читателя",
 );
 assert.equal(
-  effectivePlan(paid({ plan: "pro", owner: false, subscription_status: null, plan_ends_at: null })).id,
+  planNow(paid({ plan: "pro", owner: false, subscription_status: null, plan_ends_at: null })).id,
   "free",
   "остальным тариф по-прежнему даёт только подписка",
 );
@@ -2798,8 +2806,34 @@ const expiredEvent = readEvent({
 } as never);
 assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкшая подписка сбрасывает тариф");
 
-assert.ok(checkoutUrl("pro", 42)?.includes("reader_id"), "номер читателя уходит в оплату");
-assert.equal(checkoutUrl("free" as never, 42), null, "у бесплатного тарифа нет оплаты");
+assert.ok(checkoutUrl("pro", { id: 42, created_at: "2026-01-01" })?.includes("reader_id"), "номер читателя уходит в оплату");
+assert.equal(checkoutUrl("free" as never, { id: 42, created_at: "2026-01-01" }), null, "у бесплатного тарифа нет оплаты");
+
+// --- бесплатный период и ранние ---------------------------------------------
+// Пока оплата не включена, Pro у всех; после — ранние дочитывают месяц Pro
+// и платят со скидкой, которая подставляется в ссылку сама.
+{
+  const at = (iso: string) => new Date(iso);
+  const from = "2026-10-01T00:00:00Z";
+  const early = { ...(paid({ plan: "free", subscription_id: null }) as object), created_at: "2026-09-01T00:00:00Z" } as Reader;
+  const late = { ...early, created_at: "2026-10-02T00:00:00Z" } as Reader;
+  assert.equal(effectivePlan(late, at("2026-09-20"), null).id, "pro", "без включённой оплаты Pro у всех");
+  assert.equal(effectivePlan(late, at("2026-09-20"), from).id, "pro", "до даты включения — тоже");
+  assert.equal(effectivePlan(early, at("2026-10-20"), from).id, "pro", "ранний на Pro месяц после включения");
+  assert.equal(effectivePlan(early, at("2026-11-01"), from).id, "free", "после месяца — купленное");
+  assert.equal(effectivePlan(late, at("2026-10-20"), from).id, "free", "пришедшему после включения месяц не положен");
+  assert.ok(!isFounder(undefined, from), "непрочитанная дата — не ранний");
+  // Ссылка оплаты спрашивает дату включения у окружения проверки.
+  const checksFrom = process.env.BILLING_FROM_FOR_CHECKS;
+  process.env.BILLING_FROM_FOR_CHECKS = from;
+  process.env.LEMON_DISCOUNT_FOUNDER = "EARLY30";
+  assert.ok(checkoutUrl("pro", early)?.includes("discount_code%5D=EARLY30"), "скидка ранним подставляется в оплату");
+  delete process.env.LEMON_DISCOUNT_FOUNDER;
+  assert.ok(!checkoutUrl("pro", early)?.includes("discount_code"), "код не задан — ссылка без скидки");
+  process.env.BILLING_FROM_FOR_CHECKS = checksFrom;
+  assert.ok(founderBotLine(at("2026-10-31"), 30).includes("−30%"), "строка ранним называет скидку");
+  assert.ok(!founderBotLine(at("2026-10-31"), null).includes("%"), "и молчит о ней без кода");
+}
 
 // --- ссылка, присланная боту --------------------------------------------------
 // Прислать ссылку боту — тот же жест, что вставить её в форму. Отвечать
@@ -2837,14 +2871,14 @@ assert.ok(!looksLikeSource(""), "пустая строка не источник
 {
   const manual = { plan: "pro", subscription_id: null, subscription_status: null,
     plan_ends_at: null } as Reader;
-  assert.equal(effectivePlan(manual).id, "pro", "тариф без подписки действует как выставленный");
+  assert.equal(planNow(manual).id, "pro", "тариф без подписки действует как выставленный");
   const expired = { ...manual, subscription_id: "sub_1", subscription_status: "expired" };
-  assert.equal(effectivePlan(expired).id, "free", "истёкшая подписка гаснет в ту же секунду");
+  assert.equal(planNow(expired).id, "free", "истёкшая подписка гаснет в ту же секунду");
   const cancelled = {
     ...manual, subscription_id: "sub_1", subscription_status: "cancelled",
     plan_ends_at: new Date(Date.now() + 86_400_000).toISOString(),
   };
-  assert.equal(effectivePlan(cancelled).id, "pro", "отменённая дочитывает оплаченный месяц");
+  assert.equal(planNow(cancelled).id, "pro", "отменённая дочитывает оплаченный месяц");
 }
 
 // ---------------------------------------------------------------------------

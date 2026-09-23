@@ -120,6 +120,9 @@ export const plans = {
     pastDue: "Payment didn't go through. We'll try charging again",
     renews: (date: string) => `Renews ${date}`,
     manageElsewhere: "Change card, cancel, or view invoices on the management page",
+    founderGrace: (date: string) => `You joined before payments: Pro stays open for you through ${date}.`,
+    founderDiscount: (percent: number) =>
+      `And ${percent}% off any plan for as long as you stay subscribed. It's applied at checkout automatically.`,
   },
 
   paywall: {

@@ -227,6 +227,8 @@ export type Reader = {
    *  Персонален, как и всё остальное здесь: у каждого читателя свой. */
   plan: string;
   daily_cap_usd: number;
+  /** Когда завёлся. До `BILLING_FROM` — ранний: скидка и месяц Pro. */
+  created_at: string;
   /** Подписка Lemon Squeezy. Пусто — читатель никогда не платил. */
   subscription_id: string | null;
   /** Их статус: active, on_trial, paused, past_due, cancelled, expired. */

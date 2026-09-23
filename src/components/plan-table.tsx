@@ -87,7 +87,7 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
           const Icon = ICONS[id];
           const label = t.plans.label[id];
           const mine = plan.id === current.id;
-          const buy = plan.price > current.price ? checkoutUrl(id, reader.id) : null;
+          const buy = plan.price > current.price ? checkoutUrl(id, reader) : null;
           // Понижение и смена карты живут у Lemon Squeezy: своего экрана
           // для них нет и не будет — это был бы второй набор состояний,
           // расходящийся с настоящим.
