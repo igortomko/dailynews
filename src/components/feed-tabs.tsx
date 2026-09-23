@@ -150,6 +150,7 @@ export function FeedTabs({
   networks,
   reading,
   upgrade,
+  founder,
   textLang,
   left,
 }: {
@@ -192,6 +193,12 @@ export function FeedTabs({
    * (`upgradeReason`) — тем же правилом, каким про тариф говорит бот.
    */
   upgrade: UpgradeNote | null;
+  /**
+   * Ранний читатель в месяц Pro после включения оплаты: докуда (готовой
+   * строкой — дату форматирует сервер, иначе Node и Chrome расходятся
+   * пробелом и гидрация падает) и скидка, если она подставится сама.
+   */
+  founder: { until: string; discount: number | null } | null;
   /** Тег языка текста выпуска, null — если выпуск не переводится. */
   textLang: string | null;
   /**
@@ -723,6 +730,18 @@ export function FeedTabs({
             за выпуск. Сама строка только называет — выход стоит под лентой,
             кнопкой: решение «хочу ещё» принимают, дочитав заказанное,
             а не глядя на первую карточку сверху. */}
+        {/* Месяц Pro ранним назван здесь на весь месяц, а не только в чате:
+            Telegram читают не все, а возможности гаснут у всех. */}
+        {founder ? (
+          <p className="pt-4 text-sm text-muted-foreground sm:pt-5">
+            {t.feed.founder.until(founder.until)}
+            {founder.discount ? ` ${t.feed.founder.discount(founder.discount)}` : ""}{" "}
+            <Link href="/settings/subscription" className="underline underline-offset-4">
+              {t.feed.founder.link}
+            </Link>
+            .
+          </p>
+        ) : null}
         {reading.cut > 0 ? (
           <p className="pt-4 text-sm text-muted-foreground sm:pt-5">
             {t.feed.minutes.cut(reading.cut)}.

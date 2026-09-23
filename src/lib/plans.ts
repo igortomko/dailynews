@@ -444,3 +444,39 @@ export function isFounder(createdAt: string | null | undefined, from: string | n
 /** Докуда ранний читатель на Pro после включения. `null` — оплата не включена. */
 export const founderGraceEnds = (from: string | null = billingFrom()): Date | null =>
   from === null ? null : new Date(new Date(from).getTime() + FOUNDER_GRACE_DAYS * 86_400_000);
+
+/** За сколько дней до конца месяца Pro ранним напоминают в чате. */
+export const FOUNDER_REMIND_DAYS = 3;
+
+/**
+ * Что сказать раннему в чате сегодня: что оплата включилась, что месяц Pro
+ * кончается, или ничего.
+ *
+ * `lastSaidAt` — `readers.upsell_at`, отметка последней строки про тариф.
+ * Раньше даты включения — о включении ещё не говорили. Раньше начала окна
+ * напоминания — о конце ещё не говорили. Отдельные колонки под каждое
+ * «уже сказали» не нужны: строки идут по порядку, и одной отметки хватает.
+ * Спящий, вернувшийся за день до конца, получит «включилась» с датой —
+ * напоминание ему уже ничего не добавит.
+ */
+export function founderNotice(
+  createdAt: string | null | undefined,
+  lastSaidAt: string | null | undefined,
+  now = new Date(),
+  from: string | null = billingFrom(),
+): "started" | "ending" | null {
+  const grace = founderGraceEnds(from);
+  if (!from || !grace || !billingOn(now, from) || now >= grace || !isFounder(createdAt, from)) return null;
+  const said = lastSaidAt ? new Date(lastSaidAt).getTime() : Number.NEGATIVE_INFINITY;
+  if (!(said >= new Date(from).getTime())) return "started";
+  const remindFrom = grace.getTime() - FOUNDER_REMIND_DAYS * 86_400_000;
+  if (now.getTime() >= remindFrom && said < remindFrom) return "ending";
+  return null;
+}
+
+/**
+ * Цена со скидкой ранних, как её посчитает Lemon: до цента.
+ * Считается отсюда, а не пишется в текст: цены тарифов живут в `PLANS`.
+ */
+export const founderPrice = (plan: Plan): number =>
+  Math.round(plan.price * (100 - FOUNDER_DISCOUNT)) / 100;

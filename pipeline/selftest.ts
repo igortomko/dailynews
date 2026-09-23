@@ -82,7 +82,7 @@ import {
 import { digestHtml, isWeeklyDay, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
-import { isFounder, issuesToday } from "../src/lib/plans";
+import { founderNotice, isFounder, issuesToday } from "../src/lib/plans";
 import { upgradeLines, type UpgradeNote } from "../src/lib/upgrade";
 import { plural } from "../src/lib/plural";
 import { ru as ruDict } from "../src/lib/i18n/ru/index";
@@ -2836,8 +2836,23 @@ assert.equal(checkoutUrl("free" as never, { id: 42, created_at: "2026-01-01" }),
   delete process.env.LEMON_DISCOUNT_FOUNDER;
   assert.ok(!checkoutUrl("pro", early)?.includes("discount_code"), "код не задан — ссылка без скидки");
   process.env.BILLING_FROM_FOR_CHECKS = checksFrom;
-  assert.ok(founderBotLine(at("2026-10-31"), 30).includes("−30%"), "строка ранним называет скидку");
-  assert.ok(!founderBotLine(at("2026-10-31"), null).includes("%"), "и молчит о ней без кода");
+  assert.ok(founderBotLine("started", at("2026-10-31"), 30).includes("−30%"), "строка ранним называет скидку");
+  assert.ok(!founderBotLine("started", at("2026-10-31"), null).includes("%"), "и молчит о ней без кода");
+  assert.ok(founderBotLine("ending", at("2026-10-31"), 30).includes("$6.99"), "напоминание называет цену со скидкой");
+  assert.ok(founderBotLine("ending", at("2026-10-31"), null).includes("$9.99"), "без кода — полную");
+
+  // Когда что сказать: одна отметка `upsell_at` держит обе строки по очереди.
+  const said = (now: string, last: string | null, created = "2026-09-01T00:00:00Z") =>
+    founderNotice(created, last, at(now), from);
+  assert.equal(founderNotice("2026-09-01", null, at("2026-09-20"), null), null, "оплата не включена — молчим");
+  assert.equal(said("2026-10-02", null), "started", "первый выпуск после включения — о включении");
+  assert.equal(said("2026-10-02", "2026-09-15T00:00:00Z"), "started", "строка про предел до включения не в счёт");
+  assert.equal(said("2026-10-03", "2026-10-02T00:00:00Z"), null, "о включении — один раз");
+  assert.equal(said("2026-10-29", "2026-10-02T00:00:00Z"), "ending", "за три дня до конца — напоминание");
+  assert.equal(said("2026-10-30", "2026-10-29T00:00:00Z"), null, "напоминание — один раз");
+  assert.equal(said("2026-10-30", null), "started", "вернувшийся под конец узнаёт о включении, с датой");
+  assert.equal(said("2026-10-31T01:00:00Z", null), null, "после конца месяца молчим");
+  assert.equal(said("2026-10-02", null, "2026-10-01T12:00:00Z"), null, "пришедшему после включения — нечего");
 }
 
 // --- ссылка, присланная боту --------------------------------------------------

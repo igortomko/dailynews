@@ -8,7 +8,7 @@ import { formatMinutesLong } from "./reading-time";
 // бота, нашёл это место поиском, а не глазами на проде.
 import { feed as ruFeed } from "@/lib/i18n/ru/feed";
 import { plans as ruPlans } from "@/lib/i18n/ru/plans";
-import type { Plan } from "@/lib/plans";
+import { PLANS, founderPrice, type Plan } from "@/lib/plans";
 import { upgradeLines, type UpgradeNote } from "@/lib/upgrade";
 import { coverToday } from "./podcast-cover";
 
@@ -803,15 +803,26 @@ export function botUpsellLine(plan: Plan, note: UpgradeNote, appUrl?: string): s
 }
 
 /**
- * Строка ранним в день включения оплаты — один раз, в сообщении о выпуске.
+ * Строка ранним в сообщении о выпуске: в первом после включения оплаты
+ * и за `FOUNDER_REMIND_DAYS` до конца месяца Pro (`founderNotice`).
  *
  * Место то же, что у строки про предел: отдельное сообщение пришло бы
  * вторым и без выпуска, к которому относится, а строка в каждом выпуске
  * месяца — это спам. Скидку называем, только если она подставится сама.
+ * Напоминание называет цены: «осталось три дня» без цены отправляет
+ * по ссылке узнавать, сколько это стоит, — а за этим и не переходят.
  */
-export function founderBotLine(graceEnds: Date, discount: number | null, appUrl?: string): string {
+export function founderBotLine(
+  kind: "started" | "ending", graceEnds: Date, discount: number | null, appUrl?: string,
+): string {
   const date = graceEnds.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
   const where = appUrl ? ` ${appUrl.replace(/\/$/, "")}/settings/subscription` : "";
+  if (kind === "ending") {
+    const price = discount
+      ? ` Со скидкой −${discount}% Pro стоит $${founderPrice(PLANS.pro)} в месяц, Plus — $${founderPrice(PLANS.plus)}.`
+      : ` Pro стоит $${PLANS.pro.price} в месяц, Plus — $${PLANS.plus.price}.`;
+    return `Pro открыт для тебя до ${date} — дальше бесплатный тариф.${price}${where}`;
+  }
   const off = discount ? ` Дальше для тебя −${discount}% на любой тариф навсегда — скидка подставится при оплате сама.` : "";
   return `Reporta включила подписку. Ты пришёл, когда всё было бесплатно, поэтому Pro открыт для тебя до ${date}.${off}${where}`;
 }
