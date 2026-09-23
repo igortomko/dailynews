@@ -3,6 +3,7 @@ import { currentReader } from "@/lib/session";
 import { checkoutFor, cycleOf } from "@/lib/billing";
 import { PLANS, type PlanId } from "@/lib/plans";
 import { CheckoutOverlay } from "./overlay";
+import { dailyId, recordBillingEvent } from "@/lib/analytics/billing-events";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,14 @@ export default async function CheckoutPage({
   const { plan } = await params;
   const cycle = cycleOf((await searchParams).cycle);
   if (!(plan in PLANS) || PLANS[plan as PlanId].price === 0) redirect("/settings/subscription");
-  const checkout = checkoutFor(plan as PlanId, await currentReader(), cycle);
+  const reader = await currentReader();
+  const checkout = checkoutFor(plan as PlanId, reader, cycle);
   if (!checkout) redirect("/settings/subscription");
+  // Открыл оплату — шаг воронки между «посмотрел тарифы» и «взял триал»:
+  // без него не отличить «не понравилась цена» от «не справился с окном».
+  await recordBillingEvent({
+    id: dailyId("checkout", reader.id, `${plan}-${cycle}`), readerId: reader.id, name: "checkout_started",
+    occurredAt: new Date().toISOString(), plan, cycle,
+  });
   return <CheckoutOverlay checkout={checkout} />;
 }

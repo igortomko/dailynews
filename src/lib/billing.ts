@@ -68,6 +68,10 @@ export const yearlyReady = (): boolean => Object.values(prices()).some((price) =
  */
 export const trialDaysFor = (plan: PlanId): number => prices()[plan]?.trialDays ?? 0;
 
+/** Период по id цены: годовая — год, всё остальное — месяц. */
+export const cycleOfPrice = (priceId: string | null | undefined): Cycle =>
+  priceId && Object.values(prices()).some((price) => price.yearId === priceId) ? "year" : "month";
+
 /** Тариф по id цены из вебхука. Незнакомая цена — не тариф. */
 export function planOfPrice(priceId: string | null | undefined): Plan | null {
   for (const [plan, price] of Object.entries(prices())) {
@@ -277,6 +281,7 @@ export type SubscriptionUpdate = {
 };
 
 type PaddlePayload = {
+  event_id?: string;
   event_type?: string;
   occurred_at?: string;
   data?: {
@@ -334,4 +339,81 @@ export function readEvent(payload: PaddlePayload):
       occurredAt: payload.occurred_at ?? new Date().toISOString(),
     },
   };
+}
+
+/** Платёж или возврат для воронки: сумма в центах, как её прислал Paddle. */
+export type MoneyEvent = {
+  eventId: string;
+  kind: "payment_succeeded" | "payment_refunded";
+  readerId: number | null;
+  subscriptionId: string | null;
+  paymentId: string;
+  refundId: string | null;
+  amountMinor: number;
+  currency: string;
+  plan: PlanId | null;
+  cycle: Cycle;
+  occurredAt: string;
+};
+
+type MoneyPayload = {
+  event_id?: string;
+  event_type?: string;
+  occurred_at?: string;
+  data?: {
+    id?: string;
+    status?: string;
+    action?: string;
+    transaction_id?: string;
+    subscription_id?: string | null;
+    currency_code?: string;
+    custom_data?: { reader_id?: string | number } | null;
+    items?: { price?: { id?: string } | null; price_id?: string }[];
+    details?: { totals?: { grand_total?: string } } | null;
+    totals?: { total?: string } | null;
+  };
+};
+
+/**
+ * Деньги из вебхука: `transaction.completed` — платёж, одобренный возврат
+ * (`adjustment.*`, action refund, status approved) — возврат. Нулевая
+ * транзакция — это начало триала, а не платёж: кит отвергает платёж без
+ * суммы, и нулевой «платёж» в воронке выдал бы триал за покупку.
+ *
+ * Номер читателя может не прийти: у продления custom_data переносится
+ * не всегда, у возврата его нет вовсе. Тогда вебхук ищет читателя
+ * по подписке — поэтому она возвращается рядом.
+ */
+export function readMoney(payload: MoneyPayload): MoneyEvent | null {
+  const data = payload.data ?? {};
+  const type = payload.event_type ?? "";
+  const reader = Number(data.custom_data?.reader_id);
+  const base = {
+    eventId: payload.event_id ?? "",
+    readerId: Number.isInteger(reader) && reader > 0 ? reader : null,
+    subscriptionId: data.subscription_id ?? null,
+    currency: data.currency_code ?? "",
+    occurredAt: payload.occurred_at ?? new Date().toISOString(),
+  };
+  if (!base.eventId || !/^[A-Z]{3}$/.test(base.currency)) return null;
+
+  if (type === "transaction.completed") {
+    const amount = Number(data.details?.totals?.grand_total);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || !data.id) return null;
+    const priceId = data.items?.[0]?.price?.id ?? data.items?.[0]?.price_id;
+    return {
+      ...base, kind: "payment_succeeded", paymentId: data.id, refundId: null, amountMinor: amount,
+      plan: planOfPrice(priceId)?.id ?? null, cycle: cycleOfPrice(priceId),
+    };
+  }
+
+  if (type.startsWith("adjustment.") && data.action === "refund" && data.status === "approved") {
+    const amount = Number(data.totals?.total);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || !data.id || !data.transaction_id) return null;
+    return {
+      ...base, kind: "payment_refunded", paymentId: data.transaction_id, refundId: data.id, amountMinor: amount,
+      plan: null, cycle: "month",
+    };
+  }
+  return null;
 }

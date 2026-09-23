@@ -6,6 +6,9 @@ import { checkoutUrl, trialDaysFor, yearlyReady } from "@/lib/billing";
 import { dictOf, featureWhat, LOCALES, LOCALE_LABELS } from "@/lib/i18n";
 import { PLAN_IDS, PLANS } from "@/lib/plans";
 import { PricingCards, type PricingCard, type PricingText } from "./cards";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, verifySession } from "@/lib/auth";
+import { dailyId, recordBillingEvent } from "@/lib/analytics/billing-events";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Pricing · Reporta" };
@@ -25,6 +28,14 @@ export default async function PricingPage({
   searchParams: Promise<{ lang?: string | string[] }>;
 }) {
   const locale = await legalLocale((await searchParams).lang);
+  // Просмотр цен пишется только у вошедшего: у гостя нет номера, а воронка
+  // считает людей. Гость посчитается потом — входом по кнопке на этой же странице.
+  const viewer = await verifySession((await cookies()).get(SESSION_COOKIE)?.value);
+  if (viewer) {
+    await recordBillingEvent({
+      id: dailyId("plans", viewer), readerId: viewer, name: "plans_viewed", occurredAt: new Date().toISOString(),
+    });
+  }
   const t = dictOf(locale);
   const login = t.onboarding.login;
   const rows = planRows(t);

@@ -2681,6 +2681,31 @@ async function main() {
       assert.equal(placementStats(fresh).rows.find((row) => row.code === code)?.entered, 1, "кит сводит пришедшего с кодом размещения");
       assert.equal(fresh.placements!.items.find((item) => item.code === code)?.costMinor, 500, "цена размещения доезжает в центах");
       console.log("  ссылки на каналы: код пишется при первом /start, чужой — нет");
+
+      // Воронка оплаты: события Paddle и сайта проходят проверку кита,
+      // повтор доставки не удваивает платёж, строка без читателя не событие.
+      const { recordBillingEvent } = await import("../src/lib/analytics/billing-events");
+      const at = new Date().toISOString();
+      const pay = { id: "pay-txn_1", readerId: came.id, name: "payment_succeeded" as const, occurredAt: at,
+        plan: "pro", cycle: "month" as const, amountMinor: 999, currency: "USD", paymentId: "txn_1" };
+      for (const event of [
+        { id: "plans-probe", readerId: came.id, name: "plans_viewed" as const, occurredAt: at },
+        { id: "checkout-probe", readerId: came.id, name: "checkout_started" as const, occurredAt: at, plan: "pro", cycle: "month" as const },
+        { id: "trial-sub_1", readerId: came.id, name: "trial_started" as const, occurredAt: at, plan: "pro" },
+        pay, pay,
+        { id: "refund-adj_1", readerId: came.id, name: "payment_refunded" as const, occurredAt: at,
+          amountMinor: 999, currency: "USD", paymentId: "txn_1", refundId: "adj_1" },
+        { id: "pay-txn_orphan", readerId: null, name: "payment_succeeded" as const, occurredAt: at,
+          amountMinor: 399, currency: "USD", paymentId: "txn_orphan" },
+      ]) await recordBillingEvent(event);
+      const billed = (await buildDataset()).events.filter((e) => e.subjectId === `r${came.id}`);
+      assert.equal(billed.filter((e) => e.name === "payment_succeeded").length, 1, "повтор доставки не удваивает платёж");
+      assert.ok(billed.some((e) => e.name === "checkout_started"), "открытие оплаты доезжает до кита");
+      assert.ok(billed.some((e) => e.goal === "trial_started"), "триал — цель воронки");
+      assert.ok(billed.some((e) => e.name === "payment_refunded" && e.refundId === "adj_1"), "возврат доезжает с номером");
+      const [{ orphans }] = await sql<{ orphans: number }[]>`select count(*)::int as orphans from dailynews.billing_events where reader_id is null`;
+      assert.equal(orphans, 1, "платёж без читателя хранится, но в снимок не идёт");
+      console.log("  воронка оплаты: тарифы → оплата → триал → платёж, повтор не удваивается");
     }
 
     // Удаление профиля уносит всё личное каскадом и не трогает соседа;

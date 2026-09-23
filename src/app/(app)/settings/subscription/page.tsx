@@ -3,6 +3,7 @@ import { effectivePlan, hasFounderDiscount } from "@/lib/billing";
 import { FOUNDER_DISCOUNT, founderGraceEnds, isFounder } from "@/lib/plans";
 import { currentLocale, getDict } from "@/lib/i18n/server";
 import { PlanTable } from "@/components/plan-table";
+import { dailyId, recordBillingEvent } from "@/lib/analytics/billing-events";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,9 @@ export default async function SubscriptionPage() {
   const inGrace = grace !== null && new Date() < grace && isFounder(reader.created_at);
   const date = grace?.toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" });
   const discount = hasFounderDiscount(reader);
+  await recordBillingEvent({
+    id: dailyId("plans", reader.id), readerId: reader.id, name: "plans_viewed", occurredAt: new Date().toISOString(),
+  });
   // Действующий, а не купленный: отменённая подписка ещё работает,
   // истёкшая — уже нет, и страница обязана показывать то же, что и предел.
   return (

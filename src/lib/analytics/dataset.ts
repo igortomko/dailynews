@@ -18,6 +18,10 @@ import type { AnalyticsDataset, AnalyticsEvent } from "@launch-kit/lib/types";
  * читателя каждый день, включая тех, кто месяц не открывал ленту.
  */
 type Row = { reader_id: number; event: string; day: string; first_at: Date };
+type BillingRow = {
+  id: string; reader_id: number; name: string; occurred_at: Date; plan: string | null;
+  amount_minor: number | null; currency: string | null; payment_id: string | null; refund_id: string | null;
+};
 
 // Имена этапов — как их знает владелец, а не как они записаны в check.
 const STAGE_LABELS: Record<string, string> = {
@@ -35,7 +39,7 @@ const ACTIVITY: Record<string, (row: Row) => Partial<AnalyticsEvent>> = {
 
 export async function buildDataset(): Promise<AnalyticsDataset> {
   const generatedAt = new Date().toISOString();
-  const [readers, rows, costs, pending, placements] = await sql.begin("read only", async (tx) => {
+  const [readers, rows, costs, pending, placements, billing] = await sql.begin("read only", async (tx) => {
     await tx`set local statement_timeout = '10s'`;
     return Promise.all([
       // Источник — канал размещения, кампания — само размещение: так кит
@@ -74,6 +78,13 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
       tx<{ code: string; name: string; channel: string; cost_usd: number; created_at: Date; retired_at: Date | null }[]>`
         select code, name, channel, cost_usd::float as cost_usd, created_at, retired_at
           from dailynews.placements order by created_at`,
+      // Воронка оплаты: пишут её «Подписка», страница оплаты и вебхук Paddle.
+      // Без читателя строка не событие — воронка считает людей.
+      tx<BillingRow[]>`
+        select id, reader_id::int, name, occurred_at, plan, amount_minor::int, currency, payment_id, refund_id
+          from dailynews.billing_events
+         where reader_id is not null
+         order by occurred_at`,
     ]);
   });
 
@@ -106,13 +117,30 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
     events.push({ ...base, id: `${row.event}-${row.reader_id}-${row.day}`, ...ACTIVITY[row.event](row) } as AnalyticsEvent);
   }
 
+  for (const b of billing) {
+    const base = { id: `billing-${b.id}`, subjectId: subject(b.reader_id), occurredAt: b.occurred_at.toISOString(), surface: "web" as const };
+    const plan = b.plan ? { plan: b.plan } : {};
+    if (b.name === "payment_succeeded" || b.name === "payment_refunded") {
+      events.push({
+        ...base, ...plan, name: b.name, provider: "paddle", paymentId: b.payment_id!, amountMinor: b.amount_minor!,
+        currency: b.currency!, ...(b.refund_id ? { refundId: b.refund_id } : {}),
+      });
+    } else if (b.name === "checkout_started") {
+      events.push({ ...base, ...plan, name: "checkout_started" });
+    } else {
+      // Просмотр тарифов, триал и отмена — цели: своего имени события у кита
+      // для них нет, а шаг воронки по цели он строит.
+      events.push({ ...base, ...plan, name: "goal_completed", goal: b.name });
+    }
+  }
+
   const lastEventAt = events.reduce<string | null>((last, e) => (last && last > e.occurredAt ? last : e.occurredAt), null);
   return validateDataset({
     schemaVersion: 1,
     mode: "local",
     generatedAt,
     ...profile,
-    capabilities: { sessions: false, payments: false, lifecycle: false, crawlers: false, geography: false, identity: true },
+    capabilities: { sessions: false, payments: true, lifecycle: false, crawlers: false, geography: false, identity: true },
     events,
     modelCosts: {
       capturedAt: generatedAt,
