@@ -109,6 +109,7 @@ function StepMark({ now, of, title, step }: { now: number; of: number; title: st
 export function DeliveryForm({
   connected,
   username,
+  email,
   kindleAddress,
   kindleDigest,
   kindlePeriod,
@@ -122,6 +123,8 @@ export function DeliveryForm({
   plan: Plan;
   connected: boolean;
   username: string | null;
+  /** Почта, на которую уходит выпуск, если Telegram нет. */
+  email: string | null;
   kindleAddress: string;
   kindleDigest: boolean;
   /** Как часто уходит книга: каждое утро или в субботу за неделю. */
@@ -207,7 +210,9 @@ export function DeliveryForm({
         <CardContent className="flex flex-col gap-4 text-sm text-muted-foreground">
           {connected
             ? t.settings.delivery.telegram.connected(username)
-            : t.settings.delivery.telegram.notConnected}
+            : email
+              ? t.settings.delivery.telegram.byEmail(email)
+              : t.settings.delivery.telegram.notConnected}
 
           {/* Пояс, а не время: выпуск собирается в два ночи по нему и к утру
               уже лежит в чате. Своё время доставки ничего не добавило бы —
@@ -332,7 +337,7 @@ export function DeliveryForm({
                 <CopyAddress value={sender ? `${sender}@${DOMAIN}` : ""} t={t} />{" "}
                 {k.approvedListOutro}
               </p>
-              {!connected ? (
+              {!connected && !email ? (
                 <Alert>
                   <AlertTitle>{k.connectTelegramFirst}</AlertTitle>
                   <AlertDescription>

@@ -104,6 +104,32 @@ export async function verifyLoginToken(token: string | null): Promise<number | n
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+/**
+ * Ссылка входа из письма. Несёт адрес, а не номер читателя: строка
+ * заводится только после клика, иначе форма заводила бы читателя на любой
+ * набранный чужой адрес. Адрес в base64url — в нём бывают точки,
+ * а точка здесь разделитель.
+ *
+ * Живёт полчаса, а не десять минут: письмо, в отличие от сообщения бота,
+ * бывает, идёт минутами, и ссылка не должна истечь по дороге.
+ */
+const EMAIL_LINK_TTL_MS = 30 * 60 * 1000;
+
+export async function issueEmailToken(email: string): Promise<string> {
+  const expires = String(Date.now() + EMAIL_LINK_TTL_MS);
+  const payload = `${Buffer.from(email).toString("base64url")}.${expires}.${crypto.randomUUID()}`;
+  return `${payload}.${await sign(`email-login:${payload}`)}`;
+}
+
+export async function verifyEmailToken(token: string | null): Promise<string | null> {
+  if (!token) return null;
+  const [address, expires, nonce, signature] = token.split(".");
+  if (!address || !expires || !nonce || !signature) return null;
+  if (Date.now() > Number(expires)) return null;
+  if (!equal(signature, await sign(`email-login:${address}.${expires}.${nonce}`))) return null;
+  return Buffer.from(address, "base64url").toString("utf8");
+}
+
 export async function checkPassword(candidate: string): Promise<boolean> {
   const expected = process.env.APP_PASSWORD;
   if (!expected) throw new Error("APP_PASSWORD не задан");

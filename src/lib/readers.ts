@@ -1,6 +1,7 @@
 import { sql } from "./db";
 import type { Reader, ReaderChannel, ReaderTopic, Source, Topic, VoiceCardRow } from "./types";
 import { kindleSenderName } from "./kindle-setup";
+import { normalizeEmail } from "./email";
 import { DEFAULT_LOCALE, type Locale } from "./i18n/locale";
 import { effectiveVoice } from "./lemon";
 import { cardMinutes } from "./reading-time";
@@ -39,7 +40,7 @@ const COLUMNS = sql`
   paused_at, sleep_asked_at, resume_at, upsell_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
   voice_card, voice_built_at, voice_sample, voice_skill, voice_enabled,
-  follow_rules, exclude_rules, source
+  follow_rules, exclude_rules, source, email
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -255,6 +256,30 @@ export async function ensureReader(
 
   if (!reader.kindle_sender) {
     await freezeKindleSender(reader.id, reader.telegram_id);
+    return (await getReader(reader.id)) ?? reader;
+  }
+  return reader;
+}
+
+/**
+ * Читатель по почте: вход по ссылке из письма и через Google.
+ *
+ * Зовётся только с адресом, который уже подтверждён — кликом по ссылке или
+ * ответом Google. Строка до подтверждения завела бы читателя на любой
+ * чужой адрес, набранный в форму.
+ *
+ * Со строкой из Telegram не склеивается: у той почты нет, и один человек,
+ * вошедший обоими путями, пока становится двумя читателями.
+ */
+export async function ensureEmailReader(email: string, locale?: Locale): Promise<Reader> {
+  const [reader] = await sql<Reader[]>`
+    insert into dailynews.readers (email, ui_language)
+    values (${normalizeEmail(email)}, ${locale ?? DEFAULT_LOCALE})
+    on conflict (email) do update set updated_at = now()
+    returning ${COLUMNS}
+  `;
+  if (!reader.kindle_sender) {
+    await freezeKindleSender(reader.id, null);
     return (await getReader(reader.id)) ?? reader;
   }
   return reader;
@@ -633,7 +658,7 @@ export async function deleteReader(readerId: number): Promise<void> {
     await tx`delete from dailynews.digests where reader_id = ${readerId}`;
     await tx`
       update dailynews.readers
-         set deleted_at = now(), telegram_id = null, username = null,
+         set deleted_at = now(), telegram_id = null, username = null, email = null,
              reader_context = '', bio = null, suggested_topics = '{}',
              kindle_address = null, kindle_sender = null, kindle_digest = false,
              kindle_approved = false, podcast = false, llm = '{}'::jsonb,

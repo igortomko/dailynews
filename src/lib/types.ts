@@ -159,6 +159,9 @@ export type Reader = {
   /** Приходит из драйвера строкой: bigint. Сравнивать только в SQL. */
   telegram_id: string | null;
   username: string | null;
+  /** Почта тех, кто вошёл по ссылке из письма или через Google. Выпуск им
+   *  уходит письмом: чата бота у них нет. Нижний регистр. */
+  email: string | null;
   owner: boolean;
   reader_context: string;
   reading_v2_enabled: boolean;

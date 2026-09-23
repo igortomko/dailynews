@@ -1,6 +1,7 @@
 import { I18nProvider } from "@/components/i18n-provider";
 import { loginLocale } from "@/lib/i18n/server";
 import { LoginForm } from "./form";
+import { googleConfig } from "@/lib/google";
 
 export default async function LoginPage({
   searchParams,
@@ -18,7 +19,7 @@ export default async function LoginPage({
       {/* Язык здесь не выбирают, а фиксируют: читателя ещё нет, и спросить
           некого. loginLocale() всегда отдаёт английский. */}
       <I18nProvider locale={loginLocale()}>
-        <LoginForm next={next ?? "/"} expired={expired === "1"} bot={bot} />
+        <LoginForm next={next ?? "/"} expired={expired === "1"} bot={bot} google={Boolean(googleConfig())} />
       </I18nProvider>
     </div>
   );
