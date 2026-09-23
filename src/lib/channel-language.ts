@@ -6,7 +6,11 @@ import type { NetworkId } from "./networks";
 /** Записать язык всем сетям читателя по уже прочитанным постам. */
 export async function saveLanguages(readerId: number, posts: OwnPost[]): Promise<void> {
   const channels = await getChannels(readerId);
-  const found = languagesFor(channels.map((channel) => channel.network), posts);
+  const found = languagesFor(
+    channels.map((channel) => channel.network),
+    posts,
+    Object.fromEntries(channels.map((channel) => [channel.network, channel.language])),
+  );
   for (const channel of channels) {
     // Ничего не определилось — прежнее значение остаётся: пустой ответ
     // по неответившей сети не повод стирать то, что было известно.

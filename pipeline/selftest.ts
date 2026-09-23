@@ -5529,4 +5529,7 @@ console.log(`Самопроверка пройдена: ${checks} утвержд
   assert.equal(found.x, "английском", "в X — язык его постов в X");
   assert.equal(found.telegram, "русском", "в канале — язык канала");
   assert.equal(found.linkedin, "русском", "нечитаемая сеть получает язык автора в целом");
+  const kept = languagesFor(["x", "threads"], posts.filter((post) => post.where !== "x"), { x: "английском" });
+  assert.equal(kept.x, "английском", "сеть без постов не теряет известный язык ради чужой сети");
+  assert.equal(kept.threads, "русском", "а неизвестный берёт язык автора");
 }
