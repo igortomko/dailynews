@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     }
   }
   // Отказ — тот же экран, что у истёкшей ссылки: выход один, войти заново.
-  const response = await landByEmail(request, email);
+  const response = await landByEmail(request, email, "google");
   response.cookies.delete({ name: GOOGLE_STATE_COOKIE, path: "/auth/google" });
   return response;
 }

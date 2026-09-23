@@ -162,6 +162,10 @@ export type Reader = {
   /** Почта тех, кто вошёл по ссылке из письма или через Google. Выпуск им
    *  уходит письмом: чата бота у них нет. Нижний регистр. */
   email: string | null;
+  /** Присылать ли выпуск письмом. Отдельно от адреса: адрес — ещё и вход. */
+  email_digest: boolean;
+  /** Каким путём пришёл: `telegram`, `email` или `google`. Не меняется. */
+  entered_via: string;
   owner: boolean;
   reader_context: string;
   reading_v2_enabled: boolean;

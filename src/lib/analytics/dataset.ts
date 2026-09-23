@@ -40,8 +40,8 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
     return Promise.all([
       // Источник — канал размещения, кампания — само размещение: так кит
       // раскладывает каналы и их качество без своей таблицы соответствий.
-      tx<{ id: number; username: string | null; ui_language: string | null; created_at: Date; onboarded_at: Date | null; channel: string | null; campaign: string | null }[]>`
-        select r.id::int, r.username, r.ui_language, r.created_at, r.onboarded_at,
+      tx<{ id: number; username: string | null; ui_language: string | null; created_at: Date; onboarded_at: Date | null; channel: string | null; campaign: string | null; entered_via: string }[]>`
+        select r.id::int, r.username, r.ui_language, r.created_at, r.onboarded_at, r.entered_via,
                p.channel, p.code as campaign
           from dailynews.readers r
           left join dailynews.placements p on p.code = r.source
@@ -82,7 +82,10 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
   const events: AnalyticsEvent[] = [];
   for (const r of readers) {
     events.push({
-      id: `entered-${r.id}`, subjectId: subject(r.id), occurredAt: r.created_at.toISOString(), name: "product_entered", surface: "telegram",
+      id: `entered-${r.id}`, subjectId: subject(r.id), occurredAt: r.created_at.toISOString(), name: "product_entered",
+      // Путь входа, а не нынешние направления: привязанный потом Telegram
+      // не делает пришедшего со страницы входа пришедшим из бота.
+      surface: r.entered_via === "telegram" ? "telegram" : "web",
       // Кампания — код размещения: по нему кит сводит людей с реестром ссылок.
       ...(r.channel && r.campaign ? { source: r.channel, campaign: r.campaign } : {}),
     });

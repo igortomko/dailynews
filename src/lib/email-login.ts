@@ -12,7 +12,11 @@ import { ensureEmailReader } from "./readers";
  * Язык интерфейса — из `Accept-Language`, и только при заведении строки,
  * как `language_code` у Telegram.
  */
-export async function landByEmail(request: NextRequest, email: string | null): Promise<NextResponse> {
+export async function landByEmail(
+  request: NextRequest,
+  email: string | null,
+  via: "email" | "google",
+): Promise<NextResponse> {
   const appUrl = appOrigin(request.nextUrl.origin);
   if (!email) {
     const login = new URL("/login", appUrl);
@@ -20,7 +24,7 @@ export async function landByEmail(request: NextRequest, email: string | null): P
     return NextResponse.redirect(login);
   }
   const lang = request.headers.get("accept-language")?.split(/[-,;]/)[0].trim().toLowerCase();
-  const reader = await ensureEmailReader(email, localeOf(lang));
+  const reader = await ensureEmailReader(email, localeOf(lang), via);
   const session = await issueSession(reader.id);
   const response = NextResponse.redirect(new URL("/", appUrl));
   response.cookies.set(session.name, session.value, session.options);

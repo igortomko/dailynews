@@ -6,11 +6,12 @@ import {
   pendingKindleAsks, perCardOf, readerSources, recordCall, spentToday, wakeReader,
 } from "../src/lib/readers";
 import { resolve, writeDigest, type Survivor, type Usage } from "./digest";
-import { buildPodcast } from "./tts";
+import { buildPodcast, storePodcast } from "./tts";
 import { selectSurvivors, targetsOf } from "./select";
 import { askFinished, askResume, botUpsellLine, founderBotLine, notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
-import { digestEmail, pauseEmail, sendEmail } from "../src/lib/email";
+import { digestEmail, pauseEmail, podcastUrl, sendEmail } from "../src/lib/email";
+import { unsubscribeToken } from "../src/lib/auth";
 import { enrichImages } from "./og";
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
@@ -113,7 +114,7 @@ async function runForReader(
     if (reader.telegram_id) {
       await askResume(Number(reader.telegram_id), sleep.silentDays);
       log(`  ${name}: молчит ${sleep.silentDays} дней — пауза, спросил в боте`);
-    } else if (reader.email && process.env.APP_URL?.trim()) {
+    } else if (reader.email && reader.email_digest && process.env.APP_URL?.trim()) {
       // Кнопок у письма нет, и не нужно: заход на сайт снимает паузу сам.
       await sendEmail({ to: reader.email, ...pauseEmail(process.env.APP_URL.trim(), sleep.silentDays) })
         .catch((error) => log(`  ${name}: письмо о паузе — ${(error as Error).message}`));
@@ -437,10 +438,10 @@ async function deliver(
   const appUrl = process.env.APP_URL?.trim();
   if (!appUrl) {
     log("  APP_URL не задан — уведомления пропущены, выпуски сохранены");
-  } else if (!reader.telegram_id && !reader.email) {
+  } else if (!reader.telegram_id && !(reader.email && reader.email_digest)) {
     // Молчаливый пропуск здесь неотличим от доставки: выпуск в базе есть,
     // ошибок нет, а читатель о нём не знает.
-    log(`  ${name}: ни Telegram, ни почты — уведомление пропущено`);
+    log(`  ${name}: ни Telegram, ни письма — уведомление пропущено`);
   } else {
     // Подкаст собирается до уведомления, потому что едет тем же сообщением
     // отдельным блоком аудио: списку и записи незачем приходить порознь.
@@ -456,9 +457,11 @@ async function deliver(
     // он выбирал бы её целиком, и кнопка «озвучить» отказывала бы весь день
     // за то, чего читатель не просил.
     //
-    // Только в Telegram: у письма блока аудио нет.
+    // Одна запись на оба направления: в Telegram она едет блоком аудио,
+    // в письмо — ссылкой «Слушать» на файл, сохранённый в Telegram.
+    const byEmail = Boolean(reader.email && reader.email_digest);
     let podcast: Awaited<ReturnType<typeof buildPodcast>> | null = null;
-    if (reader.telegram_id && reader.podcast && FEATURES.audio.has(effectivePlan(reader))) {
+    if (reader.podcast && FEATURES.audio.has(effectivePlan(reader))) {
       const usage: Usage = { requests: 0, input: 0, output: 0, cached: 0, reasoning: 0 };
       try {
         podcast = await buildPodcast(reader, survivors.map((s) => Number(s.id)), usage);
@@ -516,31 +519,55 @@ async function deliver(
       log(`  ${name}: отбор дня и предложение тарифа не посчитались — ${(error as Error).message}`);
     }
 
-    try {
-      const headlines = survivors.map((s) => ({
-        id: Number(s.id),
-        title: titleOf(s),
-        topic: s.topic_label,
-        at: podcast?.at.get(Number(s.id)) ?? null,
-      }));
-      if (reader.telegram_id) {
+    const headlines = survivors.map((s) => ({
+      id: Number(s.id),
+      title: titleOf(s),
+      topic: s.topic_label,
+      at: podcast?.at.get(Number(s.id)) ?? null,
+    }));
+    // Направления независимы: заблокированный бот не должен стоить письма,
+    // а отказ почты — сообщения в Telegram.
+    let delivered = false;
+    if (reader.telegram_id) {
+      try {
         await notify(
           Number(reader.telegram_id), day, headlines, appUrl,
           { minutes: reading.minutes, picked },
           podcast,
           upsell,
         );
-      } else {
-        // Пришедший по почте или через Google: чата бота у него нет,
-        // выпуск приходит письмом с тем же списком.
+        delivered = true;
+      } catch (error) {
+        // Заблокировавший бота читатель не должен ронять прогон остальных.
+        log(`  ${name}: Telegram — ${(error as Error).message}`);
+      }
+    }
+    if (byEmail) {
+      let listen: string | null = null;
+      if (podcast) {
+        try {
+          await storePodcast(reader, day, podcast);
+          listen = podcastUrl(appUrl, day);
+        } catch (error) {
+          // Письмо важнее записи: не сохранилась — уходит без ссылки.
+          log(`  ${name}: подкаст для письма не сохранился — ${(error as Error).message}`);
+        }
+      }
+      try {
         await sendEmail({
           to: reader.email!,
           ...digestEmail({
-            day, headlines, appUrl, picked, upsell,
+            day, headlines, appUrl, picked, upsell, listen,
             size: formatMinutesLong(reading.minutes, ruFeed.time),
+            unsubscribe: `${appUrl.replace(/\/$/, "")}/api/unsubscribe?token=${await unsubscribeToken(reader.id)}`,
           }),
         });
+        delivered = true;
+      } catch (error) {
+        log(`  ${name}: письмо — ${(error as Error).message}`);
       }
+    }
+    if (delivered) {
       await sql`
         update dailynews.digests set sent_at = now()
          where reader_id = ${reader.id} and day = ${day}
@@ -550,9 +577,6 @@ async function deliver(
       if (upsell) {
         await sql`update dailynews.readers set upsell_at = now() where id = ${reader.id}`;
       }
-    } catch (error) {
-      // Заблокировавший бота читатель не должен ронять прогон остальных.
-      log(`  ${name}: ${reader.telegram_id ? "Telegram" : "почта"} — ${(error as Error).message}`);
     }
   }
 

@@ -17,7 +17,7 @@ import {
   podcastIntro, spokenMap, unabbreviate, unknownRuns, voiceFor, voiceForText,
   type AudioErrors,
 } from "../src/lib/speech";
-import { audioUrl, deleteMessage, sendAudio } from "../src/lib/telegram";
+import { audioUrl, deleteMessage, podcastParts, sendAudio } from "../src/lib/telegram";
 import { cardForReader, recordCall } from "../src/lib/readers";
 import { appOrigin } from "../src/lib/auth";
 import { SOURCE_LANGUAGE } from "../src/lib/voice";
@@ -478,12 +478,14 @@ async function cardAudio(
   //
   // Удаление не обязано получиться. Не вышло — в чате останется лишнее
   // аудио, и это хуже тишины, но лучше потерянного подкаста.
-  const sent = await sendAudio(Number(reader.telegram_id), audio, {
+  const chat = storageChat(reader);
+  const sent = await sendAudio(chat, audio, {
     title: card.title,
     url: card.url,
     duration: seconds,
+    silent: true,
   });
-  await deleteMessage(Number(reader.telegram_id), sent.messageId).catch((error) => {
+  await deleteMessage(chat, sent.messageId).catch((error) => {
     console.log(`  ~ служебное аудио ${itemId} не удалилось: ${(error as Error).message}`);
   });
   await sql`
@@ -663,4 +665,55 @@ export async function runPodcast(
     `;
     console.log(`  ! подкаст не вышел: ${text}`);
   }
+}
+
+/**
+ * Чат, куда заливается служебное аудио ради `file_id`.
+ *
+ * Свой чат читателя, если он есть. У пришедшего по почте чата с ботом нет,
+ * и файл уезжает в `TELEGRAM_STORAGE_CHAT_ID` (закрытый канал, где бот
+ * админ), а без неё — в чат владельца: сообщение удаляется сразу же
+ * и приходит без звука, `file_id` удаление переживает.
+ */
+export function storageChat(reader: Pick<Reader, "telegram_id">): number {
+  if (reader.telegram_id) return Number(reader.telegram_id);
+  const fallback = Number(process.env.TELEGRAM_STORAGE_CHAT_ID || process.env.TELEGRAM_CHAT_ID);
+  if (!Number.isSafeInteger(fallback) || fallback === 0) {
+    throw new Error("нет чата для хранения аудио: TELEGRAM_STORAGE_CHAT_ID и TELEGRAM_CHAT_ID пусты");
+  }
+  return fallback;
+}
+
+/**
+ * Сохранить подкаст выпуска для ссылки «Слушать» в письме.
+ *
+ * Файл лежит в Telegram, у нас только `file_id` частей: своего хранилища
+ * аудио нет, и заводить его ради одной записи в сутки незачем.
+ */
+export async function storePodcast(
+  reader: Reader,
+  day: string,
+  podcast: { audio: Buffer; seconds: number },
+): Promise<void> {
+  const [digest] = await sql<{ id: number }[]>`
+    select id::int as id from dailynews.digests where reader_id = ${reader.id} and day = ${day}::date
+  `;
+  if (!digest) throw new Error(`выпуска за ${day} нет`);
+  const chat = storageChat(reader);
+  const fileIds: string[] = [];
+  const parts = podcastParts(podcast.audio);
+  for (const [index, part] of parts.entries()) {
+    const sent = await sendAudio(chat, part, {
+      title: `Выпуск за ${day}${parts.length > 1 ? ` · ${index + 1}/${parts.length}` : ""}`,
+      url: appOrigin("https://news.tomko.io"),
+      silent: true,
+    });
+    fileIds.push(sent.fileId);
+    await deleteMessage(chat, sent.messageId).catch(() => {});
+  }
+  await sql`
+    insert into dailynews.podcast_audio (digest_id, file_ids, seconds)
+    values (${digest.id}, ${fileIds}, ${podcast.seconds})
+    on conflict (digest_id) do update set file_ids = excluded.file_ids, seconds = excluded.seconds, at = now()
+  `;
 }

@@ -1,11 +1,11 @@
 import { NextResponse, after, type NextRequest } from "next/server";
-import { appOrigin, issueLoginToken } from "@/lib/auth";
+import { appOrigin, issueLoginToken, verifyBindPayload } from "@/lib/auth";
 import {
   answerCallback, askSubscribe, channelHandle, checkSecret, checkSubscription, escapeHtml,
   fetchBio, loginLink, parseUpdate, sendMessage, SECRET_HEADER,
 } from "@/lib/telegram";
 import {
-  ensureReader, markChannelChecked, recordFinished, resumeReader, saveSuggestions,
+  attachTelegram, ensureReader, markChannelChecked, recordFinished, resumeReader, saveSuggestions,
 } from "@/lib/readers";
 import { addByLink } from "@/lib/sources";
 import { rankTopics } from "../../../../pipeline/interests";
@@ -164,6 +164,23 @@ export async function POST(request: NextRequest) {
       // Часики на кнопке гасим в любом случае: нажатие, на которое ничего
       // не ответило, читатель повторяет — и второй раз тоже впустую.
       await answerCallback(command.callbackId, command.finished ? "Записал" : "Учту");
+      return NextResponse.json({ ok: true });
+    }
+
+    if (command.kind === "attach") {
+      const readerId = await verifyBindPayload(command.payload);
+      const result = readerId
+        ? await attachTelegram(readerId, command.telegramId, command.username)
+        : "expired";
+      const text = {
+        ok: "Готово: Telegram привязан. Выпуск будет приходить сюда — письма можно выключить в «Доставке».",
+        same: "Этот Telegram уже привязан к твоему профилю.",
+        taken:
+          "Этот Telegram уже привязан к другому профилю Reporta. Войди через /start — откроется он.",
+        busy: "К этому профилю уже привязан другой Telegram.",
+        expired: "Ссылка устарела. Открой «Доставку» на сайте и нажми «Подключить Telegram» ещё раз.",
+      }[result];
+      await sendMessage(command.chatId, text);
       return NextResponse.json({ ok: true });
     }
 

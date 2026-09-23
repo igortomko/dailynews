@@ -40,7 +40,7 @@ const COLUMNS = sql`
   paused_at, sleep_asked_at, resume_at, upsell_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
   voice_card, voice_built_at, voice_sample, voice_skill, voice_enabled,
-  follow_rules, exclude_rules, source, email
+  follow_rules, exclude_rules, source, email, email_digest, entered_via
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -271,10 +271,17 @@ export async function ensureReader(
  * Со строкой из Telegram не склеивается: у той почты нет, и один человек,
  * вошедший обоими путями, пока становится двумя читателями.
  */
-export async function ensureEmailReader(email: string, locale?: Locale): Promise<Reader> {
+export async function ensureEmailReader(
+  email: string,
+  locale?: Locale,
+  /** Каким путём пришёл: пишется только при заведении, как и источник. */
+  via: "email" | "google" = "email",
+): Promise<Reader> {
+  // Письмо включено сразу: у пришедшего по почте это единственное
+  // направление, и без него выпуск не пришёл бы никуда.
   const [reader] = await sql<Reader[]>`
-    insert into dailynews.readers (email, ui_language)
-    values (${normalizeEmail(email)}, ${locale ?? DEFAULT_LOCALE})
+    insert into dailynews.readers (email, email_digest, ui_language, entered_via)
+    values (${normalizeEmail(email)}, true, ${locale ?? DEFAULT_LOCALE}, ${via})
     on conflict (email) do update set updated_at = now()
     returning ${COLUMNS}
   `;
@@ -283,6 +290,67 @@ export async function ensureEmailReader(email: string, locale?: Locale): Promise
     return (await getReader(reader.id)) ?? reader;
   }
   return reader;
+}
+
+/**
+ * Привязать Telegram к читателю, пришедшему по почте.
+ *
+ * Номер читателя приходит из подписанной ссылки, которую выдала ему же
+ * страница «Доставки», а telegram_id — из апдейта бота. Занятый Telegram
+ * не переносится: у той строки своя лента, и молча отобрать её у одного
+ * профиля ради другого значит потерять чью-то настройку.
+ */
+export async function attachTelegram(
+  readerId: number,
+  telegramId: number,
+  username: string | null,
+): Promise<"ok" | "same" | "taken" | "busy"> {
+  const [owner] = await sql<{ id: number }[]>`
+    select id::int as id from dailynews.readers where telegram_id = ${telegramId}
+  `;
+  if (owner) return owner.id === readerId ? "same" : "taken";
+  const updated = await sql`
+    update dailynews.readers
+       set telegram_id = ${telegramId}, username = ${username}, updated_at = now()
+     where id = ${readerId} and telegram_id is null and deleted_at is null
+  `;
+  // У строки уже другой Telegram: вторую привязку поверх первой не делаем.
+  return updated.count === 1 ? "ok" : "busy";
+}
+
+/**
+ * Почта, подтверждённая кликом по письму. Включает доставку письмом:
+ * адрес добавляют, чтобы на него что-то приходило.
+ */
+export async function confirmEmail(readerId: number, email: string): Promise<"ok" | "taken"> {
+  try {
+    await sql`
+      update dailynews.readers
+         set email = ${normalizeEmail(email)}, email_digest = true, updated_at = now()
+       where id = ${readerId} and deleted_at is null
+    `;
+    return "ok";
+  } catch (error) {
+    // unique на email: ящик уже вход другого профиля.
+    if ((error as { code?: string }).code === "23505") return "taken";
+    throw error;
+  }
+}
+
+export async function setEmailDigest(readerId: number, on: boolean): Promise<void> {
+  await sql`update dailynews.readers set email_digest = ${on}, updated_at = now() where id = ${readerId}`;
+}
+
+/**
+ * Убрать почту можно, только если есть Telegram: у вошедшего по почте
+ * адрес — это вход, и без него в профиль больше не попасть.
+ */
+export async function removeEmail(readerId: number): Promise<boolean> {
+  const updated = await sql`
+    update dailynews.readers set email = null, email_digest = false, updated_at = now()
+     where id = ${readerId} and telegram_id is not null
+  `;
+  return updated.count === 1;
 }
 
 /**
@@ -658,7 +726,7 @@ export async function deleteReader(readerId: number): Promise<void> {
     await tx`delete from dailynews.digests where reader_id = ${readerId}`;
     await tx`
       update dailynews.readers
-         set deleted_at = now(), telegram_id = null, username = null, email = null,
+         set deleted_at = now(), telegram_id = null, username = null, email = null, email_digest = false,
              reader_context = '', bio = null, suggested_topics = '{}',
              kindle_address = null, kindle_sender = null, kindle_digest = false,
              kindle_approved = false, podcast = false, llm = '{}'::jsonb,
