@@ -16,7 +16,7 @@ import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { NETWORK_IDS, NETWORKS, type NetworkId } from "@/lib/networks";
-import { STYLE_LIMIT } from "@/lib/voice";
+import { hasStyle, STYLE_LIMIT } from "@/lib/voice";
 import { Switch } from "@/components/ui/switch";
 import { useT } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
@@ -83,7 +83,7 @@ export function ChannelsForm({
   const [building, setBuilding] = useState(false);
   // Текст стиля в поле. Отдельно от сохранённого: «Сохранить» гаснет,
   // пока правок нет, и видно, что изменения ещё не записаны.
-  const [styleDraft, setStyleDraft] = useState(styleText);
+  const [styleDraft, setStyleDraft] = useState(styleText || t.onboarding.channels.styleTemplate);
   // Свитчер включён, но стиль ещё не сохранён: включить пустой стиль нельзя,
   // поэтому поле открывается сразу, а записывается включение вместе с текстом.
   const [styleOpening, setStyleOpening] = useState(false);
@@ -312,7 +312,7 @@ export function ChannelsForm({
                 if (!on) {
                   setStyleOpening(false);
                   if (styleEnabled) saveStyleAs(false, styleText);
-                } else if (styleText.trim()) saveStyleAs(true, styleText);
+                } else if (hasStyle(styleText)) saveStyleAs(true, styleText);
                 else setStyleOpening(true);
               }}
             />
@@ -355,7 +355,7 @@ export function ChannelsForm({
               <Button
                 size="sm"
                 onClick={() => saveStyleAs(true, styleDraft)}
-                disabled={busy || building || !styleDraft.trim() || (styleEnabled && styleDraft === styleText)}
+                disabled={busy || building || !hasStyle(styleDraft) || (styleEnabled && styleDraft === styleText)}
               >
                 {busy ? <Spinner /> : null}
                 {t.onboarding.channels.styleSave}

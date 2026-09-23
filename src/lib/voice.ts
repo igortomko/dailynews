@@ -214,3 +214,11 @@ export const styleOf = (key: string): VoiceOption =>
  * тянуть за собой сборщик.
  */
 export const STYLE_LIMIT = 12_000;
+
+/**
+ * Есть ли в стиле что-то кроме заголовков. Пустое поле открывается каркасом
+ * из заголовков («Как я пишу», «Для кого»…), и сохранённый как есть каркас
+ * включил бы «мой стиль» без единого слова о стиле.
+ */
+export const hasStyle = (text: string): boolean =>
+  text.split("\n").some((line) => line.trim() && !/^\s*#/.test(line));

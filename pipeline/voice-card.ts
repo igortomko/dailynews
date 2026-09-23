@@ -24,7 +24,7 @@ import { budgetedFetch } from "./model-budget";
  */
 import type { RawItem, Source } from "../src/lib/types";
 import { NETWORKS, type NetworkId } from "../src/lib/networks";
-import { complexityAt, STYLE_LIMIT, styleOf, type Voice } from "../src/lib/voice";
+import { complexityAt, hasStyle, STYLE_LIMIT, styleOf, type Voice } from "../src/lib/voice";
 import { fetchRss, fetchTelegramFeed, fetchX } from "./fetch";
 import { firstSet, resolve, type Usage } from "./digest";
 
@@ -631,7 +631,7 @@ export function draftStyle(reader: {
 }): { block: string; fallback: boolean; built_from: number } {
   const card = asCard(reader.voice_card);
   const text = cleanStyle(reader.voice_skill) || (card ? cardText(card) : "");
-  if (reader.voice_enabled && text) {
+  if (reader.voice_enabled && hasStyle(text)) {
     return { block: styleBlock(text, card?.samples ?? []), fallback: false, built_from: card?.built_from ?? 0 };
   }
   const neutral = cardFromVoice({ language: reader.language, complexity: reader.complexity, style: reader.style });
