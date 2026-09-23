@@ -50,15 +50,18 @@ export async function POST(request: NextRequest) {
   // которой материал исчезает навсегда. Отказ выглядел как успех — кнопка
   // на месте, нажимается, карточка возвращается.
   //
+  // То же у пальца вверх: пометка читается из наличия строки up, и снятая
+  // без удаления вернулась бы после перезагрузки.
+  //
   // Удаляется только собственная строка собственного читателя, и только
-  // down: отменять показ или переход незачем, а возможность стирать любое
+  // down или up: отменять показ или переход незачем, а возможность стирать любое
   // событие означала бы, что калибровку можно подчистить запросом.
   //
   // Стоит после снятия паузы: отмена — это тоже «читатель вернулся».
-  if (event === "down" && payload.undo === true) {
+  if ((event === "down" || event === "up") && payload.undo === true) {
     await sql`
       delete from dailynews.reads
-       where reader_id = ${readerId} and item_id = ${itemId} and event = 'down'
+       where reader_id = ${readerId} and item_id = ${itemId} and event = ${event}
     `;
     return NextResponse.json({ ok: true });
   }

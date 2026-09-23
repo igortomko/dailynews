@@ -247,7 +247,7 @@ export function ItemCard({
   const [storyOpen, setStoryOpen] = useState(false);
   const [opinion, setOpinion] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
-  const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const [vote, setVote] = useState<"up" | "down" | null>(item.upvoted ? "up" : null);
   // Состояние живёт в карточке, а не в ленте: отправка идёт минуту,
   // и всё это время читатель обязан видеть, что она идёт. После
   // перезагрузки оно теряется — повторный тап ловит 409 от частичного
@@ -1073,7 +1073,7 @@ export function ItemCard({
                 checked={vote === "up"}
                 onCheckedChange={(next: boolean) => {
                   setVote(next ? "up" : null);
-                  if (next) report({ item_id: item.id, event: "up" });
+                  report({ item_id: item.id, event: "up", ...(next ? {} : { undo: true }) });
                 }}
               >
                 <ThumbsUpIcon />
@@ -1269,7 +1269,7 @@ export function ItemCard({
                 aria-pressed={vote === "up"}
                 onClick={() => {
                   setVote(vote === "up" ? null : "up");
-                  if (vote !== "up") report({ item_id: item.id, event: "up" });
+                  report({ item_id: item.id, event: "up", ...(vote === "up" ? { undo: true } : {}) });
                 }}
                 className={cn(
                   "flex size-7 cursor-pointer items-center justify-center rounded-md transition-[color,background-color,scale] duration-150 active:scale-[0.96] hover:bg-muted hover:text-foreground",

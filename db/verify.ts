@@ -868,6 +868,18 @@ async function main() {
       false,
       "провалившаяся отправка не отмечается: её повторяют",
     );
+
+    // Палец вверх переживает перезагрузку тем же путём: лента отдаёт его
+    // из reads. Раньше пометка жила только в карточке.
+    assert.equal(withSeen[0].upvoted, false, "до нажатия пометки нет");
+    await sql`
+      insert into dailynews.reads (reader_id, item_id, event)
+      values (${owner.id}, ${ids[0]}, 'up')
+    `;
+    const withUp = (await queries.getFeed(owner.id, today)).items;
+    assert.equal(withUp[0].upvoted, true, "палец вверх должен вернуться после перезагрузки");
+    assert.equal(withUp[1].upvoted, false, "пометка не растекается на соседние материалы");
+    await sql`delete from dailynews.reads where reader_id = ${owner.id} and item_id = ${ids[0]} and event = 'up'`;
     await sql`delete from dailynews.kindle_sends where reader_id = ${owner.id}`;
 
     const afterRead = (await queries.getFeed(owner.id, today)).items;

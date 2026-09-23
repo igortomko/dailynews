@@ -67,6 +67,11 @@ export type FeedItem = {
    */
   voiced: boolean;
   /**
+   * Поставлен ли палец вверх. Жил только в карточке: после перезагрузки
+   * пометка пропадала, хотя событие `up` лежало в `reads`.
+   */
+  upvoted: boolean;
+  /**
    * Попадался ли материал на глаза до этого захода. Лента идёт по убыванию
    * скора, а читают её сверху вниз — значит виденное лежит подряд с начала,
    * и граница между ним и остальным отвечает на «докуда я вчера дочитал».
@@ -283,6 +288,9 @@ export async function getFeed(
            exists (select 1 from dailynews.reads r
                     where r.item_id = i.id and r.reader_id = ${readerId}
                       and r.event = 'seen') as seen,
+           exists (select 1 from dailynews.reads r
+                    where r.item_id = i.id and r.reader_id = ${readerId}
+                      and r.event = 'up') as upvoted,
            exists (select 1 from dailynews.kindle_sends ks
                     where ks.item_id = i.id and ks.reader_id = ${readerId}
                       and ks.status in ('queued', 'sent')) as kindled,
