@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   approveKindleSender,
   dropEmail,
+  dropTelegram,
   requestEmailConfirm,
   resetKindleSetup,
   saveEmailDigest,
@@ -15,7 +16,9 @@ import {
   saveTimezone,
   telegramBindLink,
 } from "@/lib/actions";
+import { HeadphonesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { PaywallCrown } from "@/components/paywall";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
@@ -252,6 +255,8 @@ export function DeliveryForm({
             </Select>
           </Field>
 
+          <Separator />
+
           {/* Выпуск голосом — тумблер, а не правило тарифа: это час звука
               каждую ночь, и такое включают сами. Корона стоит по той же
               проверке, по которой работает предел. */}
@@ -277,6 +282,12 @@ export function DeliveryForm({
               </FieldLabel>
               <FieldDescription>{t.settings.delivery.telegram.podcastHint}</FieldDescription>
             </FieldContent>
+            <span
+              aria-hidden
+              className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground"
+            >
+              <HeadphonesIcon className="size-5" />
+            </span>
           </Field>
         </CardContent>
       </Card>
@@ -288,7 +299,46 @@ export function DeliveryForm({
         </CardHeader>
         <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
           {connected ? (
-            t.settings.delivery.telegram.connected(username)
+            <>
+              <p>{t.settings.delivery.telegram.connected(username)}</p>
+              {/* Сменить — та же ссылка привязки: новый аккаунт встаёт поверх
+                  прежнего. Отвязать — только при почте, иначе у профиля
+                  не остаётся входа; кнопка гаснет по тому же правилу, что
+                  и «Убрать почту». */}
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    startTransition(async () => {
+                      const result = await telegramBindLink();
+                      if ("error" in result) return void toast.error(result.error);
+                      window.location.href = result.url;
+                    })
+                  }
+                  className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
+                >
+                  {t.settings.delivery.telegram.change}
+                </button>
+                {email ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() =>
+                      startTransition(async () => {
+                        const dropped = await dropTelegram();
+                        if ("error" in dropped) toast.error(dropped.error);
+                        else toast.success(t.settings.delivery.telegram.removed);
+                      })
+                    }
+                    className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
+                  >
+                    {t.settings.delivery.telegram.remove}
+                  </button>
+                ) : null}
+              </div>
+              <p>{t.settings.delivery.telegram.changeHint}</p>
+            </>
           ) : (
             <>
               {/* Ссылка собирается по нажатию, а не при показе: в ней
@@ -494,7 +544,7 @@ export function DeliveryForm({
                           onClick={() =>
                             run(resetKindleSetup(), k.setupReset, () => setStep("address"))
                           }
-                          className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4 hover:text-destructive disabled:opacity-50"
+                          className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-50"
                         />
                       }
                     >

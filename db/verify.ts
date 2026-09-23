@@ -2736,9 +2736,17 @@ async function main() {
       assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 400, "tg_first"), "taken", "чужой Telegram отобран");
       assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "ok");
       assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "same");
-      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 402, "other"), "busy", "второй Telegram поверх первого");
+      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 402, "other"), "changed", "смена аккаунта");
       const attached = (await readers.getReader(byMail.id))!;
-      assert.equal(attached.telegram_id, String(BIG_TELEGRAM_ID + 401));
+      assert.equal(attached.telegram_id, String(BIG_TELEGRAM_ID + 402));
+      assert.equal(attached.username, "other");
+      // Прежний свободен: его можно привязать снова, и это не «чужой профиль».
+      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "changed");
+      // Отвязка: при почте — да, у читателя без почты — нет, это его единственный вход.
+      assert.equal(await readers.detachTelegram(byMail.id), true);
+      assert.equal((await readers.getReader(byMail.id))!.telegram_id, null);
+      assert.equal(await readers.detachTelegram(tgReader.id), false, "отвязан единственный вход");
+      assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "ok");
       assert.equal(attached.entered_via, "google", "привязка переписала путь входа");
 
       // Почта у Telegram-читателя: занятый адрес не отдаётся, свой включает письма.

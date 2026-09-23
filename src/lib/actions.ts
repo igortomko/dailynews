@@ -18,7 +18,7 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, deleteReader, digestProgress, removeEmail, setEmailDigest, freezeKindleSender, getChannels,
+  addReaderSource, deleteReader, detachTelegram, digestProgress, removeEmail, setEmailDigest, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelLanguage, setChannelPublishes,
   saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
@@ -148,6 +148,15 @@ export async function telegramBindLink(): Promise<{ url: string } | { error: str
   const reader = await currentReader();
   if (!bot) return { error: dictOf(reader.ui_language).settings.delivery.telegram.noBot };
   return { url: `https://t.me/${bot}?start=${await issueBindPayload(reader.id)}` };
+}
+
+export async function dropTelegram() {
+  const reader = await currentReader();
+  if (!(await detachTelegram(reader.id))) {
+    return { error: dictOf(reader.ui_language).settings.delivery.telegram.onlyWay };
+  }
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
 }
 
 /**
