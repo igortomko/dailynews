@@ -11,7 +11,7 @@
   "hostInputs": {
     "profile.json": {
       "path": "src/lib/analytics/profile.json",
-      "sha256": "db0db22f5aff3fef258cf93ba1077a0a2a5568d9d371998251ee5a3272a189da"
+      "sha256": "29756e5104e793c9002f455e6a11d2767998479c5f0aed6be31bc9b31df80c1d"
     },
     "selection.json": {
       "path": "src/lib/analytics/selection.json",
@@ -61,7 +61,7 @@
     "lib/types.ts": "69c716cf59d1caf258d802ab46d099f16e5e97a965d625f5176d1ffdd235de63",
     "lib/utils.ts": "20364ba30942358de19c25be84a641e103a0a9d2876b585d624f62378f50666e",
     "modules.json": "b9579be704afe1008dd92a86ba3322e2af4abf15639cbdbbb1e6c3054c9ca767",
-    "profile.json": "db0db22f5aff3fef258cf93ba1077a0a2a5568d9d371998251ee5a3272a189da",
+    "profile.json": "29756e5104e793c9002f455e6a11d2767998479c5f0aed6be31bc9b31df80c1d",
     "selection.json": "d6fa53a8ba88669b1602a11bb05bd780515d39bbc3eef26683fbc8225ff36827",
     "source-package.json": "e09743c689068b3fe9a9f117afd606ee329a382791432c9c97ab6d3ff69551cb"
   }

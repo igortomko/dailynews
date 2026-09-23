@@ -41,7 +41,7 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
   },
 }) as typeof assertStrict;
 import {
-  effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, checkoutFor, endingAt, trialDaysFor,
+  effectivePlan, effectiveVoice, readEvent, readMoney, signatureValid, checkoutUrl, checkoutFor, endingAt, trialDaysFor,
 } from "../src/lib/billing";
 import {
   appOrigin, issueBindPayload, issueConfirmToken, issueEmailToken, unsubscribeToken,
@@ -2838,6 +2838,26 @@ assert.ok(
 const ended = readEvent(paddleEvent({ event_type: "subscription.canceled" }, { status: "canceled" }) as never);
 assert.ok(ended.ok && ended.update.plan === "free", "закончившаяся подписка сбрасывает тариф");
 
+{
+  // Деньги для воронки: нулевая транзакция — начало триала, а не платёж.
+  const txn = (total: string) => ({
+    event_id: "evt_1", event_type: "transaction.completed", occurred_at: "2026-10-01T00:00:00Z",
+    data: { id: "txn_1", currency_code: "USD", subscription_id: "sub_9", custom_data: { reader_id: "7" },
+      items: [{ price: { id: "pri_pro" } }], details: { totals: { grand_total: total } } },
+  });
+  const paidTxn = readMoney(txn("999") as never);
+  assert.ok(paidTxn?.kind === "payment_succeeded" && paidTxn.amountMinor === 999 && paidTxn.readerId === 7 && paidTxn.plan === "pro", "платёж читается в центах и с тарифом");
+  assert.equal(readMoney(txn("0") as never), null, "нулевая транзакция триала — не платёж");
+  const refund = readMoney({
+    event_id: "evt_2", event_type: "adjustment.updated", occurred_at: "2026-10-02T00:00:00Z",
+    data: { id: "adj_1", action: "refund", status: "approved", transaction_id: "txn_1", subscription_id: "sub_9",
+      currency_code: "USD", totals: { total: "999" } },
+  } as never);
+  assert.ok(refund?.kind === "payment_refunded" && refund.refundId === "adj_1" && refund.readerId === null, "одобренный возврат — возврат, читатель ищется по подписке");
+  assert.equal(readMoney({ event_id: "evt_3", event_type: "adjustment.created",
+    data: { id: "adj_2", action: "refund", status: "pending_approval", transaction_id: "txn_1", currency_code: "USD", totals: { total: "999" } },
+  } as never), null, "возврат на рассмотрении — ещё не возврат");
+}
 assert.equal(checkoutUrl("pro"), "/checkout/pro", "«Выбрать» ведёт на свою страницу оплаты");
 assert.equal(checkoutUrl("pro", "year"), null, "годовой цены не завели — годовой оплаты нет");
 process.env.PADDLE_PRICE_PRO_YEAR = "pri_pro_year";
