@@ -45,7 +45,6 @@ export default async function ChannelsPage({
       // Собранным до свитчера текста ещё нет — показываем их карточку
       // текстом: ровно она и уходит в промпт (`draftStyle`).
       styleText={reader.voice_skill || cardTextOf(reader.voice_card)}
-      sample={reader.voice_sample}
       oauth={oauthNetworks()}
       failed={failed as NetworkId | undefined}
       onboarding={first === "1"}

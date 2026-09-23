@@ -4,14 +4,13 @@ import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CheckIcon, PlusIcon, SparklesIcon, TrashIcon, UploadIcon } from "lucide-react";
-import { addChannel, connectTelegram, forgetChannel, rebuildVoice, saveSample, saveStyle, toggleChannel } from "@/lib/actions";
+import { CheckIcon, SparklesIcon, UploadIcon } from "lucide-react";
+import { connectTelegram, rebuildVoice, saveStyle, toggleChannel } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { SourceIcon } from "@/components/source-icon";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldTitle } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -63,7 +62,6 @@ export function ChannelsForm({
   channels,
   styleEnabled,
   styleText,
-  sample,
   oauth,
   failed,
   onboarding = false,
@@ -73,7 +71,6 @@ export function ChannelsForm({
   styleEnabled: boolean;
   /** Текст стиля; у собранных до свитчера — карточка текстом. */
   styleText: string;
-  sample: string;
   /** Сети, где «Подключить» ведёт на вход в сеть; остальные подключаются сразу. */
   oauth: NetworkId[];
   /** Сеть, откуда вход вернулся ни с чем. */
@@ -82,8 +79,6 @@ export function ChannelsForm({
   onboarding?: boolean;
 }) {
   const t = useT();
-  const [input, setInput] = useState("");
-  const [text, setText] = useState(sample);
   const [busy, startTransition] = useTransition();
   const [building, setBuilding] = useState(false);
   // Окно стиля: null — закрыто, строка — черновик текста в поле. Черновик
@@ -101,27 +96,6 @@ export function ChannelsForm({
   }, [failed, onboarding, router, t]);
 
   const byNetwork = new Map(channels.map((channel) => [channel.network, channel]));
-  // Что лента читает прямо сейчас. Адрес есть только там, где его можно
-  // прочитать: у LinkedIn и Threads его не бывает по устройству сети.
-  const reads = channels.filter((channel) => channel.handle);
-
-  const add = () => {
-    const value = input.trim();
-    if (!value) return;
-    startTransition(async () => {
-      const result = await addChannel(value);
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
-      setInput("");
-      toast.success(t.onboarding.channels.added(result.label), {
-        description: t.onboarding.channels.rebuildHint,
-      });
-      router.refresh();
-    });
-  };
-
   // Окно канала Telegram: null — закрыто. Окно, а не поле в плитке:
   // в плитку шириной 140 пикселей влезало «t.me/ка», и что туда нужен
   // существующий публичный канал, а не свой ник, сказать было негде.
@@ -144,17 +118,6 @@ export function ChannelsForm({
   const toggle = (network: string, on: boolean) => {
     startTransition(async () => {
       const result = await toggleChannel(network, on);
-      if ("error" in result) toast.error(result.error);
-      else router.refresh();
-    });
-  };
-
-  // Убрать адрес — не то же самое, что снять галочку: галочка гасит таб
-  // в черновике, а это говорит «не читайте меня отсюда». Пока это было
-  // одним действием, снятая галочка уносила канал вместе с голосом.
-  const forget = (network: string) => {
-    startTransition(async () => {
-      const result = await forgetChannel(network);
       if ("error" in result) toast.error(result.error);
       else router.refresh();
     });
@@ -395,95 +358,6 @@ export function ChannelsForm({
               {(styleDraft ?? "").length} / {STYLE_LIMIT}
             </span>
           </div>
-
-          {/* Откуда изучать — вторым планом: нужно тому, кто жмёт «Изучи»,
-              и больше никому. */}
-          <details className="group rounded-lg border px-3 py-2 text-sm">
-            <summary className="cursor-pointer font-medium">{t.onboarding.channels.styleSourcesTitle}</summary>
-            <div className="flex flex-col gap-4 pt-3">
-              <p className="text-muted-foreground">{t.onboarding.channels.styleSourcesText}</p>
-              <div className="flex gap-2">
-                <Input
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      add();
-                    }
-                  }}
-                  placeholder={t.onboarding.channels.addPlaceholder}
-                  disabled={busy}
-                />
-                <Button onClick={add} disabled={busy || !input.trim()}>
-                  <PlusIcon />
-                  {t.onboarding.channels.add}
-                </Button>
-              </div>
-
-              {reads.length ? (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {t.onboarding.channels.readingFrom}
-                  </span>
-                  {reads.map((channel) => {
-                    const id = channel.network as NetworkId;
-                    const address = channel.input_url ?? channel.handle ?? "";
-                    return (
-                      <div key={id} className="flex items-center gap-3 py-1">
-                        <SourceIcon
-                          kind={ICON_KIND[id] ?? "rss"}
-                          url={address || NETWORK_HOME[id]}
-                          className="size-4 shrink-0"
-                        />
-                        <div className="flex min-w-0 flex-1 flex-col">
-                          <span className="font-medium">{t.onboarding.networks[id]}</span>
-                          <span className="truncate text-xs text-muted-foreground">{address}</span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={t.onboarding.channels.stopReading(t.onboarding.networks[id])}
-                          onClick={() => forget(id)}
-                          disabled={busy}
-                        >
-                          <TrashIcon />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              <Field>
-                <FieldTitle>{t.onboarding.channels.pasteTitle}</FieldTitle>
-                <Textarea
-                  name="sample"
-                  value={text}
-                  onChange={(event) => setText(event.target.value)}
-                  rows={5}
-                  placeholder={t.onboarding.channels.samplePlaceholder}
-                />
-              </Field>
-              <Button
-                variant="outline"
-                size="sm"
-                className="self-start"
-                disabled={busy || text === sample}
-                onClick={() =>
-                  startTransition(async () => {
-                    const form = new FormData();
-                    form.set("sample", text);
-                    const result = await saveSample(form);
-                    if ("error" in result) toast.error(result.error);
-                    else toast.success(t.onboarding.channels.saved);
-                  })
-                }
-              >
-                {t.onboarding.channels.save}
-              </Button>
-            </div>
-          </details>
 
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={busy} />}>

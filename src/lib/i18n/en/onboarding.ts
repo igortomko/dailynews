@@ -90,7 +90,7 @@ export const onboarding = {
     styleEdit: "Edit style",
     styleDialogTitle: "How to write drafts",
     styleDialogText:
-      "Describe in your own words how to write: post shape, how you open, tone, length, emoji. Or press \"Learn my style\" — we'll read your posts and lay out the analysis here for you to edit. A ready skill file works too.",
+      "Describe in your own words how to write: post shape, how you open, tone, length, emoji. Or press \"Learn my style\" — we'll read your posts in your connected networks and lay out the analysis here for you to edit. A ready skill file works too.",
     stylePlaceholder:
       "For example: short, first person. First line is an all-caps headline. No emoji. Link on the last line.",
     learnStyle: "Learn my style",
@@ -106,18 +106,7 @@ export const onboarding = {
     skillWrongType: "Needs a .md or .txt text file",
     styleSaved: "Style saved",
     connectFailed: (network: string) => `Couldn't connect ${network}. Try again.`,
-    addPlaceholder: "t.me/channel, x.com/handle, or your blog's address",
-    add: "Add",
-    readingFrom: "Read from",
-    pasteTitle: "Or paste posts as text",
-    stopReading: (network: string) => `Stop reading ${network}`,
     toFeed: "Go to feed",
-    added: (label: string) => `Added: ${label}`,
-    rebuildHint: "Read your posts again so the feed takes them in",
-    samplePlaceholder:
-      "Paste 3 of your posts, separated by a blank line.\n\nNeeded for LinkedIn and Threads: we can't read posts from there.",
-    save: "Save",
-    saved: "Saved",
   },
   opinionDialog: {
     title: "Your take",

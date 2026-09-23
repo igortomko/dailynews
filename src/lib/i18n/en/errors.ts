@@ -68,7 +68,7 @@ export const errors = {
   noMoreFreshNews: "No more fresh stories",
   noChannelAnswered: (reasons: string) => `No channel answered: ${reasons}`,
   nothingToReadFromYou:
-    "Nothing to read yet: add a channel by link, or paste three of your own posts",
+    "Nothing to read yet: connect a public Telegram channel or X — your style is learned from posts there. Or describe your style yourself in the field",
   voiceNotBuilt: "Couldn't build your voice",
   postNotWritten: "Couldn't write the post",
 
