@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { weakSpots } from "@/lib/post-levers";
 import { takeOpinion, writeOpinion } from "@/lib/actions";
 import { NETWORKS, overLimit, postLength, type NetworkId } from "@/lib/networks";
 import { useT } from "@/components/i18n-provider";
@@ -196,14 +197,37 @@ export function OpinionDialog({
                 const text = edited[draft.id] ?? draft.text;
                 const length = postLength(network, text);
                 const over = overLimit(network, text);
+                // По тексту в поле, а не по пришедшему черновику: поправил
+                // первую строку — подсказка про неё гаснет сразу.
+                const weak = weakSpots(id, text);
 
                 return (
                   <TabsContent key={id} value={id} className="flex flex-col gap-2 pt-3">
+                    {/* Какой рычаг — вслух: иначе второй вариант читается
+                        просто «другим», а выбор между ними ничему не учит
+                        ни его, ни отчёт. */}
+                    {draft.lever ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t.onboarding.opinionDialog.lever(t.onboarding.opinionDialog.levers[draft.lever])}
+                      </span>
+                    ) : null}
                     {draft.unverified.length ? (
                       <Alert variant="destructive">
                         <AlertTitle>{t.onboarding.opinionDialog.unverifiedTitle}</AlertTitle>
                         <AlertDescription>
                           {t.onboarding.opinionDialog.unverifiedDescription(draft.unverified.join(", "))}
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
+
+                    {/* Не destructive: это подсказка из данных, а не ошибка —
+                        автор может так и хотеть. Красным стоят только числа,
+                        которых нет в материале. */}
+                    {weak.length ? (
+                      <Alert>
+                        <AlertTitle>{t.onboarding.opinionDialog.weakTitle}</AlertTitle>
+                        <AlertDescription>
+                          {weak.map((spot) => t.onboarding.opinionDialog.weak[spot]).join(" · ")}
                         </AlertDescription>
                       </Alert>
                     ) : null}

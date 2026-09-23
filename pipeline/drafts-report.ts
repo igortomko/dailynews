@@ -66,6 +66,27 @@ async function main() {
     );
   }
 
+  // Какой рычаг второго варианта он берёт. Предложено — сколько раз модель
+  // его выбрала, взято — сколько раз он взял именно этот вариант.
+  const levers = await sql<{ lever: string; offered: number; taken: number; views: number | null }[]>`
+    select lever, count(*)::int as offered,
+           count(*) filter (where taken_at is not null)::int as taken,
+           (percentile_disc(0.5) within group (order by views))::int as views
+      from dailynews.reader_posts
+     where reader_id = ${reader.id} and lever is not null
+     group by lever
+     order by taken desc, offered desc
+  `;
+  if (levers.length) {
+    console.log("\nРычаги второго варианта");
+    for (const row of levers) {
+      console.log(
+        `  ${row.lever.padEnd(11)} предложен ${row.offered}, взят ${row.taken}` +
+          (row.views !== null ? `, медиана просмотров ${row.views}` : ""),
+      );
+    }
+  }
+
   const telegram = (await getChannels(reader.id)).find((channel) => channel.network === "telegram");
   if (!telegram?.handle) {
     console.log("\nКанал Telegram не подключён — сравнивать просмотры не с чем.");

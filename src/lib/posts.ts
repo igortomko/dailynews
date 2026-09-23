@@ -69,6 +69,7 @@ export async function saveDrafts(
         network: draft.network,
         variant: draft.variant,
         text: draft.text,
+        lever: draft.lever ?? null,
       })),
     )}
     returning id::int as id, network, variant
