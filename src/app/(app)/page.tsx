@@ -6,9 +6,9 @@ import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
 import { parseStoredReading } from "@/lib/reading-document";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
-import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice, hasFounderDiscount } from "@/lib/lemon";
 import { langTagFor } from "@/lib/voice";
-import { issuesToday, sourcesForPlan } from "@/lib/plans";
+import { FOUNDER_DISCOUNT, billingOn, founderGraceEnds, isFounder, issuesToday, sourcesForPlan } from "@/lib/plans";
 import { upgradeNote, upgradeReason } from "@/lib/upgrade";
 import { charsForMinutes, minutesOf, savedMinutes } from "@/lib/reading-time";
 import { publishedIn, tabsOf } from "@/lib/networks";
@@ -17,7 +17,7 @@ import Link from "next/link";
 import { DateNav } from "@/components/date-nav";
 import { CollectNow } from "@/components/collect-now";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { dictOf } from "@/lib/i18n";
+import { dictOf, localeOf } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -192,6 +192,19 @@ export default async function FeedPage({
     story: stories.get(item.id) ?? [],
   }));
 
+  // Месяц Pro ранним — на последнем выпуске, как и строка про предел:
+  // на позавчерашнем она говорила бы про сегодня.
+  const grace = founderGraceEnds();
+  const founder =
+    grace && billingOn() && new Date() < grace && isFounder(reader.created_at) && day === days[0]
+      ? {
+          until: grace.toLocaleDateString(localeOf(reader.ui_language) === "en" ? "en-US" : "ru-RU", {
+            day: "numeric", month: "long",
+          }),
+          discount: hasFounderDiscount(reader) ? FOUNDER_DISCOUNT : null,
+        }
+      : null;
+
   return (
     <FeedTabs
       day={day}
@@ -217,6 +230,7 @@ export default async function FeedPage({
       // не едут, туда уходит готовый ответ — та же причина, по которой оси
       // материала остаются здесь.
       upgrade={upgrade ? upgradeNote(plan, upgrade, upgradeFacts) : null}
+      founder={founder}
       // Язык, которым написан текст карточек. Берётся у действующего тарифа,
       // а не из колонки: без перевода выпуск остаётся на языке источника,
       // и там тега нет — переносить чужой язык русскими правилами хуже,

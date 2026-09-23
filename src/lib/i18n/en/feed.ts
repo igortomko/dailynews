@@ -60,6 +60,13 @@ export const feed = {
   },
 
   /** Личные правила поверх готового выпуска: feed-tabs.tsx и item-card.tsx */
+  /** Ранним в месяц Pro после включения оплаты: feed-tabs.tsx */
+  founder: {
+    until: (date: string) => `Pro stays open for you through ${date}.`,
+    discount: (percent: number) => `After that, ${percent}% off any plan for good.`,
+    link: "Plans",
+  },
+
   rules: {
     hiddenBefore: (n: number) => `${n} ${n === 1 ? "card" : "cards"} hidden by your`,
     hiddenLink: "exclusions",

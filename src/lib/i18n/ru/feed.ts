@@ -56,6 +56,12 @@ export const feed: typeof En = {
     kbdSearch: "поиск по выпускам",
   },
 
+  founder: {
+    until: (date) => `Pro открыт для тебя до ${date}.`,
+    discount: (percent) => `Дальше −${percent}% на любой тариф навсегда.`,
+    link: "Тарифы",
+  },
+
   rules: {
     hiddenBefore: (n: number) =>
       `${count(n, "карточка скрыта", "карточки скрыты", "карточек скрыто")} по твоим`,
