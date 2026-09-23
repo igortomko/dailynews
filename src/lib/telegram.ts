@@ -46,7 +46,7 @@ export function checkSecret(header: string | null, envName = "TELEGRAM_WEBHOOK_S
 }
 
 export type BotCommand =
-  | { kind: "start"; telegramId: number; chatId: number; username: string | null; locale: Locale }
+  | { kind: "start"; telegramId: number; chatId: number; username: string | null; locale: Locale; source: string | null }
   | { kind: "help"; chatId: number }
   /** Присланная ссылка: бот заводит по ней источник, как форма в вебе. */
   | { kind: "link"; telegramId: number; chatId: number; text: string; locale: Locale }
@@ -173,6 +173,7 @@ export function parseUpdate(update: unknown): BotCommand {
     return {
       kind: "start", telegramId, chatId, username,
       locale: localeFromTelegram(message.from?.language_code),
+      source: placementOf(text.split(/\s+/)[1]),
     };
   }
   // Прислали ссылку — значит, хотят завести источник. Это тот же жест,
@@ -189,6 +190,19 @@ export function parseUpdate(update: unknown): BotCommand {
   }
 
   return text ? { kind: "help", chatId } : { kind: "ignore" };
+}
+
+/**
+ * Код размещения из полезной нагрузки `/start c_<код>`.
+ *
+ * Префикс, а не голый код: нагрузкой /start ходит и другое (ссылка
+ * «login» со страницы входа), и без пространства имён слово из неё
+ * однажды совпало бы с кодом. Форма кода — та же, что у ограничения
+ * в `placements`; остальное читается как «без источника».
+ */
+export function placementOf(payload: string | undefined): string | null {
+  const match = /^c_([a-z0-9]{4,32})$/.exec(payload ?? "");
+  return match ? match[1] : null;
 }
 
 /**

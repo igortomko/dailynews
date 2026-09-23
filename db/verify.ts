@@ -2634,6 +2634,22 @@ async function main() {
       const split = costs.readers.reduce((sum: number, r: { all: number }) => sum + r.all, 0) + (costs.shared as { all: number }).all;
       assert.ok(Math.abs(split - total) < 1e-6, "per-reader and shared costs add up to model_calls");
       console.log(`  дашборд: ${dataset.events.length} событий, расход $${total.toFixed(4)} сходится`);
+
+      // Ссылки на каналы: код пишется при заведении и больше не меняется,
+      // незнакомый код источником не становится.
+      const { createPlacement, listPlacements } = await import("../src/lib/analytics/placements");
+      const code = await createPlacement({ name: "Пост в @probe", channel: "telegram", cost: 5 });
+      const came = await readers.ensureReader(BIG_TELEGRAM_ID + 200, "came_by_link", undefined, code);
+      assert.equal(came.source, code, "первый /start по ссылке пишет код читателю");
+      const again = await readers.ensureReader(BIG_TELEGRAM_ID + 200, "came_by_link", undefined, await createPlacement({ name: "другая", channel: "x", cost: 0 }));
+      assert.equal(again.source, code, "повторный /start по другой ссылке первое касание не трогает");
+      const stray = await readers.ensureReader(BIG_TELEGRAM_ID + 201, "stray", undefined, "nosuchcode");
+      assert.equal(stray.source, null, "код не из реестра источником не становится");
+      const listed = (await listPlacements()).placements.find((p) => p.code === code);
+      assert.equal(listed?.starts, 1, "реестр считает пришедших по коду");
+      const entered = (await buildDataset()).events.find((e) => e.name === "product_entered" && e.subjectId === `r${came.id}`);
+      assert.equal(entered?.source, "telegram", "в снимке источник — канал размещения");
+      console.log("  ссылки на каналы: код пишется при первом /start, чужой — нет");
     }
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
