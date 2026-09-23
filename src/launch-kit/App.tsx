@@ -70,6 +70,7 @@ import {
   type Selection,
 } from "@launch-kit/lib/config";
 import type {
+  ModelPrice,
   AnalyticsDataset,
   AnalyticsFilters,
   Dimension,
@@ -800,7 +801,7 @@ export default function App() {
     </nav>
   ) : null;
   const subjectLabel = (id: string) => dataset.profiles?.find((profile) => profile.subjectId === id)?.displayName ?? id;
-  const costs = area === "costs" ? buildCosts(dataset, report.range.from, report.range.to) : null;
+  const costs = area === "costs" ? buildCosts(dataset, report.range.from, report.range.to, config.prices?.overrides) : null;
   if ((area === "costs" && costs) || (area === "links" && dataset.placements))
     return (
       <div className="min-h-screen">
@@ -814,7 +815,23 @@ export default function App() {
             {area === "costs" && period}
           </header>
           {costs ? (
-            <CostsPanel report={costs} days={report.range.days} subjectLabel={subjectLabel} />
+            <CostsPanel
+              report={costs}
+              days={report.range.days}
+              subjectLabel={subjectLabel}
+              editable={config.prices?.editable === true}
+              onSavePrice={async (model, price) => {
+                const overrides = { ...config.prices?.overrides };
+                if (price) overrides[model] = price;
+                else delete overrides[model];
+                const response = await getJson<{ overrides: Record<string, ModelPrice> }>("/api/prices", {
+                  method: "PUT",
+                  headers: { "X-CSRF-Token": config.csrfToken },
+                  body: JSON.stringify({ overrides }),
+                });
+                setConfig({ ...config, prices: { editable: true, overrides: response.overrides } });
+              }}
+            />
           ) : (
             <PlacementsPanel dataset={dataset} mint={config.placements?.mint === true} csrfToken={config.csrfToken} onChanged={() => refresh()} />
           )}

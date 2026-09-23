@@ -142,6 +142,23 @@ export interface ModelCosts {
   pendingUsd?: number | null;
   /** Owner-facing names for stage keys; keys without a name are shown as they are. */
   stageLabels?: Record<string, string>;
+  /**
+   * List prices the product knows, keyed by the row's `model`. They price only
+   * rows whose `usd` is null; a recorded amount is never replaced by an estimate.
+   */
+  prices?: Record<string, ModelPrice>;
+}
+
+/**
+ * A model's price. Tokens win when the row has them; otherwise calls times
+ * `perCall`. `source` says where the number came from, because an estimate
+ * shown without its origin reads as a bill.
+ */
+export interface ModelPrice {
+  inputPerMillion: number | null;
+  outputPerMillion: number | null;
+  perCall: number | null;
+  source: string;
 }
 
 /**

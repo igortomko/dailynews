@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": {
     "name": "Launch Kit analytics-dashboard",
-    "commit": "8e3300bc551e65835a17fb23c2fef33b1b7a8b94",
+    "commit": "ea56d1d50be7727c1aff2c7a20b2f6f7b2273876",
     "path": "launch-kit/components/analytics-dashboard/src/"
   },
   "transformations": [
@@ -19,8 +19,8 @@
     }
   },
   "files": {
-    "App.tsx": "40bcb6de1906fa98891a2c072ac8209c6edf5d40c3a0f4efe5de3be52e2ec61d",
-    "components/costs-panel.tsx": "23d1393bda23b635d3f7da0164e9d1a50058fbc78da7e71a88c9b7d230fbdc6f",
+    "App.tsx": "351061672b7dddb233724ae8dd2a984d3ae4e231f94b7fe00945acb794900dba",
+    "components/costs-panel.tsx": "260098466584062140d0515b8312ca67eea23282aec562c2874e03aeea9be32e",
     "components/dashboard-skeleton.tsx": "99276292e13bf612bb3b6723282bbf29579450e7482f2e318b8106cacd4dc0c6",
     "components/dashboard-widgets.tsx": "394d86069049c9ed3bc9e830fb43b5b7449d06880befdf6de981967ae3640188",
     "components/link-builder.tsx": "fc4bb566b66a32097d790e731e8a3975a03d076e6ec24d7abd8b78a713133f80",
@@ -47,18 +47,18 @@
     "index.css": "9d4b0fd5a4114b1062437a7ba25c187bbda131524ffba07ef29c3cb43350642e",
     "lib/analytics.test.ts": "3456946c2f8b2747b7e26a5017f8e8bb83528218edcfb470030e16d1e3bda731",
     "lib/config.test.ts": "fa95c825daa9c8a769814a6c867f0c582dbe08c847255542ce007f54f3808d7d",
-    "lib/config.ts": "35d0463f9375bcb89d737e73ca8e044ace3254558610da80e863d93f2451ed39",
-    "lib/costs.test.ts": "e02b4c7c25fc2e75fc1455f3067c7f4efe66909d97dcbe10877cde62dd845fd6",
-    "lib/costs.ts": "be99f3cc3aa550645aa8325bb2030612e71522158107124f979965add12266a2",
+    "lib/config.ts": "2c62740e609d4a14e7aa301550af35b174a5979266492305c9004a2608232ab1",
+    "lib/costs.test.ts": "459ed75c3a7bf1e514950f4bd3a582222707cb3aab8c18ea1edab6e03e0867c8",
+    "lib/costs.ts": "1508a80da55ded2d282fc747f554d7b672b49eec5f5cb8468c785d80daa35156",
     "lib/data.ts": "0ae6d080f0f516d865aaac3e58c769564ac96c7035b2c64b0a29d6f249a4cfb2",
-    "lib/demo.ts": "85057781dcba65e281512d184966d8961d07066a43330b03887d2507ad1abeda",
+    "lib/demo.ts": "d2ce46f5a335c00cf319fce84e13bb7d4d8d287e7c384baa0f99cbd8c2c62665",
     "lib/growth.test.ts": "eb7d877e3af978157f465f290a15d74e07603017afb7e212222fe781b49d3342",
     "lib/links.test.ts": "c16c93c09d4e72d920316363ab233ea0638cd2980a6f48c54a6e3c09a300ef59",
     "lib/links.ts": "da834d94be63d80f2da29933324d837d1b155e82faacc4feef756c309e808064",
     "lib/measurement.test.ts": "65165489f726faf4f05019b73e4441f83e5a000e4b58f4f8863b2a8b484d8bd5",
     "lib/placements.test.ts": "20e7993d2694220aeeda13afe756cd4dc8f4ce274f4a123b6c757f9d0f04109f",
     "lib/placements.ts": "5710767f9b59bf9ae5f43d88e9c5f4bf24690d52908e71b318939cb26ff706c4",
-    "lib/types.ts": "93a98e7872d05043a24e80b46383f07e0c51d5b217b635d001c3b9d73faf6f87",
+    "lib/types.ts": "69c716cf59d1caf258d802ab46d099f16e5e97a965d625f5176d1ffdd235de63",
     "lib/utils.ts": "20364ba30942358de19c25be84a641e103a0a9d2876b585d624f62378f50666e",
     "modules.json": "b9579be704afe1008dd92a86ba3322e2af4abf15639cbdbbb1e6c3054c9ca767",
     "profile.json": "db0db22f5aff3fef258cf93ba1077a0a2a5568d9d371998251ee5a3272a189da",

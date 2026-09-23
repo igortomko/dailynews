@@ -1,3 +1,4 @@
+import type { ModelPrice } from "./types";
 import type { AnalyticsDataset } from "./types";
 
 export interface Selection {
@@ -28,6 +29,11 @@ export interface Config {
   refresh?: { available: boolean; minimumIntervalSeconds: number };
   /** The host can mint and retire placements (POST /api/placements, /api/placements/retire). */
   placements?: { mint: boolean };
+  /**
+   * The owner's own model prices (PUT /api/prices). They override the product's
+   * defaults and price only rows the product recorded without an amount.
+   */
+  prices?: { editable: boolean; overrides: Record<string, ModelPrice> };
 }
 export const moduleInfo: Record<
   string,
