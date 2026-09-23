@@ -86,4 +86,10 @@ jobs:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           APP_URL: ${{ vars.APP_URL }}
           DB_POOL_MAX: '5'
-        run: npx tsx pipeline/run.ts
+        # react-server: queries.ts помечен server-only, чтобы не уехать
+        # в клиентский бандл, а прогон исполняет его на сервере, просто
+        # не внутри Next. При этом условии пакет отдаёт пустой модуль
+        # (его собственный exports), защита в коде остаётся. Без флага
+        # прогон падал на старте с 22 сентября 2026, как только выпуск
+        # стал спрашивать weekIssues и getUpgradeFacts.
+        run: npm run pipeline

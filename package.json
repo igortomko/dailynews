@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "pipeline": "tsx --env-file-if-exists=.env pipeline/run.ts",
+    "pipeline": "tsx --env-file-if-exists=.env --conditions=react-server pipeline/run.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx pipeline/selftest.ts && tsx pipeline/reading-selftest.ts && tsx pipeline/reading-evaluation-selftest.ts",
     "verify:db": "tsx db/verify.ts",
