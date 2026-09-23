@@ -85,45 +85,39 @@ export const onboarding = {
     channelDialogText:
       "Paste the link to your public channel. If it's public, we can pick up your style and draft a post about any story you choose.",
     channelDialogCancel: "Cancel",
+    styleTitle: "Write drafts in my style",
+    styleOff: "Off — drafts are written neutrally, from your writing settings.",
+    styleEdit: "Edit style",
+    styleDialogTitle: "How to write drafts",
+    styleDialogText:
+      "Describe in your own words how to write: post shape, how you open, tone, length, emoji. Or press \"Learn my style\" — we'll read your posts and lay out the analysis here for you to edit. A ready skill file works too.",
+    stylePlaceholder:
+      "For example: short, first person. First line is an all-caps headline. No emoji. Link on the last line.",
+    learnStyle: "Learn my style",
+    uploadSkill: "Upload skill",
+    styleSave: "Save",
+    styleSourcesTitle: "Where to learn your style from",
+    styleSourcesText:
+      "A Telegram channel, an RSS blog and an X account are read from a link. LinkedIn and Threads expose nothing — paste posts from there as text.",
+    styleEmpty: "Describe your style or press \"Learn my style\": an empty style can't be turned on.",
+    styleTooLong: (limit: number) => `The style is longer than ${limit} characters — shorten it.`,
+    styleLearned: (posts: number) =>
+      `Analysed ${posts} ${posts === 1 ? "post" : "posts"}. Check the text and fix anything that's off.`,
+    skillWrongType: "Needs a .md or .txt text file",
+    styleSaved: "Style saved",
     connectFailed: (network: string) => `Couldn't connect ${network}. Try again.`,
-    sourcesTitle: "Let us read your posts",
-    sourcesDescription:
-      "A draft sounds like you once the feed has read a dozen of your posts. A public Telegram channel, an RSS blog and an X account are read from a link. LinkedIn and Threads expose nothing — paste posts from there as text. Connecting above doesn't affect reading: it says where you post.",
     addPlaceholder: "t.me/channel, x.com/handle, or your blog's address",
     add: "Add",
-    addDescription:
-      "The address goes through the same check as sources: only something that answered with at least one post gets saved.",
     readingFrom: "Read from",
     pasteTitle: "Or paste posts as text",
     stopReading: (network: string) => `Stop reading ${network}`,
     toFeed: "Go to feed",
-    voiceTitle: "How you write",
-    voiceDescription:
-      "Structure is which blocks your post is built from and how you open it; then rhythm, person, length, emoji, where the link goes. Structure matters more: a post in your words but built like a news brief reads as someone else's from the first line. Two or three of your posts go into the prompt whole — as a sample, not as facts.",
-    rebuildVoice: "Read my posts again",
     added: (label: string) => `Added: ${label}`,
     rebuildHint: "Read your posts again so the feed takes them in",
-    builtToast: (builtFrom: number) => `Read ${builtFrom} ${builtFrom === 1 ? "post" : "posts"}`,
-    builtWithViews: "View counts included: your best-post frame comes from them",
-    builtWithoutStats: "No stats for these posts. We got how you write, but no frame",
-    builtSummary: (ago: string, builtFrom: number, ranked: boolean, hasStructure: boolean) =>
-      `Read ${builtFrom} ${builtFrom === 1 ? "post" : "posts"} ${ranked ? "with view counts" : "without stats"} · ${ago}${hasStructure ? "" : " — no structure yet, read again"}`,
-    notBuiltYet: "Nothing read yet: drafts are written from your delivery settings",
-    noFrameTitle: "No frame yet",
-    noFrameDescription:
-      "There's no view data for the posts we read, so we don't know what makes your best posts different from the rest — and the feed won't make that up. Add a public Telegram channel or an X account: view counts are visible there.",
-    structureTitle: "Post structure",
-    hooksTitle: "How you open",
-    voiceListTitle: "Tone and rhythm",
-    frameTitle: "Frame of your best posts",
-    tabooTitle: "What you never do",
     samplePlaceholder:
       "Paste 3 of your posts, separated by a blank line.\n\nNeeded for LinkedIn and Threads: we can't read posts from there.",
-    sampleDescription:
-      "Posts are separated by a blank line. Pasted posts have no view counts, so they show how you write but not which posts worked.",
     save: "Save",
     saved: "Saved",
-    savedDescription: "Read your posts again",
   },
   opinionDialog: {
     title: "Your take",

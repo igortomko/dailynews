@@ -38,7 +38,7 @@ const COLUMNS = sql`
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
   paused_at, sleep_asked_at, resume_at, upsell_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
-  voice_card, voice_built_at, voice_sample,
+  voice_card, voice_built_at, voice_sample, voice_skill, voice_enabled,
   follow_rules, exclude_rules, source
 `;
 
@@ -638,6 +638,7 @@ export async function deleteReader(readerId: number): Promise<void> {
              kindle_address = null, kindle_sender = null, kindle_digest = false,
              kindle_approved = false, podcast = false, llm = '{}'::jsonb,
              voice_card = null, voice_built_at = null, voice_sample = '',
+             voice_skill = '', voice_enabled = false,
              follow_rules = '[]'::jsonb, exclude_rules = '[]'::jsonb,
              subscription_id = null, portal_url = null,
              paused_at = coalesce(paused_at, now()), updated_at = now()
@@ -729,6 +730,15 @@ export async function saveRules(
        set follow_rules = ${sql.json(rules.follow)},
            exclude_rules = ${sql.json(rules.exclude)},
            updated_at = now()
+     where id = ${readerId}
+  `;
+}
+
+/** Свитчер и текст стиля — одной записью: включённый стиль без текста не бывает. */
+export async function saveVoiceStyle(readerId: number, enabled: boolean, text: string): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set voice_enabled = ${enabled}, voice_skill = ${text}, updated_at = now()
      where id = ${readerId}
   `;
 }

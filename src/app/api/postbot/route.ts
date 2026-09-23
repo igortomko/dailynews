@@ -3,7 +3,7 @@ import { checkSecret, escapeHtml, SECRET_HEADER } from "@/lib/telegram";
 import { getChannels, getReader, spentToday } from "@/lib/readers";
 import { classifyDrop } from "@/lib/drops";
 import { dropSourceFor, saveDrafts } from "@/lib/posts";
-import { asCard, cardFromVoice } from "../../../../pipeline/voice-card";
+import { draftStyle } from "../../../../pipeline/voice-card";
 import { writePost } from "../../../../pipeline/post";
 import { publishedIn, tabsOf } from "@/lib/networks";
 import { sql } from "@/lib/db";
@@ -148,14 +148,10 @@ async function reply(incoming: Incoming): Promise<void> {
     ));
   }
 
-  const card = asCard(reader.voice_card) ?? cardFromVoice({
-    language: reader.language,
-    complexity: reader.complexity,
-    style: reader.style,
-  });
+  const { block, fallback } = draftStyle(reader);
 
   try {
-    const written = await writePost(source, card, networks.map((network) => network.id), reader.id);
+    const written = await writePost(source, block, networks.map((network) => network.id), reader.id);
     await saveDrafts(readerId, source.id, written.drafts);
 
     for (const draft of written.drafts) {
@@ -169,8 +165,8 @@ async function reply(incoming: Incoming): Promise<void> {
           `${escapeHtml(draft.text)}${warning}${over}`,
       );
     }
-    if (card.built_from === 0) {
-      await send(incoming.chatId, "Карточки голоса нет — писал настройками подачи, не твоим голосом.");
+    if (fallback) {
+      await send(incoming.chatId, "«Писать в моём стиле» выключено — писал настройками подачи, не твоим голосом.");
     }
   } catch (error) {
     await send(incoming.chatId, escapeHtml(error instanceof Error ? error.message : "не написалось"));

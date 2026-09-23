@@ -6,7 +6,13 @@ import { PlanGate } from "@/components/plan-gate";
 import { getDict } from "@/lib/i18n/server";
 import { oauthNetworks } from "@/lib/social-connect";
 import type { NetworkId } from "@/lib/networks";
+import { asCard, cardText } from "../../../../../pipeline/voice-card";
 import { ChannelsForm } from "./form";
+
+const cardTextOf = (row: unknown) => {
+  const card = asCard(row);
+  return card ? cardText(card) : "";
+};
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +41,10 @@ export default async function ChannelsPage({
   return (
     <ChannelsForm
       channels={await getChannels(reader.id)}
-      card={reader.voice_card}
-      builtAt={reader.voice_built_at}
+      styleEnabled={reader.voice_enabled}
+      // Собранным до свитчера текста ещё нет — показываем их карточку
+      // текстом: ровно она и уходит в промпт (`draftStyle`).
+      styleText={reader.voice_skill || cardTextOf(reader.voice_card)}
       sample={reader.voice_sample}
       oauth={oauthNetworks()}
       failed={failed as NetworkId | undefined}
