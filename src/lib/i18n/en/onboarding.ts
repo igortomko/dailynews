@@ -81,6 +81,10 @@ export const onboarding = {
     connectNamed: (network: string) => `Connect ${network}`,
     disconnectNamed: (network: string) => `Disconnect ${network}`,
     channelPlaceholder: "t.me/channel",
+    channelDialogTitle: "Connect a Telegram channel",
+    channelDialogText:
+      "Paste the link to your public channel — the one you'll share posts to. We'll check that it exists and has posts. A personal profile or a private channel won't work.",
+    channelDialogCancel: "Cancel",
     connectFailed: (network: string) => `Couldn't connect ${network}. Try again.`,
     sourcesTitle: "Let us read your posts",
     sourcesDescription:

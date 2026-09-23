@@ -96,6 +96,10 @@ export const onboarding: typeof En = {
     connectNamed: (network) => `Подключить ${network}`,
     disconnectNamed: (network) => `Отключить ${network}`,
     channelPlaceholder: "t.me/канал",
+    channelDialogTitle: "Подключить канал Telegram",
+    channelDialogText:
+      "Вставь ссылку на свой публичный канал — туда ты будешь делиться постами. Проверим, что канал существует и в нём есть посты. Личный профиль и закрытый канал не подойдут.",
+    channelDialogCancel: "Отмена",
     connectFailed: (network) => `Не получилось подключить ${network}. Попробуй ещё раз.`,
     sourcesTitle: "Дай почитать свои посты",
     sourcesDescription:

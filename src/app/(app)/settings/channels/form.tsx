@@ -14,6 +14,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldDescription, FieldTitle } from "@/components/ui/field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { NETWORK_IDS, NETWORKS, type NetworkId } from "@/lib/networks";
 import { relativeTime } from "@/lib/relative-time";
 import { useT } from "@/components/i18n-provider";
@@ -114,7 +117,9 @@ export function ChannelsForm({
     });
   };
 
-  // Поле канала в плитке Telegram: открыто, пока канал не назван.
+  // Окно канала Telegram: null — закрыто. Окно, а не поле в плитке:
+  // в плитку шириной 140 пикселей влезало «t.me/ка», и что туда нужен
+  // существующий публичный канал, а не свой ник, сказать было негде.
   const [channelInput, setChannelInput] = useState<string | null>(null);
 
   const connectChannel = () => {
@@ -169,6 +174,40 @@ export function ChannelsForm({
 
   return (
     <div className="flex flex-col gap-6">
+      <Dialog open={channelInput !== null} onOpenChange={(open) => !open && setChannelInput(null)}>
+        <DialogContent>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              connectChannel();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{t.onboarding.channels.channelDialogTitle}</DialogTitle>
+              <DialogDescription>{t.onboarding.channels.channelDialogText}</DialogDescription>
+            </DialogHeader>
+            <Input
+              autoFocus
+              value={channelInput ?? ""}
+              onChange={(event) => setChannelInput(event.target.value)}
+              placeholder={t.onboarding.channels.channelPlaceholder}
+              aria-label={t.onboarding.channels.channelDialogTitle}
+              disabled={busy}
+            />
+            <DialogFooter>
+              <DialogClose render={<Button type="button" variant="outline" disabled={busy} />}>
+                {t.onboarding.channels.channelDialogCancel}
+              </DialogClose>
+              <Button type="submit" disabled={busy || !channelInput?.trim()}>
+                {busy ? <Spinner /> : null}
+                {t.onboarding.channels.connect}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardHeader>
           <CardTitle>
@@ -226,28 +265,6 @@ export function ChannelsForm({
                         {t.onboarding.channels.disconnect}
                       </span>
                     </Button>
-                  ) : asksChannel && channelInput !== null ? (
-                    <form
-                      className="mt-1 flex w-full gap-1"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        connectChannel();
-                      }}
-                    >
-                      <Input
-                        autoFocus
-                        className="h-8 min-w-0 text-xs"
-                        value={channelInput}
-                        onChange={(event) => setChannelInput(event.target.value)}
-                        onKeyDown={(event) => event.key === "Escape" && setChannelInput(null)}
-                        placeholder={t.onboarding.channels.channelPlaceholder}
-                        aria-label={t.onboarding.channels.connectNamed(name)}
-                        disabled={busy}
-                      />
-                      <Button type="submit" size="icon-sm" disabled={busy || !channelInput.trim()}>
-                        {busy ? <Spinner /> : <CheckIcon />}
-                      </Button>
-                    </form>
                   ) : oauth.includes(id) ? (
                     // Обычная ссылка, а не Link: адрес — редирект на экран
                     // сети, а не страница приложения.
