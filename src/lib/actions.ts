@@ -15,16 +15,16 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, clearChannelAddress, deleteChannel, deleteReader, digestProgress, freezeKindleSender, getChannels,
+  addReaderSource, deleteReader, digestProgress, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelPublishes,
-  saveVoiceCard, saveVoiceSample, saveVoiceStyle, spentToday, upsertTopic,
+  saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
 import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { buildVoiceCard, cardText, cleanStyle, draftStyle, readOwnPosts } from "../../pipeline/voice-card";
 import { STYLE_LIMIT } from "./voice";
 import { writePost } from "../../pipeline/post";
-import { NETWORK_IDS, networkOf, publishedIn, tabsOf, type NetworkId } from "./networks";
+import { NETWORK_IDS, publishedIn, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import { KINDLE_PERIODS, type KindlePeriod, type Reader, type Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
@@ -1043,36 +1043,6 @@ const NETWORK_BY_KIND: Partial<Record<Source["kind"], NetworkId>> = {
 };
 
 /**
- * Добавить площадку ссылкой.
- *
- * Адрес разбирает тот же `discover`, что и источники: он же проверяет, что
- * канал публичный и хоть что-то отдаёт. Сохраняется только ответившее —
- * площадка, принятая пустой, выглядит настроенной, а голос по ней собрать
- * не из чего, и понять это можно будет только по пустой карточке.
- */
-export async function addChannel(input: string): Promise<{ ok: true; network: NetworkId; label: string } | { error: string }> {
-  const denied = await denyBySection("posts");
-  if (denied) return denied;
-  const readerId = await currentReaderId();
-
-  const found = await discover(input);
-  if (!found.ok) return { error: found.error };
-
-  const network = NETWORK_BY_KIND[found.found.kind];
-  if (!network) {
-    return { error: (await getDict()).errors.notANewsletter };
-  }
-
-  await saveChannel(readerId, network, {
-    handle: found.found.url,
-    input_url: found.found.input_url,
-    label: found.found.label,
-  });
-  revalidatePath("/settings/channels");
-  return { ok: true as const, network, label: found.found.label };
-}
-
-/**
  * Подключить Telegram — значит назвать канал, куда он пишет: профиль
  * здесь ничего не говорит, вход через бота уже сделан. Канал проверяется
  * тем же разбором, что и источники: сохраняется только тот, что ответил
@@ -1120,44 +1090,6 @@ export async function toggleChannel(network: string, on: boolean) {
 }
 
 /**
- * Перестать читать площадку.
- *
- * Своё действие, а не побочный эффект галочки: «не публикую в Telegram»
- * и «не читайте мой Telegram» — разные ответы, и кнопка стоит там же,
- * где показан адрес. У сетей без таба (блог) забытый адрес не оставляет
- * от строки ничего — её и удаляем, иначе в базе осталась бы площадка,
- * которой нет ни в одном списке.
- */
-export async function forgetChannel(network: string) {
-  const denied = await denyBySection("posts");
-  if (denied) return denied;
-  const readerId = await currentReaderId();
-  const known = networkOf(network);
-  if (!known) return { error: (await getDict()).errors.unknownNetwork };
-
-  if (known.tab) await clearChannelAddress(readerId, network);
-  else await deleteChannel(readerId, network);
-  revalidatePath("/settings/channels");
-  return { ok: true as const };
-}
-
-/**
- * Вставленные руками посты.
- *
- * Не обходной путь, а единственный для LinkedIn и Threads: ленту они наружу
- * не отдают вовсе. Поэтому поле живёт рядом со списком площадок, а не
- * в «если ничего не получилось».
- */
-export async function saveSample(formData: FormData) {
-  const denied = await denyBySection("posts");
-  if (denied) return denied;
-  const readerId = await currentReaderId();
-  await saveVoiceSample(readerId, String(formData.get("sample") ?? "").slice(0, 20_000));
-  revalidatePath("/settings/channels");
-  return { ok: true as const };
-}
-
-/**
  * «Писать черновики в моём стиле»: свитчер и текст одной записью.
  * Включить можно только с текстом — пустой стиль молча писал бы
  * настройками подачи под видом «моего стиля».
@@ -1193,8 +1125,18 @@ export async function rebuildVoice(): Promise<{ ok: true; text: string; built_fr
   }
 
   const channels = await getChannels(reader.id);
+  // Стиль изучается из подключённых соцсетей. X, подключённый входом,
+  // адреса не хранит, но его ник из входа и есть то, что читается
+  // (`from:ник`); LinkedIn и Threads наружу не отдают ничего.
   const { posts, failed } = await readOwnPosts(
-    channels.map((channel) => ({ network: channel.network as NetworkId, handle: channel.handle })),
+    channels
+      .filter((channel) => channel.publishes || channel.network === "blog")
+      .map((channel) => ({
+        network: channel.network as NetworkId,
+        handle:
+          channel.handle ??
+          (channel.network === "x" && channel.account?.startsWith("@") ? channel.account : null),
+      })),
     reader.voice_sample,
   );
   if (posts.length === 0) {
