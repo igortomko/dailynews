@@ -9,7 +9,7 @@ set -euo pipefail
 
 HOST=${HOST:-root@91.108.126.101}
 DIR=/opt/dailynews
-DOMAIN=news.tomko.io
+DOMAIN=news.reporta.club
 COMMIT=$(git rev-parse HEAD)
 
 echo "→ коммит $COMMIT"
@@ -148,7 +148,10 @@ echo "→ сборка и переключение"
 ssh "$HOST" "cd $DIR && GIT_COMMIT=$COMMIT docker compose -f $DIR/docker-compose.yml build --pull web && GIT_COMMIT=$COMMIT docker compose -f $DIR/docker-compose.yml up -d --force-recreate web"
 
 echo "→ страница сайта в Caddy"
-ssh "$HOST" "cp $DIR/deploy/$DOMAIN.caddy /etc/caddy/sites/$DOMAIN.caddy && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null && systemctl reload caddy"
+# Один файл на все адреса продукта: лента, корень reporta.club и редирект
+# со старого news.tomko.io. Прежний файл снимается — иначе news.tomko.io
+# объявлен дважды, и validate отвергает весь Caddyfile, включая соседей.
+ssh "$HOST" "rm -f /etc/caddy/sites/news.tomko.io.caddy && cp $DIR/deploy/reporta.caddy /etc/caddy/sites/reporta.caddy && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null && systemctl reload caddy"
 
 echo "→ проверка: обслуживает ли запущенный контейнер отправленный код"
 for attempt in $(seq 1 20); do

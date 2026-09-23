@@ -29,7 +29,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
       title: "Privacy Policy",
       updated: "Last updated: September 23, 2026",
       intro:
-        "Reporta (news.tomko.io) is a personal news digest run by Igor Tomko as an individual. This page lists what the service stores about you, why, who processes it, and how to delete it.",
+        "Reporta (news.reporta.club) is a personal news digest run by Igor Tomko as an individual. This page lists what the service stores about you, why, who processes it, and how to delete it.",
       sections: [
         {
           id: "collect",
@@ -84,7 +84,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
       title: "Terms of Service",
       updated: "Last updated: September 23, 2026",
       intro:
-        "These terms apply to Reporta (news.tomko.io), a personal news digest run by Igor Tomko as an individual. By using the service you accept them.",
+        "These terms apply to Reporta (news.reporta.club), a personal news digest run by Igor Tomko as an individual. By using the service you accept them.",
       sections: [
         {
           id: "service",
@@ -145,7 +145,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
       title: "Политика конфиденциальности",
       updated: "Обновлено 23 сентября 2026 г.",
       intro:
-        "Reporta (news.tomko.io) — персональная лента новостей, её ведёт Игорь Томко как частное лицо. Здесь перечислено, что сервис хранит о тебе, зачем, кто это обрабатывает и как это удалить.",
+        "Reporta (news.reporta.club) — персональная лента новостей, её ведёт Игорь Томко как частное лицо. Здесь перечислено, что сервис хранит о тебе, зачем, кто это обрабатывает и как это удалить.",
       sections: [
         {
           id: "collect",
@@ -200,7 +200,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
       title: "Условия использования",
       updated: "Обновлено 23 сентября 2026 г.",
       intro:
-        "Эти условия действуют для Reporta (news.tomko.io) — персональной ленты новостей, которую ведёт Игорь Томко как частное лицо. Пользуясь сервисом, ты их принимаешь.",
+        "Эти условия действуют для Reporta (news.reporta.club) — персональной ленты новостей, которую ведёт Игорь Томко как частное лицо. Пользуясь сервисом, ты их принимаешь.",
       sections: [
         {
           id: "service",

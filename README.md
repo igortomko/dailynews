@@ -1,14 +1,14 @@
 # Reporta
 
 <p align="center">
-  <a href="https://news.tomko.io/brand/"><img src="./public/brand/brand-preview.png" alt="Reporta: смотреть внимательнее. Гравюрный город и утверждённый логотип." width="1080"></a>
+  <a href="https://news.reporta.club/brand/"><img src="./public/brand/brand-preview.png" alt="Reporta: смотреть внимательнее. Гравюрный город и утверждённый логотип." width="1080"></a>
 </p>
 
 <p align="center">
   Персональная новостная лента, которая пробирается через шум и оставляет сигнал.
   <br>
-  <a href="https://news.tomko.io/brand/">Открыть интерактивный брендбук</a> ·
-  <a href="https://news.tomko.io/brand/reporta-brand-kit.zip">Скачать бренд-кит</a>
+  <a href="https://news.reporta.club/brand/">Открыть интерактивный брендбук</a> ·
+  <a href="https://news.reporta.club/brand/reporta-brand-kit.zip">Скачать бренд-кит</a>
 </p>
 
 Reporta собирает поток, оценивает каждый материал по общим осям, отбирает
@@ -30,8 +30,8 @@ Brand system v4: настоящие векторные логотип и зна�
 четыре интерактивных состояния продукта и фотография в трёх форматах.
 Примеры в брендбуке не изменяют аккаунт и не являются реальными новостями.
 У каждой гравюры две прозрачные версии: чёрная и белая, красный неизменен.
-[Все 40 PNG](https://news.tomko.io/brand/reporta-illustrations.zip) ·
-[Сравнение шрифтов логотипа](https://news.tomko.io/brand/type-study/index.html).
+[Все 40 PNG](https://news.reporta.club/brand/reporta-illustrations.zip) ·
+[Сравнение шрифтов логотипа](https://news.reporta.club/brand/type-study/index.html).
 
 - `public/brand/logo-reporta.svg` — DM Serif Display в контурах с ручным кернингом
 - `public/brand/logo-reporta-approved-transparent.png` — прозрачная PNG-версия для макетов

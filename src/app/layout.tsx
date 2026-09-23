@@ -25,7 +25,7 @@ const inter = Inter({
  * говорит краулер, а не тот, кто перейдёт по ссылке.
  */
 export const metadata: Metadata = {
-  metadataBase: new URL("https://news.tomko.io"),
+  metadataBase: new URL("https://news.reporta.club"),
   title: "Reporta",
   description: "A personal news feed that pulls the signal out of the stream",
   icons: {

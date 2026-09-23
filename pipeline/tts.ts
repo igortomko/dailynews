@@ -634,7 +634,7 @@ export async function runPodcast(
     // неотличим от вчерашнего в списке файлов Telegram.
     await sendAudio(Number(reader.telegram_id), audio, {
       title: `${titles.length} · ${titles[0]}`,
-      url: appOrigin("https://news.tomko.io"),
+      url: appOrigin("https://news.reporta.club"),
       duration: seconds,
     });
     delivered = true;

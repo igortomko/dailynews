@@ -9,7 +9,7 @@
 Читатель заводится сам: пишет боту `/start`, получает одноразовую ссылку
 на сайт и настраивает интересы. Ни приглашений, ни ролей, ни платежей.
 
-**Живёт:** https://news.tomko.io (контейнер на `brasil-vps`, `/opt/dailynews/`)
+**Живёт:** https://news.reporta.club (контейнер на `brasil-vps`, `/opt/dailynews/`)
 **База:** Supabase `brasil-products`, схема `dailynews`, роль `dailynews_bot`
 **Прогон:** сбор и оценка — GitHub Actions раз в час (`17 * * * *`); выпуск — в 02:00 по поясу каждого читателя (таймер веба, `pipeline/issue.ts`)
 

@@ -3340,9 +3340,9 @@ assert.equal(form(0), "материалов");
 // не открывалась — и по ней понять, что сломалось, было нельзя.
 {
   const before = process.env.APP_URL;
-  process.env.APP_URL = "https://news.tomko.io";
+  process.env.APP_URL = "https://news.reporta.club";
   assert.equal(
-    appOrigin("https://0.0.0.0:3000"), "https://news.tomko.io",
+    appOrigin("https://0.0.0.0:3000"), "https://news.reporta.club",
     "адрес берётся из APP_URL, а не из того, на что смотрит контейнер",
   );
   process.env.APP_URL = "  ";
@@ -5038,7 +5038,7 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
 // адресом, метка времени только у того, что в записи есть, и ничего сверх
 // этого — ни вступления, ни подписи под плеером, ни слова «слушать».
 {
-  const APP = "https://news.tomko.io";
+  const APP = "https://news.reporta.club";
   const heads = [
     { id: 11, title: "Первая <новость> & прочее", topic: "Энергетика", at: 0 },
     { id: 12, title: "Вторая", topic: "Энергетика", at: 754 },
