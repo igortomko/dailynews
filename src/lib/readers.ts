@@ -517,7 +517,7 @@ export async function lastActivityAt(readerId: number): Promise<string | null> {
  */
 export async function getChannels(readerId: number): Promise<ReaderChannel[]> {
   return sql<ReaderChannel[]>`
-    select network, handle, input_url, label, publishes, created_at
+    select network, handle, input_url, label, publishes, account, created_at
       from dailynews.reader_channels
      where reader_id = ${readerId}
      order by created_at, network
@@ -558,7 +558,24 @@ export async function setChannelPublishes(
   await sql`
     insert into dailynews.reader_channels (reader_id, network, publishes)
     values (${readerId}, ${network}, ${publishes})
-    on conflict (reader_id, network) do update set publishes = excluded.publishes
+    on conflict (reader_id, network) do update
+      set publishes = excluded.publishes,
+          -- Отключение забывает и аккаунт: «Подключено · @ник» после
+          -- «Отключить» говорило бы о связи, которой больше нет.
+          account = case when excluded.publishes then reader_channels.account end
+  `;
+}
+
+/** Площадка подключена входом в сеть: таб включён, аккаунт назван. */
+export async function connectChannel(
+  readerId: number,
+  network: string,
+  account: string,
+): Promise<void> {
+  await sql`
+    insert into dailynews.reader_channels (reader_id, network, publishes, account)
+    values (${readerId}, ${network}, true, ${account})
+    on conflict (reader_id, network) do update set publishes = true, account = excluded.account
   `;
 }
 

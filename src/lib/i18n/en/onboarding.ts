@@ -74,12 +74,16 @@ export const onboarding = {
     // на что отвечает, — «мои площадки» не отвечало ни на один из вопросов.
     postingTitle: "Social networks",
     postingDescription:
-      "Tick the networks you post to. Each one gets its own tab in a draft, written to its own length and shape.",
-    charLimit: (limit: number) => `up to ${limit} characters`,
-    publishingIn: (network: string) => `Posting to ${network}`,
+      "Connect the networks you post to. Each one gets its own tab in a draft, written to its own length and shape.",
+    connect: "Connect",
+    connected: "Connected",
+    disconnect: "Disconnect",
+    connectNamed: (network: string) => `Connect ${network}`,
+    disconnectNamed: (network: string) => `Disconnect ${network}`,
+    connectFailed: (network: string) => `Couldn't connect ${network}. Try again.`,
     sourcesTitle: "Let us read your posts",
     sourcesDescription:
-      "A draft sounds like you once the feed has read a dozen of your posts. A public Telegram channel, an RSS blog and an X account are read from a link. LinkedIn and Threads expose nothing — paste posts from there as text. The ticks above don't affect reading: they say where you post.",
+      "A draft sounds like you once the feed has read a dozen of your posts. A public Telegram channel, an RSS blog and an X account are read from a link. LinkedIn and Threads expose nothing — paste posts from there as text. Connecting above doesn't affect reading: it says where you post.",
     addPlaceholder: "t.me/channel, x.com/handle, or your blog's address",
     add: "Add",
     addDescription:
