@@ -570,7 +570,8 @@ export async function setChannelPublishes(
       set publishes = excluded.publishes,
           -- Отключение забывает и аккаунт: «Подключено · @ник» после
           -- «Отключить» говорило бы о связи, которой больше нет.
-          account = case when excluded.publishes then reader_channels.account end
+          account = case when excluded.publishes then reader_channels.account end,
+          account_id = case when excluded.publishes then reader_channels.account_id end
   `;
 }
 
@@ -579,12 +580,39 @@ export async function connectChannel(
   readerId: number,
   network: string,
   account: string,
+  accountId: string,
 ): Promise<void> {
   await sql`
-    insert into dailynews.reader_channels (reader_id, network, publishes, account)
-    values (${readerId}, ${network}, true, ${account})
-    on conflict (reader_id, network) do update set publishes = true, account = excluded.account
+    insert into dailynews.reader_channels (reader_id, network, publishes, account, account_id)
+    values (${readerId}, ${network}, true, ${account}, ${accountId})
+    on conflict (reader_id, network) do update
+      set publishes = true, account = excluded.account, account_id = excluded.account_id
   `;
+}
+
+/**
+ * Сеть сообщила, что аккаунт отозвал доступ или просит удалить данные.
+ * Хранили мы о нём только номер и имя — их и стираем, вместе с табом:
+ * подключения больше нет. Сколько строк задето — для лога.
+ */
+export async function disconnectAccount(network: string, accountId: string): Promise<number> {
+  const rows = await sql`
+    update dailynews.reader_channels
+       set publishes = false, account = null, account_id = null
+     where network = ${network} and account_id = ${accountId}
+    returning reader_id
+  `;
+  return rows.length;
+}
+
+/**
+ * Удалить читателя целиком. Всё личное висит на `readers.id` с
+ * `on delete cascade` (выпуски, чтения, темы, источники-связки, площадки,
+ * черновики, расход, отправки), поэтому хватает одной строки. Общее —
+ * каталог источников и материалы потока — остаётся: оно ничьё.
+ */
+export async function deleteReader(readerId: number): Promise<void> {
+  await sql`delete from dailynews.readers where id = ${readerId} and not owner`;
 }
 
 /**

@@ -11,6 +11,7 @@
  * хуже кнопки, которая просто включает таб. Telegram входа не требует
  * вовсе — читатель уже вошёл через бота.
  */
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NetworkId } from "./networks";
 
 type Provider = {
@@ -21,7 +22,8 @@ type Provider = {
   /** X требует PKCE и Basic-авторизацию клиента; LinkedIn и Threads — нет. */
   pkce: boolean;
   basic: boolean;
-  profile: (token: string) => Promise<string | null>;
+  /** Номер и имя аккаунта. Номер нужен, чтобы исполнить запрос удаления от сети. */
+  profile: (token: string) => Promise<{ id: string; name: string } | null>;
 };
 
 /**
@@ -53,7 +55,7 @@ export const PROVIDERS: Partial<Record<NetworkId, Provider>> = {
     basic: true,
     profile: async (token) => {
       const body = await getJson("https://api.x.com/2/users/me", token);
-      return body?.data?.username ? `@${body.data.username}` : null;
+      return body?.data?.username ? { id: String(body.data.id), name: `@${body.data.username}` } : null;
     },
   },
   linkedin: {
@@ -64,7 +66,10 @@ export const PROVIDERS: Partial<Record<NetworkId, Provider>> = {
     pkce: false,
     basic: false,
     // Публичного ника у LinkedIn по OpenID нет — только имя.
-    profile: async (token) => (await getJson("https://api.linkedin.com/v2/userinfo", token))?.name ?? null,
+    profile: async (token) => {
+      const body = await getJson("https://api.linkedin.com/v2/userinfo", token);
+      return body?.name ? { id: String(body.sub), name: body.name } : null;
+    },
   },
   threads: {
     env: "THREADS",
@@ -75,7 +80,7 @@ export const PROVIDERS: Partial<Record<NetworkId, Provider>> = {
     basic: false,
     profile: async (token) => {
       const body = await getJson("https://graph.threads.net/v1.0/me?fields=id,username", token, true);
-      return body?.username ? `@${body.username}` : null;
+      return body?.username ? { id: String(body.id), name: `@${body.username}` } : null;
     },
   },
 };
@@ -126,13 +131,13 @@ export async function authorizeUrl(
   return url.toString();
 }
 
-/** Код из возврата → имя аккаунта. Любой отказ — исключение с причиной. */
+/** Код из возврата → номер и имя аккаунта. Любой отказ — исключение с причиной. */
 export async function accountFor(
   network: NetworkId,
   code: string,
   redirectUri: string,
   verifier: string,
-): Promise<string> {
+): Promise<{ id: string; name: string }> {
   const provider = PROVIDERS[network];
   const creds = credentials(network);
   if (!provider || !creds) throw new Error(`${network}: приложение не заведено`);
@@ -165,4 +170,25 @@ export async function accountFor(
   const account = await provider.profile(body.access_token);
   if (!account) throw new Error(`${network}: профиль пришёл без имени`);
   return account;
+}
+
+/**
+ * `signed_request` от Meta: «<подпись>.<данные>», оба в base64url, подпись —
+ * HMAC-SHA256 от строки данных секретом приложения. Так Threads сообщает,
+ * что читатель отозвал доступ или просит удалить данные. Подпись не сошлась —
+ * null: адрес открыт всему интернету, и без неё кто угодно отключал бы
+ * чужие аккаунты.
+ */
+export function parseSignedRequest(raw: string, secret: string): { user_id: string } | null {
+  const [signature, payload] = raw.split(".");
+  if (!signature || !payload || !secret) return null;
+  const expected = createHmac("sha256", secret).update(payload).digest();
+  const given = Buffer.from(signature, "base64url");
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return data?.user_id ? { user_id: String(data.user_id) } : null;
+  } catch {
+    return null;
+  }
 }
