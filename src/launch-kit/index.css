@@ -1,0 +1,184 @@
+@import "tailwindcss";
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f6f6f6;
+  --color-secondary-foreground: #363636;
+  --color-muted: #f7f7f7;
+  --color-muted-foreground: #909090;
+  --color-accent: #f4f4f4;
+  --color-accent-foreground: #303030;
+  --color-destructive: #c44132;
+  --color-border: #eaeaea;
+  --color-input: #e5e5e5;
+  --color-ring: #89bff0;
+  --color-chart-1: #89bff0;
+  --color-chart-2: #e88970;
+  --color-chart-3: #8f9dba;
+  --radius-sm: 0.45rem;
+  --radius-md: 0.65rem;
+  --radius-lg: 0.9rem;
+  --radius-xl: 1.1rem;
+}
+:root {
+  --background: #faf9f8;
+  --foreground: #303030;
+  --card: #fff;
+  --primary: #333333;
+  --chart-1: #89bff0;
+  --chart-2: #e88970;
+}
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    font-family:
+      Inter,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    font-size: 14px;
+  }
+  button,
+  a,
+  input,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:not(:disabled),
+  a {
+    cursor: pointer;
+  }
+  ::selection {
+    background: #dff0ff;
+  }
+}
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .soft-card {
+    box-shadow: 0 2px 3px -3px #1a271430;
+  }
+}
+.recharts-wrapper:focus-visible {
+  outline: 2px solid #89bff0;
+  outline-offset: 4px;
+}
+
+.dashboard-context [data-slot="select-trigger"] {
+  height: 26px;
+  width: auto;
+  max-width: 180px;
+  border: 0;
+  padding: 0 4px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
+  color: #8c8c8c;
+}
+.analytics-page > header > div > [data-slot="select-trigger"] {
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+.reference-pair > :only-child {
+  grid-column: 1 / -1;
+}
+[data-slot="tabs-list"] {
+  height: 36px;
+  padding: 3px;
+  background: #fafafa;
+  border: 1px solid #f1f1f1;
+  border-radius: 14px;
+}
+[data-slot="tabs-trigger"] {
+  border-radius: 10px;
+  color: #999;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+[data-slot="tabs-trigger"][data-state="active"] {
+  background: white;
+  color: #353535;
+  box-shadow: 0 1px 3px #0000000d;
+  border-color: #ededed;
+}
+@media print {
+  @page {
+    size: landscape;
+    margin: 8mm;
+  }
+  html,
+  body,
+  #root,
+  #root > div,
+  main {
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body {
+    background: white;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #summary,
+  #summary * {
+    visibility: visible;
+  }
+  header,
+  footer,
+  .summary-launch,
+  .dashboard-context,
+  [data-no-export] {
+    display: none !important;
+  }
+  .analytics-content {
+    display: contents !important;
+  }
+  .analytics-content > :not(#summary) {
+    display: none !important;
+  }
+  #summary {
+    position: static;
+    width: 100%;
+    padding: 0;
+    zoom: 0.8;
+  }
+  #summary .summary-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+  #summary .summary-tables {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  #summary [data-slot="card"] {
+    break-inside: avoid;
+  }
+  #summary button[aria-label^="Определение"] {
+    display: none;
+  }
+}
+
+@media print {
+  #summary[data-columns="3"] > div:first-child { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+  #summary[data-columns="2"] > div:first-child { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+  #summary > div:first-child > div { order:initial !important; }
+}

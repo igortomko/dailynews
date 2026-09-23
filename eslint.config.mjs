@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Копия Launch Kit из agent-skills: правится там, а не здесь
+    // (scripts/sync-launch-kit.mjs --check ловит ручную правку).
+    "src/launch-kit/**",
   ]),
 ]);
 
