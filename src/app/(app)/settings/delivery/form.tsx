@@ -230,7 +230,7 @@ export function DeliveryForm({
                 );
               }}
             >
-              <SelectTrigger id="timezone" className="w-full max-w-xs" disabled={pending}>
+              <SelectTrigger id="timezone" className="w-full max-w-xs text-foreground" disabled={pending}>
                 <SelectValue>{zoneLabel(zone, false)}</SelectValue>
               </SelectTrigger>
               <SelectContent alignItemWithTrigger={false} className="max-h-72 w-auto min-w-(--anchor-width)">
@@ -241,7 +241,6 @@ export function DeliveryForm({
                 ))}
               </SelectContent>
             </Select>
-            <FieldDescription>{t.settings.delivery.telegram.timezoneHint}</FieldDescription>
           </Field>
 
           {/* Выпуск голосом — тумблер, а не правило тарифа: это час звука
