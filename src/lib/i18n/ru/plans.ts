@@ -114,6 +114,14 @@ export const plans: typeof En = {
     intro:
       "Reporta читает твои источники — сайты, блоги, Hacker News, Telegram-каналы, YouTube, рассылки, — оценивает каждую новость, отбирает важное для тебя и пишет короткий выпуск на твоём языке. Он приходит каждое утро в Telegram, на почту или на Kindle.",
     start: "Начать бесплатно",
+    monthly: "Помесячно",
+    yearly: "За год",
+    save: (percent) => `−${percent}%`,
+    perYear: "в год",
+    perMonthApprox: (price) => `$${price} в месяц`,
+    thenPerYear: (price) => `потом $${price} в год`,
+    trialNote: (days) =>
+      `${days} ${plural(days, "день", "дня", "дней")} бесплатно на любом платном тарифе. Отменишь до конца пробного периода — денег не спишем.`,
   },
 
   checkout: {

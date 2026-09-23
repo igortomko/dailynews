@@ -34,14 +34,29 @@ export const paddleApi = () =>
  *
  * Не задана или не число — триала нет. Ноль и «нет» здесь одно и то же.
  */
-function prices(): Partial<Record<PlanId, { id: string; trialDays: number }>> {
-  const read = (plan: PlanId, id?: string, trial?: string) =>
-    id ? { [plan]: { id, trialDays: Math.max(0, Math.trunc(Number(trial)) || 0) } } : {};
+/**
+ * Период оплаты. Годовая цена — отдельная цена того же тарифа: тариф один,
+ * отличается только частота списания, и вебхук сводит обе к одному `plan`.
+ */
+export type Cycle = "month" | "year";
+export const cycleOf = (value: unknown): Cycle => (value === "year" ? "year" : "month");
+
+type Price = { id: string; yearId: string | null; trialDays: number };
+
+function prices(): Partial<Record<PlanId, Price>> {
+  const read = (plan: PlanId, id?: string, yearId?: string, trial?: string) =>
+    id ? { [plan]: { id, yearId: yearId || null, trialDays: Math.max(0, Math.trunc(Number(trial)) || 0) } } : {};
   return {
-    ...read("plus", process.env.PADDLE_PRICE_PLUS, process.env.PADDLE_TRIAL_PLUS),
-    ...read("pro", process.env.PADDLE_PRICE_PRO, process.env.PADDLE_TRIAL_PRO),
+    ...read("plus", process.env.PADDLE_PRICE_PLUS, process.env.PADDLE_PRICE_PLUS_YEAR, process.env.PADDLE_TRIAL_PLUS),
+    ...read("pro", process.env.PADDLE_PRICE_PRO, process.env.PADDLE_PRICE_PRO_YEAR, process.env.PADDLE_TRIAL_PRO),
   };
 }
+
+/** id цены под период. Годовой не заведено — годовой оплаты у тарифа нет. */
+const priceId = (price: Price, cycle: Cycle) => (cycle === "year" ? price.yearId : price.id);
+
+/** Заведена ли годовая оплата хоть у одного тарифа: без неё переключателю нечего переключать. */
+export const yearlyReady = (): boolean => Object.values(prices()).some((price) => price.yearId);
 
 /**
  * Сколько дней триала у этого тарифа. Ноль — триала нет, и говорить о нём
@@ -56,7 +71,7 @@ export const trialDaysFor = (plan: PlanId): number => prices()[plan]?.trialDays 
 /** Тариф по id цены из вебхука. Незнакомая цена — не тариф. */
 export function planOfPrice(priceId: string | null | undefined): Plan | null {
   for (const [plan, price] of Object.entries(prices())) {
-    if (price.id === priceId) return PLANS[plan as PlanId];
+    if (priceId && (price.id === priceId || price.yearId === priceId)) return PLANS[plan as PlanId];
   }
   return null;
 }
@@ -66,16 +81,18 @@ export function planOfPrice(priceId: string | null | undefined): Plan | null {
  * не откроет окно, и кнопка, ведущая на пустую страницу, хуже кнопки,
  * которой нет.
  */
-const checkoutReady = (plan: PlanId) =>
-  Boolean(prices()[plan] && process.env.PADDLE_CLIENT_TOKEN);
+const checkoutReady = (plan: PlanId, cycle: Cycle) => {
+  const price = prices()[plan];
+  return Boolean(price && priceId(price, cycle) && process.env.PADDLE_CLIENT_TOKEN);
+};
 
 /**
  * Куда ведёт «Выбрать». Своя страница, а не ссылка Paddle: окно оплаты —
  * overlay Paddle.js, и открыть его можно только у себя. Всё, что уходит
  * в оплату, собирает `checkoutFor` на сервере этой страницы.
  */
-export const checkoutUrl = (plan: PlanId): string | null =>
-  checkoutReady(plan) ? `/checkout/${plan}` : null;
+export const checkoutUrl = (plan: PlanId, cycle: Cycle = "month"): string | null =>
+  checkoutReady(plan, cycle) ? `/checkout/${plan}${cycle === "year" ? "?cycle=year" : ""}` : null;
 
 /** Что нужно Paddle.js, чтобы открыть оплату этому читателю. */
 export type CheckoutParams = {
@@ -96,14 +113,16 @@ export type CheckoutParams = {
 export function checkoutFor(
   plan: PlanId,
   reader: Pick<Reader, "id" | "created_at" | "email">,
+  cycle: Cycle = "month",
 ): CheckoutParams | null {
   const price = prices()[plan];
+  const id = price && priceId(price, cycle);
   const token = process.env.PADDLE_CLIENT_TOKEN;
-  if (!price || !token) return null;
+  if (!id || !token) return null;
   return {
     token,
     environment: paddleEnv(),
-    priceId: price.id,
+    priceId: id,
     customData: { reader_id: String(reader.id) },
     // Скидка ранним подставляется сама: код, который надо помнить и вводить,
     // до оплаты не доживает. Код не задан — оплата без скидки, а не сломанная.

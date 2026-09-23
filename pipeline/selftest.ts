@@ -2839,6 +2839,15 @@ const ended = readEvent(paddleEvent({ event_type: "subscription.canceled" }, { s
 assert.ok(ended.ok && ended.update.plan === "free", "закончившаяся подписка сбрасывает тариф");
 
 assert.equal(checkoutUrl("pro"), "/checkout/pro", "«Выбрать» ведёт на свою страницу оплаты");
+assert.equal(checkoutUrl("pro", "year"), null, "годовой цены не завели — годовой оплаты нет");
+process.env.PADDLE_PRICE_PRO_YEAR = "pri_pro_year";
+assert.equal(checkoutUrl("pro", "year"), "/checkout/pro?cycle=year", "годовая ведёт туда же, с периодом");
+assert.equal(checkoutFor("pro", { id: 1, created_at: "2026-01-01", email: null }, "year")?.priceId, "pri_pro_year", "в оплату уходит годовая цена");
+{
+  const yearly = readEvent(paddleEvent({}, { items: [{ price: { id: "pri_pro_year" } }] }) as never);
+  assert.ok(yearly.ok && yearly.update.plan === "pro", "годовая цена даёт тот же тариф");
+}
+delete process.env.PADDLE_PRICE_PRO_YEAR;
 assert.equal(checkoutUrl("free" as never), null, "у бесплатного тарифа нет оплаты");
 assert.equal(
   checkoutFor("pro", { id: 42, created_at: "2026-01-01", email: null })?.customData.reader_id,

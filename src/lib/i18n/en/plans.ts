@@ -130,6 +130,14 @@ export const plans = {
     intro:
       "Reporta reads your sources — news sites, blogs, Hacker News, Telegram channels, YouTube, newsletters — scores every story, picks what matters to you, and writes a short digest in your language. It arrives each morning in Telegram, by email or on Kindle.",
     start: "Start free",
+    monthly: "Monthly",
+    yearly: "Yearly",
+    save: (percent: number) => `−${percent}%`,
+    perYear: "per year",
+    perMonthApprox: (price: string) => `$${price} a month`,
+    thenPerYear: (price: number) => `then $${price} a year`,
+    trialNote: (days: number) =>
+      `${days} days free on any paid plan. Cancel before the trial ends and you won't be charged.`,
   },
 
   checkout: {
