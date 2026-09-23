@@ -1968,6 +1968,21 @@ async function main() {
       "возвращённая галочка завела площадку заново, потеряв адрес",
     );
 
+    // Подключение входом в сеть называет аккаунт, «Отключить» его забывает,
+    // а адрес для чтения оставляет — это другой вопрос.
+    await readers.connectChannel(owner.id, "x", "@owner");
+    assert.equal(
+      (await readers.getChannels(owner.id)).find((c) => c.network === "x")?.account,
+      "@owner",
+      "аккаунт из входа в сеть не сохранился",
+    );
+    await readers.setChannelPublishes(owner.id, "x", false);
+    assert.equal(
+      (await readers.getChannels(owner.id)).find((c) => c.network === "x")?.account,
+      null,
+      "«Отключить» оставило аккаунт",
+    );
+
     // «Не читать отсюда» — своё действие: адрес забыт, отметка цела.
     await readers.clearChannelAddress(owner.id, "telegram");
     const forgotten = (await readers.getChannels(owner.id)).find((c) => c.network === "telegram");

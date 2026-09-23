@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
+import { CheckIcon, PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
 import { addChannel, forgetChannel, rebuildVoice, saveSample, toggleChannel } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { SourceIcon } from "@/components/source-icon";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldTitle } from "@/components/ui/field";
@@ -62,12 +61,18 @@ export function ChannelsForm({
   card,
   builtAt,
   sample,
+  oauth,
+  failed,
   onboarding = false,
 }: {
   channels: ReaderChannel[];
   card: VoiceCardRow | null;
   builtAt: string | null;
   sample: string;
+  /** Сети, где «Подключить» ведёт на вход в сеть; остальные подключаются сразу. */
+  oauth: NetworkId[];
+  /** Сеть, откуда вход вернулся ни с чем. */
+  failed?: NetworkId;
   /** Последний шаг настройки: нужна подпись и выход в ленту. */
   onboarding?: boolean;
 }) {
@@ -80,6 +85,12 @@ export function ChannelsForm({
   // осталась бы с прежними пропсами, и разобранное выглядело бы
   // как неразобранное — тот самый отказ, похожий на успех.
   const router = useRouter();
+
+  useEffect(() => {
+    if (!failed || !NETWORK_IDS.includes(failed)) return;
+    toast.error(t.onboarding.channels.connectFailed(t.onboarding.networks[failed]));
+    router.replace(onboarding ? "/settings/channels?first=1" : "/settings/channels");
+  }, [failed, onboarding, router, t]);
 
   const byNetwork = new Map(channels.map((channel) => [channel.network, channel]));
   // Что лента читает прямо сейчас. Адрес есть только там, где его можно
@@ -151,39 +162,73 @@ export function ChannelsForm({
 
         <CardContent>
           {/* Четыре сети в ряд, а не списком: строки различались только
-              названием, и глаз всё равно читал их как один ряд знаков.
-              Отметка стоит под описанием, потому что решение принимается
-              после него, а не до. */}
+              названием, и глаз всё равно читал их как один ряд знаков. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {NETWORK_IDS.filter((id) => NETWORKS[id].tab).map((id) => {
-              const on = Boolean(byNetwork.get(id)?.publishes);
+              const channel = byNetwork.get(id);
+              const on = Boolean(channel?.publishes);
+              const name = t.onboarding.networks[id];
               return (
-                // Плитка целиком — ярлык отметки: попасть в квадрат 16×16
-                // пальцем можно, но промах здесь ничего не говорит о том,
-                // куда надо было попасть.
-                <label
+                <div
                   key={id}
                   className={cn(
-                    "flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition-colors",
-                    on ? "border-primary/30 bg-primary/5" : "hover:bg-muted/50",
+                    "group flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition-colors",
+                    on && "border-primary/30 bg-primary/5",
                   )}
                 >
                   {/* Значок общий с источниками: площадка и источник —
                       один и тот же список чужих сервисов, и узнаются они
                       знаком раньше, чем названием. */}
                   <SourceIcon kind={ICON_KIND[id]} url={NETWORK_HOME[id]} className="size-5" />
-                  <span className="text-sm font-medium">{t.onboarding.networks[id]}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {t.onboarding.channels.charLimit(NETWORKS[id].limit)}
+                  <span className="text-sm font-medium">{name}</span>
+                  <span className="min-h-4 truncate text-xs text-muted-foreground">
+                    {on ? channel?.account : null}
                   </span>
-                  <Checkbox
-                    className="mt-1"
-                    checked={on}
-                    onCheckedChange={(next) => toggle(id, next === true)}
-                    disabled={busy}
-                    aria-label={t.onboarding.channels.publishingIn(t.onboarding.networks[id])}
-                  />
-                </label>
+                  {on ? (
+                    // Одна кнопка, а не две: «Подключено» по наведению
+                    // становится «Отключить» — как «Following» у GitHub.
+                    // Второй кнопке рядом в плитке 140 пикселей не хватает.
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-1"
+                      onClick={() => toggle(id, false)}
+                      disabled={busy}
+                      aria-label={t.onboarding.channels.disconnectNamed(name)}
+                    >
+                      <span className="flex items-center gap-1 group-hover:hidden group-focus-within:hidden">
+                        <CheckIcon />
+                        {t.onboarding.channels.connected}
+                      </span>
+                      <span className="hidden text-destructive group-hover:inline group-focus-within:inline">
+                        {t.onboarding.channels.disconnect}
+                      </span>
+                    </Button>
+                  ) : oauth.includes(id) ? (
+                    // Обычная ссылка, а не Link: адрес — редирект на экран
+                    // сети, а не страница приложения.
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-1"
+                      aria-label={t.onboarding.channels.connectNamed(name)}
+                      render={<a href={`/api/connect/${id}${onboarding ? "?first=1" : ""}`} />}
+                    >
+                      {t.onboarding.channels.connect}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-1"
+                      onClick={() => toggle(id, true)}
+                      disabled={busy}
+                      aria-label={t.onboarding.channels.connectNamed(name)}
+                    >
+                      {t.onboarding.channels.connect}
+                    </Button>
+                  )}
+                </div>
               );
             })}
           </div>
