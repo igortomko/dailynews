@@ -705,7 +705,7 @@ export async function storePodcast(
   for (const [index, part] of parts.entries()) {
     const sent = await sendAudio(chat, part, {
       title: `Выпуск за ${day}${parts.length > 1 ? ` · ${index + 1}/${parts.length}` : ""}`,
-      url: appOrigin("https://news.tomko.io"),
+      url: appOrigin("https://news.reporta.club"),
       silent: true,
     });
     fileIds.push(sent.fileId);

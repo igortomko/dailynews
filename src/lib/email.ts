@@ -11,7 +11,7 @@
 import { dayUrl, digestMessage, type Headline } from "./telegram";
 import { plural } from "./plural";
 
-const DOMAIN = process.env.KINDLE_FROM_DOMAIN?.trim() || "kindle.tomko.io";
+const DOMAIN = process.env.KINDLE_FROM_DOMAIN?.trim() || "kindle.reporta.club";
 const FROM = process.env.MAIL_FROM?.trim() || `Reporta <news@${DOMAIN}>`;
 
 /** Ящик в нижнем регистре: один адрес — один читатель, как бы его ни набрали. */
