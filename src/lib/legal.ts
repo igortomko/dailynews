@@ -1,0 +1,259 @@
+import type { Locale } from "./i18n/locale";
+
+/**
+ * Политика конфиденциальности и условия — данными, а не разметкой, по два
+ * языка на документ.
+ *
+ * Здесь перечислено ровно то, что сервис собирает и куда отдаёт, а не
+ * шаблон «мы можем собирать»: страницу проверяют ревьюеры Meta и читают
+ * люди, решающие, подключать ли свой аккаунт. Появится новая колонка
+ * с личными данными или новый провайдер — строка здесь меняется тем же
+ * коммитом, иначе документ врёт так же тихо, как любой отказ в этом проекте.
+ */
+
+export type LegalDoc = {
+  title: string;
+  updated: string;
+  intro: string;
+  sections: { id: string; heading: string; paragraphs: string[] }[];
+};
+
+const CONTACT = "https://t.me/igortomko";
+const CONTACT_LABEL = "t.me/igortomko";
+
+export const LEGAL_CONTACT = { href: CONTACT, label: CONTACT_LABEL };
+
+export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
+  en: {
+    privacy: {
+      title: "Privacy Policy",
+      updated: "Last updated: September 23, 2026",
+      intro:
+        "Reporta (news.tomko.io) is a personal news digest run by Igor Tomko as an individual. This page lists what the service stores about you, why, who processes it, and how to delete it.",
+      sections: [
+        {
+          id: "collect",
+          heading: "What we store",
+          paragraphs: [
+            "Telegram account: your numeric Telegram ID, username, first name, interface language, and your profile bio. The bio is used once to suggest topics during setup.",
+            "Settings: your topics, sources, follow and exclude rules, reading time, time zone, delivery options, and Kindle address if you add one.",
+            "Reading activity: which cards were shown to you, opened, clicked through, hidden, or rated. It is used only to tune your own selection.",
+            "Connected social accounts: when you connect X, LinkedIn or Threads, we store only the account name the network returns (for example @username or your display name). We do not store access tokens, and we do not read, store or publish your posts through these networks' APIs.",
+            "Your writing samples: posts you paste as text and posts from a public Telegram channel, blog or X account whose link you add, used to build your writing profile for drafts.",
+            "Subscription: plan, status, renewal date and a link to the billing portal, received from Lemon Squeezy. We never see your card details.",
+          ],
+        },
+        {
+          id: "use",
+          heading: "How we use it",
+          paragraphs: [
+            "To select and write your daily digest, deliver it to Telegram and Kindle, generate audio if you turn it on, and write post drafts in your voice. We do not sell your data, show ads, or use it to train models.",
+          ],
+        },
+        {
+          id: "processors",
+          heading: "Who processes it",
+          paragraphs: [
+            "Hosting: a virtual server at Hostinger. Database: Supabase (PostgreSQL). Messaging: Telegram. Kindle delivery: Resend. Payments: Lemon Squeezy. Text generation: an OpenAI-compatible model provider that receives the news items and your writing preferences, not your Telegram identity. Audio: Microsoft Edge text-to-speech. Public X posts are read through twitterapi.io.",
+          ],
+        },
+        {
+          id: "cookies",
+          heading: "Cookies",
+          paragraphs: [
+            "One signed session cookie that keeps you logged in for 30 days, and a short-lived cookie (10 minutes) while you connect a social account. No analytics or advertising trackers. Your recent searches are kept in your browser only.",
+          ],
+        },
+        {
+          id: "delete",
+          heading: "Deleting your data",
+          paragraphs: [
+            "Disconnecting a social network on the settings page removes its account name immediately. To delete everything we store about you, message " +
+              CONTACT_LABEL +
+              " on Telegram from the account you signed in with; your data is deleted within 30 days. If you remove Reporta's access in X, LinkedIn or Threads settings, we stop being able to use that connection at once.",
+          ],
+        },
+        {
+          id: "contact",
+          heading: "Contact",
+          paragraphs: ["Questions about this policy: " + CONTACT_LABEL + " on Telegram."],
+        },
+      ],
+    },
+    terms: {
+      title: "Terms of Service",
+      updated: "Last updated: September 23, 2026",
+      intro:
+        "These terms apply to Reporta (news.tomko.io), a personal news digest run by Igor Tomko as an individual. By using the service you accept them.",
+      sections: [
+        {
+          id: "service",
+          heading: "The service",
+          paragraphs: [
+            "Reporta collects public news sources, selects items for you and writes short summaries with links to the originals. Summaries and post drafts are generated by AI models and may contain mistakes; check the original before relying on them.",
+          ],
+        },
+        {
+          id: "account",
+          heading: "Your account",
+          paragraphs: [
+            "You sign in through Telegram. Keep your login link to yourself. You are responsible for what you do with drafts the service writes for you, including anything you publish to your social networks.",
+          ],
+        },
+        {
+          id: "paid",
+          heading: "Plans and payments",
+          paragraphs: [
+            "There is a free plan and paid plans. Payments, renewals, cancellations and refunds are handled by Lemon Squeezy as the merchant of record. A cancelled subscription stays active until the end of the paid period.",
+          ],
+        },
+        {
+          id: "use",
+          heading: "Acceptable use",
+          paragraphs: [
+            "Do not use the service to break the law, to abuse or overload it, or to access other readers' data. We may suspend accounts that do.",
+          ],
+        },
+        {
+          id: "content",
+          heading: "Content",
+          paragraphs: [
+            "Articles belong to their publishers; Reporta shows short summaries and links back. Your settings, pasted posts and drafts stay yours.",
+          ],
+        },
+        {
+          id: "liability",
+          heading: "No warranty",
+          paragraphs: [
+            "The service is provided as is, without guarantees of availability or accuracy. To the extent the law allows, we are not liable for losses arising from its use.",
+          ],
+        },
+        {
+          id: "changes",
+          heading: "Changes and contact",
+          paragraphs: [
+            "We may update these terms; the date above shows the latest version. You can stop using the service at any time. Contact: " +
+              CONTACT_LABEL +
+              " on Telegram.",
+          ],
+        },
+      ],
+    },
+  },
+  ru: {
+    privacy: {
+      title: "Политика конфиденциальности",
+      updated: "Обновлено 23 сентября 2026 г.",
+      intro:
+        "Reporta (news.tomko.io) — персональная лента новостей, её ведёт Игорь Томко как частное лицо. Здесь перечислено, что сервис хранит о тебе, зачем, кто это обрабатывает и как это удалить.",
+      sections: [
+        {
+          id: "collect",
+          heading: "Что мы храним",
+          paragraphs: [
+            "Аккаунт Telegram: числовой ID, имя пользователя, имя, язык интерфейса и описание профиля. Описание используется один раз — чтобы предложить темы при настройке.",
+            "Настройки: темы, источники, правила «следить» и «исключить», время чтения, часовой пояс, доставка и адрес Kindle, если ты его добавил.",
+            "Чтение: какие карточки тебе показаны, раскрыты, открыты по ссылке, скрыты или оценены. Нужно только для настройки твоего собственного отбора.",
+            "Подключённые соцсети: при подключении X, LinkedIn или Threads мы сохраняем только имя аккаунта, которое вернула сеть (например, @ник или имя). Токены доступа не храним и через API этих сетей не читаем, не храним и не публикуем твои посты.",
+            "Образцы текста: посты, которые ты вставил текстом, и посты публичного канала Telegram, блога или аккаунта X по добавленной тобой ссылке — из них собирается твой стиль для черновиков.",
+            "Подписка: тариф, статус, дата продления и ссылка на кабинет оплаты — приходят от Lemon Squeezy. Данные карты мы не видим никогда.",
+          ],
+        },
+        {
+          id: "use",
+          heading: "Зачем",
+          paragraphs: [
+            "Чтобы отобрать и написать твой выпуск, доставить его в Telegram и на Kindle, озвучить, если ты это включил, и писать черновики постов твоим голосом. Мы не продаём данные, не показываем рекламу и не обучаем на них модели.",
+          ],
+        },
+        {
+          id: "processors",
+          heading: "Кто обрабатывает",
+          paragraphs: [
+            "Хостинг — виртуальный сервер Hostinger. База — Supabase (PostgreSQL). Сообщения — Telegram. Доставка на Kindle — Resend. Оплата — Lemon Squeezy. Тексты пишет OpenAI-совместимый провайдер моделей: он получает новости и твои настройки подачи, но не твою личность в Telegram. Озвучка — Microsoft Edge TTS. Публичные посты X читаются через twitterapi.io.",
+          ],
+        },
+        {
+          id: "cookies",
+          heading: "Куки",
+          paragraphs: [
+            "Одна подписанная кука сессии держит вход 30 дней, и ещё одна живёт 10 минут, пока ты подключаешь соцсеть. Счётчиков аналитики и рекламы нет. Недавние поиски хранятся только в твоём браузере.",
+          ],
+        },
+        {
+          id: "delete",
+          heading: "Удаление данных",
+          paragraphs: [
+            "«Отключить» у соцсети в настройках сразу стирает имя её аккаунта. Чтобы удалить всё, что мы о тебе храним, напиши " +
+              CONTACT_LABEL +
+              " в Telegram с того аккаунта, которым входишь; данные удаляются в течение 30 дней. Если отозвать доступ Reporta в настройках X, LinkedIn или Threads, подключением больше нельзя воспользоваться сразу.",
+          ],
+        },
+        {
+          id: "contact",
+          heading: "Связь",
+          paragraphs: ["Вопросы о политике — " + CONTACT_LABEL + " в Telegram."],
+        },
+      ],
+    },
+    terms: {
+      title: "Условия использования",
+      updated: "Обновлено 23 сентября 2026 г.",
+      intro:
+        "Эти условия действуют для Reporta (news.tomko.io) — персональной ленты новостей, которую ведёт Игорь Томко как частное лицо. Пользуясь сервисом, ты их принимаешь.",
+      sections: [
+        {
+          id: "service",
+          heading: "Сервис",
+          paragraphs: [
+            "Reporta собирает публичные источники новостей, отбирает материалы под тебя и пишет короткие пересказы со ссылками на оригиналы. Пересказы и черновики постов пишут модели ИИ, и в них бывают ошибки: сверяйся с оригиналом, прежде чем на них опираться.",
+          ],
+        },
+        {
+          id: "account",
+          heading: "Аккаунт",
+          paragraphs: [
+            "Вход — через Telegram. Не передавай ссылку входа другим. За то, что ты делаешь с черновиками, включая публикацию в своих соцсетях, отвечаешь ты.",
+          ],
+        },
+        {
+          id: "paid",
+          heading: "Тарифы и оплата",
+          paragraphs: [
+            "Есть бесплатный тариф и платные. Оплату, продление, отмену и возвраты ведёт Lemon Squeezy как продавец. Отменённая подписка работает до конца оплаченного периода.",
+          ],
+        },
+        {
+          id: "use",
+          heading: "Допустимое использование",
+          paragraphs: [
+            "Нельзя использовать сервис для нарушения закона, перегружать его или пытаться получить данные других читателей. Такие аккаунты мы можем заблокировать.",
+          ],
+        },
+        {
+          id: "content",
+          heading: "Содержимое",
+          paragraphs: [
+            "Статьи принадлежат их издателям; Reporta показывает короткие пересказы и ссылки на оригинал. Твои настройки, вставленные посты и черновики остаются твоими.",
+          ],
+        },
+        {
+          id: "liability",
+          heading: "Без гарантий",
+          paragraphs: [
+            "Сервис предоставляется как есть, без гарантий доступности и точности. В пределах, которые допускает закон, мы не отвечаем за убытки от его использования.",
+          ],
+        },
+        {
+          id: "changes",
+          heading: "Изменения и связь",
+          paragraphs: [
+            "Условия могут меняться; дата вверху показывает последнюю версию. Перестать пользоваться сервисом можно в любой момент. Связь — " +
+              CONTACT_LABEL +
+              " в Telegram.",
+          ],
+        },
+      ],
+    },
+  },
+};

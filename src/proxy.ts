@@ -22,6 +22,8 @@ import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 // увидит редирект как успех доставки и больше не повторит.
 const PUBLIC = [
   "/login", "/auth", "/api/version", "/api/telegram", "/api/lemon", "/_next", "/favicon.ico", "/brand",
+  // Политику и условия читают до входа: ревьюеры Meta, и тот, кто решает, заводиться ли.
+  "/privacy", "/terms",
 ];
 
 export async function proxy(request: NextRequest) {
