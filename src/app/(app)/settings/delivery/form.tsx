@@ -13,6 +13,7 @@ import {
   saveKindlePeriod,
   saveKindleAddress,
   savePodcast,
+  saveTelegramDigest,
   saveTimezone,
   telegramBindLink,
 } from "@/lib/actions";
@@ -35,7 +36,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useT } from "@/components/i18n-provider";
@@ -116,6 +117,7 @@ function StepMark({ now, of, title, step }: { now: number; of: number; title: st
 export function DeliveryForm({
   connected,
   username,
+  telegramDigest,
   email,
   emailDigest,
   emailResult,
@@ -132,6 +134,8 @@ export function DeliveryForm({
   plan: Plan;
   connected: boolean;
   username: string | null;
+  /** Присылать ли выпуск в Telegram. */
+  telegramDigest: boolean;
   /** Подтверждённая почта: вход и направление доставки. */
   email: string | null;
   /** Присылать ли выпуск письмом. */
@@ -167,6 +171,7 @@ export function DeliveryForm({
   // значение уже после того, как родился, — Base UI говорит об этом
   // в консоль, а стоит за этим настоящая возможность разойтись с базой.
   const [podcastOn, setPodcastOn] = useState(podcast);
+  const [telegramOn, setTelegramOn] = useState(telegramDigest);
   const [zone, setZone] = useState(timezone);
   const [digestOn, setDigestOn] = useState(kindleDigest);
   // Управляемая, как и тумблер рядом: выбор перекидывается сразу, а при
@@ -295,32 +300,52 @@ export function DeliveryForm({
       <Card>
         <CardHeader>
           <CardTitle>Telegram</CardTitle>
-          <CardDescription>{t.settings.delivery.telegram.description}</CardDescription>
+          {/* Тумблер — у настроенного направления, как у почты и Kindle:
+              выключить выпуск можно, не отвязывая аккаунт, — привязка
+              ещё и вход, и канал для вопросов бота. */}
+          {connected ? (
+            <CardAction>
+              <Switch
+                aria-label={t.settings.delivery.telegram.digest}
+                checked={telegramOn}
+                disabled={pending}
+                onCheckedChange={(next: boolean) => {
+                  setTelegramOn(next);
+                  run(
+                    saveTelegramDigest(next),
+                    next ? t.settings.delivery.telegram.digestOn : t.settings.delivery.telegram.digestOff,
+                    undefined,
+                    () => setTelegramOn(!next),
+                  );
+                }}
+              />
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
           {connected ? (
-            <>
-              <p>{t.settings.delivery.telegram.connected(username)}</p>
-              {/* Сменить — та же ссылка привязки: новый аккаунт встаёт поверх
-                  прежнего. Отвязать — только при почте, иначе у профиля
-                  не остаётся входа; кнопка гаснет по тому же правилу, что
-                  и «Убрать почту». */}
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() =>
-                    startTransition(async () => {
-                      const result = await telegramBindLink();
-                      if ("error" in result) return void toast.error(result.error);
-                      window.location.href = result.url;
-                    })
-                  }
-                  className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
-                >
-                  {t.settings.delivery.telegram.change}
-                </button>
-                {email ? (
+            // Сменить — та же ссылка привязки: новый аккаунт встаёт поверх
+            // прежнего. Отвязать — только при почте, иначе у профиля
+            // не остаётся входа; правило то же, что у «Убрать почту».
+            <p>
+              {t.settings.delivery.telegram.connected(username)}{" "}
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const result = await telegramBindLink();
+                    if ("error" in result) return void toast.error(result.error);
+                    window.location.href = result.url;
+                  })
+                }
+                className="cursor-pointer underline underline-offset-4 hover:text-foreground"
+              >
+                {t.settings.delivery.telegram.change}
+              </button>
+              {email ? (
+                <>
+                  {" · "}
                   <button
                     type="button"
                     disabled={pending}
@@ -331,14 +356,13 @@ export function DeliveryForm({
                         else toast.success(t.settings.delivery.telegram.removed);
                       })
                     }
-                    className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
+                    className="cursor-pointer underline underline-offset-4 hover:text-foreground"
                   >
                     {t.settings.delivery.telegram.remove}
                   </button>
-                ) : null}
-              </div>
-              <p>{t.settings.delivery.telegram.changeHint}</p>
-            </>
+                </>
+              ) : null}
+            </p>
           ) : (
             <>
               {/* Ссылка собирается по нажатию, а не при показе: в ней
@@ -383,6 +407,19 @@ export function DeliveryForm({
           <CardDescription>
             {step === "done" ? k.descriptionDone : k.descriptionSetup}
           </CardDescription>
+          {step === "done" ? (
+            <CardAction>
+              <Switch
+                aria-label={k.sendToKindle}
+                checked={digestOn}
+                disabled={pending || locked}
+                onCheckedChange={(next: boolean) => {
+                  setDigestOn(next);
+                  run(saveKindleDigest(next), k.saved, undefined, () => setDigestOn(!next));
+                }}
+              />
+            </CardAction>
+          ) : null}
         </CardHeader>
 
         <CardContent className="flex flex-col gap-4">
@@ -474,36 +511,16 @@ export function DeliveryForm({
                   </span>
                 </div>
 
-                {/* Сохраняется сам, как тумблер подкаста выше: два тумблера
-                    на одном экране, один по кнопке, другой без, читались бы
-                    как «этот сохранился, а тот, наверное, нет». */}
-                {/* Перенос обязателен: на узком экране выбор частоты
-                    не помещается рядом с подписью тумблера и уезжает
-                    за край — кнопка «По субботам» становится «По субб».
-                    Переносится именно она, а не подпись: тумблер со своим
-                    текстом — одна вещь, и разрывать их нечем. */}
+                {/* Тумблер — в шапке карточки, как у Telegram и почты. Здесь
+                    только то, что от него зависит: частота — при включённом,
+                    выбор, как часто присылать то, что не присылается,
+                    предлагал бы настроить несуществующее. Переносится
+                    выбор, а не подпись: на узком экране «По субботам»
+                    иначе становится «По субб». */}
                 <Field orientation="horizontal" className="flex-wrap">
-                  <Switch
-                    id="kindle_digest"
-                    checked={digestOn}
-                    disabled={pending || locked}
-                    onCheckedChange={(next: boolean) => {
-                      setDigestOn(next);
-                      run(saveKindleDigest(next), k.saved, undefined, () => setDigestOn(!next));
-                    }}
-                  />
                   <FieldContent>
-                    <FieldLabel htmlFor="kindle_digest">
-                      {k.sendToKindle}
-                    </FieldLabel>
                     <FieldDescription>{k.sendToKindleHint(digestOn, period)}</FieldDescription>
                   </FieldContent>
-                  {/* Частота — рядом с тумблером, и только при включённом:
-                      выбор, как часто присылать то, что не присылается,
-                      предлагал бы настроить несуществующее. Сохраняется сам,
-                      как и тумблер: две соседние настройки, одна по кнопке,
-                      другая без, читались бы как «эта сохранилась, а та,
-                      наверное, нет». */}
                   {digestOn ? (
                     <ToggleGroup
                       aria-label={k.periodLabel}
@@ -585,6 +602,8 @@ function EmailCard({
   const [editing, setEditing] = useState(!email);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  // Последний набранный адрес: «Изменить» после отправки возвращает его в поле.
+  const [typed, setTyped] = useState("");
 
   // Ответ подтверждения — один раз, при приходе со ссылки.
   const told = useRef(false);
@@ -595,42 +614,46 @@ function EmailCard({
     else toast.error(result === "taken" ? e.confirmTaken : e.confirmExpired);
   }, [result, e]);
 
+  // Ссылка-действие в строке текста: «Сменить адрес» стоит рядом с тем,
+  // что меняет, а не отдельной строкой под ним.
+  const link = "cursor-pointer underline underline-offset-4 hover:text-foreground";
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>{e.title}</CardTitle>
-        <CardDescription>{e.description}</CardDescription>
+        {/* Тумблер — у настроенного направления: до подтверждения адреса
+            включать нечего, и на его месте стоит настройка ниже. */}
+        {email ? (
+          <CardAction>
+            <Switch
+              aria-label={e.digest}
+              checked={on}
+              disabled={pending}
+              onCheckedChange={(next: boolean) => {
+                setOn(next);
+                startTransition(async () => {
+                  const saved = await saveEmailDigest(next);
+                  if ("error" in saved && saved.error) {
+                    setOn(!next);
+                    toast.error(saved.error);
+                  } else toast.success(next ? e.digestOn : e.digestOff);
+                });
+              }}
+            />
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm text-muted-foreground">
-        {email ? (
-          <>
-            <p>{e.address(email)}</p>
-            <Field orientation="horizontal">
-              <Switch
-                id="email_digest"
-                checked={on}
-                disabled={pending}
-                onCheckedChange={(next: boolean) => {
-                  setOn(next);
-                  startTransition(async () => {
-                    const saved = await saveEmailDigest(next);
-                    if ("error" in saved && saved.error) {
-                      setOn(!next);
-                      toast.error(saved.error);
-                    } else toast.success(next ? e.digestOn : e.digestOff);
-                  });
-                }}
-              />
-              <FieldContent>
-                <FieldLabel htmlFor="email_digest" className="text-foreground">{e.digest}</FieldLabel>
-                <FieldDescription>{e.digestHint}</FieldDescription>
-              </FieldContent>
-            </Field>
-          </>
-        ) : null}
-
         {sentTo ? (
-          <p role="status">{e.sent(sentTo)}</p>
+          // Ошибся в адресе — узнаёт об этом здесь, глядя на него. «Изменить»
+          // возвращает поле с тем же набранным, а не пустое.
+          <p role="status">
+            {e.sent(sentTo)}{" "}
+            <button type="button" className={link} onClick={() => { setSentTo(null); setEditing(true); }}>
+              {e.edit}
+            </button>
+          </p>
         ) : editing ? (
           <form
             action={(fd) =>
@@ -639,6 +662,7 @@ function EmailCard({
                 const sent = await requestEmailConfirm(address);
                 if ("error" in sent) return void setError(sent.error);
                 setError(null);
+                setTyped(address.trim());
                 setSentTo(address.trim());
               })
             }
@@ -652,6 +676,7 @@ function EmailCard({
                   type="email"
                   required
                   autoComplete="email"
+                  defaultValue={typed}
                   placeholder={e.placeholder}
                   aria-invalid={error ? true : undefined}
                   className="max-w-xs"
@@ -670,33 +695,33 @@ function EmailCard({
               </div>
             </FieldGroup>
           </form>
-        ) : (
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
-            >
+        ) : email ? (
+          <p>
+            {e.address(email)}{" "}
+            <button type="button" className={link} onClick={() => setEditing(true)}>
               {e.change}
             </button>
             {canRemove ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  startTransition(async () => {
-                    const dropped = await dropEmail();
-                    if ("error" in dropped) toast.error(dropped.error);
-                    else toast.success(e.removed);
-                  })
-                }
-                className="cursor-pointer text-sm underline underline-offset-4 hover:text-foreground"
-              >
-                {e.remove}
-              </button>
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  disabled={pending}
+                  className={link}
+                  onClick={() =>
+                    startTransition(async () => {
+                      const dropped = await dropEmail();
+                      if ("error" in dropped) toast.error(dropped.error);
+                      else toast.success(e.removed);
+                    })
+                  }
+                >
+                  {e.remove}
+                </button>
+              </>
             ) : null}
-          </div>
-        )}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

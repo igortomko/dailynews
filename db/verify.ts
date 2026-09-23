@@ -2735,6 +2735,13 @@ async function main() {
       assert.equal(tgReader.email_digest, false);
       assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 400, "tg_first"), "taken", "чужой Telegram отобран");
       assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "ok");
+      // Выпуск в Telegram выключается без отвязки: привязка остаётся входом.
+      assert.equal((await readers.getReader(byMail.id))!.telegram_digest, true, "новой привязке выпуск не включён");
+      await readers.setTelegramDigest(byMail.id, false);
+      const quiet = (await readers.getReader(byMail.id))!;
+      assert.equal(quiet.telegram_digest, false);
+      assert.equal(quiet.telegram_id, String(BIG_TELEGRAM_ID + 401), "выключение выпуска отвязало Telegram");
+      await readers.setTelegramDigest(byMail.id, true);
       assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 401, "mine"), "same");
       assert.equal(await readers.attachTelegram(byMail.id, BIG_TELEGRAM_ID + 402, "other"), "changed", "смена аккаунта");
       const attached = (await readers.getReader(byMail.id))!;
