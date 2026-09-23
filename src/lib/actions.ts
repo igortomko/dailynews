@@ -18,7 +18,7 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, deleteReader, detachTelegram, digestProgress, removeEmail, setEmailDigest, freezeKindleSender, getChannels,
+  addReaderSource, deleteReader, detachTelegram, digestProgress, removeEmail, setEmailDigest, setTelegramDigest, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelLanguage, setChannelPublishes,
   saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
@@ -128,6 +128,13 @@ export async function saveEmailDigest(on: boolean) {
   const reader = await currentReader();
   if (on && !reader.email) return { error: dictOf(reader.ui_language).settings.delivery.email.noAddress };
   await setEmailDigest(reader.id, on);
+  return { ok: true as const };
+}
+
+export async function saveTelegramDigest(on: boolean) {
+  const reader = await currentReader();
+  if (on && !reader.telegram_id) return { error: dictOf(reader.ui_language).settings.delivery.telegram.noAccount };
+  await setTelegramDigest(reader.id, on);
   return { ok: true as const };
 }
 

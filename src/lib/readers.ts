@@ -40,7 +40,7 @@ const COLUMNS = sql`
   paused_at, sleep_asked_at, resume_at, upsell_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
   voice_card, voice_built_at, voice_sample, voice_skill, voice_enabled,
-  follow_rules, exclude_rules, source, email, email_digest, entered_via
+  follow_rules, exclude_rules, source, email, email_digest, telegram_digest, entered_via
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -354,6 +354,10 @@ export async function confirmEmail(readerId: number, email: string): Promise<"ok
     if ((error as { code?: string }).code === "23505") return "taken";
     throw error;
   }
+}
+
+export async function setTelegramDigest(readerId: number, on: boolean): Promise<void> {
+  await sql`update dailynews.readers set telegram_digest = ${on}, updated_at = now() where id = ${readerId}`;
 }
 
 export async function setEmailDigest(readerId: number, on: boolean): Promise<void> {

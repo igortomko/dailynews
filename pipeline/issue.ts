@@ -438,7 +438,7 @@ async function deliver(
   const appUrl = process.env.APP_URL?.trim();
   if (!appUrl) {
     log("  APP_URL не задан — уведомления пропущены, выпуски сохранены");
-  } else if (!reader.telegram_id && !(reader.email && reader.email_digest)) {
+  } else if (!(reader.telegram_id && reader.telegram_digest) && !(reader.email && reader.email_digest)) {
     // Молчаливый пропуск здесь неотличим от доставки: выпуск в базе есть,
     // ошибок нет, а читатель о нём не знает.
     log(`  ${name}: ни Telegram, ни письма — уведомление пропущено`);
@@ -528,7 +528,7 @@ async function deliver(
     // Направления независимы: заблокированный бот не должен стоить письма,
     // а отказ почты — сообщения в Telegram.
     let delivered = false;
-    if (reader.telegram_id) {
+    if (reader.telegram_id && reader.telegram_digest) {
       try {
         await notify(
           Number(reader.telegram_id), day, headlines, appUrl,

@@ -164,6 +164,8 @@ export type Reader = {
   email: string | null;
   /** Присылать ли выпуск письмом. Отдельно от адреса: адрес — ещё и вход. */
   email_digest: boolean;
+  /** Присылать ли выпуск в Telegram. Отдельно от привязки: она ещё и вход. */
+  telegram_digest: boolean;
   /** Каким путём пришёл: `telegram`, `email` или `google`. Не меняется. */
   entered_via: string;
   owner: boolean;

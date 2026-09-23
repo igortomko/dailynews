@@ -22,6 +22,7 @@ export default async function DeliveryPage({
       username={reader.username}
       email={reader.email}
       emailDigest={reader.email_digest}
+      telegramDigest={reader.telegram_digest}
       emailResult={emailResult}
       kindleAddress={reader.kindle_address ?? ""}
       kindleDigest={reader.kindle_digest}
