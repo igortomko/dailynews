@@ -2847,6 +2847,7 @@ assert.ok(
 );
 const ended = readEvent(paddleEvent({ event_type: "subscription.canceled" }, { status: "canceled" }) as never);
 assert.ok(ended.ok && ended.update.plan === "free", "закончившаяся подписка сбрасывает тариф");
+assert.ok(ended.ok && ended.update.pricePlan === "pro", "а воронка отмены помнит, с какого тарифа ушли");
 
 {
   // Деньги для воронки: нулевая транзакция — начало триала, а не платёж.

@@ -252,6 +252,8 @@ export type SubscriptionUpdate = {
   /** Когда событие случилось у Paddle: по нему отсекается опоздавшее старое. */
   occurredAt: string;
   cycle: Cycle;
+  /** Тариф цены — и у закончившейся подписки: воронке отмены важно, с чего ушли. */
+  pricePlan: PlanId;
 };
 
 type PaddlePayload = {
@@ -313,6 +315,7 @@ export function readEvent(payload: PaddlePayload):
       subscriptionId: String(data.id ?? ""),
       occurredAt: payload.occurred_at ?? new Date().toISOString(),
       cycle,
+      pricePlan: plan.id,
     },
   };
 }
