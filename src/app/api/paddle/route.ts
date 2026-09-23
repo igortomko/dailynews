@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { readEvent, readMoney, signatureValid } from "@/lib/billing";
 import { recordBillingEvent } from "@/lib/analytics/billing-events";
+import { applySubscription } from "@/lib/plan-change";
 
 /**
  * Вебхук Paddle: единственный путь, которым тариф меняется.
@@ -90,24 +91,11 @@ export async function POST(request: Request) {
     });
   }
 
-  // Условие на время события — защита от доставки не по порядку: старое
-  // событие, пришедшее после нового, не перезаписывает то, что уже стало.
-  // Повтор того же события проходит (<=) и записывает то же самое.
-  const updated = await sql<{ id: number }[]>`
-    update dailynews.readers
-       set plan = ${update.plan},
-           subscription_id = ${update.subscriptionId || null},
-           subscription_status = ${update.status || null},
-           plan_renews_at = ${update.renewsAt},
-           plan_ends_at = ${update.endsAt},
-           subscription_event_at = ${update.occurredAt},
-           updated_at = now()
-     where id = ${readerId}
-       and (subscription_event_at is null or subscription_event_at <= ${update.occurredAt}::timestamptz)
-    returning id
-  `;
+  // Запись — та же, что у смены тарифа из «Подписки» (`applySubscription`):
+  // событие старше применённого её не перезаписывает.
+  const applied = await applySubscription(readerId, update);
 
-  if (updated.length === 0) {
+  if (!applied) {
     console.error(`paddle: читатель ${readerId} не найден или событие старше применённого — пропущено`);
     return NextResponse.json({ skipped: "нет читателя или событие устарело" });
   }

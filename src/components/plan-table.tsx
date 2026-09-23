@@ -8,6 +8,7 @@ import Link from "next/link";
 import { checkoutUrl, endingAt, trialDaysFor, yearlyReady, type Cycle } from "@/lib/billing";
 import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
+import { changePlanAction } from "@/lib/actions";
 import { currentLocale, getDict } from "@/lib/i18n/server";
 import { featureWhat, type Dict } from "@/lib/i18n";
 
@@ -187,16 +188,27 @@ export function PlanCards({
           // расходящийся с настоящим. Ссылка портала одноразовая, поэтому
           // кнопка ведёт на наш адрес, который выдаёт свежую на нажатие.
           const portal = reader?.subscription_id ? "/api/billing/portal" : null;
+          // Уже платит — любой переход правит ту же подписку (`changePlan`):
+          // новое окно оплаты завело бы вторую, и списывались бы обе.
+          const live = !guest && ["active", "trialing", "past_due"].includes(reader.subscription_status ?? "");
+          const ending = live && endingAt(reader) !== null;
           // Состояние кнопки считается до разметки и именем: три вложенных
-          // тернарника в JSX читаются только целиком, а состояний тут пять
-          // и следующий тариф добавит шестое.
-          const action: "start" | "manage" | "here" | "buy" | "unpaid" | "down" | "below" = guest
+          // тернарника в JSX читаются только целиком, а состояний тут семь.
+          const action: "start" | "manage" | "resume" | "here" | "switch" | "buy" | "unpaid" | "below" = guest
             ? plan.price > 0 ? "buy" : "start"
             : mine
-            ? portal ? "manage" : "here"
+            ? ending ? "resume" : portal ? "manage" : "here"
+            : live
+              ? "switch"
+              : plan.price > current.price
+                ? buy ? "buy" : "unpaid"
+                : "below";
+          // Что случится с деньгами — строкой под кнопкой смены, до нажатия.
+          const switchNote = !live || mine ? null
+            : plan.price <= 0 ? t.plans.table.toFreeNote
             : plan.price > current.price
-              ? buy ? "buy" : "unpaid"
-              : portal ? "down" : "below";
+              ? reader.subscription_status === "trialing" ? t.plans.table.upgradeTrialNote : t.plans.table.upgradeNote
+              : t.plans.table.downgradeNote;
 
           return (
             <div
@@ -322,18 +334,19 @@ export function PlanCards({
                     {t.plans.table.checkoutNotReady}
                   </TooltipContent>
                 </Tooltip>
-              ) : action === "down" ? (
-                // Понижение — тоже переход, и вести ему есть куда: смену
-                // тарифа принимает тот же портал. «Ниже твоего» сообщало
-                // только, что кнопка не работает, и уйти с Pro было нечем.
-                <div className="mt-auto flex flex-col gap-1.5">
-                  <Button size="sm" variant="outline" render={<a href={portal!} />}>
-                    {t.plans.moveTo(label)}
+              ) : action === "switch" || action === "resume" ? (
+                // Форма, а не ссылка: смена тарифа — действие на сервере
+                // над подпиской этого читателя, номер подписки из формы не берётся.
+                <form action={changePlanAction} className="mt-auto flex flex-col gap-1.5">
+                  <input type="hidden" name="plan" value={id} />
+                  <input type="hidden" name="cycle" value={cycle} />
+                  <Button type="submit" size="sm" variant={action === "resume" || plan.price > current!.price ? "default" : "outline"}>
+                    {action === "resume" ? t.plans.table.resume : t.plans.moveTo(label)}
                   </Button>
-                  <span className="text-center text-[11px] leading-tight text-muted-foreground">
-                    {t.plans.table.changesAfterPeriod}
-                  </span>
-                </div>
+                  {switchNote ? (
+                    <span className="text-center text-[11px] leading-tight text-muted-foreground">{switchNote}</span>
+                  ) : null}
+                </form>
               ) : (
                 <Button size="sm" variant="outline" className="mt-auto" disabled>
                   {t.plans.table.belowYours}

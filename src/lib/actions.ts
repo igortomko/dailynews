@@ -34,10 +34,10 @@ import { KINDLE_PERIODS, type KindlePeriod, type Reader, type Source } from "./t
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
 import {
   allows, cheapestFor, cheapestWith, FEATURES, kindDenial, MIN_READING_MINUTES, minutesCap,
-  READING_MINUTES, sourcesForPlan, targetMinutes, type FeatureId, type Gated,
+  PLAN_IDS, READING_MINUTES, sourcesForPlan, targetMinutes, type FeatureId, type Gated, type PlanId,
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
-import { effectivePlan, effectiveVoice } from "./billing";
+import { cycleOf, effectivePlan, effectiveVoice } from "./billing";
 import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
 import { isTimezone } from "./issue-time";
@@ -1556,4 +1556,21 @@ export async function countRuleHits(kind: RuleKind, raw: unknown): Promise<numbe
   if ("error" in clean) return null;
   const pool = await mentionPool(readerId);
   return pool.length === 0 ? null : countHits(clean.rules, pool);
+}
+
+/**
+ * Смена тарифа из «Подписки» у того, кто уже платит: повышение, понижение,
+ * переход на бесплатный (отмена с конца периода) и возобновление.
+ * Номер подписки берётся у вошедшего читателя, а не из формы.
+ */
+export async function changePlanAction(formData: FormData) {
+  const reader = await currentReader();
+  const target = String(formData.get("plan") ?? "");
+  if (!(PLAN_IDS as readonly string[]).includes(target)) return;
+  const { changePlan } = await import("./plan-change");
+  const result = await changePlan(reader, target as PlanId, cycleOf(formData.get("cycle"))).catch(
+    (error: Error) => ({ ok: false as const, why: error.message }),
+  );
+  if (!result.ok) console.error(`paddle: смена тарифа читателя ${reader.id} на ${target} — ${result.why}`);
+  revalidatePath("/settings/subscription");
 }
