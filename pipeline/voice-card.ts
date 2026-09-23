@@ -26,7 +26,7 @@ import type { RawItem, Source } from "../src/lib/types";
 import { NETWORKS, type NetworkId } from "../src/lib/networks";
 import { complexityAt, hasStyle, STYLE_LIMIT, styleOf, type Voice } from "../src/lib/voice";
 import { fetchRss, fetchTelegramFeed, fetchX } from "./fetch";
-import { firstSet, resolve, type Usage } from "./digest";
+import { firstSet, resolve, thinkingControl, type Usage } from "./digest";
 
 export type OwnPost = {
   text: string;
@@ -427,9 +427,10 @@ ${text}
       // не увидит, и ответ приходил пустым (урок дайджеста, 32 000 на двадцать
       // описаний).
       max_tokens: 12_000,
-      ...(firstSet(process.env.LLM_REASONING_EFFORT)
-        ? { reasoning_effort: firstSet(process.env.LLM_REASONING_EFFORT) }
-        : {}),
+      // Как просить «не рассуждай», решает провайдер: MiMo `reasoning_effort`
+      // принимает молча и думает дальше, и рассуждение съедало потолок —
+      // черновик приходил пустым (обрыв: length), а счёт рос невидимо.
+      ...thinkingControl(baseUrl, firstSet(process.env.LLM_REASONING_EFFORT) ?? ""),
       response_format: { type: "json_object" },
       messages: [{ role: "user", content: prompt }],
     }),

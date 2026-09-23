@@ -7,6 +7,10 @@ import { draftStyle } from "../../../../pipeline/voice-card";
 import { takesBlock, writePost } from "../../../../pipeline/post";
 import { languagesOf, publishedIn, tabsOf } from "@/lib/networks";
 import { sql } from "@/lib/db";
+import { ru } from "@/lib/i18n/ru";
+
+// Пост-бот отвечает одному владельцу и по-русски, как и все его строки.
+const LEVER_NAMES = ru.onboarding.opinionDialog.levers;
 
 /**
  * Второй бот: сюда владелец бросает материал, отсюда получает черновики
@@ -165,8 +169,14 @@ async function reply(incoming: Incoming): Promise<void> {
       const over = draft.over ? "\n\n⚠️ Длиннее лимита сети" : "";
       await send(
         incoming.chatId,
-        `<b>${escapeHtml(draft.network)} · вариант ${draft.variant}</b>\n\n` +
+        `<b>${escapeHtml(draft.network)} · вариант ${draft.variant}${draft.lever ? ` · ${LEVER_NAMES[draft.lever]}` : ""}</b>\n\n` +
           `${escapeHtml(draft.text)}${warning}${over}`,
+      );
+    }
+    if (written.about.length) {
+      await send(
+        incoming.chatId,
+        `⚠️ Сказано о тебе — это правда? Если нет, убери:\n${written.about.map((line) => `— ${escapeHtml(line)}`).join("\n")}`,
       );
     }
     if (fallback) {
