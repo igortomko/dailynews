@@ -48,6 +48,8 @@ export function checkSecret(header: string | null, envName = "TELEGRAM_WEBHOOK_S
 export type BotCommand =
   | { kind: "start"; telegramId: number; chatId: number; username: string | null; locale: Locale; source: string | null }
   | { kind: "help"; chatId: number }
+  /** `/start a_…` со страницы «Доставки»: привязать этот Telegram к профилю, пришедшему по почте. */
+  | { kind: "attach"; telegramId: number; chatId: number; username: string | null; payload: string }
   /** Присланная ссылка: бот заводит по ней источник, как форма в вебе. */
   | { kind: "link"; telegramId: number; chatId: number; text: string; locale: Locale }
   /** Ответ на «дочитал?»: единственный сигнал о том, что уехало на читалку. */
@@ -170,6 +172,10 @@ export function parseUpdate(update: unknown): BotCommand {
   const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
   if (command === "/start") {
     const username = typeof message.from?.username === "string" ? message.from.username : null;
+    const payload = text.split(/\s+/)[1] ?? "";
+    // Привязка, а не вход: строку читателя заводить нельзя, иначе этот
+    // Telegram стал бы отдельным профилем раньше, чем его привяжут.
+    if (payload.startsWith("a_")) return { kind: "attach", telegramId, chatId, username, payload };
     return {
       kind: "start", telegramId, chatId, username,
       locale: localeFromTelegram(message.from?.language_code),
@@ -399,7 +405,8 @@ export async function sendRichMessage(
 export async function sendAudio(
   chatId: number,
   audio: Buffer | string,
-  meta: { title: string; url: string; duration?: number },
+  /** `silent` — служебная заливка ради file_id: сообщение сразу удаляется, звенеть незачем. */
+  meta: { title: string; url: string; duration?: number; silent?: boolean },
 ): Promise<{ fileId: string; messageId: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
@@ -426,6 +433,7 @@ export async function sendAudio(
     parse_mode: "HTML",
   };
   if (meta.duration) fields.duration = String(Math.round(meta.duration));
+  if (meta.silent) fields.disable_notification = "true";
 
   if (typeof audio === "string") {
     // Обложки здесь нет намеренно: `thumbnail` переживает заливку вместе
@@ -499,6 +507,19 @@ export async function deleteMessage(chatId: number, messageId: number): Promise<
  * разметку.
  */
 const escapeAttr = (s: string) => escapeHtml(s).replace(/"/g, "&quot;");
+
+/**
+ * Предел части: Bot API отдаёт скачиванием файлы до 20 МБ, и больший
+ * файл лежал бы в Telegram, но играть его было бы нечем.
+ */
+export const PODCAST_PART_BYTES = 19 * 1024 * 1024;
+
+/** Режет запись на части по байтам: склеенные обратно встык, они тот же файл. */
+export function podcastParts(audio: Buffer, size = PODCAST_PART_BYTES): Buffer[] {
+  const parts: Buffer[] = [];
+  for (let at = 0; at < audio.length; at += size) parts.push(audio.subarray(at, at + size));
+  return parts;
+}
 
 /**
  * Откуда скачать уже отправленное.

@@ -43,7 +43,12 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
 import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt, trialDaysFor,
 } from "../src/lib/lemon";
-import { appOrigin } from "../src/lib/auth";
+import {
+  appOrigin, issueBindPayload, issueConfirmToken, issueEmailToken, unsubscribeToken,
+  verifyBindPayload, verifyConfirmToken, verifyEmailToken, verifyUnsubscribeToken,
+} from "../src/lib/auth";
+import { digestEmail, looksLikeEmail, normalizeEmail } from "../src/lib/email";
+import { emailFromIdToken } from "../src/lib/google";
 import * as bus from "../src/lib/audio-bus";
 import {
   applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
@@ -71,7 +76,7 @@ import { parseFeed, stripHtml } from "./fetch";
 import { articleHtml, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
-  botUpsellLine, channelHandle, founderBotLine, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate,
+  botUpsellLine, channelHandle, founderBotLine, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate, podcastParts,
   splitClassic, stamp, SUBSCRIBED_PREFIX, verdictOf,
 } from "../src/lib/telegram";
 import { pickSurvivors, type Candidate } from "./select";
@@ -3237,6 +3242,12 @@ assert.deepEqual(
     parsed.drafts.find((draft) => draft.network === "telegram" && draft.variant === 2)?.lever, undefined,
     "незнакомый ключ — не рычаг: отчёт не заведёт по нему строку",
   );
+  const told = parseDrafts(
+    JSON.stringify({ x: ["а"], about: ["у меня нет живого CLI", "", "я закладывал буфер"] }),
+    item, [NETWORKS.x],
+  );
+  assert.deepEqual(told.about, ["у меня нет живого CLI", "я закладывал буфер"], "сказанное об авторе доезжает до окна");
+  assert.deepEqual(parseDrafts(JSON.stringify({ x: ["а"] }), item, [NETWORKS.x]).about, [], "нет поля — нет и тревоги");
   const card = cardFromVoice({ language: "русском", complexity: 3, style: "нейтральный" });
   assert.ok(!cardBlock(card).includes(CORPUS_FRAME[0]), "у запасной карточки не на чем стоять и корпусу");
   assert.ok(
@@ -5318,5 +5329,87 @@ assert.equal(
   // Драйвер отдаёт timestamptz объектом Date, а не строкой.
   assert.ok(!pollNow({ kind: "x", last_ok_at: new Date("2026-09-23T11:00:00Z") as unknown as string }, now));
 }
+
+// Вход по почте. Токен несёт адрес внутри подписи: подменённый адрес
+// с чужой подписью не проходит, а точки в адресе не ломают разбор.
+// Асинхронно (подпись — Web Crypto), а файл собирается в cjs без
+// top-level await: провал ставит код выхода сам.
+void (async () => {
+  process.env.APP_SECRET ||= "selftest-secret-0123456789";
+  const token = await issueEmailToken("first.last@mail.example.com");
+  assert.equal(await verifyEmailToken(token), "first.last@mail.example.com");
+  const [, ...rest] = token.split(".");
+  const forged = [Buffer.from("victim@example.com").toString("base64url"), ...rest].join(".");
+  assert.equal(await verifyEmailToken(forged), null, "чужой адрес под своей подписью");
+  assert.equal(await verifyEmailToken(null), null);
+  assert.equal(await verifyEmailToken("a.b.c"), null);
+
+  assert.equal(normalizeEmail("  Igor@Gmail.COM "), "igor@gmail.com");
+  assert.ok(looksLikeEmail("a@b.co"));
+  assert.ok(!looksLikeEmail("a@b") && !looksLikeEmail("a b@c.d") && !looksLikeEmail(""));
+
+  // id_token Google: годится только подтверждённый адрес нашего клиента.
+  const jwt = (claims: object) => `h.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.s`;
+  const good = { aud: "cid", iss: "https://accounts.google.com", email: "a@b.co", email_verified: true, exp: Date.now() / 1000 + 60 };
+  assert.equal(emailFromIdToken(jwt(good), "cid"), "a@b.co");
+  assert.equal(emailFromIdToken(jwt({ ...good, email_verified: false }), "cid"), null, "неподтверждённый адрес");
+  assert.equal(emailFromIdToken(jwt({ ...good, email_verified: "true" }), "cid"), null, "строка вместо булева");
+  assert.equal(emailFromIdToken(jwt({ ...good, aud: "other" }), "cid"), null, "чужой клиент");
+  assert.equal(emailFromIdToken(jwt({ ...good, iss: "https://evil.example" }), "cid"), null);
+  assert.equal(emailFromIdToken(jwt({ ...good, exp: 1 }), "cid"), null, "истёкший");
+  assert.equal(emailFromIdToken("garbage", "cid"), null);
+
+  // Письмо с выпуском: тот же список, что в Telegram, текст без разметки.
+  const mail = digestEmail({
+    day: "2026-09-23", appUrl: "https://news.example", size: "~12 минут", picked: null, upsell: null,
+    headlines: [{ id: 7, title: "R&D <растёт>", topic: "ИИ", at: null }],
+    unsubscribe: "https://news.example/api/unsubscribe?token=1.x",
+  });
+  assert.equal(mail.headers["List-Unsubscribe"], "<https://news.example/api/unsubscribe?token=1.x>");
+  assert.equal(mail.headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+  assert.ok(!mail.html.includes("Слушать"), "без записи ссылки «Слушать» нет");
+  const withAudio = digestEmail({
+    day: "2026-09-23", appUrl: "https://news.example", size: "~12 минут", picked: null, upsell: null,
+    headlines: [], unsubscribe: "u", listen: "https://news.example/api/audio/day?day=2026-09-23",
+  });
+  assert.ok(withAudio.html.includes("/api/audio/day?day=2026-09-23") && withAudio.text.includes("Слушать:"));
+
+  // Привязка Telegram: нагрузка /start укладывается в 64 знака Telegram,
+  // чужой номер под своей подписью не проходит.
+  const bind = await issueBindPayload(123456789);
+  assert.ok(bind.length <= 64 && /^[A-Za-z0-9_-]+$/.test(bind), `нагрузка /start: ${bind}`);
+  assert.equal(await verifyBindPayload(bind), 123456789);
+  const [, , ...tail] = bind.split("_");
+  assert.equal(await verifyBindPayload(`a_${(5).toString(36)}_${tail.join("_")}`), null, "чужой номер");
+  assert.equal(await verifyBindPayload("a_1_2_x"), null);
+  assert.equal(await verifyBindPayload(undefined), null);
+  const attach = parseUpdate({
+    message: { text: `/start ${bind}`, chat: { id: 5, type: "private" }, from: { id: 5, username: "u" } },
+  });
+  assert.equal(attach.kind, "attach", "/start a_… — привязка, а не вход");
+
+  // Подтверждение почты несёт и профиль, и адрес внутри подписи.
+  const confirm = await issueConfirmToken(42, "new@mail.example");
+  assert.deepEqual(await verifyConfirmToken(confirm), { readerId: 42, email: "new@mail.example" });
+  assert.equal(await verifyConfirmToken(confirm.replace(/^42\./, "43.")), null, "чужой профиль");
+
+  // Отписка бессрочная и подписана номером.
+  const unsub = await unsubscribeToken(42);
+  assert.equal(await verifyUnsubscribeToken(unsub), 42);
+  assert.equal(await verifyUnsubscribeToken(unsub.replace(/^42\./, "43.")), null);
+
+  // Подкаст режется по 19 МБ и склеивается обратно тем же файлом.
+  const audio = Buffer.alloc(45, 7);
+  const parts = podcastParts(audio, 20);
+  assert.deepEqual(parts.map((part) => part.length), [20, 20, 5]);
+  assert.ok(Buffer.concat(parts).equals(audio));
+  assert.ok(mail.subject.startsWith("Выпуск за") && !mail.subject.includes("<"));
+  assert.ok(mail.html.includes("https://news.example/?day=2026-09-23#item-7"), "заголовок ведёт на карточку");
+  assert.ok(mail.text.includes("R&D <растёт>") && !mail.text.includes("&amp;"), "сущности раскрыты в тексте");
+  assert.ok(!mail.html.includes("<audio"), "у письма нет блока аудио");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

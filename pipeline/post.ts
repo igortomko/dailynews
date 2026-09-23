@@ -18,7 +18,7 @@ import { budgetedFetch } from "./model-budget";
  */
 import type { Axes } from "../src/lib/types";
 import { NETWORKS, overLimit, postLength, type Network, type NetworkId } from "../src/lib/networks";
-import { firstSet, resolve, type Usage } from "./digest";
+import { firstSet, resolve, thinkingControl, type Usage } from "./digest";
 import { cleanStyle } from "./voice-card";
 import { isLever, LEVERS, weakSpots, type LeverId, type WeakSpot } from "../src/lib/post-levers";
 
@@ -57,6 +57,13 @@ export type PostResult = {
   hook: string;
   /** Что модель добавила от себя — по её же признанию. */
   added: string[];
+  /**
+   * Что черновик говорит о самом авторе: его дела, привычки, планы,
+   * прошлое. Запрет в промпте протекает — живой прогон писал от его имени
+   * «у меня нет живого CLI», — поэтому модель обязана назвать такое сама,
+   * а окно показывает это красным, как выдуманные числа.
+   */
+  about: string[];
   usage: Usage;
   model: string;
 };
@@ -141,6 +148,13 @@ const RULES = `Ты пишешь черновик поста для автора
 
 ${Object.entries(LEVERS).map(([id, what]) => `  ${id}: ${what}`).join("\n")}
 
+Рычаг меняет форму, а не факты. От первого лица — только оценка и эмоция,
+никогда не его действия, планы, проекты, деньги или прошлое: их нет
+в материале, и под его именем это будет ложь.
+
+    нельзя:  Я до сих пор закладывал буфер на подорожание. Промпты проверю позже.
+    можно:   Меня зацепило не падение цены, а то, что буфер больше не нужен.
+
 Поле "levers" — какой рычаг взят во втором варианте каждой сети, ключом
 из списка.
 
@@ -148,7 +162,12 @@ ${Object.entries(LEVERS).map(([id, what]) => `  ${id}: ${what}`).join("\n")}
 Поле "added" — только то, чего в материале нет: твои сравнения, оценки
 масштаба, контекст из общих знаний, каждое до восьми слов. Что взято
 из материала, перечислять не надо: это поле читает автор перед публикацией,
-чтобы знать, что проверить. Нечего назвать — пустой массив.`;
+чтобы знать, что проверить. Нечего назвать — пустой массив.
+Поле "about" — каждое утверждение о самом авторе из любого варианта: что он
+делает, умеет, имеет, планирует или делал («у меня нет CLI», «я закладывал
+буфер», «проверю позже»), дословно, до двенадцати слов. Оценки и эмоции
+(«меня зацепило», «не ожидал») сюда не идут. Пропустить такое хуже, чем
+перечислить лишнее: это поле он читает перед публикацией под своим именем.`;
 
 const blockOf = (item: PostSource) =>
   [
@@ -217,7 +236,7 @@ ${languageBlock}
 ${blockOf(item)}
 
 Ответь только валидным JSON, без markdown:
-{${shape}, "levers": {${networks.map((network) => `"${network.id}": "number"`).join(", ")}}, "hook": "...", "added": ["..."]}`;
+{${shape}, "levers": {${networks.map((network) => `"${network.id}": "number"`).join(", ")}}, "hook": "...", "added": ["..."], "about": ["..."]}`;
 }
 
 /**
@@ -283,7 +302,7 @@ export function parseDrafts(
   answer: string,
   item: PostSource,
   networks: Network[],
-): { drafts: Draft[]; hook: string; added: string[] } {
+): { drafts: Draft[]; hook: string; added: string[]; about: string[] } {
   const json = answer.replace(/```(?:json)?/g, "").match(/\{[\s\S]*\}/)?.[0];
   if (!json) throw new Error(`модель вернула не JSON: ${answer.slice(0, 200)}`);
   const parsed = JSON.parse(json) as Record<string, unknown>;
@@ -320,14 +339,17 @@ export function parseDrafts(
   // Пять пунктов и по сто знаков в каждом: красная простыня на пол-экрана
   // читается ровно один раз, а потом её перестают замечать вместе с тем
   // единственным пунктом, ради которого она есть.
-  const added = Array.isArray(parsed.added)
-    ? parsed.added
-        .map((entry) => String(entry).trim().slice(0, 100))
-        .filter(Boolean)
-        .slice(0, 5)
-    : [];
+  const listOf = (value: unknown) =>
+    Array.isArray(value)
+      ? value.map((entry) => String(entry).trim().slice(0, 100)).filter(Boolean).slice(0, 5)
+      : [];
 
-  return { drafts, hook: String(parsed.hook ?? "").trim().slice(0, 80), added };
+  return {
+    drafts,
+    hook: String(parsed.hook ?? "").trim().slice(0, 80),
+    added: listOf(parsed.added),
+    about: listOf(parsed.about),
+  };
 }
 
 export async function writePost(
@@ -352,9 +374,10 @@ export async function writePost(
       // Потолок делится с рассуждением модели, поэтому впятеро выше нужного:
       // при включённом рассуждении четырёх тысяч не хватало на ответ вовсе.
       max_tokens: 12_000,
-      ...(firstSet(process.env.LLM_REASONING_EFFORT)
-        ? { reasoning_effort: firstSet(process.env.LLM_REASONING_EFFORT) }
-        : {}),
+      // Как просить «не рассуждай», решает провайдер: MiMo `reasoning_effort`
+      // принимает молча и думает дальше, и рассуждение съедало потолок —
+      // черновик приходил пустым (обрыв: length), а счёт рос невидимо.
+      ...thinkingControl(baseUrl, firstSet(process.env.LLM_REASONING_EFFORT) ?? ""),
       response_format: { type: "json_object" },
       messages: [{ role: "user", content: promptFor(item, style, networks, languages) }],
     }),
@@ -370,7 +393,7 @@ export async function writePost(
       `весь потолок ушёл на рассуждение, проверь LLM_REASONING_EFFORT`,
     );
   }
-  const { drafts, hook, added } = parseDrafts(answer, item, networks);
+  const { drafts, hook, added, about } = parseDrafts(answer, item, networks);
   if (drafts.length === 0) {
     throw new Error(`модель не дала ни одного текста (обрыв: ${payload.choices?.[0]?.finish_reason})`);
   }
@@ -379,6 +402,7 @@ export async function writePost(
     drafts,
     hook,
     added,
+    about,
     model,
     usage: {
       input: payload.usage?.prompt_tokens ?? 0,

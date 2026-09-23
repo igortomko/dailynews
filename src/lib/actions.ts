@@ -1,10 +1,13 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
-import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
+import {
+  appOrigin, checkPassword, issueBindPayload, issueConfirmToken, issueEmailToken, issueSession, SESSION_COOKIE,
+} from "./auth";
+import { confirmEmailMessage, loginEmail, looksLikeEmail, normalizeEmail, sendEmail } from "./email";
 import { currentReader, currentReaderId } from "./session";
 import { dictOf, localeOf, type Dict } from "./i18n";
 import { getDict } from "./i18n/server";
@@ -15,7 +18,7 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, deleteReader, digestProgress, freezeKindleSender, getChannels,
+  addReaderSource, deleteReader, digestProgress, removeEmail, setEmailDigest, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelLanguage, setChannelPublishes,
   saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
@@ -62,6 +65,112 @@ export async function login(_prev: unknown, formData: FormData) {
   const session = await issueSession(owner.id);
   (await cookies()).set(session.name, session.value, session.options);
   redirect(String(formData.get("next") || "/"));
+}
+
+/**
+ * Ссылка входа на почту. Строка читателя здесь не заводится — только
+ * после клика (`/auth/email`), иначе форма заводила бы читателя на любой
+ * набранный чужой адрес.
+ *
+ * Ответ одинаковый для нового и знакомого адреса: заводиться может любой,
+ * и прятать тут нечего, а вторая формулировка была бы лишним состоянием.
+ */
+// ponytail: память одного процесса — веб здесь один контейнер. Появится
+// второй — отметка переезжает в базу.
+const lastLinkAt = new Map<string, number>();
+const LINK_COOLDOWN_MS = 60_000;
+
+export async function requestEmailLink(
+  _prev: unknown,
+  formData: FormData,
+): Promise<{ sent?: string; error?: string } | null> {
+  const t = dictOf(undefined).onboarding.login;
+  const email = normalizeEmail(String(formData.get("email") ?? ""));
+  if (!looksLikeEmail(email)) return { error: t.emailInvalid };
+
+  // Одна минута на адрес: форма открыта всему интернету, и без паузы
+  // её можно превратить в рассылку писем на чужой ящик от нашего имени.
+  const now = Date.now();
+  if (now - (lastLinkAt.get(email) ?? 0) < LINK_COOLDOWN_MS) return { sent: email };
+  lastLinkAt.set(email, now);
+  for (const [key, at] of lastLinkAt) if (now - at > LINK_COOLDOWN_MS) lastLinkAt.delete(key);
+
+  const h = await headers();
+  const link = `${originOf(h)}/auth/email?token=${encodeURIComponent(await issueEmailToken(email))}`;
+  // Письмо — на языке браузера, а не страницы входа: страница английская,
+  // потому что спросить некого, а в заголовке браузер уже сказал.
+  const mail = dictOf(localeOf(h.get("accept-language")?.split(/[-,;]/)[0].trim().toLowerCase())).onboarding.login.mail;
+  try {
+    await sendEmail({ to: email, ...loginEmail(link, mail) });
+  } catch (error) {
+    lastLinkAt.delete(email);
+    console.error(`email login: ${(error as Error).message}`);
+    return { error: t.emailFailed };
+  }
+  return { sent: email };
+}
+
+/** Внешний адрес для ссылок в письмах: за прокси `host` — это имя сервиса. */
+const originOf = (h: Headers) =>
+  appOrigin(`${h.get("x-forwarded-proto") ?? "https"}://${h.get("host")}`).replace(/\/$/, "");
+
+/**
+ * Добавить почту как направление доставки. Адрес записывается только
+ * по клику из письма (`/auth/email-confirm`): вписанный чужой ящик
+ * иначе получал бы наши письма каждую ночь.
+ *
+ * Не за тарифом: письмо — такое же направление, как Telegram, а не Kindle.
+ */
+export async function requestEmailConfirm(raw: string): Promise<{ ok: true } | { error: string }> {
+  const reader = await currentReader();
+  const t = dictOf(reader.ui_language).settings.delivery.email;
+  const email = normalizeEmail(raw);
+  if (!looksLikeEmail(email)) return { error: t.invalid };
+  if (email === reader.email) return { error: t.same };
+  const [taken] = await sql`select 1 from dailynews.readers where email = ${email} and id <> ${reader.id}`;
+  if (taken) return { error: t.taken };
+
+  const now = Date.now();
+  const key = `confirm:${reader.id}`;
+  if (now - (lastLinkAt.get(key) ?? 0) < LINK_COOLDOWN_MS) return { error: t.tooSoon };
+  lastLinkAt.set(key, now);
+
+  const link = `${originOf(await headers())}/auth/email-confirm?token=${encodeURIComponent(await issueConfirmToken(reader.id, email))}`;
+  const profile = reader.username ? `@${reader.username}` : reader.email ?? `№${reader.id}`;
+  try {
+    await sendEmail({ to: email, ...confirmEmailMessage(link, profile) });
+  } catch (error) {
+    lastLinkAt.delete(key);
+    console.error(`email confirm: ${(error as Error).message}`);
+    return { error: t.failed };
+  }
+  return { ok: true };
+}
+
+export async function saveEmailDigest(on: boolean) {
+  const reader = await currentReader();
+  if (on && !reader.email) return { error: dictOf(reader.ui_language).settings.delivery.email.noAddress };
+  await setEmailDigest(reader.id, on);
+  return { ok: true as const };
+}
+
+export async function dropEmail() {
+  const reader = await currentReader();
+  if (!(await removeEmail(reader.id))) return { error: dictOf(reader.ui_language).settings.delivery.email.onlyWay };
+  revalidatePath("/settings/delivery");
+  return { ok: true as const };
+}
+
+/**
+ * Ссылка в бота, которая привяжет Telegram к этому профилю. Подписанный
+ * номер читателя едет нагрузкой `/start`: бот видит telegram_id из апдейта,
+ * а к какому профилю его писать — только из ссылки.
+ */
+export async function telegramBindLink(): Promise<{ url: string } | { error: string }> {
+  const bot = process.env.TELEGRAM_BOT_USERNAME?.trim().replace(/^@/, "");
+  const reader = await currentReader();
+  if (!bot) return { error: dictOf(reader.ui_language).settings.delivery.telegram.noBot };
+  return { url: `https://t.me/${bot}?start=${await issueBindPayload(reader.id)}` };
 }
 
 /**
@@ -1195,7 +1304,10 @@ export async function rebuildVoice(): Promise<{ ok: true; text: string; built_fr
  * Заодно это и есть проверка, что материал ему вообще показывали.
  */
 export async function writeOpinion(itemId: number): Promise<
-  | { ok: true; drafts: SavedDraft[]; hook: string; added: string[]; fallback: boolean; built_from: number }
+  | {
+      ok: true; drafts: SavedDraft[]; hook: string; added: string[]; about: string[];
+      fallback: boolean; built_from: number;
+    }
   | { error: string }
 > {
   const denied = await denyBySection("posts");
@@ -1233,6 +1345,7 @@ export async function writeOpinion(itemId: number): Promise<
       drafts: saved,
       hook: written.hook,
       added: written.added,
+      about: written.about,
       fallback: style.fallback,
       built_from: style.built_from,
     };
