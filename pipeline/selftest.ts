@@ -3237,6 +3237,12 @@ assert.deepEqual(
     parsed.drafts.find((draft) => draft.network === "telegram" && draft.variant === 2)?.lever, undefined,
     "незнакомый ключ — не рычаг: отчёт не заведёт по нему строку",
   );
+  const told = parseDrafts(
+    JSON.stringify({ x: ["а"], about: ["у меня нет живого CLI", "", "я закладывал буфер"] }),
+    item, [NETWORKS.x],
+  );
+  assert.deepEqual(told.about, ["у меня нет живого CLI", "я закладывал буфер"], "сказанное об авторе доезжает до окна");
+  assert.deepEqual(parseDrafts(JSON.stringify({ x: ["а"] }), item, [NETWORKS.x]).about, [], "нет поля — нет и тревоги");
   const card = cardFromVoice({ language: "русском", complexity: 3, style: "нейтральный" });
   assert.ok(!cardBlock(card).includes(CORPUS_FRAME[0]), "у запасной карточки не на чем стоять и корпусу");
   assert.ok(

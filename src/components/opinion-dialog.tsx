@@ -53,7 +53,7 @@ export function OpinionDialog({
   const [state, setState] = useState<
     | { kind: "writing" }
     | { kind: "failed"; error: string }
-    | { kind: "ready"; drafts: SavedDraft[]; hook: string; added: string[]; fallback: boolean }
+    | { kind: "ready"; drafts: SavedDraft[]; hook: string; added: string[]; about: string[]; fallback: boolean }
   >({ kind: "writing" });
   const [edited, setEdited] = useState<Record<number, string>>({});
   const [variant, setVariant] = useState("1");
@@ -77,6 +77,7 @@ export function OpinionDialog({
               drafts: result.drafts,
               hook: result.hook,
               added: result.added,
+              about: result.about,
               fallback: result.fallback,
             },
       );
@@ -141,6 +142,21 @@ export function OpinionDialog({
               <Alert>
                 <AlertTitle>{t.onboarding.opinionDialog.voiceNotBuiltTitle}</AlertTitle>
                 <AlertDescription>{t.onboarding.opinionDialog.voiceNotBuiltDescription}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            {/* Первым и красным: выдуманное о нём самом под его именем —
+                дороже любого числа. */}
+            {state.about.length ? (
+              <Alert variant="destructive">
+                <AlertTitle>{t.onboarding.opinionDialog.aboutYouTitle}</AlertTitle>
+                <AlertDescription>
+                  <ul className="mt-1 flex flex-col gap-0.5">
+                    {state.about.map((line) => (
+                      <li key={line}>— {line}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
               </Alert>
             ) : null}
 

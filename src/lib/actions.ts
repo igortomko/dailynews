@@ -1195,7 +1195,10 @@ export async function rebuildVoice(): Promise<{ ok: true; text: string; built_fr
  * Заодно это и есть проверка, что материал ему вообще показывали.
  */
 export async function writeOpinion(itemId: number): Promise<
-  | { ok: true; drafts: SavedDraft[]; hook: string; added: string[]; fallback: boolean; built_from: number }
+  | {
+      ok: true; drafts: SavedDraft[]; hook: string; added: string[]; about: string[];
+      fallback: boolean; built_from: number;
+    }
   | { error: string }
 > {
   const denied = await denyBySection("posts");
@@ -1233,6 +1236,7 @@ export async function writeOpinion(itemId: number): Promise<
       drafts: saved,
       hook: written.hook,
       added: written.added,
+      about: written.about,
       fallback: style.fallback,
       built_from: style.built_from,
     };
