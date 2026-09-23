@@ -95,6 +95,7 @@ export const onboarding: typeof En = {
     disconnect: "Отключить",
     connectNamed: (network) => `Подключить ${network}`,
     disconnectNamed: (network) => `Отключить ${network}`,
+    channelPlaceholder: "t.me/канал",
     connectFailed: (network) => `Не получилось подключить ${network}. Попробуй ещё раз.`,
     sourcesTitle: "Дай почитать свои посты",
     sourcesDescription:

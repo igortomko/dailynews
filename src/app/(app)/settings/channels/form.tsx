@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CheckIcon, PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
-import { addChannel, forgetChannel, rebuildVoice, saveSample, toggleChannel } from "@/lib/actions";
+import { addChannel, connectTelegram, forgetChannel, rebuildVoice, saveSample, toggleChannel } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -114,6 +114,23 @@ export function ChannelsForm({
     });
   };
 
+  // Поле канала в плитке Telegram: открыто, пока канал не назван.
+  const [channelInput, setChannelInput] = useState<string | null>(null);
+
+  const connectChannel = () => {
+    const value = channelInput?.trim();
+    if (!value) return;
+    startTransition(async () => {
+      const result = await connectTelegram(value);
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      setChannelInput(null);
+      router.refresh();
+    });
+  };
+
   const toggle = (network: string, on: boolean) => {
     startTransition(async () => {
       const result = await toggleChannel(network, on);
@@ -168,6 +185,11 @@ export function ChannelsForm({
               const channel = byNetwork.get(id);
               const on = Boolean(channel?.publishes);
               const name = t.onboarding.networks[id];
+              // У Telegram подключается канал, а не профиль: без названного
+              // канала «Подключить» сначала спрашивает ссылку на него.
+              const account =
+                id === "telegram" ? (channel?.handle ? `@${channel.handle}` : null) : channel?.account;
+              const asksChannel = id === "telegram" && !channel?.handle;
               return (
                 <div
                   key={id}
@@ -182,7 +204,7 @@ export function ChannelsForm({
                   <SourceIcon kind={ICON_KIND[id]} url={NETWORK_HOME[id]} className="size-5" />
                   <span className="text-sm font-medium">{name}</span>
                   <span className="min-h-4 truncate text-xs text-muted-foreground">
-                    {on ? channel?.account : null}
+                    {on ? account : null}
                   </span>
                   {on ? (
                     // Одна кнопка, а не две: «Подключено» по наведению
@@ -204,6 +226,28 @@ export function ChannelsForm({
                         {t.onboarding.channels.disconnect}
                       </span>
                     </Button>
+                  ) : asksChannel && channelInput !== null ? (
+                    <form
+                      className="mt-1 flex w-full gap-1"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        connectChannel();
+                      }}
+                    >
+                      <Input
+                        autoFocus
+                        className="h-8 min-w-0 text-xs"
+                        value={channelInput}
+                        onChange={(event) => setChannelInput(event.target.value)}
+                        onKeyDown={(event) => event.key === "Escape" && setChannelInput(null)}
+                        placeholder={t.onboarding.channels.channelPlaceholder}
+                        aria-label={t.onboarding.channels.connectNamed(name)}
+                        disabled={busy}
+                      />
+                      <Button type="submit" size="icon-sm" disabled={busy || !channelInput.trim()}>
+                        {busy ? <Spinner /> : <CheckIcon />}
+                      </Button>
+                    </form>
                   ) : oauth.includes(id) ? (
                     // Обычная ссылка, а не Link: адрес — редирект на экран
                     // сети, а не страница приложения.
@@ -221,7 +265,7 @@ export function ChannelsForm({
                       variant="outline"
                       size="sm"
                       className="mt-1"
-                      onClick={() => toggle(id, true)}
+                      onClick={() => (asksChannel ? setChannelInput("") : toggle(id, true))}
                       disabled={busy}
                       aria-label={t.onboarding.channels.connectNamed(name)}
                     >

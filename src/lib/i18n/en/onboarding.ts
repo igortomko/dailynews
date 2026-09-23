@@ -80,6 +80,7 @@ export const onboarding = {
     disconnect: "Disconnect",
     connectNamed: (network: string) => `Connect ${network}`,
     disconnectNamed: (network: string) => `Disconnect ${network}`,
+    channelPlaceholder: "t.me/channel",
     connectFailed: (network: string) => `Couldn't connect ${network}. Try again.`,
     sourcesTitle: "Let us read your posts",
     sourcesDescription:

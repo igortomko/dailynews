@@ -40,6 +40,7 @@ export const errors = {
 
   notANewsletter:
     "That looks like a newsletter, not your own channel: we need a Telegram channel, an X account or a blog",
+  notATelegramChannel: "We need a link to a public Telegram channel: t.me/channel",
   unknownNetwork: "Unknown network",
   itemNotYours: "That story isn't in any of your issues",
   noChannelsYet: "Tell us where you publish first, in settings",
