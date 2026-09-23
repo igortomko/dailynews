@@ -72,9 +72,9 @@ export const onboarding = {
     // (галочка даёт таб в черновике) и откуда мы читаем его тексты (ссылка
     // или вставленные посты). Теперь это два блока, и каждый назван тем,
     // на что отвечает, — «мои площадки» не отвечало ни на один из вопросов.
-    postingTitle: "Social networks",
+    postingTitle: "Your social networks",
     postingDescription:
-      "Connect the networks you post to. Each one gets its own tab in a draft, written to its own length and shape.",
+      "Connect the networks you'll share posts to.",
     connect: "Connect",
     connected: "Connected",
     disconnect: "Disconnect",
