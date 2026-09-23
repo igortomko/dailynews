@@ -114,8 +114,6 @@ export const plans = {
     thenPerMonth: (price: number) => `then $${price} a month`,
     hasFeature: "included",
     noFeature: "not included",
-    techLimit: (items: string) =>
-      `Reading time is based on the length of our own summaries, not the linked articles. The digest's technical ceiling is ${items} stories respectively: if a day has less that matters, the digest is shorter than ordered, and the feed says so directly.`,
     cancelledUntil: (label: string, date: string) => `Subscription cancelled, the ${label} plan works through ${date}.`,
     pastDue: "Payment didn't go through. We'll try charging again",
     renews: (date: string) => `Renews ${date}`,

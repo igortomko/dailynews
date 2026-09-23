@@ -13,7 +13,21 @@
  * и таймер там разослал бы настоящие выпуски настоящим читателям.
  */
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.ISSUE_TICK !== "1") return;
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  // Каталог Paddle подтягивается к PLANS при каждом старте боевого
+  // контейнера: цены пишутся в plans.ts, а развёртывание доносит их
+  // до Paddle. Только здесь — `npm run dev` на ветке ходит в тот же
+  // аккаунт и переписал бы цену всем. Отказ не мешает старту: оплата
+  // продолжит работать по тому, что в Paddle уже стоит.
+  if (process.env.PADDLE_SYNC === "1" && process.env.PADDLE_API_KEY) {
+    const { syncCatalog } = await import("./lib/paddle-catalog");
+    syncCatalog()
+      .then((done) => console.log(`paddle: каталог ${done.length ? done.join("; ") : "совпадает с PLANS"}`))
+      .catch((error) => console.error(`paddle: каталог не синхронизирован — ${(error as Error).message}`));
+  }
+
+  if (process.env.ISSUE_TICK !== "1") return;
 
   const { issueDue } = await import("../pipeline/issue");
   // Круг может идти дольше десяти минут (подкаст — до десяти на читателя),

@@ -1,5 +1,5 @@
 import { currentReader } from "@/lib/session";
-import { effectivePlan, hasFounderDiscount } from "@/lib/billing";
+import { cycleOf, effectivePlan, hasFounderDiscount } from "@/lib/billing";
 import { FOUNDER_DISCOUNT, founderGraceEnds, isFounder } from "@/lib/plans";
 import { currentLocale, getDict } from "@/lib/i18n/server";
 import { PlanTable } from "@/components/plan-table";
@@ -19,7 +19,12 @@ export const dynamic = "force-dynamic";
  * убран вместе с ним: хранить чужой секрет ради настройки, которой никто
  * не пользовался, незачем. Модель дайджеста задаётся окружением.
  */
-export default async function SubscriptionPage() {
+export default async function SubscriptionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cycle?: string | string[] }>;
+}) {
+  const cycle = cycleOf((await searchParams).cycle);
   const [reader, t, locale] = await Promise.all([currentReader(), getDict(), currentLocale()]);
   // Ранним — сколько ещё Pro и какая скидка: без этой строки месяц Pro
   // после включения выглядел бы как чужой тариф, а скидка — как её отсутствие.
@@ -40,7 +45,7 @@ export default async function SubscriptionPage() {
           {discount ? t.plans.table.founderDiscount(FOUNDER_DISCOUNT) : null}
         </p>
       ) : null}
-      <PlanTable reader={reader} current={effectivePlan(reader)} />
+      <PlanTable reader={reader} current={effectivePlan(reader)} cycle={cycle} />
     </div>
   );
 }

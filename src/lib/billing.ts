@@ -25,78 +25,54 @@ export const paddleApi = () =>
   paddleEnv() === "production" ? "https://api.paddle.com" : "https://sandbox-api.paddle.com";
 
 /**
- * Цены подписки: id цены из Paddle → тариф.
- *
- * Длина триала лежит здесь же, рядом с ценой, а не одной переменной на весь
- * продукт: включается триал на стороне Paddle и на конкретной цене. Одна
- * общая переменная обещала бы «7 дней бесплатно» и на том тарифе, где триала
- * не завели, — надпись, которая врёт ровно тому, кто по ней нажал.
- *
- * Не задана или не число — триала нет. Ноль и «нет» здесь одно и то же.
- */
-/**
  * Период оплаты. Годовая цена — отдельная цена того же тарифа: тариф один,
  * отличается только частота списания, и вебхук сводит обе к одному `plan`.
  */
 export type Cycle = "month" | "year";
 export const cycleOf = (value: unknown): Cycle => (value === "year" ? "year" : "month");
 
-type Price = { id: string; yearId: string | null; trialDays: number };
-
-function prices(): Partial<Record<PlanId, Price>> {
-  const read = (plan: PlanId, id?: string, yearId?: string, trial?: string) =>
-    id ? { [plan]: { id, yearId: yearId || null, trialDays: Math.max(0, Math.trunc(Number(trial)) || 0) } } : {};
-  return {
-    ...read("plus", process.env.PADDLE_PRICE_PLUS, process.env.PADDLE_PRICE_PLUS_YEAR, process.env.PADDLE_TRIAL_PLUS),
-    ...read("pro", process.env.PADDLE_PRICE_PRO, process.env.PADDLE_PRICE_PRO_YEAR, process.env.PADDLE_TRIAL_PRO),
-  };
-}
-
-/** id цены под период. Годовой не заведено — годовой оплаты у тарифа нет. */
-const priceId = (price: Price, cycle: Cycle) => (cycle === "year" ? price.yearId : price.id);
-
-/** Заведена ли годовая оплата хоть у одного тарифа: без неё переключателю нечего переключать. */
-export const yearlyReady = (): boolean => Object.values(prices()).some((price) => price.yearId);
+/**
+ * Оплата подключена: есть серверный ключ (им находится цена) и клиентский
+ * токен (им открывается окно). Цены, триал и годовая оплата — не здесь,
+ * а в `PLANS`: Paddle подтягивается к ним сам (`lib/paddle-catalog.ts`).
+ */
+export const paymentsReady = (): boolean =>
+  Boolean(process.env.PADDLE_API_KEY && process.env.PADDLE_CLIENT_TOKEN);
 
 /**
  * Сколько дней триала у этого тарифа. Ноль — триала нет, и говорить о нём
- * нельзя: в Paddle он живёт настройкой цены, а не нашим желанием.
- *
- * Замер 22 сентября 2026, предельная себестоимость Pro: $0.019 в день
- * типично и $0.053 в потолке. Неделя выходит $0.15–0.38 — дешевле, чем
- * $0.50 фиксированной комиссии с одного платежа. Расчёт — в docs/economics.md.
+ * нельзя. Число одно на кнопку и на Paddle — `PLANS[plan].trialDays`, —
+ * поэтому обещание не расходится с тем, что Paddle спишет.
  */
-export const trialDaysFor = (plan: PlanId): number => prices()[plan]?.trialDays ?? 0;
+export const trialDaysFor = (plan: PlanId): number => (paymentsReady() ? PLANS[plan].trialDays : 0);
 
-/** Период по id цены: годовая — год, всё остальное — месяц. */
-export const cycleOfPrice = (priceId: string | null | undefined): Cycle =>
-  priceId && Object.values(prices()).some((price) => price.yearId === priceId) ? "year" : "month";
+/** Есть ли годовая оплата хоть у одного тарифа: без неё переключателю нечего переключать. */
+export const yearlyReady = (): boolean => paymentsReady() && Object.values(PLANS).some((p) => p.yearPrice > 0);
 
-/** Тариф по id цены из вебхука. Незнакомая цена — не тариф. */
-export function planOfPrice(priceId: string | null | undefined): Plan | null {
-  for (const [plan, price] of Object.entries(prices())) {
-    if (priceId && (price.id === priceId || price.yearId === priceId)) return PLANS[plan as PlanId];
-  }
-  return null;
+/**
+ * Тариф и период по метке цены (`custom_data: { plan, cycle }`), которую
+ * ставит синхронизация каталога. Вебхук получает цену целиком внутри
+ * события, поэтому id цен не хранятся нигде. Незнакомая метка — не тариф:
+ * цена, заведённая руками в кабинете, платного тарифа не выдаёт.
+ */
+export function planOfPrice(
+  price: { custom_data?: { plan?: string; cycle?: string } | null } | null | undefined,
+): { plan: Plan; cycle: Cycle } | null {
+  const id = price?.custom_data?.plan;
+  if (!id || !(id in PLANS) || PLANS[id as PlanId].price <= 0) return null;
+  return { plan: PLANS[id as PlanId], cycle: cycleOf(price?.custom_data?.cycle) };
 }
 
 /**
- * Оплата настроена: есть цена и клиентский токен. Без токена Paddle.js
- * не откроет окно, и кнопка, ведущая на пустую страницу, хуже кнопки,
- * которой нет.
- */
-const checkoutReady = (plan: PlanId, cycle: Cycle) => {
-  const price = prices()[plan];
-  return Boolean(price && priceId(price, cycle) && process.env.PADDLE_CLIENT_TOKEN);
-};
-
-/**
  * Куда ведёт «Выбрать». Своя страница, а не ссылка Paddle: окно оплаты —
- * overlay Paddle.js, и открыть его можно только у себя. Всё, что уходит
- * в оплату, собирает `checkoutFor` на сервере этой страницы.
+ * overlay Paddle.js, и открыть его можно только у себя. Без оплаты, у
+ * бесплатного тарифа и у периода, которого у тарифа нет, кнопке вести
+ * некуда: кнопка на пустое окно хуже отсутствующей.
  */
 export const checkoutUrl = (plan: PlanId, cycle: Cycle = "month"): string | null =>
-  checkoutReady(plan, cycle) ? `/checkout/${plan}${cycle === "year" ? "?cycle=year" : ""}` : null;
+  paymentsReady() && PLANS[plan].price > 0 && (cycle === "month" || PLANS[plan].yearPrice > 0)
+    ? `/checkout/${plan}${cycle === "year" ? "?cycle=year" : ""}`
+    : null;
 
 /** Что нужно Paddle.js, чтобы открыть оплату этому читателю. */
 export type CheckoutParams = {
@@ -114,19 +90,17 @@ export type CheckoutParams = {
   email: string | null;
 };
 
+/** Параметры окна. id цены находит вызывающий (`priceIdFor`) — здесь только сборка. */
 export function checkoutFor(
-  plan: PlanId,
+  priceId: string | null,
   reader: Pick<Reader, "id" | "created_at" | "email">,
-  cycle: Cycle = "month",
 ): CheckoutParams | null {
-  const price = prices()[plan];
-  const id = price && priceId(price, cycle);
   const token = process.env.PADDLE_CLIENT_TOKEN;
-  if (!id || !token) return null;
+  if (!priceId || !token) return null;
   return {
     token,
     environment: paddleEnv(),
-    priceId: id,
+    priceId,
     customData: { reader_id: String(reader.id) },
     // Скидка ранним подставляется сама: код, который надо помнить и вводить,
     // до оплаты не доживает. Код не задан — оплата без скидки, а не сломанная.
@@ -134,6 +108,7 @@ export function checkoutFor(
     email: reader.email ?? null,
   };
 }
+
 
 /**
  * Достаётся ли этому читателю скидка ранних. Код не задан — не достаётся
@@ -276,6 +251,7 @@ export type SubscriptionUpdate = {
   subscriptionId: string;
   /** Когда событие случилось у Paddle: по нему отсекается опоздавшее старое. */
   occurredAt: string;
+  cycle: Cycle;
 };
 
 type PaddlePayload = {
@@ -286,7 +262,7 @@ type PaddlePayload = {
     id?: string;
     status?: string;
     custom_data?: { reader_id?: string | number } | null;
-    items?: { price?: { id?: string } }[];
+    items?: { price?: { id?: string; custom_data?: { plan?: string; cycle?: string } | null } }[];
     next_billed_at?: string | null;
     canceled_at?: string | null;
     current_billing_period?: { ends_at?: string } | null;
@@ -311,9 +287,10 @@ export function readEvent(payload: PaddlePayload):
     return { ok: false, why: "в custom_data нет номера читателя" };
   }
 
-  const priceId = data.items?.[0]?.price?.id;
-  const plan = planOfPrice(priceId);
-  if (!plan) return { ok: false, why: `цена ${priceId} не привязана к тарифу` };
+  const price = data.items?.[0]?.price;
+  const priced = planOfPrice(price);
+  if (!priced) return { ok: false, why: `цена ${price?.id} не привязана к тарифу` };
+  const { plan, cycle } = priced;
 
   const status = data.status ?? "";
   // canceled у Paddle — уже конец, а не «отменена, дочитывает»: отмена
@@ -335,6 +312,7 @@ export function readEvent(payload: PaddlePayload):
         : dead ? data.canceled_at ?? null : null,
       subscriptionId: String(data.id ?? ""),
       occurredAt: payload.occurred_at ?? new Date().toISOString(),
+      cycle,
     },
   };
 }
@@ -366,7 +344,7 @@ type MoneyPayload = {
     subscription_id?: string | null;
     currency_code?: string;
     custom_data?: { reader_id?: string | number } | null;
-    items?: { price?: { id?: string } | null; price_id?: string }[];
+    items?: { price?: { id?: string; custom_data?: { plan?: string; cycle?: string } | null } | null }[];
     details?: { totals?: { grand_total?: string } } | null;
     totals?: { total?: string } | null;
   };
@@ -398,10 +376,10 @@ export function readMoney(payload: MoneyPayload): MoneyEvent | null {
   if (type === "transaction.completed") {
     const amount = Number(data.details?.totals?.grand_total);
     if (!Number.isSafeInteger(amount) || amount <= 0 || !data.id) return null;
-    const priceId = data.items?.[0]?.price?.id ?? data.items?.[0]?.price_id;
+    const priced = planOfPrice(data.items?.[0]?.price);
     return {
       ...base, kind: "payment_succeeded", paymentId: data.id, refundId: null, amountMinor: amount,
-      plan: planOfPrice(priceId)?.id ?? null, cycle: cycleOfPrice(priceId),
+      plan: priced?.plan.id ?? null, cycle: priced?.cycle ?? "month",
     };
   }
 

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentReader } from "@/lib/session";
-import { checkoutFor, cycleOf } from "@/lib/billing";
+import { checkoutFor, checkoutUrl, cycleOf } from "@/lib/billing";
+import { priceIdFor } from "@/lib/paddle-catalog";
 import { PLANS, type PlanId } from "@/lib/plans";
 import { CheckoutOverlay } from "./overlay";
 import { dailyId, recordBillingEvent } from "@/lib/analytics/billing-events";
@@ -28,7 +29,15 @@ export default async function CheckoutPage({
   const cycle = cycleOf((await searchParams).cycle);
   if (!(plan in PLANS) || PLANS[plan as PlanId].price === 0) redirect("/settings/subscription");
   const reader = await currentReader();
-  const checkout = checkoutFor(plan as PlanId, reader, cycle);
+  // Цена находится по метке тарифа и периода, а не по id из окружения:
+  // каталог Paddle — производное от PLANS (`lib/paddle-catalog.ts`).
+  const priceId = checkoutUrl(plan as PlanId, cycle)
+    ? await priceIdFor(plan as PlanId, cycle).catch((error) => {
+        console.error(`paddle: цена ${plan}/${cycle} не нашлась — ${(error as Error).message}`);
+        return null;
+      })
+    : null;
+  const checkout = checkoutFor(priceId, reader);
   if (!checkout) redirect("/settings/subscription");
   // Открыл оплату — шаг воронки между «посмотрел тарифы» и «взял триал»:
   // без него не отличить «не понравилась цена» от «не справился с окном».

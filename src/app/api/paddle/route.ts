@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
-import { cycleOfPrice, readEvent, readMoney, signatureValid } from "@/lib/billing";
+import { readEvent, readMoney, signatureValid } from "@/lib/billing";
 import { recordBillingEvent } from "@/lib/analytics/billing-events";
 
 /**
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     return new NextResponse("нет", { status: 401 });
   }
 
-  let payload: { event_type?: string; data?: { items?: { price?: { id?: string } }[] } };
+  let payload: { event_type?: string };
   try {
     payload = JSON.parse(raw);
   } catch {
@@ -75,19 +75,18 @@ export async function POST(request: Request) {
   }
 
   const { readerId, update } = read;
-  const priceId = payload.data?.items?.[0]?.price?.id;
   // Воронка пишется до тарифа и независимо от порядка: «взял триал» — факт,
   // даже если следом пришло более новое событие и тариф уже другой.
   if (payload.event_type === "subscription.created" && update.status === "trialing") {
     await recordBillingEvent({
       id: `trial-${update.subscriptionId}`, readerId, name: "trial_started", occurredAt: update.occurredAt,
-      plan: update.plan, cycle: cycleOfPrice(priceId),
+      plan: update.plan, cycle: update.cycle,
     });
   }
   if (payload.event_type === "subscription.canceled") {
     await recordBillingEvent({
       id: `canceled-${update.subscriptionId}`, readerId, name: "canceled", occurredAt: update.occurredAt,
-      plan: update.plan, cycle: cycleOfPrice(priceId),
+      plan: update.plan, cycle: update.cycle,
     });
   }
 

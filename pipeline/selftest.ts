@@ -88,6 +88,7 @@ import { digestHtml, isWeeklyDay, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
 import { SLEEP_DAYS, sleepVerdict } from "../src/lib/sleep";
 import { founderNotice, isFounder, issuesToday } from "../src/lib/plans";
+import { desiredPrices } from "../src/lib/paddle-catalog";
 import { upgradeLines, type UpgradeNote } from "../src/lib/upgrade";
 import { plural } from "../src/lib/plural";
 import { ru as ruDict } from "../src/lib/i18n/ru/index";
@@ -1848,29 +1849,22 @@ assert.ok(
 // «язык источника» — его язык, а русскому приходила лента, которой он
 // не понимает. Предел, зависящий от того, на каком языке пишут источники,
 // это не тариф, а лотерея.
-// Триал: длина живёт рядом с ценой Paddle, а не одной переменной
-// на продукт. Одна общая обещала бы «7 дней бесплатно» и там, где триала
-// не завели, — надпись, которая врёт ровно тому, кто по ней нажал.
-// Не задана, не число, ноль или минус — триала нет и говорить о нём нечего.
+// Триал: число одно — `PLANS[plan].trialDays`, — и на кнопку, и в Paddle
+// (синхронизация каталога). Без подключённой оплаты кнопка о нём молчит:
+// обещать бесплатный месяц там, где оплатить нечем, — надпись, которая врёт.
 {
   const was = { ...process.env };
   try {
-    process.env.PADDLE_PRICE_PRO = "pri_pro";
-    delete process.env.PADDLE_PRICE_PLUS;
-
-    delete process.env.PADDLE_TRIAL_PRO;
-    assert.equal(trialDaysFor("pro"), 0, "незаданный триал — это ноль, а не обещание");
-    process.env.PADDLE_TRIAL_PRO = "7";
-    assert.equal(trialDaysFor("pro"), 7, "заданный триал читается числом дней");
-    assert.equal(trialDaysFor("plus"), 0, "у тарифа без цены триала нет по построению");
-    for (const junk of ["", "неделя", "-3", "0"]) {
-      process.env.PADDLE_TRIAL_PRO = junk;
-      assert.equal(trialDaysFor("pro"), 0, `«${junk}» не становится днями триала`);
-    }
+    delete process.env.PADDLE_API_KEY;
+    delete process.env.PADDLE_CLIENT_TOKEN;
+    assert.equal(trialDaysFor("pro"), 0, "без оплаты триал не обещается");
+    process.env.PADDLE_API_KEY = "key";
+    process.env.PADDLE_CLIENT_TOKEN = "test_token";
+    assert.equal(trialDaysFor("pro"), PLANS.pro.trialDays, "с оплатой — ровно то, что в PLANS");
+    assert.equal(trialDaysFor("free"), 0, "у бесплатного триала нет");
     // Сам триал действует как тариф: Paddle присылает `trialing`, и выпуск
-    // обязан быть уже платным — иначе неделя бесплатного Pro выглядит как
+    // обязан быть уже платным — иначе месяц бесплатного Pro выглядит как
     // бесплатный Free, за который читатель оставил карту.
-    process.env.PADDLE_TRIAL_PRO = "7";
     assert.equal(
       effectivePlan({
         plan: "pro", owner: false, subscription_id: "sub_1",
@@ -1880,7 +1874,7 @@ assert.ok(
       "на триале действует купленный тариф, а не бесплатный",
     );
   } finally {
-    for (const key of ["PADDLE_PRICE_PRO", "PADDLE_TRIAL_PRO", "PADDLE_PRICE_PLUS"]) {
+    for (const key of ["PADDLE_API_KEY", "PADDLE_CLIENT_TOKEN"]) {
       if (was[key] === undefined) delete process.env[key];
       else process.env[key] = was[key];
     }
@@ -2747,8 +2741,7 @@ assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержк�
 // Тариф выдаётся только подписанным событием с их стороны, а действует он,
 // пока оплачен. Обе ошибки молчаливы: лишний платный выпуск и снятый раньше
 // срока тариф одинаково не видны в логе.
-process.env.PADDLE_PRICE_PLUS = "pri_plus";
-process.env.PADDLE_PRICE_PRO = "pri_pro";
+process.env.PADDLE_API_KEY = "key";
 process.env.PADDLE_CLIENT_TOKEN = "test_token";
 process.env.PADDLE_WEBHOOK_SECRET = "s3cret";
 
@@ -2829,7 +2822,7 @@ const paddleEvent = (over: Record<string, unknown> = {}, data: Record<string, un
   ...over,
   data: {
     id: "sub_9", status: "active", custom_data: { reader_id: "7" },
-    items: [{ price: { id: "pri_pro" } }],
+    items: [{ price: { id: "pri_pro", custom_data: { plan: "pro" } } }],
     next_billed_at: "2026-11-01T00:00:00Z", scheduled_change: null,
     ...data,
   },
@@ -2841,7 +2834,9 @@ assert.ok(applied.ok && applied.update.renewsAt === "2026-11-01T00:00:00Z", "д�
 assert.ok(applied.ok && applied.update.occurredAt === "2026-10-01T00:00:00Z", "время события уходит в запись");
 assert.ok(!readEvent(paddleEvent({ event_type: "transaction.completed" }) as never).ok, "не про подписку — мимо");
 assert.ok(!readEvent(paddleEvent({}, { custom_data: null }) as never).ok, "без номера читателя платёж некому засчитать");
-assert.ok(!readEvent(paddleEvent({}, { items: [{ price: { id: "pri_other" } }] }) as never).ok, "чужая цена не выдаёт тариф");
+assert.ok(!readEvent(paddleEvent({}, { items: [{ price: { id: "pri_other" } }] }) as never).ok, "цена без метки не выдаёт тариф");
+assert.ok(!readEvent(paddleEvent({}, { items: [{ price: { id: "pri_x", custom_data: { plan: "free" } } }] }) as never).ok, "метка бесплатного тарифа — не платный тариф");
+assert.ok(!readEvent(paddleEvent({}, { items: [{ price: { id: "pri_x", custom_data: { plan: "enterprise" } } }] }) as never).ok, "незнакомый тариф не выдаётся");
 const cancelling = readEvent(paddleEvent({}, {
   scheduled_change: { action: "cancel", effective_at: "2026-10-15T00:00:00Z" },
 }) as never);
@@ -2858,10 +2853,10 @@ assert.ok(ended.ok && ended.update.plan === "free", "закончившаяся 
   const txn = (total: string) => ({
     event_id: "evt_1", event_type: "transaction.completed", occurred_at: "2026-10-01T00:00:00Z",
     data: { id: "txn_1", currency_code: "USD", subscription_id: "sub_9", custom_data: { reader_id: "7" },
-      items: [{ price: { id: "pri_pro" } }], details: { totals: { grand_total: total } } },
+      items: [{ price: { id: "pri_pro", custom_data: { plan: "pro", cycle: "year" } } }], details: { totals: { grand_total: total } } },
   });
   const paidTxn = readMoney(txn("999") as never);
-  assert.ok(paidTxn?.kind === "payment_succeeded" && paidTxn.amountMinor === 999 && paidTxn.readerId === 7 && paidTxn.plan === "pro", "платёж читается в центах и с тарифом");
+  assert.ok(paidTxn?.kind === "payment_succeeded" && paidTxn.amountMinor === 999 && paidTxn.readerId === 7 && paidTxn.plan === "pro" && paidTxn.cycle === "year", "платёж читается в центах, с тарифом и периодом");
   assert.equal(readMoney(txn("0") as never), null, "нулевая транзакция триала — не платёж");
   const refund = readMoney({
     event_id: "evt_2", event_type: "adjustment.updated", occurred_at: "2026-10-02T00:00:00Z",
@@ -2874,18 +2869,26 @@ assert.ok(ended.ok && ended.update.plan === "free", "закончившаяся 
   } as never), null, "возврат на рассмотрении — ещё не возврат");
 }
 assert.equal(checkoutUrl("pro"), "/checkout/pro", "«Выбрать» ведёт на свою страницу оплаты");
-assert.equal(checkoutUrl("pro", "year"), null, "годовой цены не завели — годовой оплаты нет");
-process.env.PADDLE_PRICE_PRO_YEAR = "pri_pro_year";
 assert.equal(checkoutUrl("pro", "year"), "/checkout/pro?cycle=year", "годовая ведёт туда же, с периодом");
-assert.equal(checkoutFor("pro", { id: 1, created_at: "2026-01-01", email: null }, "year")?.priceId, "pri_pro_year", "в оплату уходит годовая цена");
+assert.equal(checkoutFor("pri_pro_year", { id: 1, created_at: "2026-01-01", email: null })?.priceId, "pri_pro_year", "в оплату уходит найденная цена");
+assert.equal(checkoutFor(null, { id: 1, created_at: "2026-01-01", email: null }), null, "цена не нашлась — окна нет");
 {
-  const yearly = readEvent(paddleEvent({}, { items: [{ price: { id: "pri_pro_year" } }] }) as never);
-  assert.ok(yearly.ok && yearly.update.plan === "pro", "годовая цена даёт тот же тариф");
+  const yearly = readEvent(paddleEvent({}, { items: [{ price: { id: "pri_pro_year", custom_data: { plan: "pro", cycle: "year" } } }] }) as never);
+  assert.ok(yearly.ok && yearly.update.plan === "pro" && yearly.update.cycle === "year", "годовая цена даёт тот же тариф, период из метки");
 }
-delete process.env.PADDLE_PRICE_PRO_YEAR;
+// Каталог Paddle — производное от PLANS: суммы в центах, триал и период
+// берутся оттуда и больше ниоткуда.
+{
+  const want = desiredPrices();
+  const find = (plan: string, cycle: string) => want.find((p) => p.plan === plan && p.cycle === cycle);
+  assert.equal(find("plus", "month")?.amount, String(Math.round(PLANS.plus.price * 100)), "помесячная сумма — из PLANS");
+  assert.equal(find("pro", "year")?.amount, String(Math.round(PLANS.pro.yearPrice * 100)), "годовая сумма — из PLANS");
+  assert.equal(find("pro", "month")?.trialDays, PLANS.pro.trialDays, "триал — из PLANS");
+  assert.ok(!want.some((p) => p.plan === "free"), "у бесплатного тарифа цены в Paddle нет");
+}
 assert.equal(checkoutUrl("free" as never), null, "у бесплатного тарифа нет оплаты");
 assert.equal(
-  checkoutFor("pro", { id: 42, created_at: "2026-01-01", email: null })?.customData.reader_id,
+  checkoutFor("pri_pro", { id: 42, created_at: "2026-01-01", email: null })?.customData.reader_id,
   "42",
   "номер читателя уходит в оплату",
 );
@@ -2914,10 +2917,10 @@ assert.equal(
   const checksFrom = process.env.BILLING_FROM_FOR_CHECKS;
   process.env.BILLING_FROM_FOR_CHECKS = from;
   process.env.PADDLE_DISCOUNT_FOUNDER = "EARLY30";
-  assert.equal(checkoutFor("pro", early)?.discountCode, "EARLY30", "скидка ранним подставляется в оплату");
-  assert.equal(checkoutFor("pro", late)?.discountCode, null, "пришедшему после включения скидки нет");
+  assert.equal(checkoutFor("pri_pro", early)?.discountCode, "EARLY30", "скидка ранним подставляется в оплату");
+  assert.equal(checkoutFor("pri_pro", late)?.discountCode, null, "пришедшему после включения скидки нет");
   delete process.env.PADDLE_DISCOUNT_FOUNDER;
-  assert.equal(checkoutFor("pro", early)?.discountCode, null, "код не задан — оплата без скидки");
+  assert.equal(checkoutFor("pri_pro", early)?.discountCode, null, "код не задан — оплата без скидки");
   process.env.BILLING_FROM_FOR_CHECKS = checksFrom;
   assert.ok(founderBotLine("started", at("2026-10-31"), 30).includes("−30%"), "строка ранним называет скидку");
   assert.ok(!founderBotLine("started", at("2026-10-31"), null).includes("%"), "и молчит о ней без кода");

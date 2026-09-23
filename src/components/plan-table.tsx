@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { checkoutUrl, endingAt, trialDaysFor } from "@/lib/billing";
+import Link from "next/link";
+import { checkoutUrl, endingAt, trialDaysFor, yearlyReady, type Cycle } from "@/lib/billing";
 import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
 import { currentLocale, getDict } from "@/lib/i18n/server";
@@ -68,7 +69,14 @@ export const planRows = (t: Dict): { feature: FeatureId; value: (plan: Plan) => 
   { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
 ];
 
-export async function PlanTable({ reader, current }: { reader: Reader; current: Plan }) {
+export async function PlanTable({
+  reader, current, cycle = "month",
+}: {
+  reader: Reader;
+  current: Plan;
+  /** Период из адреса (`?cycle=year`): таблица серверная, и переключатель — ссылки. */
+  cycle?: Cycle;
+}) {
   const t = await getDict();
   // Дата отмены/продления форматируется под язык интерфейса, а не всегда
   // по-русски: иначе на английском экране число выглядело бы чужим форматом
@@ -77,8 +85,6 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
   const ends = endingAt(reader);
   const paying = Boolean(reader.subscription_id);
 
-  const ROWS = planRows(t);
-
   return (
     <Card>
       <CardHeader>
@@ -86,22 +92,107 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
         <CardDescription>{t.plans.table.description}</CardDescription>
       </CardHeader>
 
-      <CardContent className="grid gap-3 sm:grid-cols-3">
+      <CardContent>
+        <PlanCards t={t} reader={reader} current={current} cycle={cycle} cycleHref={{ month: "?", year: "?cycle=year" }} />
+      </CardContent>
+
+      {/* Только состояние подписки: кнопка портала переехала в карточку
+          своего тарифа — две одинаковые ссылки на одной странице заставляют
+          выбирать между ними, хотя ведут они в одно место. */}
+      {paying ? (
+        <CardContent className="pt-0">
+          <p className="text-xs text-muted-foreground">
+            {ends
+              ? t.plans.table.cancelledUntil(t.plans.label[current.id], ends.toLocaleDateString(dateLocale))
+              : reader.subscription_status === "past_due"
+                ? t.plans.table.pastDue
+                : reader.plan_renews_at
+                  ? t.plans.table.renews(new Date(reader.plan_renews_at).toLocaleDateString(dateLocale))
+                  : t.plans.table.manageElsewhere}
+          </p>
+        </CardContent>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
+ * Переключатель периода, карточки тарифов и технический предел — одни
+ * на «Подписку» и на открытую страницу цен. Две разметки одних и тех же
+ * тарифов разошлись бы на первой же правке: цена, триал или строка
+ * поменялись бы в одной и остались прежними в другой.
+ *
+ * Серверный компонент, и переключатель — ссылки (`cycleHref`): период
+ * живёт в адресе, и выбранный «за год» переживает перезагрузку.
+ */
+export function PlanCards({
+  t, reader, current, cycle, cycleHref,
+}: {
+  t: Dict;
+  /** Нет — гость: кнопки ведут во вход и в оплату, своего тарифа не отмечено. */
+  reader: Reader | null;
+  current: Plan | null;
+  cycle: Cycle;
+  cycleHref: Record<Cycle, string>;
+}) {
+  const ROWS = planRows(t);
+  const paid = PLAN_IDS.filter((id) => PLANS[id].price > 0);
+  // Наименьшая скидка: «−25%» на переключателе обещал бы Pro больше,
+  // чем у него выходит.
+  const save = Math.min(...paid.map((id) => Math.round((1 - PLANS[id].yearPrice / (PLANS[id].price * 12)) * 100)));
+
+  return (
+    <div className="flex flex-col gap-4">
+      {yearlyReady() ? (
+          <div role="radiogroup" className="flex w-fit gap-1 rounded-lg border bg-muted p-1 text-sm">
+            {(["month", "year"] as const).map((value) => (
+              <Link
+                key={value}
+                href={cycleHref[value]}
+                scroll={false}
+                replace
+                role="radio"
+                aria-checked={cycle === value}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors",
+                  cycle === value ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {value === "month" ? t.plans.pricing.monthly : t.plans.pricing.yearly}
+                {value === "year" ? (
+                  <span className="rounded bg-amber-100 px-1.5 text-xs text-amber-900 dark:bg-amber-400/20 dark:text-amber-200">
+                    {t.plans.pricing.save(save)}
+                  </span>
+                ) : null}
+              </Link>
+            ))}
+          </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-3">
         {PLAN_IDS.map((id) => {
           const plan = PLANS[id];
           const Icon = ICONS[id];
           const label = t.plans.label[id];
-          const mine = plan.id === current.id;
-          const buy = plan.price > current.price ? checkoutUrl(id) : null;
+          // Гость (страница цен без входа) своего тарифа не имеет: бесплатный
+          // зовёт войти, платные — в оплату, а proxy уведёт на вход сам.
+          const guest = !reader || !current;
+          const mine = !guest && plan.id === current.id;
+          const buy = guest
+            ? plan.price > 0 ? checkoutUrl(id, cycle) ?? "/login" : null
+            : plan.price > current.price ? checkoutUrl(id, cycle) : null;
+          const year = cycle === "year" && plan.price > 0;
           // Понижение и смена карты живут в портале Paddle: своего экрана
           // для них нет и не будет — это был бы второй набор состояний,
           // расходящийся с настоящим. Ссылка портала одноразовая, поэтому
           // кнопка ведёт на наш адрес, который выдаёт свежую на нажатие.
-          const portal = reader.subscription_id ? "/api/billing/portal" : null;
+          const portal = reader?.subscription_id ? "/api/billing/portal" : null;
           // Состояние кнопки считается до разметки и именем: три вложенных
           // тернарника в JSX читаются только целиком, а состояний тут пять
           // и следующий тариф добавит шестое.
-          const action: "manage" | "here" | "buy" | "unpaid" | "down" | "below" = mine
+          const action: "start" | "manage" | "here" | "buy" | "unpaid" | "down" | "below" = guest
+            ? plan.price > 0 ? "buy" : "start"
+            : mine
             ? portal ? "manage" : "here"
             : plan.price > current.price
               ? buy ? "buy" : "unpaid"
@@ -130,9 +221,20 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
                 {action === "manage" ? <Badge variant="secondary">{t.plans.table.yourPlan}</Badge> : null}
               </div>
 
-              <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-medium tabular-nums">${plan.price}</span>
-                <span className="text-xs text-muted-foreground">{t.plans.table.perMonth}</span>
+              {/* За год крупно — цена в месяц, строкой под ней — сумма раз в год,
+                  как на странице цен: платят раз в год, а сравнивают помесячно. */}
+              <div className="flex flex-col">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-medium tabular-nums">
+                    ${year ? (plan.yearPrice / 12).toFixed(2) : plan.price}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{t.plans.table.perMonth}</span>
+                </div>
+                {cycle === "year" ? (
+                  <span className={cn("text-xs text-muted-foreground", !year && "invisible")}>
+                    {year ? t.plans.pricing.billedYearly(plan.yearPrice) : "\u00a0"}
+                  </span>
+                ) : null}
               </div>
 
               {/* Зачем брать — над столбиком чисел: числа отвечают «сколько
@@ -168,7 +270,11 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
 
               {/* Кнопка появляется только там, где ей есть куда вести:
                   «перейти» без настроенной оплаты — обещание без продукта. */}
-              {action === "manage" ? (
+              {action === "start" ? (
+                <Button size="sm" variant="outline" className="mt-auto" render={<a href="/login" />}>
+                  {t.plans.pricing.start}
+                </Button>
+              ) : action === "manage" ? (
                 <Button size="sm" variant="outline" className="mt-auto" render={<a href={portal!} />}>
                   {t.plans.table.manage}
                 </Button>
@@ -192,7 +298,7 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
                   </Button>
                   {trialDaysFor(id) > 0 ? (
                     <span className="text-center text-[11px] leading-tight text-muted-foreground">
-                      {t.plans.table.thenPerMonth(plan.price)}
+                      {year ? t.plans.pricing.thenPerYear(plan.yearPrice) : t.plans.table.thenPerMonth(plan.price)}
                     </span>
                   ) : null}
                 </div>
@@ -236,34 +342,7 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
             </div>
           );
         })}
-      </CardContent>
-
-      {/* Технические пределы — мелким шрифтом и после цен: число карточек
-          решает, сколько описаний мы напишем, а не сколько читатель получит
-          времени. Обещание — минуты; штуки стоят здесь, чтобы «до 45 минут»
-          не выглядело бездонным. Считаются из PLANS, как и всё выше. */}
-      <CardContent className="pt-0">
-        <p className="text-xs text-muted-foreground">
-          {t.plans.table.techLimit(PLAN_IDS.map((id) => PLANS[id].maxItems).join(" / "))}
-        </p>
-      </CardContent>
-
-      {/* Только состояние подписки: кнопка портала переехала в карточку
-          своего тарифа — две одинаковые ссылки на одной странице заставляют
-          выбирать между ними, хотя ведут они в одно место. */}
-      {paying ? (
-        <CardContent className="pt-0">
-          <p className="text-xs text-muted-foreground">
-            {ends
-              ? t.plans.table.cancelledUntil(t.plans.label[current.id], ends.toLocaleDateString(dateLocale))
-              : reader.subscription_status === "past_due"
-                ? t.plans.table.pastDue
-                : reader.plan_renews_at
-                  ? t.plans.table.renews(new Date(reader.plan_renews_at).toLocaleDateString(dateLocale))
-                  : t.plans.table.manageElsewhere}
-          </p>
-        </CardContent>
-      ) : null}
-    </Card>
+      </div>
+    </div>
   );
 }
