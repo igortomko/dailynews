@@ -366,6 +366,9 @@ export function ChannelsForm({
             onChange={(event) => setStyleDraft(event.target.value)}
             rows={12}
             maxLength={STYLE_LIMIT}
+            // Высота ограничена: поле растёт под текст, и на живом skill-файле
+            // в 6,5 тысячи знаков кнопки уезжали на три экрана вниз.
+            className="max-h-[45dvh] overflow-y-auto"
             placeholder={t.onboarding.channels.stylePlaceholder}
             aria-label={t.onboarding.channels.styleDialogTitle}
             disabled={busy || building}
