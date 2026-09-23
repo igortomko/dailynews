@@ -38,7 +38,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useT } from "@/components/i18n-provider";
 import type { Dict } from "@/lib/i18n";
 
-const DOMAIN = "kindle.tomko.io";
+const DOMAIN = "kindle.reporta.club";
 
 // Точка входа «Manage Your Content and Devices». Ссылка ведёт на настоящий
 // раздел Amazon, а не на угаданный якорь внутри него: адрес личного

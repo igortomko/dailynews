@@ -2454,7 +2454,7 @@ assert.equal(kindleSenderName(1, "52308619"), "52308619", "адрес собир
 assert.equal(kindleSenderName(1, 52308619), "52308619", "число из драйвера и строка дают одно имя");
 assert.equal(kindleSenderName(7, null), "reader7", "без привязанного Telegram — номер читателя");
 // Пустая строка и мусор — не id. Приняв их за имя, мы бы выдали адрес
-// вида `@kindle.tomko.io`, и письма исчезали бы молча.
+// вида `@kindle.reporta.club`, и письма исчезали бы молча.
 assert.equal(kindleSenderName(7, ""), "reader7", "пустая строка именем не становится");
 assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем не становится");
 
@@ -3351,9 +3351,9 @@ assert.equal(form(0), "материалов");
 // не открывалась — и по ней понять, что сломалось, было нельзя.
 {
   const before = process.env.APP_URL;
-  process.env.APP_URL = "https://news.tomko.io";
+  process.env.APP_URL = "https://news.reporta.club";
   assert.equal(
-    appOrigin("https://0.0.0.0:3000"), "https://news.tomko.io",
+    appOrigin("https://0.0.0.0:3000"), "https://news.reporta.club",
     "адрес берётся из APP_URL, а не из того, на что смотрит контейнер",
   );
   process.env.APP_URL = "  ";
@@ -5049,7 +5049,7 @@ assert.equal(isDay("0000-02-30"), false, "календарь проверяет�
 // адресом, метка времени только у того, что в записи есть, и ничего сверх
 // этого — ни вступления, ни подписи под плеером, ни слова «слушать».
 {
-  const APP = "https://news.tomko.io";
+  const APP = "https://news.reporta.club";
   const heads = [
     { id: 11, title: "Первая <новость> & прочее", topic: "Энергетика", at: 0 },
     { id: 12, title: "Вторая", topic: "Энергетика", at: 754 },

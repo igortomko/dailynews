@@ -59,7 +59,7 @@ async function grab(url: string): Promise<Response | null> {
         // Браузерный заголовок, но без `Referer`: бот-защита у половины
         // проблемных хостов срабатывает именно на кросс-сайтовую ссылку.
         headers: {
-          "user-agent": "Mozilla/5.0 (compatible; Reporta/1.0; +https://news.tomko.io)",
+          "user-agent": "Mozilla/5.0 (compatible; Reporta/1.0; +https://news.reporta.club)",
           accept: "image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8",
         },
         redirect: "manual",
