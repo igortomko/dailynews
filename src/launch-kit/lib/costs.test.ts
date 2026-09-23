@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCosts, validateModelCosts } from "./costs";
+import { buildCosts, priceRow, validateModelCosts, validatePrices } from "./costs";
 import { makeDemoDataset } from "./demo";
 import type { ModelCostRow } from "./types";
 
@@ -30,4 +30,23 @@ test("calls without prices are counted, never shown as zero dollars", () => {
 test("malformed spend is rejected instead of trimmed", () => {
   assert.throws(() => validateModelCosts({ capturedAt: "2026-09-23T00:00:00Z", granularity: "week", rows: [] }, "2026-09-23T12:00:00Z"));
   assert.throws(() => validateModelCosts({ capturedAt: "2026-09-23T00:00:00Z", granularity: "day", rows: [{ ...row("2026-09-22", "s", null, -1) }] }, "2026-09-23T12:00:00Z"));
+});
+
+test("unpriced calls are priced by the model's price and marked as an estimate", () => {
+  const base = dataset([row("2026-09-22", "translate", "u1", null, 10), { ...row("2026-09-22", "digest", "u1", 0.5), model: "known" }]);
+  const withDefaults = { ...base, modelCosts: { ...base.modelCosts, prices: { m: { inputPerMillion: null, outputPerMillion: null, perCall: 0.002, source: "product docs" } } } };
+  const report = buildCosts(withDefaults, "2026-09-20T00:00:00Z", "2026-09-23T00:00:00Z")!;
+  assert.equal(report.total.usd, 0.52, "10 calls × $0.002 join the recorded $0.50");
+  assert.equal(report.estimated, true);
+  assert.equal(report.models.find((m) => m.key === "known")!.estimated, false, "a recorded amount is never an estimate");
+  const owner = buildCosts(withDefaults, "2026-09-20T00:00:00Z", "2026-09-23T00:00:00Z", { m: { inputPerMillion: null, outputPerMillion: null, perCall: 0.01, source: "owner" } })!;
+  assert.equal(owner.models.find((m) => m.key === "m")!.usd, 0.1, "the owner's price wins over the product default");
+  assert.equal(owner.models.find((m) => m.key === "m")!.priceOrigin, "owner");
+});
+
+test("tokens win over the per-call amount; a recorded amount is never replaced", () => {
+  assert.equal(priceRow({ ...row("2026-09-22", "s", null, null), tokensIn: 1_000_000, tokensOut: 100_000 }, { inputPerMillion: 0.3, outputPerMillion: 2.5, perCall: 99, source: "x" }), 0.55);
+  assert.equal(priceRow(row("2026-09-22", "s", null, 0.7), { inputPerMillion: null, outputPerMillion: null, perCall: 99, source: "x" }), 0.7);
+  assert.equal(priceRow(row("2026-09-22", "s", null, null), undefined), null, "no price — no amount, not zero");
+  assert.throws(() => validatePrices({ m: { inputPerMillion: 0.3, outputPerMillion: null, perCall: null, source: "x" } }), "half a token rate prices nothing");
 });
