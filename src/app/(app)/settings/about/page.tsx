@@ -331,6 +331,17 @@ export default async function AboutPage() {
           </ol>
         </CardContent>
       </Card>
+
+      {/* Внизу раздела, мелко: документы нужны раз в жизни, но искать их
+          будут именно здесь — «О проекте». */}
+      <nav className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        <Link href="/privacy" className="hover:text-foreground hover:underline">
+          {t.plans.about.privacyLink}
+        </Link>
+        <Link href="/terms" className="hover:text-foreground hover:underline">
+          {t.plans.about.termsLink}
+        </Link>
+      </nav>
     </div>
   );
 }

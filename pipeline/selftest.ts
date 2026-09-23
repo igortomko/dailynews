@@ -1326,6 +1326,12 @@ for (const hook of ["/api/telegram", "/api/lemon"]) {
   assert.ok(proxy.includes(`"${hook}"`), `${hook} должен быть открыт в proxy`);
   assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
 }
+// Политику и условия ревьюеры Meta открывают без входа: за проверкой сессии
+// они получили бы экран входа, и заявку отклонили бы за «нет политики».
+for (const page of ["/privacy", "/terms"]) {
+  assert.ok(proxy.includes(`"${page}"`), `${page} должен быть открыт в proxy`);
+  assert.ok(existsSync(`src/app${page}/page.tsx`), `${page} должен существовать`);
+}
 assert.ok(!existsSync("middleware.ts"), "middleware в корне не подключается и вводит в заблуждение");
 
 

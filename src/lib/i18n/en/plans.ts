@@ -164,6 +164,8 @@ export const plans = {
     flowKept: "kept for you",
     flowDropped: "dropped",
     flowTune: "Change reading time",
+    privacyLink: "Privacy Policy",
+    termsLink: "Terms of Service",
     stepsTitle: "How it lands on exactly that much",
     steps: [
       {

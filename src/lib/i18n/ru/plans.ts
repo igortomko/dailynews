@@ -143,6 +143,8 @@ export const plans: typeof En = {
     flowKept: "дошло до тебя",
     flowDropped: "отброшено",
     flowTune: "Изменить время чтения",
+    privacyLink: "Политика конфиденциальности",
+    termsLink: "Условия использования",
     stepsTitle: "Как выходит именно столько",
     steps: [
       {
