@@ -117,8 +117,7 @@ export const plans: typeof En = {
     monthly: "Помесячно",
     yearly: "За год",
     save: (percent) => `−${percent}%`,
-    perYear: "в год",
-    perMonthApprox: (price) => `$${price} в месяц`,
+    billedYearly: (price) => `$${price} раз в год`,
     thenPerYear: (price) => `потом $${price} в год`,
     trialNote: (days) =>
       `${days} ${plural(days, "день", "дня", "дней")} бесплатно на любом платном тарифе. Отменишь до конца пробного периода — денег не спишем.`,

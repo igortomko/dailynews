@@ -140,8 +140,8 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "plus",
     label: "Plus",
     price: 3.99,
-    // Два месяца в подарок (−16,5%). Расчёт в docs/economics.md, «Годовая оплата».
-    yearPrice: 39.99,
+    // $2.99 в месяц при оплате за год (−25%). Расчёт в docs/economics.md, «Годовая оплата».
+    yearPrice: 35.88,
     maxSources: 40,
     maxTopics: 15,
     maxMinutes: 20,
@@ -166,7 +166,8 @@ export const PLANS: Record<PlanId, Plan> = {
     id: "pro",
     label: "Pro",
     price: 9.99,
-    yearPrice: 99.99,
+    // $7.99 в месяц при оплате за год (−20%).
+    yearPrice: 95.88,
     maxSources: 100,
     maxTopics: 30,
     // Сорок пять, а не шестьдесят: при карточке в 460 знаков потолок в сто

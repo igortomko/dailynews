@@ -30,8 +30,7 @@ export type PricingText = {
   yearly: string;
   save: string;
   perMonth: string;
-  perYear: string;
-  perMonthApprox: Record<string, string>;
+  billedYearly: Record<string, string>;
   start: string;
   tryFree: Record<string, string>;
   then: Record<string, Record<Cycle, string>>;
@@ -84,14 +83,17 @@ export function PricingCards({
             <section key={card.id} className="flex flex-col gap-3 rounded-lg border p-4">
               <h2 className="font-medium">{card.label}</h2>
               <div className="flex flex-col">
+                {/* За год крупно стоит цена в месяц, а сумма списания — строкой
+                    под ней: сравнивают с помесячной ценой, а платят раз в год,
+                    и прятать настоящую сумму значило бы удивить при оплате. */}
                 <p className="flex items-baseline gap-1">
-                  <span className="text-2xl font-medium tabular-nums">${year ? card.yearPrice : card.price}</span>
-                  <span className="text-xs text-muted-foreground">{year ? text.perYear : text.perMonth}</span>
+                  <span className="text-2xl font-medium tabular-nums">
+                    ${year ? (card.yearPrice / 12).toFixed(2) : card.price}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{text.perMonth}</span>
                 </p>
-                {/* Месячный эквивалент — строкой под годовой ценой: сравнивают
-                    с соседней карточкой в месяц, а платят один раз в год. */}
                 <span className={cn("text-xs text-muted-foreground", !year && "invisible")} aria-hidden={!year}>
-                  {text.perMonthApprox[card.id] ?? " "}
+                  {text.billedYearly[card.id] ?? "\u00a0"}
                 </span>
               </div>
               <p className="font-medium">{card.tagline}</p>
