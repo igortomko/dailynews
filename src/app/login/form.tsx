@@ -45,7 +45,9 @@ export function LoginForm({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <FieldGroup>
+        {/* Кнопки входа — один выбор из трёх, а не три поля формы: зазор
+            кнопочный, а не межполевой (gap-7 у FieldGroup). */}
+        <FieldGroup className="gap-3">
           {bot ? (
             <Button size="lg" nativeButton={false} render={<a href={`https://t.me/${bot}?start=login`} />}>
               <SendIcon data-icon="inline-start" />
@@ -72,7 +74,7 @@ export function LoginForm({
             <FieldDescription role="status">{t.onboarding.login.linkSent(mail.sent)}</FieldDescription>
           ) : emailOpen ? (
             <form action={mailAction}>
-              <FieldGroup>
+              <FieldGroup className="gap-3">
                 <Field data-invalid={mail?.error ? true : undefined}>
                   <FieldLabel htmlFor="email" className="sr-only">{t.onboarding.login.emailLabel}</FieldLabel>
                   <Input
