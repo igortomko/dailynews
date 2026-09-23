@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { appOrigin, equal, sign } from "@/lib/auth";
 import { currentReader } from "@/lib/session";
 import { connectChannel } from "@/lib/readers";
@@ -65,6 +65,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     try {
       const account = await accountFor(network, code, redirectUri, verifier);
       await connectChannel(reader.id, network, account.name, account.id);
+      // Язык сети — по постам автора, после ответа: сеть не ждёт чтения.
+      const readerId = reader.id;
+      after(async () => (await import("@/lib/channel-language")).refreshLanguages(readerId));
     } catch (error) {
       console.error("connect:", error instanceof Error ? error.message : error);
       back.searchParams.set("failed", network);

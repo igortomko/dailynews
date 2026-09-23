@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CheckIcon, SparklesIcon, UploadIcon } from "lucide-react";
-import { connectTelegram, rebuildVoice, saveChannelLanguage, saveStyle, toggleChannel } from "@/lib/actions";
+import { connectTelegram, rebuildVoice, saveStyle, toggleChannel } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,7 +16,7 @@ import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { NETWORK_IDS, NETWORKS, type NetworkId } from "@/lib/networks";
-import { hasStyle, LANGUAGES, SOURCE_LANGUAGE, STYLE_LIMIT } from "@/lib/voice";
+import { hasStyle, STYLE_LIMIT } from "@/lib/voice";
 import { Switch } from "@/components/ui/switch";
 import { useT } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
@@ -122,14 +122,6 @@ export function ChannelsForm({
   const toggle = (network: string, on: boolean) => {
     startTransition(async () => {
       const result = await toggleChannel(network, on);
-      if ("error" in result) toast.error(result.error);
-      else router.refresh();
-    });
-  };
-
-  const setLanguage = (network: string, language: string) => {
-    startTransition(async () => {
-      const result = await saveChannelLanguage(network, language);
       if ("error" in result) toast.error(result.error);
       else router.refresh();
     });
@@ -303,25 +295,16 @@ export function ChannelsForm({
                       {t.onboarding.channels.connect}
                     </Button>
                   )}
-                  {/* Язык — свойство площадки, а не стиля: в тексте стиля он
-                      терялся при каждой загрузке нового skill-файла. Селект
-                      нативный: в плитке 140 пикселей, а выбрать надо одно
-                      из шестнадцати. */}
-                  {on ? (
-                    <select
-                      className="mt-1 w-full truncate rounded-md border bg-transparent px-1.5 py-1 text-xs text-muted-foreground"
-                      value={channel?.language ?? ""}
-                      disabled={busy}
-                      aria-label={t.onboarding.channels.postLanguageNamed(name)}
-                      onChange={(event) => setLanguage(id, event.target.value)}
-                    >
-                      <option value="">{t.onboarding.channels.languageAsStyle}</option>
-                      {LANGUAGES.filter((language) => language !== SOURCE_LANGUAGE).map((language) => (
-                        <option key={language} value={language}>
-                          {t.settings.voice.languageNames[language] ?? language}
-                        </option>
-                      ))}
-                    </select>
+                  {/* Язык не выбирается, а определяется по его же постам
+                      (`lib/channel-language.ts`): при подключении сети и при
+                      «Изучи мой стиль». Подпись — чтобы было видно, на каком
+                      языке будут черновики; не определился — молчим. */}
+                  {on && channel?.language ? (
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      {t.onboarding.channels.detectedLanguage(
+                        t.settings.voice.languageNames[channel.language] ?? channel.language,
+                      )}
+                    </span>
                   ) : null}
                 </div>
               );

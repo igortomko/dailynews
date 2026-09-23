@@ -328,6 +328,11 @@ export type MoneyEvent = {
   subscriptionId: string | null;
   paymentId: string;
   refundId: string | null;
+  /**
+   * Вернули всё: полный возврат или chargeback. Только такой закрывает
+   * доступ — частичный возврат это компенсация, а не отказ от покупки.
+   */
+  full: boolean;
   amountMinor: number;
   currency: string;
   plan: PlanId | null;
@@ -343,6 +348,7 @@ type MoneyPayload = {
     id?: string;
     status?: string;
     action?: string;
+    type?: string;
     transaction_id?: string;
     subscription_id?: string | null;
     currency_code?: string;
@@ -381,16 +387,20 @@ export function readMoney(payload: MoneyPayload): MoneyEvent | null {
     if (!Number.isSafeInteger(amount) || amount <= 0 || !data.id) return null;
     const priced = planOfPrice(data.items?.[0]?.price);
     return {
-      ...base, kind: "payment_succeeded", paymentId: data.id, refundId: null, amountMinor: amount,
+      ...base, kind: "payment_succeeded", paymentId: data.id, refundId: null, full: false, amountMinor: amount,
       plan: priced?.plan.id ?? null, cycle: priced?.cycle ?? "month",
     };
   }
 
-  if (type.startsWith("adjustment.") && data.action === "refund" && data.status === "approved") {
+  // Chargeback — деньги забрал банк по спору: для воронки это тот же возврат,
+  // и доступ он закрывает так же, как полный возврат.
+  const refundLike = data.action === "refund" || data.action === "chargeback";
+  if (type.startsWith("adjustment.") && refundLike && data.status === "approved") {
     const amount = Number(data.totals?.total);
     if (!Number.isSafeInteger(amount) || amount <= 0 || !data.id || !data.transaction_id) return null;
     return {
       ...base, kind: "payment_refunded", paymentId: data.transaction_id, refundId: data.id, amountMinor: amount,
+      full: data.action === "chargeback" || data.type === "full",
       plan: null, cycle: "month",
     };
   }
