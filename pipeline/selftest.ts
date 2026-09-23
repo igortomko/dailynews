@@ -82,7 +82,7 @@ import {
 import { pickSurvivors, type Candidate } from "./select";
 import {
   applyRules, asNames, cleanRules, compile, mentionText, mergeDraft, NO_RULES, RULE_LIMITS, rulesOf,
-  splitNames, withVariants,
+  splitNames, withVariants, countHits,
 } from "../src/lib/rules";
 import { digestHtml, isWeeklyDay, kindleDigestVerdict } from "./kindle";
 import { QUALITY_SAMPLE, qualitySample } from "./summary-quality";
@@ -964,6 +964,21 @@ assert.ok("error" in cleanRules("follow", {}), "не-массив от форм�
 const nested = compile([["Figma"], ["Figma Design"]]);
 assert.equal(nested.find("Figma Design ships"), "Figma Design", "длинное написание называет себя, а не свой префикс");
 assert.equal(nested.find("Figma ships"), "Figma", "короткое находится, когда длинного нет");
+
+// Пробел и дефис внутри названия необязательны: «open ai» набирают,
+// а пишут «OpenAI». Однословное не меняется, границы по краям те же.
+const joined = compile([["open ai"], ["e-mail"]]);
+assert.equal(joined.test("OpenAI ships GPT-6"), true, "open ai находит слитное OpenAI");
+assert.equal(joined.test("Open-AI and Open AI"), true, "и через дефис, и через пробел");
+assert.equal(joined.find("the OpenAI board"), "open ai", "называется написание из правила");
+assert.equal(joined.test("email is dead"), true, "e-mail находит email");
+assert.equal(joined.test("reopenai"), false, "граница слова по краям на месте");
+assert.equal(compile([["Go"]]).test("Google"), false, "однословное не расширяется");
+assert.deepEqual(
+  countHits([["Figma"], ["open ai"], ["akiflow"], []], ["Figma 5", "OpenAI and Figma", "nothing"]),
+  [2, 1, 0, 0],
+  "счёт упоминаний — по текстам, тем же сопоставителем",
+);
 
 const foldedNames = compile([["Фёдор"], ["Figma"]]);
 assert.equal(foldedNames.test("ФЕДОР пришёл"), true, "регистр и ё/е сходятся");

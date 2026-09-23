@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { flushRebuild } from "@/components/rebuild-queue";
 import { useSettingsSave } from "@/components/settings-save";
 import { useT } from "@/components/i18n-provider";
+import { followExamples } from "@/lib/starter-topics";
 import { NameRules } from "@/components/name-rules";
 import type { Names } from "@/lib/rules";
 
@@ -132,7 +133,7 @@ export function InterestsForm({
                 Пересборку выпуска ни то ни другое не заводит — исключение
                 прячет карточки из готового само, слежение решается
                 при следующем отборе. */}
-            <NameRules kind="follow" name="follow" initial={follow} onChange={touch} />
+            <NameRules kind="follow" name="follow" initial={follow} examples={followExamples(seed.chips.map((chip) => chip.slug))} onChange={touch} />
             <NameRules kind="exclude" name="exclude" initial={exclude} onChange={touch} />
             {error ? <FieldError>{error}</FieldError> : null}
 

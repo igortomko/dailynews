@@ -50,6 +50,9 @@ export const RULE_LIMITS = {
   chars: 80,
 } as const;
 
+/** Окно, по которому «Интересы» считают упоминания у правил (`mentionPool`). */
+export const MENTION_DAYS = 30;
+
 /**
  * Одна форма для сравнения: NFKC (полноширинные буквы и лигатуры сходятся
  * к обычным), без регистра, «ё» как «е», один пробел вместо любого пробельного.
@@ -157,6 +160,13 @@ const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"
 /** Знак, из которого состоят слова: буква, цифра или подчёркивание. */
 const WORD = "\\p{L}\\p{N}_";
 
+/** Пробел или дефис между двумя словесными знаками внутри написания. */
+const JOINT = new RegExp(`(?<=[${WORD}])[ \\-‐–]+(?=[${WORD}])`, "gu");
+/** Чем он ищется: любой разрыв из пробелов и дефисов или никакого. */
+const SEPARATOR = "[\\s\\-‐–]*";
+/** Ключ написания без необязательных разрывов: «open ai» и «OpenAI» — одно. */
+const squash = (text: string) => fold(text).replace(JOINT, "");
+
 /**
  * Одно выражение на все написания.
  *
@@ -170,24 +180,28 @@ const WORD = "\\p{L}\\p{N}_";
  * Текст читателя экранируется целиком: «a.*b» — это буквы и звёздочка,
  * а не выражение.
  *
- * Внутри написания пробел ловит любой пробельный разрыв: в тексте статьи
- * «Hacker\nNews» — то же самое, что «Hacker News».
+ * Пробел или дефис между буквами внутри написания необязателен и ловит
+ * любой такой разрыв: «open ai» находит «OpenAI», «Open-AI» и «Hacker\nNews»
+ * у «Hacker News». Слитное пишут чаще, чем набирают, — «open ai» в «За чем
+ * следить» не находил ничего. Границы по краям при этом те же: однословное
+ * написание не меняется, и «Go» по-прежнему не находится в «Google».
  */
 export function compile(rules: Names[]): Matcher {
   const shown = new Map<string, string>();
   for (const names of rules) {
     for (const name of names) {
       const key = fold(name);
-      if (key && !shown.has(key)) shown.set(key, names[0]);
+      if (key && !shown.has(squash(key))) shown.set(squash(key), names[0]);
     }
   }
   if (shown.size === 0) return NO_MATCH;
-  const alternation = [...shown.keys()]
+  const keys = new Set(rules.flat().map(fold).filter(Boolean));
+  const alternation = [...keys]
     // Длинное написание первым: у альтернатив побеждает первая совпавшая,
     // и «Figma» назвала бы себя в «Figma Design», хотя правило про второе.
     .sort((a, b) => b.length - a.length)
     .map((key) => {
-      const body = escapeRegex(key).replace(/ /g, "\\s+");
+      const body = escapeRegex(key).replace(JOINT, SEPARATOR);
       const lead = new RegExp(`^[${WORD}]`, "u").test(key) ? `(?<![${WORD}])` : "";
       const trail = new RegExp(`[${WORD}]$`, "u").test(key) ? `(?![${WORD}])` : "";
       return `${lead}${body}${trail}`;
@@ -199,7 +213,7 @@ export function compile(rules: Names[]): Matcher {
     test: (text) => pattern.test(fold(text)),
     find: (text) => {
       const hit = pattern.exec(fold(text));
-      return hit ? (shown.get(fold(hit[0])) ?? null) : null;
+      return hit ? (shown.get(squash(hit[0])) ?? null) : null;
     },
   };
 }
@@ -271,6 +285,18 @@ export function withVariants(
   const names = [shown, ...others];
   if (names.join("\n") === rules[index].join("\n")) return { next: rules, stopped: null };
   return { next: rules.map((entry, i) => (i === index ? names : entry)), stopped: null };
+}
+
+/**
+ * Сколько текстов упоминает каждое правило — тем же сопоставителем, что
+ * и отбор. Ноль у правила — почти всегда не то написание, а не тишина
+ * вокруг названия: без числа это правило работало бы молча, не работая.
+ */
+export function countHits(rules: Names[], texts: string[]): number[] {
+  return rules.map((names) => {
+    const matcher = compile([names]);
+    return matcher.empty ? 0 : texts.filter((text) => matcher.test(text)).length;
+  });
 }
 
 /** Правила читателя в том виде, в каком их применяет отбор и лента. */

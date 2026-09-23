@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +8,9 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useT } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
+import { countRuleHits } from "@/lib/actions";
 import {
-  mergeDraft, RULE_LIMITS, rulesAnchor, splitNames, withVariants, type Names, type RuleKind,
+  compile, MENTION_DAYS, mergeDraft, RULE_LIMITS, rulesAnchor, splitNames, withVariants, type Names, type RuleKind,
 } from "@/lib/rules";
 
 /**
@@ -36,6 +37,7 @@ export function NameRules({
   optional,
   raised,
   name,
+  examples,
   onChange,
 }: {
   kind: RuleKind;
@@ -52,6 +54,11 @@ export function NameRules({
   raised?: boolean;
   /** Имя скрытого поля формы. Пусто — список отдаётся только через onChange. */
   name?: string;
+  /**
+   * Что предложить нажатием. Не задано — примеры из словаря (у исключений
+   * они есть, у слежения зависят от тем и приходят от страницы).
+   */
+  examples?: Names[];
   onChange?: (next: Names[]) => void;
 }) {
   const t = useT();
@@ -70,6 +77,43 @@ export function NameRules({
 
   const limit = RULE_LIMITS.rules[kind];
   const full = rules.length >= limit;
+
+  // Сколько раз каждое правило нашлось бы в своих источниках за месяц.
+  // Считается по принятым чипам, а не по набору в поле: иначе запрос
+  // уходил бы на каждое нажатие клавиши. Ответ на устаревший список
+  // выбрасывается — чипы успели поменяться, и числа встали бы не к тем.
+  const [hits, setHits] = useState<{ key: string; counts: number[] } | null>(null);
+  const rulesKey = JSON.stringify(rules);
+  useEffect(() => {
+    if (rules.length === 0) return;
+    let live = true;
+    countRuleHits(kind, rules)
+      .then((counts) => {
+        if (live && counts && counts.length === rules.length) setHits({ key: rulesKey, counts });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+    // rulesKey и есть rules: массив пересоздаётся, а содержимое то же.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, rulesKey]);
+  const counts = hits?.key === rulesKey ? hits.counts : null;
+  const misses = counts ? rules.filter((_, i) => counts[i] === 0).map((names) => names[0]) : [];
+
+  // Уже пойманное своим правилом не предлагается: «open ai» ловит «OpenAI»,
+  // и пример рядом с ним был бы вторым правилом про то же самое.
+  const known = compile(rules);
+  const offered = (examples ?? (kind === "exclude" ? words.exclude.examples : []))
+    .filter((names) => !names.some((n) => known.test(n)))
+    .slice(0, 6);
+
+  /** Пример целиком, со всеми написаниями: их и подобрали ради буквального поиска. */
+  const addExample = (names: Names) => {
+    if (full) return;
+    setRules([...rules, names]);
+    setNote(null);
+  };
 
   /**
    * Список, каким его увидит форма и родитель: правила, написания
@@ -187,6 +231,22 @@ export function NameRules({
                       {words.more(names.length - 1)}
                     </span>
                   ) : null}
+                  {/* Сколько раз сработало бы: правило иначе работает молча,
+                      и ноль — почти всегда не то написание. */}
+                  {counts ? (
+                    <span
+                      title={words.hitsTitle(counts[index], MENTION_DAYS)}
+                      className={cn(
+                        "rounded-md px-1.5 py-0.5 text-xs tabular-nums",
+                        counts[index] === 0
+                          ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      <span aria-hidden>{counts[index]}</span>
+                      <span className="sr-only">{words.hitsTitle(counts[index], MENTION_DAYS)}</span>
+                    </span>
+                  ) : null}
                 </button>
                 <Tooltip>
                   <TooltipTrigger
@@ -235,6 +295,7 @@ export function NameRules({
           ))}
         </div>
       ) : null}
+      {misses.length > 0 ? <FieldDescription>{words.misses(misses, MENTION_DAYS)}</FieldDescription> : null}
 
       <div className="flex gap-2">
         <Input
@@ -269,6 +330,24 @@ export function NameRules({
           {words.add}
         </Button>
       </div>
+      {offered.length > 0 && !full ? (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span>{words.examplesLabel}:</span>
+          {offered.map((names) => (
+            <button
+              key={names[0]}
+              type="button"
+              aria-label={words.addExample(names[0])}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => addExample(names)}
+              className="flex h-7 cursor-pointer items-center gap-1 rounded-md border border-dashed px-2 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            >
+              <PlusIcon className="size-3" />
+              {names[0]}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {note ? <FieldDescription>{note}</FieldDescription> : null}
       {full && !note ? <FieldDescription>{words.limitReached(limit)}</FieldDescription> : null}
     </Field>

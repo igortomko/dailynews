@@ -1284,6 +1284,10 @@ async function main() {
     const theirs = await queries.getSourceHealth(second.id);
     assert.ok(mine.length > 0, "у владельца источники есть");
     assert.equal(theirs.length, 0, "у нового читателя своих источников нет, пока он их не выбрал");
+    // Счётчик у правил в «Интересах» считает по своим источникам: чужой
+    // поток показал бы «сработало 12 раз» там, где до читателя не дойдёт ничего.
+    assert.ok((await queries.mentionPool(owner.id)).length > 0, "у владельца есть текст для счётчика правил");
+    assert.equal((await queries.mentionPool(second.id)).length, 0, "без своих источников считать не по чему — чужой поток не виден");
 
     await readers.addReaderSource(second.id, source.id);
     assert.deepEqual(

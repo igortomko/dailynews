@@ -8,6 +8,7 @@ import { parseStoredReading } from "./reading-document";
 import type { SourceYield } from "./source-health";
 import type { Axes, Source } from "./types";
 import type { Publication } from "./story";
+import { MENTION_DAYS } from "./rules";
 
 /**
  * Запросы ленты. У каждого первым аргументом идёт читатель, и это не
@@ -914,4 +915,22 @@ export async function weekIssues(readerId: number, endDay: string): Promise<Issu
     byDay.set(row.day, issue);
   }
   return [...byDay.values()];
+}
+
+/**
+ * Заголовки и анонсы из источников этого читателя за месяц — текст,
+ * по которому чип правила называет, сколько раз оно сработало бы.
+ * Весь поток, а не выпуски: исключённое в выпуск не попадает, и по
+ * выпускам у исключения всегда стоял бы ноль. Тело статьи не берётся:
+ * около 500 материалов на читателя — это 400 КБ заголовков с анонсами
+ * и мегабайты с телом ради того же ответа «работает ли написание».
+ */
+export async function mentionPool(readerId: number): Promise<string[]> {
+  const rows = await sql<{ text: string }[]>`
+    select concat_ws(e'\n', i.title, i.excerpt) as text
+      from dailynews.items i
+      join dailynews.reader_sources rs on rs.source_id = i.source_id and rs.reader_id = ${readerId}
+     where i.collected_at > now() - make_interval(days => ${MENTION_DAYS}::int)
+  `;
+  return rows.map((row) => row.text);
 }
