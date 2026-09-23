@@ -616,7 +616,7 @@ const localeOfUpdate = (update: unknown) => {
 
 assert.deepEqual(
   parseUpdate(privateStart("/start")),
-  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor", locale: "en" },
+  { kind: "start", telegramId: 4242, chatId: 4242, username: "igor", locale: "en", source: null },
   "обычный /start заводит читателя",
 );
 
@@ -649,6 +649,14 @@ assert.equal(
 assert.equal(parseUpdate(privateStart("/start@lenta_bot")).kind, "start", "/start@ИмяБота — тот же /start");
 assert.equal(parseUpdate(privateStart("/start login")).kind, "start", "полезная нагрузка не мешает");
 assert.equal(parseUpdate(privateStart("/START")).kind, "start", "регистр команды не важен");
+{
+  const sourceOf = (text: string) => { const u = parseUpdate(privateStart(text)); return u.kind === "start" ? u.source : "not start"; };
+  assert.equal(sourceOf("/start c_ab12cd"), "ab12cd", "код размещения читается из нагрузки");
+  assert.equal(sourceOf("/start"), null, "без нагрузки источника нет");
+  assert.equal(sourceOf("/start login"), null, "чужая нагрузка — не код");
+  assert.equal(sourceOf("/start c_AB12CD"), null, "код только строчный — как в реестре");
+  assert.equal(sourceOf("/start c_ab"), null, "короче четырёх — не код");
+}
 assert.equal(parseUpdate(privateStart("привет")).kind, "help", "на прочий текст отвечаем подсказкой");
 assert.equal(parseUpdate(privateStart("")).kind, "ignore", "пустое сообщение игнорируем");
 
@@ -673,7 +681,7 @@ assert.deepEqual(
   parseUpdate({
     message: { text: "/start", chat: { id: bigId, type: "private" }, from: { id: bigId } },
   }),
-  { kind: "start", telegramId: bigId, chatId: bigId, username: null, locale: "en" },
+  { kind: "start", telegramId: bigId, chatId: bigId, username: null, locale: "en", source: null },
   "большой telegram_id должен пережить разбор",
 );
 

@@ -30,9 +30,14 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
   const [readers, rows] = await sql.begin("read only", async (tx) => {
     await tx`set local statement_timeout = '10s'`;
     return Promise.all([
-      tx<{ id: number; username: string | null; ui_language: string | null; created_at: Date; onboarded_at: Date | null }[]>`
-        select id::int, username, ui_language, created_at, onboarded_at
-          from dailynews.readers order by id`,
+      // Источник — канал размещения, кампания — само размещение: так кит
+      // раскладывает каналы и их качество без своей таблицы соответствий.
+      tx<{ id: number; username: string | null; ui_language: string | null; created_at: Date; onboarded_at: Date | null; channel: string | null; campaign: string | null }[]>`
+        select r.id::int, r.username, r.ui_language, r.created_at, r.onboarded_at,
+               p.channel, p.name as campaign
+          from dailynews.readers r
+          left join dailynews.placements p on p.code = r.source
+         order by r.id`,
       // up и down сводятся в одну оценку: день, в котором читатель поставил
       // и то и другое, — один день с оценкой, а не два.
       tx<Row[]>`
@@ -49,7 +54,10 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
   const subject = (id: number) => `r${id}`;
   const events: AnalyticsEvent[] = [];
   for (const r of readers) {
-    events.push({ id: `entered-${r.id}`, subjectId: subject(r.id), occurredAt: r.created_at.toISOString(), name: "product_entered", surface: "telegram" });
+    events.push({
+      id: `entered-${r.id}`, subjectId: subject(r.id), occurredAt: r.created_at.toISOString(), name: "product_entered", surface: "telegram",
+      ...(r.channel && r.campaign ? { source: r.channel, campaign: r.campaign.slice(0, 100) } : {}),
+    });
     if (r.onboarded_at) events.push({ id: `onboarded-${r.id}`, subjectId: subject(r.id), occurredAt: r.onboarded_at.toISOString(), name: "goal_completed", surface: "web", goal: "onboarded" });
   }
 

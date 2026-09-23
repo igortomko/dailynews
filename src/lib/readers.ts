@@ -39,7 +39,7 @@ const COLUMNS = sql`
   paused_at, sleep_asked_at, resume_at, upsell_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
   voice_card, voice_built_at, voice_sample,
-  follow_rules, exclude_rules
+  follow_rules, exclude_rules, source
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
@@ -224,6 +224,13 @@ export async function ensureReader(
    * то есть не пустил бы читателя вовсе.
    */
   locale?: Locale,
+  /**
+   * Код размещения из `/start c_<код>`. Пишется только при заведении:
+   * первое касание и есть источник, а вернувшийся по новой ссылке —
+   * визит, не привлечение. Кода нет в реестре — источник остаётся
+   * пустым: мусорная нагрузка не должна заводить в отчётах новый канал.
+   */
+  source?: string | null,
 ): Promise<Reader> {
   // Владелец забирает строку, перенесённую из profile: в ней его контекст,
   // веса и пройденный онбординг. Иначе он завёлся бы вторым читателем
@@ -238,8 +245,9 @@ export async function ensureReader(
   }
 
   const [reader] = await sql<Reader[]>`
-    insert into dailynews.readers (telegram_id, username, ui_language)
-    values (${telegramId}, ${username}, ${locale ?? DEFAULT_LOCALE})
+    insert into dailynews.readers (telegram_id, username, ui_language, source)
+    values (${telegramId}, ${username}, ${locale ?? DEFAULT_LOCALE},
+            (select code from dailynews.placements where code = ${source ?? null}::text))
     on conflict (telegram_id) do update
       set username = excluded.username, updated_at = now()
     returning ${COLUMNS}

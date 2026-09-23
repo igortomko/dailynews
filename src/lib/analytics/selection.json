@@ -1,33 +1,88 @@
 {
   "contract_version": "product-analytics-v1",
   "preset": "custom",
-  "selected_modules": ["overview", "goals", "funnels", "users", "journeys", "retention", "summary", "sharing", "data_health", "activity"],
+  "selected_modules": [
+    "overview",
+    "goals",
+    "funnels",
+    "users",
+    "journeys",
+    "retention",
+    "summary",
+    "sharing",
+    "data_health",
+    "activity",
+    "channels",
+    "campaigns",
+    "source_quality"
+  ],
   "view_choices": {
-    "overview": ["visitors", "activation", "trend"],
-    "goals": ["goal_list", "goal_trend"],
-    "funnels": ["product_activation_payment", "step_details"],
-    "users": ["user_list", "user_card"],
-    "journeys": ["timeline"],
-    "retention": ["seven_day_return", "retention_windows"],
-    "summary": ["identity_period", "daily_averages", "activation", "seven_day_return"],
-    "sharing": ["export_png", "export_pdf"],
-    "data_health": ["ingestion", "coverage", "redacted_debug"],
-    "activity": ["active_windows", "activity_trend"]
+    "overview": [
+      "visitors",
+      "activation",
+      "trend"
+    ],
+    "goals": [
+      "goal_list",
+      "goal_trend"
+    ],
+    "funnels": [
+      "product_activation_payment",
+      "step_details"
+    ],
+    "users": [
+      "user_list",
+      "user_card"
+    ],
+    "journeys": [
+      "timeline"
+    ],
+    "retention": [
+      "seven_day_return",
+      "retention_windows"
+    ],
+    "summary": [
+      "identity_period",
+      "daily_averages",
+      "activation",
+      "seven_day_return"
+    ],
+    "sharing": [
+      "export_png",
+      "export_pdf"
+    ],
+    "data_health": [
+      "ingestion",
+      "coverage",
+      "redacted_debug"
+    ],
+    "activity": [
+      "active_windows",
+      "activity_trend"
+    ],
+    "channels": [
+      "channel_share",
+      "channel_table"
+    ],
+    "campaigns": [
+      "source",
+      "campaign"
+    ],
+    "source_quality": [
+      "cohort_table"
+    ]
   },
   "excluded_modules": {
     "realtime": "No realtime in the MVP",
-    "channels": "Acquisition source is not recorded at /start yet",
-    "referrers": "Acquisition source is not recorded at /start yet",
-    "source_quality": "Acquisition source is not recorded at /start yet",
-    "campaigns": "No registered campaign placements yet",
     "keywords": "No search data",
     "geography": "Telegram does not provide geography",
     "pages": "Page views are not recorded",
     "technology": "Browser, OS and device are not recorded",
-    "link_builder": "Bot entry has no campaign deep links yet",
+    "link_builder": "Bot deep links are minted in the Links tab, not as UTM links",
     "ai_crawlers": "No web request log source",
     "lifecycle": "Delivery is Telegram and Kindle, not Resend lifecycle email",
-    "learning": "Not a learning product"
+    "learning": "Not a learning product",
+    "referrers": "Bot entry has no web referrer"
   },
   "provenance": "agent"
 }
