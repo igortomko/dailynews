@@ -50,8 +50,13 @@ export type Plan = {
   label: string;
   /** $ в месяц. Ноль — бесплатный тариф. */
   price: number;
-  /** Цена за год, долларов. Только для текста: списывает Paddle по своей цене. */
+  /**
+   * Цена за год, долларов; ноль — годовой оплаты нет. Paddle подтягивается
+   * к этим числам сам (`syncCatalog`): цены пишутся здесь и только здесь.
+   */
   yearPrice: number;
+  /** Дней бесплатного триала; ноль — триала нет. Тот же источник для Paddle и для кнопки. */
+  trialDays: number;
   /** Сколько источников опрашивается. Остальные включённые просто ждут. */
   maxSources: number;
   /**
@@ -123,6 +128,7 @@ export const PLANS: Record<PlanId, Plan> = {
     label: "Бесплатный",
     price: 0,
     yearPrice: 0,
+    trialDays: 0,
     maxSources: 5,
     maxTopics: 5,
     maxMinutes: 5,
@@ -142,6 +148,9 @@ export const PLANS: Record<PlanId, Plan> = {
     price: 3.99,
     // $2.99 в месяц при оплате за год (−25%). Расчёт в docs/economics.md, «Годовая оплата».
     yearPrice: 35.88,
+    // Месяц, а не неделя: за неделю не складывается привычка читать.
+    // Карта нужна до начала — расчёт цены триала в docs/economics.md.
+    trialDays: 30,
     maxSources: 40,
     maxTopics: 15,
     maxMinutes: 20,
@@ -168,6 +177,7 @@ export const PLANS: Record<PlanId, Plan> = {
     price: 9.99,
     // $7.99 в месяц при оплате за год (−20%).
     yearPrice: 95.88,
+    trialDays: 30,
     maxSources: 100,
     maxTopics: 30,
     // Сорок пять, а не шестьдесят: при карточке в 460 знаков потолок в сто
