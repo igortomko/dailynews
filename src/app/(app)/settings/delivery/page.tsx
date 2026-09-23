@@ -1,6 +1,6 @@
 import { currentReader } from "@/lib/session";
 import { kindlePeriodOf } from "@/lib/types";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { timezoneOf } from "@/lib/issue-time";
 import { DeliveryForm } from "./form";
 

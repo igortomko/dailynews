@@ -22,7 +22,7 @@ import { sql } from "../src/lib/db";
 import { getReader, allReaders } from "../src/lib/readers";
 import type { Reader } from "../src/lib/types";
 import { writeDigest, type Survivor } from "./digest";
-import { effectiveVoice } from "../src/lib/lemon";
+import { effectiveVoice } from "../src/lib/billing";
 import { scoreSummaries, type SummaryQuality } from "./summary-quality";
 import { readability } from "./lexicon";
 import { DEFAULT_COMPLEXITY, DEFAULT_STYLE } from "../src/lib/voice";

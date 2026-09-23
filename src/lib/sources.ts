@@ -1,7 +1,7 @@
 import "server-only";
 import { sql } from "./db";
 import { kindDenial } from "./plans";
-import { effectivePlan } from "./lemon";
+import { effectivePlan } from "./billing";
 import { dictOf } from "./i18n";
 import { discover, planFor, probeOne, type Found } from "../../pipeline/discover";
 import { addReaderSource } from "./readers";

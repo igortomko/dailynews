@@ -36,7 +36,7 @@ import {
   READING_MINUTES, sourcesForPlan, targetMinutes, type FeatureId, type Gated,
 } from "./plans";
 import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
-import { effectivePlan, effectiveVoice } from "./lemon";
+import { effectivePlan, effectiveVoice } from "./billing";
 import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
 import { isTimezone } from "./issue-time";

@@ -2,7 +2,7 @@ import { RebuildOnLeave } from "@/components/rebuild-queue";
 import { TimezoneSync } from "@/components/timezone-sync";
 import { I18nProvider } from "@/components/i18n-provider";
 import { PaywallProvider, type Checkout } from "@/components/paywall";
-import { checkoutUrl, trialDaysFor } from "@/lib/lemon";
+import { checkoutUrl, trialDaysFor } from "@/lib/billing";
 import { PLAN_IDS, type PlanId } from "@/lib/plans";
 import { currentLocale } from "@/lib/i18n/server";
 import { currentReader } from "@/lib/session";
@@ -29,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
    * на ненастроенные ключи, срабатывал при настроенных.
    */
   const checkout: Partial<Record<PlanId, Checkout>> = Object.fromEntries(
-    PLAN_IDS.map((id) => [id, { buy: checkoutUrl(id, reader), trialDays: trialDaysFor(id) }])
+    PLAN_IDS.map((id) => [id, { buy: checkoutUrl(id), trialDays: trialDaysFor(id) }])
       .filter(([, value]) => (value as Checkout).buy),
   );
   return (

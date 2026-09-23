@@ -10,7 +10,7 @@ import { LEGAL } from "@/lib/legal";
  * кто ещё решает, заводиться ли. Язык — из `?lang`, иначе у вошедшего
  * читателя его собственный, иначе английский, как на экране входа.
  */
-async function legalLocale(lang: string | string[] | undefined): Promise<Locale> {
+export async function legalLocale(lang: string | string[] | undefined): Promise<Locale> {
   if (typeof lang === "string" && (LOCALES as readonly string[]).includes(lang)) return lang as Locale;
   const id = await verifySession((await cookies()).get(SESSION_COOKIE)?.value);
   const reader = id ? await getReader(id).catch(() => undefined) : undefined;
@@ -21,7 +21,7 @@ export async function LegalPage({
   kind,
   searchParams,
 }: {
-  kind: "privacy" | "terms";
+  kind: "privacy" | "terms" | "refund";
   searchParams: Promise<{ lang?: string | string[] }>;
 }) {
   const locale = await legalLocale((await searchParams).lang);

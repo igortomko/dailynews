@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { currentReader } from "@/lib/session";
-import { effectivePlan, hasFounderDiscount } from "@/lib/lemon";
+import { effectivePlan, hasFounderDiscount } from "@/lib/billing";
 import { FOUNDER_DISCOUNT, billingOn, founderGraceEnds, isFounder } from "@/lib/plans";
 import { currentLocale, getDict } from "@/lib/i18n/server";
 import { PlanTable } from "@/components/plan-table";

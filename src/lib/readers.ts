@@ -3,7 +3,7 @@ import type { Reader, ReaderChannel, ReaderTopic, Source, Topic, VoiceCardRow } 
 import { kindleSenderName } from "./kindle-setup";
 import { normalizeEmail } from "./email";
 import { DEFAULT_LOCALE, type Locale } from "./i18n/locale";
-import { effectiveVoice } from "./lemon";
+import { effectiveVoice } from "./billing";
 import { cardMinutes } from "./reading-time";
 import type { Rules } from "./rules";
 import { catalogTopic } from "./starter-topics";
@@ -731,7 +731,7 @@ export async function disconnectAccount(network: string, accountId: string): Pro
  * Номер Telegram стирается тоже, поэтому следующий /start заводит новый
  * пустой профиль, а `getReader` и прогон отметку видят и строку не берут.
  * Тариф и статус подписки остаются — это счёт, а не личность; номер
- * подписки уходит, он ведёт в кабинет Lemon к самому человеку.
+ * подписки уходит, он ведёт в портал Paddle к самому человеку.
  */
 export async function deleteReader(readerId: number): Promise<void> {
   await sql.begin(async (tx) => {

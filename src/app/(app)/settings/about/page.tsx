@@ -5,7 +5,7 @@ import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
 import { currentReader } from "@/lib/session";
-import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice } from "@/lib/billing";
 import { getCollectedLast24h, getSources } from "@/lib/queries";
 import { cardCharsOf } from "@/lib/readers";
 import {

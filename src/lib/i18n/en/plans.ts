@@ -125,6 +125,19 @@ export const plans = {
       `And ${percent}% off any plan for as long as you stay subscribed. It's applied at checkout automatically.`,
   },
 
+  pricing: {
+    title: "Reporta pricing",
+    intro:
+      "Reporta reads your sources — news sites, blogs, Hacker News, Telegram channels, YouTube, newsletters — scores every story, picks what matters to you, and writes a short digest in your language. It arrives each morning in Telegram, by email or on Kindle.",
+    start: "Start free",
+  },
+
+  checkout: {
+    opening: "Opening checkout…",
+    failed: "Checkout didn't open. Try again in a minute or message the bot.",
+    back: "Back to plans",
+  },
+
   paywall: {
     choose: "Choose",
     perMonthShort: "/mo",

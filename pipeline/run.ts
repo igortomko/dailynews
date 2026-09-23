@@ -10,7 +10,7 @@ import { WINDOW_DAYS } from "./select";
 import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoIdOf } from "./youtube";
 import { jevCost, llmCost } from "./cost";
 import { sourcesForPlan } from "../src/lib/plans";
-import { effectivePlan } from "../src/lib/lemon";
+import { effectivePlan } from "../src/lib/billing";
 import { jevVersionNote } from "../src/lib/jev-version";
 import { issueDue } from "./issue";
 

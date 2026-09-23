@@ -17,7 +17,7 @@ import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { cheapestFor, FEATURES, type Plan } from "../src/lib/plans";
 import { kindlePeriodOf, type KindlePeriod } from "../src/lib/types";
-import { effectivePlan } from "../src/lib/lemon";
+import { effectivePlan } from "../src/lib/billing";
 /** Домен отправителя. Переменная старше константы: она уже есть
  *  в окружении, и константа рядом с ней — настройка, которой никто
  *  не управляет. Пустая строка — это «не задано», а не пустой домен. */

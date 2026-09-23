@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { logout } from "@/lib/actions";
 import { currentReader } from "@/lib/session";
 
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { UnsavedGuard } from "@/components/unsaved-guard";
 import { getDict } from "@/lib/i18n/server";
 import { SettingsNav } from "./nav";

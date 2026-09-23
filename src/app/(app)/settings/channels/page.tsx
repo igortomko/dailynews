@@ -1,6 +1,6 @@
 import { currentReader } from "@/lib/session";
 import { getChannels } from "@/lib/readers";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { allows } from "@/lib/plans";
 import { PlanGate } from "@/components/plan-gate";
 import { getDict } from "@/lib/i18n/server";

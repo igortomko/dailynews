@@ -6,7 +6,7 @@ import { CLICKBAIT_LABEL_NOUL } from "@/lib/types";
 import { parseStoredReading } from "@/lib/reading-document";
 import { digestProgress, getChannels, getReaderTopics, readerSources } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
-import { effectivePlan, effectiveVoice, hasFounderDiscount } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice, hasFounderDiscount } from "@/lib/billing";
 import { langTagFor } from "@/lib/voice";
 import { FOUNDER_DISCOUNT, billingOn, founderGraceEnds, isFounder, issuesToday, sourcesForPlan } from "@/lib/plans";
 import { upgradeNote, upgradeReason } from "@/lib/upgrade";

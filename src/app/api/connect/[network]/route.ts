@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { appOrigin, equal, sign } from "@/lib/auth";
 import { currentReader } from "@/lib/session";
 import { connectChannel } from "@/lib/readers";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { allows } from "@/lib/plans";
 import { accountFor, authorizeUrl, newState, PROVIDERS } from "@/lib/social-connect";
 import type { NetworkId } from "@/lib/networks";

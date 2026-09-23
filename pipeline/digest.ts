@@ -228,7 +228,7 @@ export async function writeDigest(
     if (!reader) throw new Error("Reader unavailable");
     if (reader.reading_v2_enabled) {
       const { writeReadingDigest, readingPicks, readingCards } = await import("./reading");
-      const { effectivePlan } = await import("../src/lib/lemon");
+      const { effectivePlan } = await import("../src/lib/billing");
       /**
        * Разбор получают только верхние карточки выпуска, остальные пишутся
        * как обычно.

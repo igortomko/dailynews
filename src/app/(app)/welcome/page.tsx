@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentReader } from "@/lib/session";
 import { getReaderTopics } from "@/lib/readers";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { onboardingStep, suggestSources, topicOptions } from "@/lib/onboarding";
 import { dictOf } from "@/lib/i18n";
 import { InterestsStep, ReadyStep, SourcesStep } from "./wizard";

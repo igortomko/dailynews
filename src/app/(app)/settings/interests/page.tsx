@@ -1,7 +1,7 @@
 import { digestProgress, getReaderTopics, perCardOf } from "@/lib/readers";
 import { currentReader } from "@/lib/session";
 
-import { effectivePlan, effectiveVoice } from "@/lib/lemon";
+import { effectivePlan, effectiveVoice } from "@/lib/billing";
 import { minutesOf } from "@/lib/reading-time";
 import { asNames } from "@/lib/rules";
 import { formChipOf } from "@/lib/starter-topics";
