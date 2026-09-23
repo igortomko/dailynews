@@ -10,6 +10,7 @@ import { buildPodcast } from "./tts";
 import { selectSurvivors, targetsOf } from "./select";
 import { askFinished, askResume, botUpsellLine, founderBotLine, notify } from "../src/lib/telegram";
 import { sendToKindle, kindleDigestVerdict } from "./kindle";
+import { digestEmail, pauseEmail, sendEmail } from "../src/lib/email";
 import { enrichImages } from "./og";
 import { qualitySample, scoreSummaries } from "./summary-quality";
 import { readability } from "./lexicon";
@@ -17,7 +18,7 @@ import { formOf } from "../src/lib/reading-evaluation";
 import { jevCost, llmCost } from "./cost";
 import { FEATURES, FOUNDER_DISCOUNT, founderGraceEnds, founderNotice, issuesToday, sourcesForPlan, targetMinutes } from "../src/lib/plans";
 import {
-  cardChars, formatMinutes, isShort, itemsForMinutes, minutesOf, pickedNote, savedMinutes,
+  cardChars, formatMinutes, formatMinutesLong, isShort, itemsForMinutes, minutesOf, pickedNote, savedMinutes,
 } from "../src/lib/reading-time";
 // Лог прогона владельческий и русский: «набран», «материалов», «пропуск».
 // Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
@@ -112,6 +113,11 @@ async function runForReader(
     if (reader.telegram_id) {
       await askResume(Number(reader.telegram_id), sleep.silentDays);
       log(`  ${name}: молчит ${sleep.silentDays} дней — пауза, спросил в боте`);
+    } else if (reader.email && process.env.APP_URL?.trim()) {
+      // Кнопок у письма нет, и не нужно: заход на сайт снимает паузу сам.
+      await sendEmail({ to: reader.email, ...pauseEmail(process.env.APP_URL.trim(), sleep.silentDays) })
+        .catch((error) => log(`  ${name}: письмо о паузе — ${(error as Error).message}`));
+      log(`  ${name}: молчит ${sleep.silentDays} дней — пауза, написал на почту`);
     } else {
       log(`  ${name}: молчит ${sleep.silentDays} дней — пауза, спросить негде`);
     }
@@ -431,10 +437,10 @@ async function deliver(
   const appUrl = process.env.APP_URL?.trim();
   if (!appUrl) {
     log("  APP_URL не задан — уведомления пропущены, выпуски сохранены");
-  } else if (!reader.telegram_id) {
+  } else if (!reader.telegram_id && !reader.email) {
     // Молчаливый пропуск здесь неотличим от доставки: выпуск в базе есть,
     // ошибок нет, а читатель о нём не знает.
-    log(`  ${name}: Telegram не привязан — уведомление пропущено`);
+    log(`  ${name}: ни Telegram, ни почты — уведомление пропущено`);
   } else {
     // Подкаст собирается до уведомления, потому что едет тем же сообщением
     // отдельным блоком аудио: списку и записи незачем приходить порознь.
@@ -449,8 +455,10 @@ async function deliver(
     // приходит один раз в сутки и размером ровно с выпуск. Засчитанный,
     // он выбирал бы её целиком, и кнопка «озвучить» отказывала бы весь день
     // за то, чего читатель не просил.
+    //
+    // Только в Telegram: у письма блока аудио нет.
     let podcast: Awaited<ReturnType<typeof buildPodcast>> | null = null;
-    if (reader.podcast && FEATURES.audio.has(effectivePlan(reader))) {
+    if (reader.telegram_id && reader.podcast && FEATURES.audio.has(effectivePlan(reader))) {
       const usage: Usage = { requests: 0, input: 0, output: 0, cached: 0, reasoning: 0 };
       try {
         podcast = await buildPodcast(reader, survivors.map((s) => Number(s.id)), usage);
@@ -509,19 +517,30 @@ async function deliver(
     }
 
     try {
-      await notify(
-        Number(reader.telegram_id), day,
-        survivors.map((s) => ({
-          id: Number(s.id),
-          title: titleOf(s),
-          topic: s.topic_label,
-          at: podcast?.at.get(Number(s.id)) ?? null,
-        })),
-        appUrl,
-        { minutes: reading.minutes, picked },
-        podcast,
-        upsell,
-      );
+      const headlines = survivors.map((s) => ({
+        id: Number(s.id),
+        title: titleOf(s),
+        topic: s.topic_label,
+        at: podcast?.at.get(Number(s.id)) ?? null,
+      }));
+      if (reader.telegram_id) {
+        await notify(
+          Number(reader.telegram_id), day, headlines, appUrl,
+          { minutes: reading.minutes, picked },
+          podcast,
+          upsell,
+        );
+      } else {
+        // Пришедший по почте или через Google: чата бота у него нет,
+        // выпуск приходит письмом с тем же списком.
+        await sendEmail({
+          to: reader.email!,
+          ...digestEmail({
+            day, headlines, appUrl, picked, upsell,
+            size: formatMinutesLong(reading.minutes, ruFeed.time),
+          }),
+        });
+      }
       await sql`
         update dailynews.digests set sent_at = now()
          where reader_id = ${reader.id} and day = ${day}
@@ -533,7 +552,7 @@ async function deliver(
       }
     } catch (error) {
       // Заблокировавший бота читатель не должен ронять прогон остальных.
-      log(`  ${name}: Telegram — ${(error as Error).message}`);
+      log(`  ${name}: ${reader.telegram_id ? "Telegram" : "почта"} — ${(error as Error).message}`);
     }
   }
 

@@ -136,6 +136,7 @@ export const settings = {
       description: "Every morning your digest arrives in Telegram: a subtitle, every headline by topic, and a link to each story.",
       connected: (username: string | null) => `Connected${username ? ` as @${username}` : ""}.`,
       notConnected: "Not connected — message the bot /start, and it'll link this account.",
+      byEmail: (email: string) => `Your issue arrives by email at ${email}.`,
       podcast: "Send an audio podcast",
       podcastHint: "The digest as an audio recording, arrives together with the link.",
       podcastSaved: "Saved",

@@ -1,10 +1,11 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
-import { checkPassword, issueSession, SESSION_COOKIE } from "./auth";
+import { appOrigin, checkPassword, issueEmailToken, issueSession, SESSION_COOKIE } from "./auth";
+import { loginEmail, looksLikeEmail, normalizeEmail, sendEmail } from "./email";
 import { currentReader, currentReaderId } from "./session";
 import { dictOf, localeOf, type Dict } from "./i18n";
 import { getDict } from "./i18n/server";
@@ -62,6 +63,47 @@ export async function login(_prev: unknown, formData: FormData) {
   const session = await issueSession(owner.id);
   (await cookies()).set(session.name, session.value, session.options);
   redirect(String(formData.get("next") || "/"));
+}
+
+/**
+ * Ссылка входа на почту. Строка читателя здесь не заводится — только
+ * после клика (`/auth/email`), иначе форма заводила бы читателя на любой
+ * набранный чужой адрес.
+ *
+ * Ответ одинаковый для нового и знакомого адреса: заводиться может любой,
+ * и прятать тут нечего, а вторая формулировка была бы лишним состоянием.
+ */
+// ponytail: память одного процесса — веб здесь один контейнер. Появится
+// второй — отметка переезжает в базу.
+const lastLinkAt = new Map<string, number>();
+const LINK_COOLDOWN_MS = 60_000;
+
+export async function requestEmailLink(
+  _prev: unknown,
+  formData: FormData,
+): Promise<{ sent?: string; error?: string } | null> {
+  const t = dictOf(undefined).onboarding.login;
+  const email = normalizeEmail(String(formData.get("email") ?? ""));
+  if (!looksLikeEmail(email)) return { error: t.emailInvalid };
+
+  // Одна минута на адрес: форма открыта всему интернету, и без паузы
+  // её можно превратить в рассылку писем на чужой ящик от нашего имени.
+  const now = Date.now();
+  if (now - (lastLinkAt.get(email) ?? 0) < LINK_COOLDOWN_MS) return { sent: email };
+  lastLinkAt.set(email, now);
+  for (const [key, at] of lastLinkAt) if (now - at > LINK_COOLDOWN_MS) lastLinkAt.delete(key);
+
+  const h = await headers();
+  const origin = appOrigin(`${h.get("x-forwarded-proto") ?? "https"}://${h.get("host")}`);
+  const link = `${origin.replace(/\/$/, "")}/auth/email?token=${encodeURIComponent(await issueEmailToken(email))}`;
+  try {
+    await sendEmail({ to: email, ...loginEmail(link, t.mail) });
+  } catch (error) {
+    lastLinkAt.delete(email);
+    console.error(`email login: ${(error as Error).message}`);
+    return { error: t.emailFailed };
+  }
+  return { sent: email };
 }
 
 /**

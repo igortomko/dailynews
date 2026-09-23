@@ -2706,6 +2706,26 @@ async function main() {
       console.log("  удаление профиля: личное стёрто, расход и строка для счёта остались, владелец не удаляется");
     }
 
+    // Вход по почте: письмо и Google сходятся на одной строке при любом
+    // регистре адреса, у нового есть отправитель Kindle, удаление
+    // освобождает адрес для нового профиля.
+    {
+      const first = await readers.ensureEmailReader("Mail.Reader@Example.com", "ru");
+      const second = await readers.ensureEmailReader("mail.reader@example.com");
+      assert.equal(second.id, first.id, "тот же ящик в другом регистре завёл второго читателя");
+      assert.equal(first.email, "mail.reader@example.com");
+      assert.equal(first.telegram_id, null);
+      assert.equal(first.ui_language, "ru");
+      assert.equal(first.kindle_sender, `reader${first.id}`, "у читателя по почте нет отправителя Kindle");
+      await readers.deleteReader(first.id);
+      const [{ email }] = await sql<{ email: string | null }[]>`
+        select email from dailynews.readers where id = ${first.id}`;
+      assert.equal(email, null, "адрес удалённого остался в строке");
+      const reborn = await readers.ensureEmailReader("mail.reader@example.com");
+      assert.notEqual(reborn.id, first.id, "вход по почте вернул удалённый профиль");
+      console.log("  вход по почте: один ящик — один читатель, удаление освобождает адрес");
+    }
+
     console.log("\nСхема и запросы проверены на настоящем Postgres.");
   } finally {
     await sql.end({ timeout: 5 }).catch(() => {});

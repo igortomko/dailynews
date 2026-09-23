@@ -43,7 +43,9 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
 import {
   effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt, trialDaysFor,
 } from "../src/lib/lemon";
-import { appOrigin } from "../src/lib/auth";
+import { appOrigin, issueEmailToken, verifyEmailToken } from "../src/lib/auth";
+import { digestEmail, looksLikeEmail, normalizeEmail } from "../src/lib/email";
+import { emailFromIdToken } from "../src/lib/google";
 import * as bus from "../src/lib/audio-bus";
 import {
   applySpoken, audioBlocker, byLetters, chunks, estimateSeconds, latinRuns,
@@ -5324,5 +5326,48 @@ assert.equal(
   // Драйвер отдаёт timestamptz объектом Date, а не строкой.
   assert.ok(!pollNow({ kind: "x", last_ok_at: new Date("2026-09-23T11:00:00Z") as unknown as string }, now));
 }
+
+// Вход по почте. Токен несёт адрес внутри подписи: подменённый адрес
+// с чужой подписью не проходит, а точки в адресе не ломают разбор.
+// Асинхронно (подпись — Web Crypto), а файл собирается в cjs без
+// top-level await: провал ставит код выхода сам.
+void (async () => {
+  process.env.APP_SECRET ||= "selftest-secret-0123456789";
+  const token = await issueEmailToken("first.last@mail.example.com");
+  assert.equal(await verifyEmailToken(token), "first.last@mail.example.com");
+  const [, ...rest] = token.split(".");
+  const forged = [Buffer.from("victim@example.com").toString("base64url"), ...rest].join(".");
+  assert.equal(await verifyEmailToken(forged), null, "чужой адрес под своей подписью");
+  assert.equal(await verifyEmailToken(null), null);
+  assert.equal(await verifyEmailToken("a.b.c"), null);
+
+  assert.equal(normalizeEmail("  Igor@Gmail.COM "), "igor@gmail.com");
+  assert.ok(looksLikeEmail("a@b.co"));
+  assert.ok(!looksLikeEmail("a@b") && !looksLikeEmail("a b@c.d") && !looksLikeEmail(""));
+
+  // id_token Google: годится только подтверждённый адрес нашего клиента.
+  const jwt = (claims: object) => `h.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.s`;
+  const good = { aud: "cid", iss: "https://accounts.google.com", email: "a@b.co", email_verified: true, exp: Date.now() / 1000 + 60 };
+  assert.equal(emailFromIdToken(jwt(good), "cid"), "a@b.co");
+  assert.equal(emailFromIdToken(jwt({ ...good, email_verified: false }), "cid"), null, "неподтверждённый адрес");
+  assert.equal(emailFromIdToken(jwt({ ...good, email_verified: "true" }), "cid"), null, "строка вместо булева");
+  assert.equal(emailFromIdToken(jwt({ ...good, aud: "other" }), "cid"), null, "чужой клиент");
+  assert.equal(emailFromIdToken(jwt({ ...good, iss: "https://evil.example" }), "cid"), null);
+  assert.equal(emailFromIdToken(jwt({ ...good, exp: 1 }), "cid"), null, "истёкший");
+  assert.equal(emailFromIdToken("garbage", "cid"), null);
+
+  // Письмо с выпуском: тот же список, что в Telegram, текст без разметки.
+  const mail = digestEmail({
+    day: "2026-09-23", appUrl: "https://news.example", size: "~12 минут", picked: null, upsell: null,
+    headlines: [{ id: 7, title: "R&D <растёт>", topic: "ИИ", at: null }],
+  });
+  assert.ok(mail.subject.startsWith("Выпуск за") && !mail.subject.includes("<"));
+  assert.ok(mail.html.includes("https://news.example/?day=2026-09-23#item-7"), "заголовок ведёт на карточку");
+  assert.ok(mail.text.includes("R&D <растёт>") && !mail.text.includes("&amp;"), "сущности раскрыты в тексте");
+  assert.ok(!mail.html.includes("<audio"), "у письма нет блока аудио");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

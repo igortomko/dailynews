@@ -12,6 +12,7 @@ export default async function DeliveryPage() {
     <DeliveryForm
       connected={Boolean(reader.telegram_id)}
       username={reader.username}
+      email={reader.telegram_id ? null : reader.email}
       kindleAddress={reader.kindle_address ?? ""}
       kindleDigest={reader.kindle_digest}
       kindlePeriod={kindlePeriodOf(reader.kindle_period)}
