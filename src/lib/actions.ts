@@ -22,7 +22,7 @@ import {
 import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { buildVoiceCard, cardText, cleanStyle, draftStyle, readOwnPosts } from "../../pipeline/voice-card";
-import { STYLE_LIMIT } from "./voice";
+import { hasStyle, STYLE_LIMIT } from "./voice";
 import { writePost } from "../../pipeline/post";
 import { NETWORK_IDS, publishedIn, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
@@ -1101,7 +1101,7 @@ export async function saveStyle(enabled: boolean, text: string): Promise<{ ok: t
   const t = (await getDict()).onboarding.channels;
   const clean = cleanStyle(String(text ?? ""));
   if (String(text ?? "").trim().length > STYLE_LIMIT) return { error: t.styleTooLong(STYLE_LIMIT) };
-  if (enabled && !clean) return { error: t.styleEmpty };
+  if (enabled && !hasStyle(clean)) return { error: t.styleEmpty };
   await saveVoiceStyle(readerId, Boolean(enabled), clean);
   revalidatePath("/settings/channels");
   return { ok: true as const };

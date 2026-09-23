@@ -1353,6 +1353,11 @@ for (const hook of ["/api/telegram", "/api/lemon"]) {
   assert.equal(draftStyle({ ...reader, voice_enabled: false }).fallback, true, "выключенный свитчер писал стилем");
   assert.equal(draftStyle({ ...reader, voice_enabled: true }).fallback, false, "включённый свитчер писал настройками подачи");
   assert.equal(draftStyle({ ...reader, voice_enabled: true, voice_skill: "  " }).fallback, true, "пустой стиль выдан за «мой стиль»");
+  assert.equal(
+    draftStyle({ ...reader, voice_enabled: true, voice_skill: "# Как я пишу\n\n## Для кого\n" }).fallback,
+    true,
+    "каркас из одних заголовков выдан за «мой стиль»",
+  );
 }
 
 // signed_request от Meta: подпись секретом приложения. Без проверки открытый
