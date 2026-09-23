@@ -87,7 +87,7 @@ export async function POST(request: Request) {
   if (payload.event_type === "subscription.canceled") {
     await recordBillingEvent({
       id: `canceled-${update.subscriptionId}`, readerId, name: "canceled", occurredAt: update.occurredAt,
-      plan: update.plan, cycle: update.cycle,
+      plan: update.pricePlan, cycle: update.cycle,
     });
   }
 

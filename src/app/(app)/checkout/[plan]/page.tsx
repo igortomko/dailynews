@@ -29,6 +29,12 @@ export default async function CheckoutPage({
   const cycle = cycleOf((await searchParams).cycle);
   if (!(plan in PLANS) || PLANS[plan as PlanId].price === 0) redirect("/settings/subscription");
   const reader = await currentReader();
+  // Уже платит — вторая оплата завела бы вторую подписку, и списывались бы
+  // обе (так и вышло на проверке 23 сентября 2026: прямой адрес /checkout
+  // открыл окно поверх действующего триала). Смена тарифа — в «Подписке».
+  if (["active", "trialing", "past_due"].includes(reader.subscription_status ?? "")) {
+    redirect("/settings/subscription");
+  }
   // Цена находится по метке тарифа и периода, а не по id из окружения:
   // каталог Paddle — производное от PLANS (`lib/paddle-catalog.ts`).
   const priceId = checkoutUrl(plan as PlanId, cycle)
