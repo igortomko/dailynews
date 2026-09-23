@@ -2052,8 +2052,8 @@ async function main() {
     );
 
     const saved = await posts.saveDrafts(owner.id, ids[0], [
-      { network: "telegram", variant: 1, text: "первый", length: 6, over: false, unverified: [] },
-      { network: "telegram", variant: 2, text: "второй", length: 6, over: false, unverified: [] },
+      { network: "telegram", variant: 1, text: "первый", length: 6, over: false, unverified: [], weak: [] },
+      { network: "telegram", variant: 2, text: "второй", length: 6, over: false, unverified: [], weak: [], lever: "number" },
     ]);
     assert.equal(saved.length, 2, "оба варианта сохранены: выбор между ними — сигнал о вкусе");
     assert.ok(saved.every((draft) => draft.id > 0), "у каждого черновика свой номер");
@@ -2080,6 +2080,17 @@ async function main() {
     );
     assert.equal(await posts.takenToday(owner.id), 2, "взятые за сутки считаются по читателю");
     assert.equal(await posts.takenToday(second.id), 0, "у соседа свой счёт");
+    const levers = await sql<{ variant: number; lever: string | null }[]>`
+      select variant, lever from dailynews.reader_posts
+       where id in ${sql(saved.map((draft) => draft.id))} order by variant
+    `;
+    assert.deepEqual(
+      levers.map((row) => row.lever), [null, "number"],
+      "рычаг второго варианта лежит в базе: без него отчёт не скажет, какой рычаг работает у него",
+    );
+    const takes = await posts.recentTakes(owner.id, ["telegram"]);
+    assert.equal(takes[0]?.taken, "второй, но переписанный", "правленый черновик идёт образцом первым");
+    assert.equal((await posts.recentTakes(second.id, ["telegram"])).length, 0, "чужие правки образцом не становятся");
     console.log("  блогер: площадки и черновики у каждого свои, правка сохраняется");
 
     // Оплаченные этапы обязаны проходить ограничение: этап, которого нет

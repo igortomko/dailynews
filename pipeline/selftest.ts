@@ -116,7 +116,8 @@ import { countOf, explain, parseTelegram, sharesInTelegram } from "./fetch";
 import {
   languagesOf, NETWORK_IDS, NETWORKS, overLimit, postLength, publishedIn, readableOf, tabsOf,
 } from "../src/lib/networks";
-import { parseDrafts, promptFor, takesBlock, unverifiedNumbers } from "./post";
+import { parseDrafts, promptFor, takesBlock, unverifiedNumbers, weakSpots } from "./post";
+import { CORPUS_FRAME } from "./voice-card";
 import { matchPublished, overlap } from "./drafts-match";
 import { asCard, capReplies, cardBlock, cardFromVoice, cardText, corpusOf, MIN_SHARES, medianViews, parseCard, samplesOf } from "./voice-card";
 import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
@@ -3207,6 +3208,41 @@ assert.deepEqual(
   const found = matchPublished([{ id: 1, text: draft, taken_at: takenAt }, { id: 2, text: draft, taken_at: takenAt }], posts);
   assert.equal(found.get(1), posts[1], "пост раньше взятого черновика из него вырасти не мог");
   assert.equal(found.has(2), false, "один пост — одному черновику: просмотры не делятся надвое");
+}
+
+// Слабые места — код, а не модель, и каждое — провал из корпуса.
+{
+  assert.deepEqual(weakSpots("x", "OpenAI выпустила новую модель"), ["company"], "вход с компании и глагола пойман");
+  assert.deepEqual(weakSpots("x", "Anthropic launched a new model"), ["company"], "и по-английски");
+  assert.deepEqual(weakSpots("x", "Я запустил бота и потерял 40 подписчиков"), [], "«Я запустил» — признание, а не заметка о компании");
+  assert.ok(weakSpots("telegram", "а".repeat(500)).includes("middle"), "500 знаков в Telegram — провальная середина");
+  assert.ok(!weakSpots("x", "а".repeat(500)).includes("middle"), "середина — правило Telegram, не X");
+  assert.ok(weakSpots("telegram", "слово ".repeat(60)).includes("no_number"), "длинный пост без цифр отмечен");
+  assert.ok(!weakSpots("telegram", "Ну наконец-то.").includes("no_number"), "короткая реакция без цифр — нормально");
+  assert.ok(weakSpots("linkedin", "Пост\n\nЧто думаете?").includes("ask"), "«что думаете?» в конце отмечено");
+  assert.ok(!weakSpots("linkedin", "Пост\n\nКто нанимал в Польше — вилка выросла?").includes("ask"), "конкретный вопрос не отмечен");
+}
+
+// Второй вариант — тот же голос плюс один рычаг; рычаг лежит в черновике.
+{
+  const item = { id: 1, title: "t", summary: "s", excerpt: "e", url: "https://a.b", source_label: "a" };
+  const parsed = parseDrafts(
+    JSON.stringify({ x: ["первый", "второй"], telegram: ["один", "два"], levers: { x: "number", telegram: "выдумка" } }),
+    item, [NETWORKS.x, NETWORKS.telegram],
+  );
+  const x = parsed.drafts.filter((draft) => draft.network === "x");
+  assert.equal(x[0].lever, undefined, "у первого варианта рычага нет — он «как автор»");
+  assert.equal(x[1].lever, "number", "рычаг второго варианта разобран");
+  assert.equal(
+    parsed.drafts.find((draft) => draft.network === "telegram" && draft.variant === 2)?.lever, undefined,
+    "незнакомый ключ — не рычаг: отчёт не заведёт по нему строку",
+  );
+  const card = cardFromVoice({ language: "русском", complexity: 3, style: "нейтральный" });
+  assert.ok(!cardBlock(card).includes(CORPUS_FRAME[0]), "у запасной карточки не на чем стоять и корпусу");
+  assert.ok(
+    cardBlock({ ...card, voice: ["а"], built_from: 5 }).includes(CORPUS_FRAME[0]),
+    "без своей статистики форма подтягивается к корпусу",
+  );
 }
 
 // «49.3K» — это 49 300, а пусто — это null, а не ноль: ноль означал бы

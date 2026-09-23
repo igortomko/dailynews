@@ -20,6 +20,9 @@ import type { Axes } from "../src/lib/types";
 import { NETWORKS, overLimit, postLength, type Network, type NetworkId } from "../src/lib/networks";
 import { firstSet, resolve, type Usage } from "./digest";
 import { cleanStyle } from "./voice-card";
+import { isLever, LEVERS, weakSpots, type LeverId, type WeakSpot } from "../src/lib/post-levers";
+
+export { LEVERS, weakSpots, type LeverId, type WeakSpot };
 
 
 export type PostSource = {
@@ -37,6 +40,10 @@ export type Draft = {
   network: NetworkId;
   variant: number;
   text: string;
+  /** Каким рычагом прокачан второй вариант (`LEVERS`). У первого пусто. */
+  lever?: LeverId;
+  /** Слабые места, найденные кодом: подсказка, а не запрет. */
+  weak: WeakSpot[];
   /** Длина с поправкой на ссылку: в X она всегда 23 символа. */
   length: number;
   over: boolean;
@@ -126,9 +133,16 @@ const RULES = `Ты пишешь черновик поста для автора
 
 — утверждение источника и трактовка — разными предложениями.
 
-Вариантов на каждую сеть — два. Они отличаются входом: разные приёмы из его же
-набора или разный угол захода. Факты и вердикт в них одни и те же; два варианта
-с переставленными словами — это один вариант.
+Вариантов на каждую сеть — два, и роли у них разные. Первый — как он пишет
+сам. Второй — тот же голос и те же факты плюс ровно один рычаг из списка ниже:
+тот, что сильнее всего поднимет именно этот пост. Два рычага сразу нельзя —
+потом не понять, какой сработал. Голос, словечки и запреты автора рычаг
+не трогает: улучшается форма, а не человек.
+
+${Object.entries(LEVERS).map(([id, what]) => `  ${id}: ${what}`).join("\n")}
+
+Поле "levers" — какой рычаг взят во втором варианте каждой сети, ключом
+из списка.
 
 Поле "hook" — каким его приёмом открыт первый вариант, в двух-трёх словах.
 Поле "added" — только то, чего в материале нет: твои сравнения, оценки
@@ -203,7 +217,7 @@ ${languageBlock}
 ${blockOf(item)}
 
 Ответь только валидным JSON, без markdown:
-{${shape}, "hook": "...", "added": ["..."]}`;
+{${shape}, "levers": {${networks.map((network) => `"${network.id}": "number"`).join(", ")}}, "hook": "...", "added": ["..."]}`;
 }
 
 /**
@@ -276,6 +290,7 @@ export function parseDrafts(
 
   const source = [item.title, item.summary, item.excerpt].join(" ");
   const drafts: Draft[] = [];
+  const levers = (parsed.levers ?? {}) as Record<string, unknown>;
 
   for (const network of networks) {
     const value = parsed[network.id];
@@ -294,6 +309,10 @@ export function parseDrafts(
         length: postLength(network, text),
         over: overLimit(network, text),
         unverified: [...unverifiedNumbers(text, source), ...foreignLinks(text, item.url)],
+        // Незнакомый ключ — не рычаг: подпись «рычаг: ???» врала бы, а отчёт
+        // завёл бы по нему отдельную строку.
+        lever: index === 1 && isLever(levers[network.id]) ? levers[network.id] as LeverId : undefined,
+        weak: weakSpots(network.id, text),
       });
     }
   }
