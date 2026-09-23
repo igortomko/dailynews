@@ -159,7 +159,18 @@ export function ChannelsForm({
       toast.error(t.onboarding.channels.skillWrongType);
       return;
     }
+    // Файл заменяет поле целиком, и 23 сентября 2026 так пропал голос:
+    // загрузили скилл про новости, нажали «Сохранить» — формы, словечки
+    // и запреты ушли вместе с прежним текстом. Поэтому замена называется
+    // вслух, а прежний текст возвращается одним нажатием до сохранения.
+    const previous = styleDraft;
     setStyleDraft((await file.text()).slice(0, STYLE_LIMIT));
+    if (previous.trim()) {
+      toast.warning(t.onboarding.channels.skillReplaced, {
+        duration: 15_000,
+        action: { label: t.onboarding.channels.skillRestore, onClick: () => setStyleDraft(previous) },
+      });
+    }
   };
 
   const saveStyleAs = (enabled: boolean, text: string) =>

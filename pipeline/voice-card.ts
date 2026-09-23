@@ -154,7 +154,7 @@ export async function readOwnPosts(
     const network = NETWORKS[channel.network];
     if (!network?.readable || !channel.handle) continue;
     try {
-      posts.push(...(await readOne(channel.network, channel.handle)));
+      posts.push(...capReplies(await readOne(channel.network, channel.handle)));
     } catch (error) {
       failed.push({
         network: channel.network,
@@ -188,7 +188,7 @@ async function readOne(network: NetworkId, handle: string): Promise<OwnPost[]> {
     // для вписанного руками ника: без неё запрос к X ушёл бы за постами
     // со словом «ник», а не за его собственными.
     url: network === "x" && !handle.startsWith("from:") ? `from:${handle.replace(/^@/, "")}` : handle,
-    config: network === "x" ? { max_age_days: 365, max_pages: 3 } : {},
+    config: network === "x" ? { max_age_days: 365, max_pages: 3, replies: true } : {},
     active: true,
     input_url: null,
     last_ok_at: null,
@@ -216,7 +216,22 @@ async function readOne(network: NetworkId, handle: string): Promise<OwnPost[]> {
       where: network,
       shares: Boolean(item.shares),
     }))
-    .filter((post) => post.text.trim().length > 40);
+    // Ответ короче поста по природе: «Ровно. И цена тоже врёт» — это его
+    // мнение целиком, и сорок знаков отрезали бы большинство ответов.
+    .filter((post) => post.text.trim().length > (isReply(post.text) ? 15 : 40));
+}
+
+const isReply = (text: string) => text.startsWith("[ответ");
+
+/**
+ * Ответы не должны вытеснить посты. У замеренного автора в X три четверти
+ * ленты — ответы, и без предела корпус стал бы его перепиской: форму поста
+ * по нему не собрать. Ответов — не больше, чем постов, но хотя бы десяток.
+ */
+export function capReplies(posts: OwnPost[]): OwnPost[] {
+  const own = posts.filter((post) => !isReply(post.text));
+  const replies = posts.filter((post) => isReply(post.text));
+  return [...own, ...replies.slice(0, Math.max(10, own.length))];
 }
 
 /**

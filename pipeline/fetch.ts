@@ -436,6 +436,7 @@ type XTweet = {
   retweetCount?: number;
   viewCount?: number;
   isReply?: boolean;
+  inReplyToUsername?: string;
   retweeted_tweet?: unknown;
   quoted_tweet?: unknown;
   entities?: { urls?: { expanded_url?: string }[] };
@@ -521,6 +522,10 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
   const maxAgeDays = Number(source.config?.max_age_days ?? X_MAX_AGE_DAYS);
   const maxPages = Number(source.config?.max_pages ?? X_MAX_PAGES);
   const queryType = String(source.config?.query_type ?? "Latest");
+  // Ответы нужны только карточке автора: ответ на чужой твит — это его
+  // мнение о чужом, ровно то, чему учится черновик. В сборе новостей они
+  // по-прежнему отсекаются — там переписка оплачивалась бы как материал.
+  const keepReplies = source.config?.replies === true;
 
   // since_time ставится в сам запрос: платить за старые посты, которые
   // всё равно отсеет фильтр свежести, незачем.
@@ -550,13 +555,18 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
       // `-is:reply -is:retweet` убирают их до оплаты, но запрос пишет
       // читатель, и рассчитывать на них нельзя: без этой отсечки лента
       // выбранных авторов приходит их перепиской.
-      if (tweet.isReply || tweet.retweeted_tweet) continue;
+      if ((tweet.isReply && !keepReplies) || tweet.retweeted_tweet) continue;
       const handle = tweet.author?.userName ? `@${tweet.author.userName}` : "";
       const link = tweetLink(tweet);
       const published = new Date(tweet.createdAt);
       // Текст приходит с неразвёрнутыми HTML-сущностями (&amp;, &gt;).
       // В заголовке дайджеста они видны читателю как есть.
-      const text = stripHtml(tweet.text);
+      const own = stripHtml(tweet.text);
+      // Ответ без адресата читается как пост, а форма у него другая:
+      // пометка говорит модели, что это реплика в чужой ветке.
+      const text = tweet.isReply
+        ? `[ответ${tweet.inReplyToUsername ? ` @${tweet.inReplyToUsername}` : ""}] ${own}`
+        : own;
       items.push({
         // Первая строка поста работает заголовком: у твита его нет,
         // а Jev и дайджест ждут заголовок отдельно от текста.
@@ -566,7 +576,7 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
         points: tweet.likeCount ?? null,
         comments: tweet.retweetCount ?? null,
         views: tweet.viewCount ?? null,
-        shares: Boolean(link || tweet.quoted_tweet),
+        shares: Boolean(link || tweet.quoted_tweet || tweet.isReply),
         published_at: Number.isNaN(published.getTime()) ? null : published,
       });
     }

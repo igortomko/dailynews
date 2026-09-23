@@ -2,9 +2,9 @@ import { NextResponse, after, type NextRequest } from "next/server";
 import { checkSecret, escapeHtml, SECRET_HEADER } from "@/lib/telegram";
 import { getChannels, getReader, spentToday } from "@/lib/readers";
 import { classifyDrop } from "@/lib/drops";
-import { dropSourceFor, saveDrafts } from "@/lib/posts";
+import { dropSourceFor, recentTakes, saveDrafts } from "@/lib/posts";
 import { draftStyle } from "../../../../pipeline/voice-card";
-import { writePost } from "../../../../pipeline/post";
+import { takesBlock, writePost } from "../../../../pipeline/post";
 import { languagesOf, publishedIn, tabsOf } from "@/lib/networks";
 import { sql } from "@/lib/db";
 
@@ -151,8 +151,10 @@ async function reply(incoming: Incoming): Promise<void> {
   const { block, fallback } = draftStyle(reader);
 
   try {
+    const ids = networks.map((network) => network.id);
+    const takes = takesBlock(await recentTakes(readerId, ids));
     const written = await writePost(
-      source, block, networks.map((network) => network.id), reader.id, languagesOf(channels),
+      source, [block, takes].filter(Boolean).join("\n\n"), ids, reader.id, languagesOf(channels),
     );
     await saveDrafts(readerId, source.id, written.drafts);
 

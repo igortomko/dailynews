@@ -82,6 +82,8 @@ export const onboarding = {
     disconnectNamed: (network: string) => `Disconnect ${network}`,
     postLanguageNamed: (network: string) => `Post language on ${network}`,
     languageAsStyle: "language: as in style",
+    skillReplaced: "The file replaced all the text in the field. Until you press Save, you can bring the old one back",
+    skillRestore: "Restore previous",
     channelPlaceholder: "t.me/channel",
     channelDialogTitle: "Connect a Telegram channel",
     channelDialogText:

@@ -18,6 +18,7 @@
     "postbot:webhook": "tsx --env-file=.env scripts/set-webhook.ts postbot",
     "env:set": "tsx scripts/env-set.ts",
     "replay": "tsx --env-file=.env pipeline/prompt-replay.ts",
+    "drafts:report": "tsx --env-file=.env --conditions=react-server pipeline/drafts-report.ts",
     "reading:evaluate": "tsx --env-file-if-exists=.env scripts/reading-evaluate.ts",
     "sync:launch-kit": "node scripts/sync-launch-kit.mjs"
   },

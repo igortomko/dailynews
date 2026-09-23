@@ -105,6 +105,34 @@ export async function takeDraft(
   return rows.length > 0;
 }
 
+export type Take = { network: string; draft: string; taken: string | null };
+
+/**
+ * Что он взял из прошлых черновиков и как поправил — образец для следующего.
+ *
+ * Правка сильнее описания стиля: описание модель читает пожеланием, а пара
+ * «было → стало» показывает, что именно он в наших черновиках исправляет.
+ * Поэтому правленые идут первыми, взятые без правки — следом: они тоже
+ * сигнал, «вот так — годится». Только по сетям, для которых пишется пост:
+ * правка твита ничему не учит пост в LinkedIn.
+ */
+export async function recentTakes(
+  readerId: number,
+  networks: string[],
+  limit = 5,
+): Promise<Take[]> {
+  if (networks.length === 0) return [];
+  return sql<Take[]>`
+    select network, text as draft, taken_text as taken
+      from dailynews.reader_posts
+     where reader_id = ${readerId}
+       and taken_at is not null
+       and network = any(${networks}::text[])
+     order by (taken_text is not null) desc, taken_at desc
+     limit ${limit}
+  `;
+}
+
 /** Сколько постов он взял за сутки. Видно в интерфейсе рядом с расходом. */
 export async function takenToday(readerId: number): Promise<number> {
   const [row] = await sql<{ n: number }[]>`
