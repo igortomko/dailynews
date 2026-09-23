@@ -21,7 +21,7 @@ export function kindleSetupStep(reader: {
 }
 
 /**
- * Имя обратного адреса для Kindle: из него собирается `имя@kindle.tomko.io`.
+ * Имя обратного адреса для Kindle: из него собирается `имя@kindle.reporta.club`.
  *
  * Telegram-id, а не username: username читатель меняет в Telegram когда
  * захочет, а адрес после одобрения в Amazon заморожен навсегда. Разъехавшись,

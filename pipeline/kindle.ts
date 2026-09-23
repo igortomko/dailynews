@@ -1,5 +1,5 @@
 /**
- * Выпуск книгой на Kindle. Через Resend: домен kindle.tomko.io.
+ * Выпуск книгой на Kindle. Через Resend: домен kindle.reporta.club.
  *
  * Обратный адрес свой на каждого читателя. Amazon считает объём по адресу
  * отправителя — E010 предупреждение, E011 последнее, E012 блокировка
@@ -21,7 +21,7 @@ import { effectivePlan } from "../src/lib/lemon";
 /** Домен отправителя. Переменная старше константы: она уже есть
  *  в окружении, и константа рядом с ней — настройка, которой никто
  *  не управляет. Пустая строка — это «не задано», а не пустой домен. */
-const DOMAIN = process.env.KINDLE_FROM_DOMAIN?.trim() || "kindle.tomko.io";
+const DOMAIN = process.env.KINDLE_FROM_DOMAIN?.trim() || "kindle.reporta.club";
 
 export type Article = {
   title: string;

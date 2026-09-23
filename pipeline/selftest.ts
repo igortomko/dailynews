@@ -2449,7 +2449,7 @@ assert.equal(kindleSenderName(1, "52308619"), "52308619", "адрес собир
 assert.equal(kindleSenderName(1, 52308619), "52308619", "число из драйвера и строка дают одно имя");
 assert.equal(kindleSenderName(7, null), "reader7", "без привязанного Telegram — номер читателя");
 // Пустая строка и мусор — не id. Приняв их за имя, мы бы выдали адрес
-// вида `@kindle.tomko.io`, и письма исчезали бы молча.
+// вида `@kindle.reporta.club`, и письма исчезали бы молча.
 assert.equal(kindleSenderName(7, ""), "reader7", "пустая строка именем не становится");
 assert.equal(kindleSenderName(7, "igortomko"), "reader7", "username именем не становится");
 
