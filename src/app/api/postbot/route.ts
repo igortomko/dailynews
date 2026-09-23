@@ -5,7 +5,7 @@ import { classifyDrop } from "@/lib/drops";
 import { dropSourceFor, saveDrafts } from "@/lib/posts";
 import { draftStyle } from "../../../../pipeline/voice-card";
 import { writePost } from "../../../../pipeline/post";
-import { publishedIn, tabsOf } from "@/lib/networks";
+import { languagesOf, publishedIn, tabsOf } from "@/lib/networks";
 import { sql } from "@/lib/db";
 
 /**
@@ -151,7 +151,9 @@ async function reply(incoming: Incoming): Promise<void> {
   const { block, fallback } = draftStyle(reader);
 
   try {
-    const written = await writePost(source, block, networks.map((network) => network.id), reader.id);
+    const written = await writePost(
+      source, block, networks.map((network) => network.id), reader.id, languagesOf(channels),
+    );
     await saveDrafts(readerId, source.id, written.drafts);
 
     for (const draft of written.drafts) {

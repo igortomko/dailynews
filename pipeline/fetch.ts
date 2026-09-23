@@ -437,6 +437,7 @@ type XTweet = {
   viewCount?: number;
   isReply?: boolean;
   retweeted_tweet?: unknown;
+  quoted_tweet?: unknown;
   entities?: { urls?: { expanded_url?: string }[] };
   author?: { userName?: string; name?: string };
 };
@@ -565,6 +566,7 @@ export async function fetchX(source: Source): Promise<RawItem[]> {
         points: tweet.likeCount ?? null,
         comments: tweet.retweetCount ?? null,
         views: tweet.viewCount ?? null,
+        shares: Boolean(link || tweet.quoted_tweet),
         published_at: Number.isNaN(published.getTime()) ? null : published,
       });
     }
@@ -605,6 +607,28 @@ export function countOf(raw: string | undefined): number | null {
   if (raw.endsWith("K")) return Math.round(digits * 1000);
   if (raw.endsWith("M")) return Math.round(digits * 1e6);
   return Math.round(digits);
+}
+
+/**
+ * Делится ли пост канала чужим материалом: переслан из другого канала,
+ * несёт превью ссылки или ссылку наружу в тексте. Ссылка на другой канал
+ * в t.me — тоже чужое; на свой же канал — нет: это «как я писал раньше».
+ */
+export function sharesInTelegram(chunk: string, body: string, channel: string): boolean {
+  if (/tgme_widget_message_forwarded_from/.test(chunk)) return true;
+  if (/tgme_widget_message_link_preview/.test(chunk)) return true;
+  const own = channel.replace(/^@/, "").toLowerCase();
+  return [...body.matchAll(/<a[^>]+href="(https?:\/\/[^"]+)"/gi)].some(([, href]) => {
+    try {
+      const url = new URL(href);
+      if (!/(^|\.)(t\.me|telegram\.me)$/.test(url.hostname)) return true;
+      const parts = url.pathname.split("/").filter(Boolean);
+      const name = (parts[0] === "s" ? parts[1] : parts[0])?.toLowerCase() ?? "";
+      return Boolean(name) && name !== own;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function parseTelegram(html: string, channel: string): FeedDoc {
@@ -649,6 +673,7 @@ export function parseTelegram(html: string, channel: string): FeedDoc {
       // «49.3K» и «1.74M» — так их печатает сама страница. Нужны только
       // карточке автора: по ним видно, какие его посты заходят.
       views: countOf(chunk.match(/tgme_widget_message_views">([\d.,KM]+)</)?.[1]),
+      shares: sharesInTelegram(chunk, body, channel),
       // У поста нет заголовка, как и у твита: первая строка работает
       // заголовком, потому что Jev и дайджест ждут его отдельно от текста.
       title: (text.split("\n").find((line) => line.trim()) ?? text).trim().slice(0, 200),
