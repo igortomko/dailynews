@@ -20,10 +20,10 @@ import {
   saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
 import { cleanRules, rulesOf, type Rules } from "./rules";
-import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
+import { postSourceFor, recentTakes, saveDrafts, takeDraft, type SavedDraft } from "./posts";
 import { buildVoiceCard, cardText, cleanStyle, draftStyle, readOwnPosts } from "../../pipeline/voice-card";
 import { hasStyle, LANGUAGES, SOURCE_LANGUAGE, STYLE_LIMIT } from "./voice";
-import { writePost } from "../../pipeline/post";
+import { takesBlock, writePost } from "../../pipeline/post";
 import { languagesOf, NETWORK_IDS, publishedIn, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import { KINDLE_PERIODS, type KindlePeriod, type Reader, type Source } from "./types";
@@ -1222,8 +1222,10 @@ export async function writeOpinion(itemId: number): Promise<
   const style = draftStyle(reader);
 
   try {
+    const ids = networks.map((network) => network.id);
+    const takes = takesBlock(await recentTakes(reader.id, ids));
     const written = await writePost(
-      item, style.block, networks.map((network) => network.id), reader.id, languagesOf(channels),
+      item, [style.block, takes].filter(Boolean).join("\n\n"), ids, reader.id, languagesOf(channels),
     );
     const saved = await saveDrafts(reader.id, item.id, written.drafts);
     return {

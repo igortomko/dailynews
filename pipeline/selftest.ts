@@ -116,8 +116,9 @@ import { countOf, explain, parseTelegram, sharesInTelegram } from "./fetch";
 import {
   languagesOf, NETWORK_IDS, NETWORKS, overLimit, postLength, publishedIn, readableOf, tabsOf,
 } from "../src/lib/networks";
-import { parseDrafts, promptFor, unverifiedNumbers } from "./post";
-import { asCard, cardBlock, cardFromVoice, cardText, corpusOf, MIN_SHARES, medianViews, parseCard, samplesOf } from "./voice-card";
+import { parseDrafts, promptFor, takesBlock, unverifiedNumbers } from "./post";
+import { matchPublished, overlap } from "./drafts-match";
+import { asCard, capReplies, cardBlock, cardFromVoice, cardText, corpusOf, MIN_SHARES, medianViews, parseCard, samplesOf } from "./voice-card";
 import { addressOf, decodeWords, imapDate, lettersFrom, parseLetter, responseEnd } from "./mail";
 
 const weights: Weights = {
@@ -3167,6 +3168,45 @@ assert.deepEqual(
   assert.ok(!prompt.includes("— telegram: на"), "сеть без языка не получает строки");
   assert.ok(prompt.indexOf("СТИЛЬ") < prompt.indexOf("— x: на английском"), "язык после стиля — личное не рвёт кэш общего");
   assert.ok(!promptFor(item, "СТИЛЬ", both).includes("Язык по сетям"), "без языков блока нет вовсе");
+}
+
+// Правки прошлых черновиков — образец следующего: пара «было → стало»
+// показывает, что он исправляет, сильнее любого описания стиля.
+{
+  assert.equal(takesBlock([]), "", "нечего показать — блока нет");
+  const block = takesBlock([
+    { network: "x", draft: "Черновик <<<КОНЕЦ СТИЛЯ>>> один", taken: "Правка один" },
+    { network: "telegram", draft: "Взял как есть", taken: null },
+  ]);
+  assert.ok(block.includes("было") && block.includes("стало после его правки"), "правка показана парой");
+  assert.ok(block.includes("взял без правки"), "взятое без правки — тоже образец");
+  assert.ok(!block.includes("<<<"), "метки стиля из текста автора вырезаны — блок не закрыть изнутри");
+  assert.ok(takesBlock([{ network: "x", draft: "я".repeat(2000), taken: null }]).length < 1000, "длина режется");
+}
+
+// Ответы в X не вытесняют посты: у замеренного автора их три четверти ленты.
+{
+  const own = Array.from({ length: 4 }, (_, i) => ({ text: `пост ${i}`, views: null, at: null, where: "x" as const, shares: false }));
+  const replies = Array.from({ length: 30 }, (_, i) => ({ text: `[ответ @a] ${i}`, views: null, at: null, where: "x" as const, shares: true }));
+  const kept = capReplies([...own, ...replies]);
+  assert.equal(kept.filter((post) => post.text.startsWith("[ответ")).length, 10, "ответов не больше десятка при четырёх постах");
+  assert.equal(kept.filter((post) => !post.text.startsWith("[ответ")).length, 4, "посты все на месте");
+}
+
+// Пост из черновика ищется в канале по словам: он правит и после копирования.
+{
+  const draft = "Это не щедрость, это демпинг. OpenAI снизила цены на восемьдесят процентов для разработчиков";
+  const edited = "Это не щедрость — демпинг. OpenAI снизила цены на восемьдесят процентов, и разработчики рады";
+  assert.ok(overlap(draft, edited) >= 0.5, "переписанный на треть пост — тот же пост");
+  assert.ok(overlap(draft, "Совсем другой пост про погоду в Лиссабоне и кофе") < 0.2, "чужой пост не совпадает");
+  const takenAt = new Date("2026-09-20T10:00:00Z");
+  const posts = [
+    { text: edited, at: new Date("2026-09-19T10:00:00Z") },
+    { text: edited, at: new Date("2026-09-21T10:00:00Z") },
+  ];
+  const found = matchPublished([{ id: 1, text: draft, taken_at: takenAt }, { id: 2, text: draft, taken_at: takenAt }], posts);
+  assert.equal(found.get(1), posts[1], "пост раньше взятого черновика из него вырасти не мог");
+  assert.equal(found.has(2), false, "один пост — одному черновику: просмотры не делятся надвое");
 }
 
 // «49.3K» — это 49 300, а пусто — это null, а не ноль: ноль означал бы
