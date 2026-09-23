@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { PLANS, planOf, type Plan, type PlanId } from "./plans";
+import {
+  PLANS, billingFrom, billingOn, founderGraceEnds, isFounder, planOf, type Plan, type PlanId,
+} from "./plans";
 import type { Voice } from "./voice";
 import type { Reader } from "./types";
 
@@ -60,17 +62,33 @@ export function planOfVariant(variantId: string | number | null | undefined): Pl
  * от Lemon Squeezy, а не из браузера, и связать платёж с читателем больше
  * нечем — почта в чеке может отличаться от той, что в профиле.
  */
-export function checkoutUrl(plan: PlanId, readerId: number): string | null {
+export function checkoutUrl(
+  plan: PlanId,
+  reader: Pick<Reader, "id" | "created_at">,
+): string | null {
   const variant = variants()[plan];
   if (!variant) return null;
   const url = new URL(variant.buy);
-  url.searchParams.set("checkout[custom][reader_id]", String(readerId));
+  url.searchParams.set("checkout[custom][reader_id]", String(reader.id));
+  // Скидка ранним подставляется сама: код, который надо помнить и вводить,
+  // до оплаты не доживает. Код не задан — ссылка без скидки, а не сломанная.
+  if (hasFounderDiscount(reader)) {
+    url.searchParams.set("checkout[discount_code]", process.env.LEMON_DISCOUNT_FOUNDER!);
+  }
   // Свой экран «спасибо» не нужен: читатель возвращается туда, откуда ушёл,
   // и видит тариф уже применённым — вебхук приходит раньше редиректа редко,
   // поэтому страница подписки сама показывает «платёж обрабатывается».
   url.searchParams.set("embed", "0");
   return url.toString();
 }
+
+/**
+ * Достаётся ли этому читателю скидка ранних. Код не задан — не достаётся
+ * никому, и интерфейс о ней молчит: обещанная и не подставленная скидка
+ * хуже несуществующей.
+ */
+export const hasFounderDiscount = (reader: Pick<Reader, "created_at">): boolean =>
+  Boolean(process.env.LEMON_DISCOUNT_FOUNDER) && isFounder(reader.created_at);
 
 export const paymentsConfigured = () => Object.keys(variants()).length > 0;
 
@@ -111,7 +129,11 @@ export function effectiveVoice(reader: Reader): Voice {
   };
 }
 
-export function effectivePlan(reader: Reader, now = new Date()): Plan {
+export function effectivePlan(reader: Reader, now = new Date(), from: string | null = billingFrom()): Plan {
+  // Оплата не включена — Pro у всех, включая владельца: смотреть продукт
+  // глазами бесплатного читателя незачем, пока бесплатного тарифа нет.
+  if (!billingOn(now, from)) return PLANS.pro;
+
   // У владельца действует то, что стоит в колонке: подписки он у себя
   // самого не покупает, и проверять её статус не по чему. Так у него
   // и стояло «pro» — и гасло каждой проверкой на подписку, которой нет.
@@ -119,6 +141,11 @@ export function effectivePlan(reader: Reader, now = new Date()): Plan {
   // посмотреть на продукт глазами бесплатного читателя, а проверка
   // «платный источник просит Pro» меряет владельца и потому мертва.
   if (reader.owner) return planOf(reader.plan);
+
+  // Ранний читатель дочитывает месяц Pro после включения, даже если купил
+  // Plus раньше конца этого месяца: купленное не должно отнимать подаренное.
+  const grace = founderGraceEnds(from);
+  if (grace && now < grace && isFounder(reader.created_at, from)) return PLANS.pro;
 
   const bought = planOf(reader.plan);
   if (bought.id === "free") return bought;

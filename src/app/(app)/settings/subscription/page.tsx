@@ -1,5 +1,8 @@
+import { notFound } from "next/navigation";
 import { currentReader } from "@/lib/session";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan, hasFounderDiscount } from "@/lib/lemon";
+import { FOUNDER_DISCOUNT, billingOn, founderGraceEnds, isFounder } from "@/lib/plans";
+import { currentLocale, getDict } from "@/lib/i18n/server";
 import { PlanTable } from "@/components/plan-table";
 
 export const dynamic = "force-dynamic";
@@ -8,16 +11,32 @@ export const dynamic = "force-dynamic";
  * Страница открыта на любом тарифе: прайс за замком — это предложение,
  * которого не видит ровно тот, кому оно адресовано.
  *
+ * Пока оплата не включена (`BILLING_FROM`), страницы нет вовсе: у всех Pro,
+ * и таблица с кнопками «Выбрать» предлагала бы купить то, что уже есть.
+ *
  * Своего ключа здесь больше нет. Он лежал в базе открытым текстом, и раздел
  * убран вместе с ним: хранить чужой секрет ради настройки, которой никто
  * не пользовался, незачем. Модель дайджеста задаётся окружением.
  */
 export default async function SubscriptionPage() {
-  const reader = await currentReader();
+  if (!billingOn()) notFound();
+  const [reader, t, locale] = await Promise.all([currentReader(), getDict(), currentLocale()]);
+  // Ранним — сколько ещё Pro и какая скидка: без этой строки месяц Pro
+  // после включения выглядел бы как чужой тариф, а скидка — как её отсутствие.
+  const grace = founderGraceEnds();
+  const inGrace = grace !== null && new Date() < grace && isFounder(reader.created_at);
+  const date = grace?.toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long" });
+  const discount = hasFounderDiscount(reader);
   // Действующий, а не купленный: отменённая подписка ещё работает,
   // истёкшая — уже нет, и страница обязана показывать то же, что и предел.
   return (
     <div className="flex flex-col gap-6">
+      {inGrace || discount ? (
+        <p className="rounded-lg border border-amber-400/70 bg-amber-50 p-4 text-sm dark:bg-amber-400/10">
+          {inGrace && date ? t.plans.table.founderGrace(date) : null}{" "}
+          {discount ? t.plans.table.founderDiscount(FOUNDER_DISCOUNT) : null}
+        </p>
+      ) : null}
       <PlanTable reader={reader} current={effectivePlan(reader)} />
     </div>
   );

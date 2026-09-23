@@ -36,6 +36,9 @@ import { starterBySlug } from "../src/lib/starter-topics";
 
 
 async function main() {
+  // Пределы тарифов меряются при включённой оплате: пока она выключена,
+  // у всех Pro и отказывать некому (`billingFrom` в src/lib/plans.ts).
+  process.env.BILLING_FROM_FOR_CHECKS ??= "2020-01-01T00:00:00Z";
   const db = await PGlite.create({ extensions: { pg_trgm } });
 
   // Схема extensions и роль products_reader на Supabase уже есть.
