@@ -334,11 +334,10 @@ export default async function AboutPage() {
         </CardContent>
       </Card>
 
-      <DeleteProfile blocker={await deleteBlocker()} portalUrl={reader.portal_url} />
-
       {/* Внизу раздела, мелко: документы нужны раз в жизни, но искать их
           будут именно здесь — «О проекте». */}
       <nav className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        <DeleteProfile blocker={await deleteBlocker()} portalUrl={reader.portal_url} />
         <Link href="/privacy" className="hover:text-foreground hover:underline">
           {t.plans.about.privacyLink}
         </Link>
