@@ -579,7 +579,7 @@ export async function setChannelPublishes(
 export async function connectChannel(
   readerId: number,
   network: string,
-  account: string,
+  account: string | null,
   accountId: string,
 ): Promise<void> {
   await sql`

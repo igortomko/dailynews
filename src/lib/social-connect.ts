@@ -137,7 +137,7 @@ export async function accountFor(
   code: string,
   redirectUri: string,
   verifier: string,
-): Promise<{ id: string; name: string }> {
+): Promise<{ id: string; name: string | null }> {
   const provider = PROVIDERS[network];
   const creds = credentials(network);
   if (!provider || !creds) throw new Error(`${network}: приложение не заведено`);
@@ -167,9 +167,20 @@ export async function accountFor(
   if (!response.ok || !body?.access_token) {
     throw new Error(`${network}: обмен кода ${response.status} ${JSON.stringify(body)?.slice(0, 200)}`);
   }
-  const account = await provider.profile(body.access_token);
-  if (!account) throw new Error(`${network}: профиль пришёл без имени`);
-  return account;
+  // Threads отдаёт номер аккаунта уже при обмене кода, а профиль у закрытого
+  // аккаунта отвечает «unknown error» (код 1) — токен при этом верен. Вход
+  // состоялся, поэтому подключаем по номеру, без имени, и причину — в лог:
+  // имя под плиткой — украшение, а номер нужен для запросов удаления от Meta.
+  let account: { id: string; name: string } | null = null;
+  try {
+    account = await provider.profile(body.access_token);
+  } catch (error) {
+    if (!body.user_id) throw error;
+    console.error(`connect: ${network} без профиля, подключаю по номеру:`, error instanceof Error ? error.message : error);
+  }
+  if (account) return account;
+  if (body.user_id) return { id: String(body.user_id), name: null };
+  throw new Error(`${network}: профиль пришёл без имени`);
 }
 
 /**
