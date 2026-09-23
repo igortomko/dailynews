@@ -1,4 +1,4 @@
-import type { AnalyticsDataset, AnalyticsEvent, ProductProfile, Surface } from "./types";
+import type { AnalyticsDataset, AnalyticsEvent, ModelCostRow, ProductProfile, Surface } from "./types";
 
 const DAY = 86_400_000;
 const labels: Record<ProductProfile, string> = {
@@ -77,9 +77,27 @@ export function makeDemoDataset(profile: ProductProfile = "saas", now: Date | st
     add({ subjectId: `crawler-${index}`, surface: "landing", hostname: "demo-product.example", route: ["/", "/pricing", "/docs"][index % 3], crawlerName: ["ChatGPT", "Googlebot", "ClaudeBot"][index % 3], crawlerCategory: category }, "crawler_requested", started);
   }
   events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id));
+  // Synthetic spend: one shared stage for everyone and one per-user stage.
+  const costRows: ModelCostRow[] = [];
+  for (let day = 0; day < 60; day++) {
+    const date = new Date(midnight - day * DAY).toISOString().slice(0, 10);
+    costRows.push({ date, stage: "classify", model: "demo-small", subjectId: null, calls: 300 + day % 40, tokensIn: 420_000, tokensOut: 30_000, usd: 0.08 + (day % 5) * 0.01 });
+    for (let user = 1; user <= 6; user++)
+      if ((day + user) % 3 !== 0) costRows.push({ date, stage: "answer", model: "demo-large", subjectId: `visitor-${String(user).padStart(4, "0")}`, calls: 2 + user, tokensIn: 9_000 * user, tokensOut: 1_500 * user, usd: 0.004 * user });
+  }
+  const created = new Date(midnight - 70 * DAY).toISOString();
   return {
     schemaVersion: 1, mode: "demo", product: { name: "Demo product", profile, firstValueLabel: labels[profile], currency },
     generatedAt: reference.toISOString(), capabilities: { sessions: true, payments: true, lifecycle: true, crawlers: true, geography: true, identity: true }, events,
     health: { lastEventAt: events.at(-1)?.occurredAt ?? null, errors: 0 },
+    modelCosts: { capturedAt: reference.toISOString(), granularity: "day", rows: costRows, stageLabels: { classify: "Classify feed", answer: "Answer" } },
+    placements: {
+      entry: profile === "telegram" ? { kind: "telegram_start", bot: "demo_product_bot" } : { kind: "url_ref", url: "https://demo-product.example/" },
+      items: [
+        { code: "launch-week", name: "Launch week post", channel: "x", costMinor: 0, currency, createdAt: created, retiredAt: null },
+        { code: "partner-launch", name: "Partner newsletter", channel: "newsletter", costMinor: currency === "XTR" ? 5_000 : 15_000, currency, createdAt: created, retiredAt: null },
+        { code: "tutorial", name: "Tutorial video", channel: "youtube", costMinor: 0, currency, createdAt: created, retiredAt: new Date(midnight - 5 * DAY).toISOString() },
+      ],
+    },
   };
 }

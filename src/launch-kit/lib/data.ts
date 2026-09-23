@@ -3,6 +3,8 @@ import {
   type BreakdownRow, type DashboardData, type Dimension, type Overview, type ProductMeasurement,
   type CohortResult, type GrowthReport, type RetentionResult, type AnalyticsUserProfile, type LearnerSnapshot,
 } from "./types";
+import { validateModelCosts } from "./costs";
+import { validatePlacements } from "./placements";
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -114,6 +116,8 @@ export function validateDataset(input: unknown): AnalyticsDataset {
   if (!record(input.health) || !(input.health.lastEventAt === null || timestamp(input.health.lastEventAt)) || !Number.isSafeInteger(input.health.errors) || Number(input.health.errors) < 0) throw new Error("Invalid analytics health status.");
   if (input.measurement !== undefined) validateMeasurement(input.measurement);
   validatePrivateExtensions({ profiles: input.profiles, learning: input.learning, generatedAt: input.generatedAt });
+  if (input.modelCosts !== undefined) validateModelCosts(input.modelCosts, String(input.generatedAt));
+  if (input.placements !== undefined) validatePlacements(input.placements);
   if (!Array.isArray(input.events) || input.events.length > 100_000) throw new Error("Expected at most 100,000 analytics events.");
   const allowed = new Set(["id", "subjectId", "occurredAt", "name", "surface", ...dimensions, "sessionId", "activeSeconds", "amountMinor", "currency", "provider", "currencyExponent", "paymentId", "refundId", "goal", "plan", "crawlerName", "crawlerCategory"]);
   for (const event of input.events) {

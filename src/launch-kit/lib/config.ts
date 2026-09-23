@@ -26,6 +26,8 @@ export interface Config {
   csrfToken: string;
   mode: "demo" | "local";
   refresh?: { available: boolean; minimumIntervalSeconds: number };
+  /** The host can mint and retire placements (POST /api/placements, /api/placements/retire). */
+  placements?: { mint: boolean };
 }
 export const moduleInfo: Record<
   string,

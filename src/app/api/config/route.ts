@@ -9,5 +9,7 @@ export async function GET(request: Request): Promise<Response> {
   return json({
     product: profile.product, selection: await ownerSelection(), catalog, csrfToken: await csrfToken(),
     mode: "local", refresh: { available: true, minimumIntervalSeconds: 30 },
+    // Ссылки выдаёт сам хост: реестр и код живут в его базе.
+    placements: { mint: true },
   });
 }

@@ -57,17 +57,24 @@ export async function readBody(request: Request): Promise<unknown> {
 
 // Снимок живёт тридцать секунд на процесс: кит спрашивает dataset на каждом
 // показе, а обновление по кнопке — не чаще раза в тридцать секунд.
-let snapshot: { at: number; value: ReturnType<typeof buildDataset> } | undefined;
-let refreshedAt = 0;
+// Кэш на globalThis, а не в модуле: роуты в Next могут получить свои копии
+// модуля, и выданная ссылка не сбросила бы снимок, который читает /api/dataset.
+type Cache = { snapshot?: { at: number; value: ReturnType<typeof buildDataset> }; refreshedAt: number };
+const cache = ((globalThis as { __reportaAnalytics?: Cache }).__reportaAnalytics ??= { refreshedAt: 0 });
 export function loadDataset(force = false) {
   const now = Date.now();
-  if (force && now - refreshedAt < 30_000) return null;
-  if (force) refreshedAt = now;
-  else if (snapshot && now - snapshot.at < 30_000) return snapshot.value;
+  if (force && now - cache.refreshedAt < 30_000) return null;
+  if (force) cache.refreshedAt = now;
+  else if (cache.snapshot && now - cache.snapshot.at < 30_000) return cache.snapshot.value;
   const value = buildDataset();
-  snapshot = { at: now, value };
-  value.catch(() => { if (snapshot?.value === value) snapshot = undefined; });
+  cache.snapshot = { at: now, value };
+  value.catch(() => { if (cache.snapshot?.value === value) cache.snapshot = undefined; });
   return value;
+}
+
+/** Реестр изменился — следующий показ читает базу, а не тридцатисекундный снимок. */
+export function resetDataset(): void {
+  cache.snapshot = undefined;
 }
 
 // Состав блоков — в подписанной куке, как у Brasil Course: это настройка

@@ -54,6 +54,9 @@ import {
   pct,
 } from "@launch-kit/components/dashboard-widgets";
 import { LinkBuilder } from "@launch-kit/components/link-builder";
+import { CostsPanel } from "@launch-kit/components/costs-panel";
+import { PlacementsPanel } from "@launch-kit/components/placements-panel";
+import { buildCosts } from "@launch-kit/lib/costs";
 import { buildDashboard, formatAmount, validateDataset } from "@launch-kit/lib/data";
 import { makeDemoDataset } from "@launch-kit/lib/demo";
 import {
@@ -363,6 +366,9 @@ export default function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [section, setSection] = useState("dashboard");
+  // Product, model spend and acquisition links are separate areas, shown only
+  // when the dataset carries the extension; a product without them sees no tabs.
+  const [area, setArea] = useState<"product" | "costs" | "links">("product");
   const dashboardScroll = useRef(0);
   function openSection(next: string) {
     if (section === "dashboard") dashboardScroll.current = window.scrollY;
@@ -769,11 +775,54 @@ export default function App() {
       </Button>
     </div>
   );
+  const areas = [
+    { id: "product" as const, label: "Продукт" },
+    ...(dataset.modelCosts ? [{ id: "costs" as const, label: "Расходы" }] : []),
+    ...(dataset.placements ? [{ id: "links" as const, label: "Ссылки" }] : []),
+  ];
+  const areaNav = areas.length > 1 && section !== "report" ? (
+    <nav className="mb-5 flex gap-1" aria-label="Разделы дашборда" data-no-export>
+      {areas.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          aria-current={area === item.id ? "page" : undefined}
+          onClick={() => { setArea(item.id); window.scrollTo({ top: 0 }); }}
+          className={`rounded-lg px-3 py-1.5 text-sm ${area === item.id ? "bg-white font-medium shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
+  ) : null;
+  const subjectLabel = (id: string) => dataset.profiles?.find((profile) => profile.subjectId === id)?.displayName ?? id;
+  const costs = area === "costs" ? buildCosts(dataset, report.range.from, report.range.to) : null;
+  if ((area === "costs" && costs) || (area === "links" && dataset.placements))
+    return (
+      <div className="min-h-screen">
+        <main className="analytics-page mx-auto min-w-0 max-w-[1160px] px-3 pb-24 pt-7 sm:px-6 sm:pt-12">
+          {areaNav}
+          <header className="mb-5 flex flex-wrap items-center gap-3 sm:gap-4">
+            <h1 className="mr-1 inline-flex h-10 items-center gap-2 rounded-lg border bg-white px-3 text-base font-semibold tracking-tight shadow-xs">
+              <BarChart3 className="size-5" />
+              {config.product.name}
+            </h1>
+            {area === "costs" && period}
+          </header>
+          {costs ? (
+            <CostsPanel report={costs} days={report.range.days} subjectLabel={subjectLabel} />
+          ) : (
+            <PlacementsPanel dataset={dataset} mint={config.placements?.mint === true} csrfToken={config.csrfToken} onChanged={() => refresh()} />
+          )}
+        </main>
+      </div>
+    );
   return (
     <div className="min-h-screen">
       <main
         className={`analytics-page mx-auto min-w-0 px-3 pb-24 pt-7 sm:px-6 sm:pt-12 ${section === "report" ? "max-w-[1600px]" : "max-w-[1160px]"}`}
       >
+        {areaNav}
         <header className="mb-5 flex flex-wrap items-center gap-3 sm:gap-4">
           {section !== "dashboard" ? (
             <Button
