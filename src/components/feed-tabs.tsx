@@ -709,20 +709,6 @@ export function FeedTabs({
           selecting ? "pb-24" : "pb-4 sm:pb-6",
         )}
       >
-        {/* Отбор дня называется пользой, а не недобором: сколько отобрано
-            из скольких и сколько времени это сняло. Короткий выпуск
-            объясняет себя тем же — «12 из 89» говорит, что остальное
-            отсеяно, а не потеряно. Экономия меньше минуты не называется,
-            как и в «О проекте». Над панелью и по центру: это итог выпуска
-            целиком, и центр не спорит с левым краем карточек. */}
-        {reading.picked ? (
-          <p className="pb-4 text-center text-sm text-muted-foreground sm:pb-5">
-            {t.feed.time.picked(reading.picked.kept, reading.picked.collected)}
-            {reading.picked.saved >= 1
-              ? ` ${t.feed.time.savedToday(formatDuration(reading.picked.saved, t.feed.time))}`
-              : null}
-          </p>
-        ) : null}
         <div className="sm:rounded-xl sm:bg-card sm:px-6 sm:shadow-(--shadow-border)">
         {/* Строки про отрезанное и скрытое живут внутри белой панели:
             снаружи они выровнены по краю страницы, а карточки — по своей
@@ -836,6 +822,20 @@ export function FeedTabs({
         );
       })}
         </div>
+        {/* Отбор дня называется пользой, а не недобором: сколько отобрано
+            из скольких и сколько времени это сняло. Короткий выпуск
+            объясняет себя тем же — «12 из 89» говорит, что остальное
+            отсеяно, а не потеряно. Экономия меньше минуты не называется,
+            как и в «О проекте». Под панелью и по центру: это итог дочитанного
+            выпуска, а наверху он стоял бы между читателем и первой новостью. */}
+        {reading.picked && items.length > 0 ? (
+          <p className="pt-5 text-center text-sm text-muted-foreground">
+            {t.feed.time.picked(reading.picked.kept, reading.picked.collected)}
+            {reading.picked.saved >= 1
+              ? ` ${t.feed.time.savedToday(formatDuration(reading.picked.saved, t.feed.time))}`
+              : null}
+          </p>
+        ) : null}
         {/* Выход из заказа — под лентой и кнопкой, а не ссылкой в строке
             сверху. «Хочу ещё» решают, дочитав заказанные десять минут,
             а не увидев первую карточку: наверху это предложение уйти
