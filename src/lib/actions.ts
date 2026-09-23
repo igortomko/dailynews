@@ -35,6 +35,7 @@ import { cardChars, itemsForMinutes, minutesOf } from "./reading-time";
 import { effectivePlan, effectiveVoice } from "./lemon";
 import { SEARCH_CONFIG, tsConfigFor } from "./search";
 import { toSlug } from "./slug";
+import { isTimezone } from "./issue-time";
 import { clampTopicText, formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
 import { addByLink } from "./sources";
 import { resolveSuggestions } from "./onboarding";
@@ -442,6 +443,29 @@ export async function savePodcast(podcast: boolean) {
   // Перерисовка же заново рождала бы соседний, неуправляемый тумблер
   // читалки с новым начальным значением — Base UI пишет об этом в консоль,
   // и за жалобой стоит настоящая возможность разойтись с базой.
+  return { ok: true as const };
+}
+
+/**
+ * Часовой пояс: выпуск собирается в 02:00 по нему (`src/lib/issue-time.ts`).
+ *
+ * Зовут двое: поле в «Доставке» и первый заход с пустым поясом — браузер
+ * называет свой сам (`TimezoneSync`), спрашивать об этом в онбординге
+ * значило бы добавить решение туда, где каждое лишнее закрывает вкладку.
+ * Тарифом не закрыт: пояс не стоит ничего, а без него бесплатный читатель
+ * в Токио получал бы выпуск к обеду.
+ *
+ * Имя проверяется здесь: приходит снаружи, а неизвестное таймер прочитал
+ * бы как Сан-Паулу — молча и не то.
+ */
+export async function saveTimezone(timezone: string) {
+  if (!isTimezone(timezone)) return { error: "неизвестный часовой пояс" };
+  const readerId = await currentReaderId();
+  await sql`
+    update dailynews.readers
+       set timezone = ${timezone}, updated_at = now()
+     where id = ${readerId}
+  `;
   return { ok: true as const };
 }
 

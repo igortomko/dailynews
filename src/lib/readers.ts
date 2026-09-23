@@ -33,6 +33,7 @@ const COLUMNS = sql`
   reader_context, reading_v2_enabled, digest_minutes, weights, language, ui_language, complexity, style,
   kindle_address, kindle_sender, kindle_digest, kindle_approved, podcast,
   kindle_period, kindle_weekly_at::text as kindle_weekly_at,
+  timezone, issue_day::text as issue_day,
   plan, daily_cap_usd, onboarded_at,
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
   paused_at, sleep_asked_at, resume_at, upsell_at,

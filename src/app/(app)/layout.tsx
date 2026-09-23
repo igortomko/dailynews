@@ -1,4 +1,5 @@
 import { RebuildOnLeave } from "@/components/rebuild-queue";
+import { TimezoneSync } from "@/components/timezone-sync";
 import { I18nProvider } from "@/components/i18n-provider";
 import { PaywallProvider, type Checkout } from "@/components/paywall";
 import { checkoutUrl, trialDaysFor } from "@/lib/lemon";
@@ -47,6 +48,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           Сторож стоит здесь, а не в самих настройках: тот компонент к этому
           моменту уже размонтирован — его уход и есть сигнал. */}
       <RebuildOnLeave />
+      {/* Только пока пояса нет: выбранный в «Доставке» браузер не переписывает. */}
+      {reader.timezone ? null : <TimezoneSync />}
     </div>
     </PaywallProvider>
     </I18nProvider>
