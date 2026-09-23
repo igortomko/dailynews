@@ -189,13 +189,6 @@ export async function verifyUnsubscribeToken(token: string | null): Promise<numb
   return Number.isSafeInteger(readerId) && readerId > 0 ? readerId : null;
 }
 
-export async function checkPassword(candidate: string): Promise<boolean> {
-  const expected = process.env.APP_PASSWORD;
-  if (!expected) throw new Error("APP_PASSWORD не задан");
-  // Хэшируем обе стороны, чтобы сравнивать строки одинаковой длины.
-  return equal(await sign(`pw:${candidate}`), await sign(`pw:${expected}`));
-}
-
 export const SESSION_COOKIE = COOKIE;
 
 /**

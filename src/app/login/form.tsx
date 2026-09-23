@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 import { MailIcon, SendIcon } from "lucide-react";
-import { login, requestEmailLink } from "@/lib/actions";
+import { requestEmailLink } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -15,24 +15,30 @@ import { useT } from "@/components/i18n-provider";
  * достаётся тому, кому пришла ссылка, а не тому, кто открыл адрес.
  * Пришедшие по почте получают выпуск письмом, а не в бота.
  *
- * Пароль остаётся запасным входом владельца и убран с глаз: если Telegram
- * недоступен, дверь не должна захлопываться снаружи.
+ * Пароля нет: запасной вход владельца — та же почта. Telegram недоступен —
+ * входят ссылкой из письма, если адрес добавлен в «Доставке».
  */
 export function LoginForm({
-  next,
   expired,
   bot,
   google,
-}: { next: string; expired: boolean; bot: string | null; google: boolean }) {
-  const [state, action, pending] = useActionState(login, null);
+}: { expired: boolean; bot: string | null; google: boolean }) {
   const [mail, mailAction, mailPending] = useActionState(requestEmailLink, null);
-  const [showPassword, setShowPassword] = useState(false);
   const t = useT();
 
   return (
     <Card className="w-full">
-      <CardHeader>
-        <CardTitle>Reporta</CardTitle>
+      <CardHeader className="items-center text-center">
+        {/* Логотип вместо слова: это первое, что видит пришедший, и знак здесь
+            говорит больше названия. 192 px — выше минимума в 160 из GUIDELINES. */}
+        <CardTitle>
+          <h1 className="mx-auto w-48">
+            {/* eslint-disable @next/next/no-img-element */}
+            <img src="/brand/logo-reporta.svg" alt="Reporta" width="760" height="216" className="block h-auto w-full dark:hidden" />
+            <img src="/brand/logo-reporta-dark.svg" alt="Reporta" width="760" height="216" className="hidden h-auto w-full dark:block" />
+            {/* eslint-enable @next/next/no-img-element */}
+          </h1>
+        </CardTitle>
         <CardDescription>
           {expired ? t.onboarding.login.linkExpired : t.onboarding.login.tagline}
         </CardDescription>
@@ -91,36 +97,6 @@ export function LoginForm({
             </form>
           )}
 
-          {showPassword ? (
-            <form action={action}>
-              <input type="hidden" name="next" value={next} />
-              <FieldGroup>
-                <Field data-invalid={state?.error ? true : undefined}>
-                  <FieldLabel htmlFor="password">{t.onboarding.login.passwordLabel}</FieldLabel>
-                  <Input
-                    id="password"
-                    name="password"
-                    type="password"
-                    autoFocus
-                    autoComplete="current-password"
-                    aria-invalid={state?.error ? true : undefined}
-                  />
-                  {state?.error ? <FieldError>{state.error}</FieldError> : null}
-                </Field>
-                <Button type="submit" variant="outline" disabled={pending}>
-                  {t.onboarding.login.signIn}
-                </Button>
-              </FieldGroup>
-            </form>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowPassword(true)}
-              className="cursor-pointer self-start text-xs text-muted-foreground hover:text-foreground"
-            >
-              {t.onboarding.login.signInWithPassword}
-            </button>
-          )}
         </FieldGroup>
       </CardContent>
     </Card>

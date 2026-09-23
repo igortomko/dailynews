@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import {
-  appOrigin, checkPassword, issueBindPayload, issueConfirmToken, issueEmailToken, issueSession, SESSION_COOKIE,
+  appOrigin, issueBindPayload, issueConfirmToken, issueEmailToken, SESSION_COOKIE,
 } from "./auth";
 import { confirmEmailMessage, loginEmail, looksLikeEmail, normalizeEmail, sendEmail } from "./email";
 import { currentReader, currentReaderId } from "./session";
@@ -43,29 +43,6 @@ import { isTimezone } from "./issue-time";
 import { clampTopicText, formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
 import { addByLink } from "./sources";
 import { resolveSuggestions } from "./onboarding";
-
-/**
- * Запасной вход владельца. Читатели входят ссылкой из бота; пароль остаётся
- * на случай, когда Telegram недоступен, и пускает ровно в ту строку, которая
- * была перенесена из profile.
- */
-export async function login(_prev: unknown, formData: FormData) {
-  const password = String(formData.get("password") ?? "");
-  // Словарь по умолчанию: на этом экране читатель ещё не опознан,
-  // и спросить, на каком языке с ним говорить, некого.
-  const t = dictOf(undefined);
-  if (!(await checkPassword(password))) {
-    return { error: t.errors.wrongPassword };
-  }
-  const [owner] = await sql<{ id: number }[]>`
-    select id::int as id from dailynews.readers where owner
-  `;
-  if (!owner) return { error: t.errors.noSuchEntrance };
-
-  const session = await issueSession(owner.id);
-  (await cookies()).set(session.name, session.value, session.options);
-  redirect(String(formData.get("next") || "/"));
-}
 
 /**
  * Ссылка входа на почту. Строка читателя здесь не заводится — только
