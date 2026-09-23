@@ -282,6 +282,9 @@ export const feed = {
         : `~${h} ${h === 1 ? "hour" : "hours"}`,
     shortfall: (have: string, target: number): string =>
       `${have} of ${target}: there is nothing more that really matters today`,
+    picked: (kept: number, collected: number): string =>
+      `We picked the ${kept} most important of ${collected} ${collected === 1 ? "story" : "stories"}.`,
+    savedToday: (duration: string): string => `Saved you ${duration} today.`,
     monthDay: (date: Date): string => MONTH.format(date),
   },
 };

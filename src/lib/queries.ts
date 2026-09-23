@@ -608,12 +608,18 @@ export async function getCalibration(readerId: number): Promise<{
 export async function getUpgradeFacts(
   readerId: number,
   sourceIds: number[],
-): Promise<{ collected: number; active: boolean; sources: number; topics: number }> {
-  const [row] = await sql<{ collected: number; active: boolean; sources: number; topics: number }[]>`
+): Promise<{ collected: number; streamChars: number; active: boolean; sources: number; topics: number }> {
+  const [row] = await sql<{ collected: number; stream_chars: number; active: boolean; sources: number; topics: number }[]>`
     select
       (select count(*)::int from dailynews.items
         where collected_at >= now() - interval '24 hours'
           and source_id = any(${sourceIds.length ? sourceIds : [0]}::bigint[])) as collected,
+      -- Та же сумма, что в getCollectedLast24h: «сэкономили» в ленте
+      -- и в «О проекте» считается одной меркой.
+      (select coalesce(sum(char_length(coalesce(title, '')) + char_length(coalesce(excerpt, ''))), 0)::int
+         from dailynews.items
+        where collected_at >= now() - interval '24 hours'
+          and source_id = any(${sourceIds.length ? sourceIds : [0]}::bigint[])) as stream_chars,
       exists (select 1 from dailynews.reads
                where reader_id = ${readerId}
                  and event in ('opened', 'outbound')
@@ -625,6 +631,7 @@ export async function getUpgradeFacts(
   `;
   return {
     collected: row?.collected ?? 0,
+    streamChars: row?.stream_chars ?? 0,
     active: row?.active ?? false,
     sources: row?.sources ?? 0,
     topics: row?.topics ?? 0,

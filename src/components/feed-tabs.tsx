@@ -25,7 +25,7 @@ import type { ReaderTopic } from "@/lib/types";
 import type { Plan } from "@/lib/plans";
 import type { UpgradeNote } from "@/lib/upgrade";
 import { UpgradeLine } from "@/components/upgrade-note";
-import { formatMinutes, isShort, shortfallNote } from "@/lib/reading-time";
+import { formatDuration, formatMinutes } from "@/lib/reading-time";
 import { MinutesSelect } from "@/components/minutes-select";
 import { FeedMenu } from "@/components/feed-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -182,7 +182,11 @@ export function FeedTabs({
    * которые его не сохранили: о недоборе тогда молчим, а не считаем его
    * по сегодняшней настройке.
    */
-  reading: { minutes: number; target: number | null; cut: number };
+  reading: {
+    minutes: number;
+    cut: number;
+    picked: { kept: number; collected: number; saved: number } | null;
+  };
   /**
    * Предел, в который читатель упёрся сегодня, или null. Считает сервер
    * (`upgradeReason`) — тем же правилом, каким про тариф говорит бот.
@@ -705,16 +709,18 @@ export function FeedTabs({
           selecting ? "pb-24" : "pb-4 sm:pb-6",
         )}
       >
-        {/* Недобор объясняется, а не заметается добором слабого материала.
-            Короткий выпуск без единого слова читается как поломка отбора —
-            и чинить его читатель пойдёт в настройки, где всё исправно.
-            Строка появляется только при настоящем недоборе: тревога,
-            горящая каждый день, ничем не отличается от выключенной.
-            Стоит над панелью и по центру: это итог выпуска целиком, а не
-            строка о его содержимом, и центр не спорит с левым краем карточек. */}
-        {reading.target !== null && isShort(reading.minutes, reading.target) ? (
+        {/* Отбор дня называется пользой, а не недобором: сколько отобрано
+            из скольких и сколько времени это сняло. Короткий выпуск
+            объясняет себя тем же — «12 из 89» говорит, что остальное
+            отсеяно, а не потеряно. Экономия меньше минуты не называется,
+            как и в «О проекте». Над панелью и по центру: это итог выпуска
+            целиком, и центр не спорит с левым краем карточек. */}
+        {reading.picked ? (
           <p className="pb-4 text-center text-sm text-muted-foreground sm:pb-5">
-            {shortfallNote(reading.minutes, reading.target, t.feed.time)}.
+            {t.feed.time.picked(reading.picked.kept, reading.picked.collected)}
+            {reading.picked.saved >= 1
+              ? ` ${t.feed.time.savedToday(formatDuration(reading.picked.saved, t.feed.time))}`
+              : null}
           </p>
         ) : null}
         <div className="sm:rounded-xl sm:bg-card sm:px-6 sm:shadow-(--shadow-border)">

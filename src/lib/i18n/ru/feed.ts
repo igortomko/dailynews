@@ -279,6 +279,9 @@ export const feed: typeof En = {
         : `~${h} ${plural(h, "час", "часа", "часов")}`,
     shortfall: (have: string, target: number): string =>
       `${have} из ${target}: сегодня больше действительно важного нет`,
+    picked: (kept: number, collected: number): string =>
+      `Отобрали ${kept} ${plural(kept, "самый важный материал", "самых важных материала", "самых важных материалов")} из ${collected}.`,
+    savedToday: (duration: string): string => `Сэкономили сегодня ${duration}.`,
     monthDay: (date: Date): string => MONTH.format(date),
   },
 };

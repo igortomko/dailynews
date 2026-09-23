@@ -10,7 +10,7 @@ import { effectivePlan, effectiveVoice } from "@/lib/lemon";
 import { langTagFor } from "@/lib/voice";
 import { issuesToday, sourcesForPlan } from "@/lib/plans";
 import { upgradeNote, upgradeReason } from "@/lib/upgrade";
-import { charsForMinutes, minutesOf } from "@/lib/reading-time";
+import { charsForMinutes, minutesOf, savedMinutes } from "@/lib/reading-time";
 import { publishedIn, tabsOf } from "@/lib/networks";
 import { FeedTabs } from "@/components/feed-tabs";
 import Link from "next/link";
@@ -202,10 +202,18 @@ export default async function FeedPage({
       hidden={hidden}
       plan={plan}
       networks={networks}
-      // Заказ отдаём только для последнего выпуска: фраза недобора говорит
-      // «сегодня больше действительно важного нет», и на выпуске недельной
-      // давности она рассказывала бы про сегодня, глядя на позавчера.
-      reading={{ minutes, target: whole && day === days[0] ? digest.target : null, cut }}
+      // Отбор дня — только для последнего выпуска: «из 89 отобрали 12»
+      // считается по потоку последних суток, и на выпуске недельной давности
+      // рассказывало бы про сегодня, глядя на позавчера. Молчит, когда
+      // отбирать было не из чего: «12 из 9» — не отбор.
+      reading={{
+        minutes,
+        cut,
+        picked:
+          whole && day === days[0] && facts.collected > feed.length
+            ? { kept: feed.length, collected: facts.collected, saved: savedMinutes(facts.streamChars, minutes) }
+            : null,
+      }}
       // Предел считает сервер: числа тарифов и поток за сутки в браузер
       // не едут, туда уходит готовый ответ — та же причина, по которой оси
       // материала остаются здесь.
