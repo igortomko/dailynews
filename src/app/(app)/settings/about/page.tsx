@@ -13,6 +13,8 @@ import {
 } from "@/lib/reading-time";
 import { minutesCap, sourcesForPlan, PLAN_IDS, PLANS } from "@/lib/plans";
 import { getDict } from "@/lib/i18n/server";
+import { deleteBlocker } from "@/lib/actions";
+import { DeleteProfile } from "./delete-profile";
 import type { Dict } from "@/lib/i18n";
 
 /**
@@ -331,6 +333,8 @@ export default async function AboutPage() {
           </ol>
         </CardContent>
       </Card>
+
+      <DeleteProfile blocker={await deleteBlocker()} portalUrl={reader.portal_url} />
 
       {/* Внизу раздела, мелко: документы нужны раз в жизни, но искать их
           будут именно здесь — «О проекте». */}

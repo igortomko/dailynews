@@ -6,6 +6,7 @@
  *   npx tsx pipeline/selftest.ts
  */
 import assertStrict from "node:assert/strict";
+import { parseSignedRequest } from "../src/lib/social-connect";
 import { classifyDrop, syntheticUrl, titleOf } from "../src/lib/drops";
 
 /**
@@ -1326,6 +1327,18 @@ for (const hook of ["/api/telegram", "/api/lemon"]) {
   assert.ok(proxy.includes(`"${hook}"`), `${hook} должен быть открыт в proxy`);
   assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
 }
+// signed_request от Meta: подпись секретом приложения. Без проверки открытый
+// адрес отключал бы кому угодно чужие аккаунты.
+{
+  const payload = Buffer.from(JSON.stringify({ user_id: "123", algorithm: "HMAC-SHA256" })).toString("base64url");
+  const sign = (secret: string) => createHmac("sha256", secret).update(payload).digest("base64url");
+  assert.deepEqual(parseSignedRequest(`${sign("s3cret")}.${payload}`, "s3cret"), { user_id: "123" });
+  assert.equal(parseSignedRequest(`${sign("other")}.${payload}`, "s3cret"), null, "чужая подпись принята");
+  assert.equal(parseSignedRequest(`${sign("")}.${payload}`, ""), null, "пустой секрет пропускает всех");
+  assert.equal(parseSignedRequest("мусор", "s3cret"), null);
+  assert.ok(proxy.includes('"/api/threads/"'), "уведомления Threads должны быть открыты в proxy");
+}
+
 // Политику и условия ревьюеры Meta открывают без входа: за проверкой сессии
 // они получили бы экран входа, и заявку отклонили бы за «нет политики».
 for (const page of ["/privacy", "/terms"]) {

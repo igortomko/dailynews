@@ -1970,7 +1970,7 @@ async function main() {
 
     // Подключение входом в сеть называет аккаунт, «Отключить» его забывает,
     // а адрес для чтения оставляет — это другой вопрос.
-    await readers.connectChannel(owner.id, "x", "@owner");
+    await readers.connectChannel(owner.id, "x", "@owner", "42");
     assert.equal(
       (await readers.getChannels(owner.id)).find((c) => c.network === "x")?.account,
       "@owner",
@@ -1981,6 +1981,20 @@ async function main() {
       (await readers.getChannels(owner.id)).find((c) => c.network === "x")?.account,
       null,
       "«Отключить» оставило аккаунт",
+    );
+
+    // Threads сообщает об отзыве доступа номером аккаунта: стираются номер,
+    // имя и таб — у того, чей номер, и ни у кого больше.
+    await readers.connectChannel(owner.id, "threads", "@owner", "t-1");
+    await readers.connectChannel(second.id, "threads", "@vera", "t-2");
+    assert.equal(await readers.disconnectAccount("threads", "t-1"), 1, "отзыв доступа не нашёл аккаунт по номеру");
+    const revoked = (await readers.getChannels(owner.id)).find((c) => c.network === "threads");
+    assert.equal(revoked?.account, null, "отзыв доступа оставил имя аккаунта");
+    assert.equal(revoked?.publishes, false, "отзыв доступа оставил таб");
+    assert.equal(
+      (await readers.getChannels(second.id)).find((c) => c.network === "threads")?.account,
+      "@vera",
+      "отзыв доступа задел чужой аккаунт",
     );
 
     // «Не читать отсюда» — своё действие: адрес забыт, отметка цела.
@@ -2648,6 +2662,22 @@ async function main() {
       assert.equal(placementStats(fresh).rows.find((row) => row.code === code)?.entered, 1, "кит сводит пришедшего с кодом размещения");
       assert.equal(fresh.placements!.items.find((item) => item.code === code)?.costMinor, 500, "цена размещения доезжает в центах");
       console.log("  ссылки на каналы: код пишется при первом /start, чужой — нет");
+    }
+
+    // Удаление профиля уносит всё личное каскадом и не трогает соседа;
+    // профиль владельца не удаляется даже прямым вызовом.
+    {
+      const leaving = await readers.ensureReader(BIG_TELEGRAM_ID + 300, "leaving");
+      await readers.connectChannel(leaving.id, "x", "@leaving", "x-300");
+      await readers.setChannelPublishes(leaving.id, "linkedin", true);
+      await readers.deleteReader(leaving.id);
+      assert.equal(await readers.getReader(leaving.id), undefined, "удалённый читатель остался в базе");
+      const [{ left }] = await sql<{ left: number }[]>`
+        select count(*)::int as left from dailynews.reader_channels where reader_id = ${leaving.id}`;
+      assert.equal(left, 0, "у удалённого читателя остались площадки");
+      await readers.deleteReader(owner.id);
+      assert.ok(await readers.getReader(owner.id), "профиль владельца удалился");
+      console.log("  удаление профиля: личное уходит каскадом, владелец не удаляется");
     }
 
     console.log("\nСхема и запросы проверены на настоящем Postgres.");

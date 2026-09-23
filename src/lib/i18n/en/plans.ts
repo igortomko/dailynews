@@ -166,6 +166,17 @@ export const plans = {
     flowTune: "Change reading time",
     privacyLink: "Privacy Policy",
     termsLink: "Terms of Service",
+    deleteTitle: "Delete profile",
+    deleteDescription:
+      "We'll erase everything tied to you: issues, topics, sources, rules, reading history, connected networks and drafts. This can't be undone. You can message the bot /start later to get a fresh, empty profile.",
+    deleteButton: "Delete profile",
+    deleteConfirmTitle: "Delete your profile for good?",
+    deleteConfirmText: "Issues, settings and reading history are erased right away. This can't be undone.",
+    deleteConfirm: "Yes, delete",
+    deleteCancel: "Cancel",
+    deleteBlockedOwner: "The owner's profile can't be deleted: the feed runs on it.",
+    deleteBlockedSubscription: "Cancel your subscription first, or it will keep charging you.",
+    openPortal: "Open billing portal",
     stepsTitle: "How it lands on exactly that much",
     steps: [
       {

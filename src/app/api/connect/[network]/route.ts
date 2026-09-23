@@ -63,7 +63,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const code = query.get("code");
   if (valid && code) {
     try {
-      await connectChannel(reader.id, network, await accountFor(network, code, redirectUri, verifier));
+      const account = await accountFor(network, code, redirectUri, verifier);
+      await connectChannel(reader.id, network, account.name, account.id);
     } catch (error) {
       console.error("connect:", error instanceof Error ? error.message : error);
       back.searchParams.set("failed", network);

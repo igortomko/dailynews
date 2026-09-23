@@ -24,6 +24,9 @@ const PUBLIC = [
   "/login", "/auth", "/api/version", "/api/telegram", "/api/lemon", "/_next", "/favicon.ico", "/brand",
   // Политику и условия читают до входа: ревьюеры Meta, и тот, кто решает, заводиться ли.
   "/privacy", "/terms",
+  // Уведомления Threads об отзыве доступа и удалении данных: куки у Meta нет,
+  // подлинность решает подпись секретом приложения.
+  "/api/threads/",
 ];
 
 export async function proxy(request: NextRequest) {

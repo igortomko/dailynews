@@ -15,7 +15,7 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, clearChannelAddress, deleteChannel, digestProgress, freezeKindleSender, getChannels,
+  addReaderSource, clearChannelAddress, deleteChannel, deleteReader, digestProgress, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelPublishes,
   saveVoiceCard, saveVoiceSample, spentToday, upsertTopic,
 } from "./readers";
@@ -61,6 +61,37 @@ export async function login(_prev: unknown, formData: FormData) {
   const session = await issueSession(owner.id);
   (await cookies()).set(session.name, session.value, session.options);
   redirect(String(formData.get("next") || "/"));
+}
+
+/**
+ * Подписка, которая ещё будет списывать деньги. Удалить профиль под ней —
+ * значит потерять к ней ссылку на кабинет, а списания продолжатся.
+ */
+const renews = (reader: { subscription_id: string | null; subscription_status: string | null }) =>
+  Boolean(reader.subscription_id) && !["cancelled", "expired"].includes(reader.subscription_status ?? "");
+
+/** Причина, по которой профиль сейчас не удалить, или null. */
+export async function deleteBlocker(): Promise<"owner" | "subscription" | null> {
+  const reader = await currentReader();
+  if (reader.owner) return "owner";
+  return renews(reader) ? "subscription" : null;
+}
+
+/**
+ * Удалить профиль целиком. Те же проверки, что рисуют кнопку, стоят
+ * и здесь: действие зовётся по своему адресу мимо страницы.
+ */
+export async function deleteProfile(): Promise<{ error: string }> {
+  const reader = await currentReader();
+  const t = (await getDict()).plans.about;
+  const blocker = await deleteBlocker();
+  if (blocker === "owner") return { error: t.deleteBlockedOwner };
+  if (blocker === "subscription") return { error: t.deleteBlockedSubscription };
+
+  await deleteReader(reader.id);
+  console.log(`профиль ${reader.id} удалён по просьбе читателя`);
+  (await cookies()).delete(SESSION_COOKIE);
+  redirect("/login");
 }
 
 export async function logout() {
