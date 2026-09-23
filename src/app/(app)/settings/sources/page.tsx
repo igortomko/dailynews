@@ -1,6 +1,6 @@
 import { getSourceHealth } from "@/lib/queries";
 import { currentReader } from "@/lib/session";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { SourcesManager } from "./manager";
 
 export const dynamic = "force-dynamic";

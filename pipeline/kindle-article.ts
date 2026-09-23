@@ -10,7 +10,7 @@ import type { Dict } from "../src/lib/i18n";
 import { ru } from "../src/lib/i18n/ru/index";
 import { sql } from "../src/lib/db";
 import { itemForReader, spentToday } from "../src/lib/readers";
-import { effectivePlan } from "../src/lib/lemon";
+import { effectivePlan } from "../src/lib/billing";
 import type { Reader } from "../src/lib/types";
 import { fetchArticle } from "./article";
 import { translateArticle, splitBlocks } from "./translate";

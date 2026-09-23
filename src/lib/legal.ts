@@ -23,7 +23,7 @@ const CONTACT_LABEL = "t.me/igortomko";
 
 export const LEGAL_CONTACT = { href: CONTACT, label: CONTACT_LABEL };
 
-export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
+export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc; refund: LegalDoc }> = {
   en: {
     privacy: {
       title: "Privacy Policy",
@@ -40,7 +40,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
             "Reading activity: which cards were shown to you, opened, clicked through, hidden, or rated. It is used only to tune your own selection.",
             "Connected social accounts: when you connect X, LinkedIn or Threads, we store only the account name the network returns (for example @username or your display name). We do not store access tokens, and we do not read, store or publish your posts through these networks' APIs.",
             "Your writing samples: posts you paste as text and posts from a public Telegram channel, blog or X account whose link you add, used to build your writing profile for drafts.",
-            "Subscription: plan, status, renewal date and a link to the billing portal, received from Lemon Squeezy. We never see your card details.",
+            "Subscription: plan, status, renewal date and a link to the billing portal, received from Paddle. We never see your card details.",
           ],
         },
         {
@@ -54,7 +54,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
           id: "processors",
           heading: "Who processes it",
           paragraphs: [
-            "Hosting: a virtual server at Hostinger. Database: Supabase (PostgreSQL). Messaging: Telegram. Kindle delivery: Resend. Payments: Lemon Squeezy. Text generation: an OpenAI-compatible model provider that receives the news items and your writing preferences, not your Telegram identity. Audio: Microsoft Edge text-to-speech. Public X posts are read through twitterapi.io.",
+            "Hosting: a virtual server at Hostinger. Database: Supabase (PostgreSQL). Messaging: Telegram. Kindle delivery: Resend. Payments: Paddle. Text generation: an OpenAI-compatible model provider that receives the news items and your writing preferences, not your Telegram identity. Audio: Microsoft Edge text-to-speech. Public X posts are read through twitterapi.io.",
           ],
         },
         {
@@ -104,7 +104,8 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
           id: "paid",
           heading: "Plans and payments",
           paragraphs: [
-            "There is a free plan and paid plans. Payments, renewals, cancellations and refunds are handled by Lemon Squeezy as the merchant of record. A cancelled subscription stays active until the end of the paid period.",
+            "There is a free plan and paid plans: Plus at $3.99 a month and Pro at $9.99 a month, prices in US dollars before any applicable tax. Our order process is conducted by our online reseller Paddle.com. Paddle.com is the Merchant of Record for all our orders. Paddle provides all customer service inquiries and handles returns.",
+            "A subscription renews automatically each month until you cancel it. You can cancel at any time from Subscription → Manage plan; a cancelled subscription stays active until the end of the paid period. Refunds are described in the Refund Policy at news.reporta.club/refund.",
           ],
         },
         {
@@ -139,6 +140,37 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
         },
       ],
     },
+    refund: {
+      title: "Refund Policy",
+      updated: "Last updated: September 23, 2026",
+      intro:
+        "Paid plans of Reporta are sold by our reseller Paddle.com, the Merchant of Record for all our orders. This page explains when and how you get your money back.",
+      sections: [
+        {
+          id: "window",
+          heading: "14-day refund",
+          paragraphs: [
+            "You can get a full refund of any payment within 14 days of the charge, including renewals. No reason is needed.",
+          ],
+        },
+        {
+          id: "how",
+          heading: "How to request it",
+          paragraphs: [
+            "Open paddle.net, find the order by the email you paid with, and request a refund there. Or message " +
+              CONTACT_LABEL +
+              " on Telegram and we will ask Paddle to refund it. The money returns to the original payment method; banks usually show it within 5–10 business days.",
+          ],
+        },
+        {
+          id: "cancel",
+          heading: "Cancelling",
+          paragraphs: [
+            "Cancelling stops future renewals. After 14 days a payment is not refunded, but the plan keeps working until the end of the paid period.",
+          ],
+        },
+      ],
+    },
   },
   ru: {
     privacy: {
@@ -156,7 +188,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
             "Чтение: какие карточки тебе показаны, раскрыты, открыты по ссылке, скрыты или оценены. Нужно только для настройки твоего собственного отбора.",
             "Подключённые соцсети: при подключении X, LinkedIn или Threads мы сохраняем только имя аккаунта, которое вернула сеть (например, @ник или имя). Токены доступа не храним и через API этих сетей не читаем, не храним и не публикуем твои посты.",
             "Образцы текста: посты, которые ты вставил текстом, и посты публичного канала Telegram, блога или аккаунта X по добавленной тобой ссылке — из них собирается твой стиль для черновиков.",
-            "Подписка: тариф, статус, дата продления и ссылка на кабинет оплаты — приходят от Lemon Squeezy. Данные карты мы не видим никогда.",
+            "Подписка: тариф, статус, дата продления и ссылка на кабинет оплаты — приходят от Paddle. Данные карты мы не видим никогда.",
           ],
         },
         {
@@ -170,7 +202,7 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
           id: "processors",
           heading: "Кто обрабатывает",
           paragraphs: [
-            "Хостинг — виртуальный сервер Hostinger. База — Supabase (PostgreSQL). Сообщения — Telegram. Доставка на Kindle — Resend. Оплата — Lemon Squeezy. Тексты пишет OpenAI-совместимый провайдер моделей: он получает новости и твои настройки подачи, но не твою личность в Telegram. Озвучка — Microsoft Edge TTS. Публичные посты X читаются через twitterapi.io.",
+            "Хостинг — виртуальный сервер Hostinger. База — Supabase (PostgreSQL). Сообщения — Telegram. Доставка на Kindle — Resend. Оплата — Paddle. Тексты пишет OpenAI-совместимый провайдер моделей: он получает новости и твои настройки подачи, но не твою личность в Telegram. Озвучка — Microsoft Edge TTS. Публичные посты X читаются через twitterapi.io.",
           ],
         },
         {
@@ -220,7 +252,8 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
           id: "paid",
           heading: "Тарифы и оплата",
           paragraphs: [
-            "Есть бесплатный тариф и платные. Оплату, продление, отмену и возвраты ведёт Lemon Squeezy как продавец. Отменённая подписка работает до конца оплаченного периода.",
+            "Есть бесплатный тариф и платные: Plus за $3.99 в месяц и Pro за $9.99 в месяц, цены в долларах США без учёта применимых налогов. Заказ оформляет наш онлайн-реселлер Paddle.com. Paddle.com — продавец (Merchant of Record) по всем нашим заказам: он отвечает на вопросы об оплате и проводит возвраты.",
+            "Подписка продлевается каждый месяц, пока ты её не отменишь. Отменить можно в любой момент: Подписка → Управлять тарифом; отменённая подписка работает до конца оплаченного периода. Возвраты описаны в Политике возврата: news.reporta.club/refund.",
           ],
         },
         {
@@ -251,6 +284,37 @@ export const LEGAL: Record<Locale, { privacy: LegalDoc; terms: LegalDoc }> = {
             "Условия могут меняться; дата вверху показывает последнюю версию. Перестать пользоваться сервисом можно в любой момент. Связь — " +
               CONTACT_LABEL +
               " в Telegram.",
+          ],
+        },
+      ],
+    },
+    refund: {
+      title: "Политика возврата",
+      updated: "Обновлено 23 сентября 2026 г.",
+      intro:
+        "Платные тарифы Reporta продаёт наш реселлер Paddle.com — продавец (Merchant of Record) по всем нашим заказам. Здесь сказано, когда и как вернуть деньги.",
+      sections: [
+        {
+          id: "window",
+          heading: "Возврат в течение 14 дней",
+          paragraphs: [
+            "Любой платёж, включая продление, возвращается полностью в течение 14 дней после списания. Причина не нужна.",
+          ],
+        },
+        {
+          id: "how",
+          heading: "Как попросить",
+          paragraphs: [
+            "Открой paddle.net, найди заказ по почте, с которой платил, и попроси возврат там. Или напиши " +
+              CONTACT_LABEL +
+              " в Telegram — мы попросим Paddle вернуть деньги. Они приходят туда, откуда было списание; банки обычно показывают возврат за 5–10 рабочих дней.",
+          ],
+        },
+        {
+          id: "cancel",
+          heading: "Отмена",
+          paragraphs: [
+            "Отмена останавливает следующие продления. Через 14 дней платёж не возвращается, но тариф работает до конца оплаченного периода.",
           ],
         },
       ],

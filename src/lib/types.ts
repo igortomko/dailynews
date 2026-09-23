@@ -245,14 +245,14 @@ export type Reader = {
   daily_cap_usd: number;
   /** Когда завёлся. До `BILLING_FROM` — ранний: скидка и месяц Pro. */
   created_at: string;
-  /** Подписка Lemon Squeezy. Пусто — читатель никогда не платил. */
+  /** Подписка Paddle (`sub_…`). Пусто — читатель никогда не платил. */
   subscription_id: string | null;
-  /** Их статус: active, on_trial, paused, past_due, cancelled, expired. */
+  /** Их статус: active, trialing, past_due, paused, canceled. */
   subscription_status: string | null;
   plan_renews_at: string | null;
   /** Докуда работает отменённая подписка. Оплаченный месяц дочитывается. */
   plan_ends_at: string | null;
-  /** Их страница управления: смена карты, отмена, возобновление. */
+  /** От Lemon Squeezy; не пишется с 0070 — портал Paddle выдаётся на нажатие. */
   portal_url: string | null;
   /** Пусто — лента идёт. Время — с какого момента выпуск не пишется. */
   paused_at: string | null;

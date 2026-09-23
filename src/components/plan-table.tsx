@@ -4,11 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { checkoutUrl, endingAt, trialDaysFor } from "@/lib/lemon";
+import { checkoutUrl, endingAt, trialDaysFor } from "@/lib/billing";
 import { FEATURES, PLAN_IDS, PLANS, type FeatureId, type Plan, type PlanId } from "@/lib/plans";
 import type { Reader } from "@/lib/types";
 import { currentLocale, getDict } from "@/lib/i18n/server";
-import { featureWhat } from "@/lib/i18n";
+import { featureWhat, type Dict } from "@/lib/i18n";
 
 /**
  * Сравнение тарифов.
@@ -26,7 +26,7 @@ const ICONS: Record<PlanId, typeof CrownIcon> = {
   pro: CrownIcon,
 };
 
-function Value({ value, yes, no }: { value: string | boolean; yes: string; no: string }) {
+export function Value({ value, yes, no }: { value: string | boolean; yes: string; no: string }) {
   if (typeof value === "string") return <>{value}</>;
   return value ? (
     <CheckIcon className="size-4" aria-label={yes} />
@@ -34,6 +34,39 @@ function Value({ value, yes, no }: { value: string | boolean; yes: string; no: s
     <MinusIcon className="size-4 text-muted-foreground/50" aria-label={no} />
   );
 }
+
+/**
+ * Строки сравнения: одна формула на «Подписку» и на открытую страницу цен.
+ * Порядок — от того, что считается глазами, к тому, что включается.
+ */
+export const planRows = (t: Dict): { feature: FeatureId; value: (plan: Plan) => string | boolean }[] => [
+  { feature: "sources", value: (plan) => String(plan.maxSources) },
+  { feature: "topics", value: (plan) => String(plan.maxTopics) },
+  { feature: "digest", value: (plan) => t.plans.table.upToMinutes(plan.maxMinutes) },
+  {
+    // Числом, а не галочкой: между тарифами разница количественная,
+    // и «да» одинаково выглядело бы у двух карточек и у десяти.
+    feature: "rich",
+    value: (plan) => (plan.richCards > 0 ? t.plans.table.richCards(plan.richCards) : false),
+  },
+  {
+    feature: "cadence",
+    value: (plan) => (plan.everyDays <= 1 ? t.plans.table.dailyCadence : t.plans.table.everyOtherCadence),
+  },
+  {
+    feature: "audio",
+    // Минутами, а не галочкой: разница между тарифами здесь
+    // количественная, и «да/нет» о ней не говорит.
+    value: (plan) =>
+      plan.audioSecondsPerDay > 0
+        ? t.plans.table.audioPerDay(Math.floor(plan.audioSecondsPerDay / 60))
+        : false,
+  },
+  { feature: "delivery", value: (plan) => FEATURES.delivery.has(plan) },
+  { feature: "posts", value: (plan) => FEATURES.posts.has(plan) },
+  { feature: "x", value: (plan) => plan.kinds.includes("x") },
+  { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
+];
 
 export async function PlanTable({ reader, current }: { reader: Reader; current: Plan }) {
   const t = await getDict();
@@ -44,35 +77,7 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
   const ends = endingAt(reader);
   const paying = Boolean(reader.subscription_id);
 
-  /** Порядок строк — от того, что считается глазами, к тому, что включается. */
-  const ROWS: { feature: FeatureId; value: (plan: Plan) => string | boolean }[] = [
-    { feature: "sources", value: (plan) => String(plan.maxSources) },
-    { feature: "topics", value: (plan) => String(plan.maxTopics) },
-    { feature: "digest", value: (plan) => t.plans.table.upToMinutes(plan.maxMinutes) },
-    {
-      // Числом, а не галочкой: между тарифами разница количественная,
-      // и «да» одинаково выглядело бы у двух карточек и у десяти.
-      feature: "rich",
-      value: (plan) => (plan.richCards > 0 ? t.plans.table.richCards(plan.richCards) : false),
-    },
-    {
-      feature: "cadence",
-      value: (plan) => (plan.everyDays <= 1 ? t.plans.table.dailyCadence : t.plans.table.everyOtherCadence),
-    },
-    {
-      feature: "audio",
-      // Минутами, а не галочкой: разница между тарифами здесь
-      // количественная, и «да/нет» о ней не говорит.
-      value: (plan) =>
-        plan.audioSecondsPerDay > 0
-          ? t.plans.table.audioPerDay(Math.floor(plan.audioSecondsPerDay / 60))
-          : false,
-    },
-    { feature: "delivery", value: (plan) => FEATURES.delivery.has(plan) },
-    { feature: "posts", value: (plan) => FEATURES.posts.has(plan) },
-    { feature: "x", value: (plan) => plan.kinds.includes("x") },
-    { feature: "personalization", value: (plan) => FEATURES.personalization.has(plan) },
-  ];
+  const ROWS = planRows(t);
 
   return (
     <Card>
@@ -87,11 +92,12 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
           const Icon = ICONS[id];
           const label = t.plans.label[id];
           const mine = plan.id === current.id;
-          const buy = plan.price > current.price ? checkoutUrl(id, reader) : null;
-          // Понижение и смена карты живут у Lemon Squeezy: своего экрана
+          const buy = plan.price > current.price ? checkoutUrl(id) : null;
+          // Понижение и смена карты живут в портале Paddle: своего экрана
           // для них нет и не будет — это был бы второй набор состояний,
-          // расходящийся с настоящим.
-          const portal = reader.portal_url;
+          // расходящийся с настоящим. Ссылка портала одноразовая, поэтому
+          // кнопка ведёт на наш адрес, который выдаёт свежую на нажатие.
+          const portal = reader.subscription_id ? "/api/billing/portal" : null;
           // Состояние кнопки считается до разметки и именем: три вложенных
           // тернарника в JSX читаются только целиком, а состояний тут пять
           // и следующий тариф добавит шестое.
@@ -176,7 +182,7 @@ export async function PlanTable({ reader, current }: { reader: Reader; current: 
                 // неделю», и только потом настоящая цена. Молчащий триал
                 // не существует — по нему некому нажать. А если его
                 // у этого варианта не завели, надписи нет вовсе: обещать
-                // бесплатную неделю там, где Lemon сразу попросит денег,
+                // бесплатную неделю там, где Paddle сразу попросит денег,
                 // значит соврать ровно тому, кто поверил.
                 <div className="mt-auto flex flex-col gap-1.5">
                   <Button size="sm" render={<a href={buy!} />}>

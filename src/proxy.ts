@@ -16,14 +16,15 @@ import { SESSION_COOKIE, verifySession } from "@/lib/auth";
  */
 // /api/version открыт намеренно: он нужен развёртыванию до входа
 // и не отдаёт ничего, кроме хеша коммита.
-// /api/telegram и /api/lemon открыты намеренно: их аутентифицирует подпись
-// вебхука, а куки ни у Telegram, ни у Lemon Squeezy нет и быть не может.
+// /api/telegram и /api/paddle открыты намеренно: их аутентифицирует подпись
+// вебхука, а куки ни у Telegram, ни у Paddle нет и быть не может.
 // Забыть их здесь — значит получить тихий 307 вместо платежа: отправитель
 // увидит редирект как успех доставки и больше не повторит.
 const PUBLIC = [
-  "/login", "/auth", "/api/version", "/api/telegram", "/api/lemon", "/_next", "/favicon.ico", "/brand",
+  "/login", "/auth", "/api/version", "/api/telegram", "/api/paddle", "/_next", "/favicon.ico", "/brand",
   // Политику и условия читают до входа: ревьюеры Meta, и тот, кто решает, заводиться ли.
-  "/privacy", "/terms",
+  // Цены и возврат — ревьюеры Paddle: домен не одобряют, пока их не видно без входа.
+  "/privacy", "/terms", "/refund", "/pricing",
   // Уведомления Threads об отзыве доступа и удалении данных: куки у Meta нет,
   // подлинность решает подпись секретом приложения.
   "/api/threads/",

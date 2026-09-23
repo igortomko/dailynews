@@ -1,5 +1,5 @@
 import { currentReader } from "@/lib/session";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { PersonalizationForm } from "./form";
 
 export const dynamic = "force-dynamic";

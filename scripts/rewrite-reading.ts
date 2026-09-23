@@ -2,7 +2,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { sql } from '../src/lib/db';
 import { getReader } from '../src/lib/readers';
-import { effectiveVoice } from '../src/lib/lemon';
+import { effectiveVoice } from '../src/lib/billing';
 import { writeDigest, type Survivor } from '../pipeline/digest';
 import { pooled } from '../pipeline/fetch';
 

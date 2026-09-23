@@ -41,8 +41,8 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
   },
 }) as typeof assertStrict;
 import {
-  effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, endingAt, trialDaysFor,
-} from "../src/lib/lemon";
+  effectivePlan, effectiveVoice, readEvent, signatureValid, checkoutUrl, checkoutFor, endingAt, trialDaysFor,
+} from "../src/lib/billing";
 import {
   appOrigin, issueBindPayload, issueConfirmToken, issueEmailToken, unsubscribeToken,
   verifyBindPayload, verifyConfirmToken, verifyEmailToken, verifyUnsubscribeToken,
@@ -1337,7 +1337,7 @@ assert.ok(existsSync("src/proxy.ts"), "proxy должен лежать в src/")
 // читает 307 как успех и не повторяет доставку. Платёж при этом проходит,
 // а тариф не выдаётся — отказ, который виден только по жалобе.
 const proxy = readFileSync("src/proxy.ts", "utf8");
-for (const hook of ["/api/telegram", "/api/lemon"]) {
+for (const hook of ["/api/telegram", "/api/paddle"]) {
   assert.ok(proxy.includes(`"${hook}"`), `${hook} должен быть открыт в proxy`);
   assert.ok(existsSync(`src/app${hook}/route.ts`), `${hook} должен существовать`);
 }
@@ -1833,41 +1833,39 @@ assert.ok(
 // «язык источника» — его язык, а русскому приходила лента, которой он
 // не понимает. Предел, зависящий от того, на каком языке пишут источники,
 // это не тариф, а лотерея.
-// Триал: длина живёт рядом с вариантом Lemon, а не одной переменной
+// Триал: длина живёт рядом с ценой Paddle, а не одной переменной
 // на продукт. Одна общая обещала бы «7 дней бесплатно» и там, где триала
 // не завели, — надпись, которая врёт ровно тому, кто по ней нажал.
 // Не задана, не число, ноль или минус — триала нет и говорить о нём нечего.
 {
   const was = { ...process.env };
   try {
-    process.env.LEMON_VARIANT_PRO = "1";
-    process.env.LEMON_BUY_PRO = "https://example.lemonsqueezy.com/buy/pro";
-    delete process.env.LEMON_VARIANT_PLUS;
-    delete process.env.LEMON_BUY_PLUS;
+    process.env.PADDLE_PRICE_PRO = "pri_pro";
+    delete process.env.PADDLE_PRICE_PLUS;
 
-    delete process.env.LEMON_TRIAL_PRO;
+    delete process.env.PADDLE_TRIAL_PRO;
     assert.equal(trialDaysFor("pro"), 0, "незаданный триал — это ноль, а не обещание");
-    process.env.LEMON_TRIAL_PRO = "7";
+    process.env.PADDLE_TRIAL_PRO = "7";
     assert.equal(trialDaysFor("pro"), 7, "заданный триал читается числом дней");
-    assert.equal(trialDaysFor("plus"), 0, "у тарифа без варианта триала нет по построению");
+    assert.equal(trialDaysFor("plus"), 0, "у тарифа без цены триала нет по построению");
     for (const junk of ["", "неделя", "-3", "0"]) {
-      process.env.LEMON_TRIAL_PRO = junk;
+      process.env.PADDLE_TRIAL_PRO = junk;
       assert.equal(trialDaysFor("pro"), 0, `«${junk}» не становится днями триала`);
     }
-    // Сам триал действует как тариф: Lemon присылает `on_trial`, и выпуск
+    // Сам триал действует как тариф: Paddle присылает `trialing`, и выпуск
     // обязан быть уже платным — иначе неделя бесплатного Pro выглядит как
     // бесплатный Free, за который читатель оставил карту.
-    process.env.LEMON_TRIAL_PRO = "7";
+    process.env.PADDLE_TRIAL_PRO = "7";
     assert.equal(
       effectivePlan({
         plan: "pro", owner: false, subscription_id: "sub_1",
-        subscription_status: "on_trial", plan_ends_at: null,
+        subscription_status: "trialing", plan_ends_at: null,
       } as never, new Date(), "2020-01-01T00:00:00Z").id,
       "pro",
       "на триале действует купленный тариф, а не бесплатный",
     );
   } finally {
-    for (const key of ["LEMON_VARIANT_PRO", "LEMON_BUY_PRO", "LEMON_TRIAL_PRO", "LEMON_VARIANT_PLUS", "LEMON_BUY_PLUS"]) {
+    for (const key of ["PADDLE_PRICE_PRO", "PADDLE_TRIAL_PRO", "PADDLE_PRICE_PLUS"]) {
       if (was[key] === undefined) delete process.env[key];
       else process.env[key] = was[key];
     }
@@ -2730,15 +2728,14 @@ assert.ok(!alreadyIn("", "русском"), "пустой текст не дел
 assert.ok(alreadyIn("Релиз Kubernetes 1.34 добавил поддержку swap на узлах.", "русском"), "латинские термины внутри русского не сбивают счёт");
 
 
-// --- подписка Lemon Squeezy --------------------------------------------------
+// --- подписка Paddle ---------------------------------------------------------
 // Тариф выдаётся только подписанным событием с их стороны, а действует он,
 // пока оплачен. Обе ошибки молчаливы: лишний платный выпуск и снятый раньше
 // срока тариф одинаково не видны в логе.
-process.env.LEMON_VARIANT_PLUS = "111";
-process.env.LEMON_BUY_PLUS = "https://shop.lemonsqueezy.com/buy/aaa";
-process.env.LEMON_VARIANT_PRO = "222";
-process.env.LEMON_BUY_PRO = "https://shop.lemonsqueezy.com/buy/bbb";
-process.env.LEMON_WEBHOOK_SECRET = "s3cret";
+process.env.PADDLE_PRICE_PLUS = "pri_plus";
+process.env.PADDLE_PRICE_PRO = "pri_pro";
+process.env.PADDLE_CLIENT_TOKEN = "test_token";
+process.env.PADDLE_WEBHOOK_SECRET = "s3cret";
 
 const paid = (over: Record<string, unknown> = {}) =>
   ({ id: 1, plan: "pro", subscription_status: "active", plan_ends_at: null,
@@ -2751,20 +2748,24 @@ const planNow = (reader: Reader) => effectivePlan(reader, new Date(), BILLING_ON
 const DAY = 86_400_000;
 assert.equal(planNow(paid()).id, "pro", "активная подписка даёт купленный тариф");
 assert.equal(
-  planNow(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() + DAY).toISOString() })).id,
+  planNow(paid({ subscription_status: "canceled", plan_ends_at: new Date(Date.now() + DAY).toISOString() })).id,
   "pro",
   "отменённая подписка работает до конца оплаченного периода",
 );
 assert.equal(
-  planNow(paid({ subscription_status: "cancelled", plan_ends_at: new Date(Date.now() - DAY).toISOString() })).id,
+  planNow(paid({ subscription_status: "canceled", plan_ends_at: new Date(Date.now() - DAY).toISOString() })).id,
   "free",
   "после конца оплаченного периода тариф гаснет сразу, а не к ночному прогону",
 );
 assert.equal(
-  planNow(paid({ subscription_status: "expired", plan_ends_at: null })).id,
+  planNow(paid({ subscription_status: "canceled", plan_ends_at: null })).id,
   "free",
-  "истёкшая подписка не даёт платного выпуска",
+  "закончившаяся подписка не даёт платного выпуска",
 );
+assert.equal(planNow(paid({ subscription_status: "paused" })).id, "free", "на паузе — без оплаты и без тарифа");
+// past_due у Paddle — попытки списать заново, а не конец: гасить тариф
+// на первой неудачной попытке значит наказать платящего за его банк.
+assert.equal(planNow(paid({ subscription_status: "past_due" })).id, "pro", "пока Paddle пробует списать, тариф работает");
 assert.equal(planNow(paid({ plan: "free" })).id, "free", "бесплатный остаётся бесплатным");
 
 // Владелец не покупает подписку у себя самого, и проверять её статус
@@ -2789,37 +2790,67 @@ assert.ok(endingAt(paid({ plan_ends_at: new Date(Date.now() + DAY).toISOString()
 assert.equal(endingAt(paid()), null, "у активной подписки конца нет");
 
 const signedBody = JSON.stringify({ hello: "world" });
-const goodSignature = createHmac("sha256", "s3cret").update(signedBody).digest("hex");
-assert.ok(signatureValid(signedBody, goodSignature), "своя подпись принимается");
-assert.ok(!signatureValid(signedBody, goodSignature.replace(/.$/, "0")), "чужая подпись отвергается");
-assert.ok(!signatureValid(signedBody, null), "без подписи — отказ");
-assert.ok(!signatureValid(signedBody, "не-шестнадцатеричное"), "мусор вместо подписи не роняет разбор");
+const NOW = 1_790_000_000_000;
+const ts = String(NOW / 1000);
+const h1 = createHmac("sha256", "s3cret").update(`${ts}:${signedBody}`).digest("hex");
+const header = `ts=${ts};h1=${h1}`;
+assert.ok(signatureValid(signedBody, header, NOW), "своя подпись принимается");
+assert.ok(!signatureValid(signedBody, `ts=${ts};h1=${h1.replace(/.$/, h1.endsWith("0") ? "1" : "0")}`, NOW), "чужая подпись отвергается");
+assert.ok(!signatureValid(signedBody + " ", header, NOW), "подпись от другого тела отвергается");
+assert.ok(!signatureValid(signedBody, `ts=${Number(ts) + 1};h1=${h1}`, NOW), "подпись привязана к своему ts");
+assert.ok(!signatureValid(signedBody, header, NOW + 301_000), "перехваченное событие через шесть минут не принимается");
+assert.ok(!signatureValid(signedBody, null, NOW), "без подписи — отказ");
+assert.ok(!signatureValid(signedBody, "ts=abc;h1=не-шестнадцатеричное", NOW), "мусор вместо подписи не роняет разбор");
+{
+  const secret = process.env.PADDLE_WEBHOOK_SECRET;
+  delete process.env.PADDLE_WEBHOOK_SECRET;
+  assert.ok(!signatureValid(signedBody, header, NOW), "незаданный секрет — «нет», а не «пропускай всех»");
+  process.env.PADDLE_WEBHOOK_SECRET = secret;
+}
 
-const lemonEvent = (over: Record<string, unknown> = {}) => ({
-  meta: { event_name: "subscription_updated", custom_data: { reader_id: 7 } },
-  data: { id: "sub_9", attributes: { variant_id: 222, status: "active", renews_at: "2026-11-01T00:00:00Z", ends_at: null } },
+const paddleEvent = (over: Record<string, unknown> = {}, data: Record<string, unknown> = {}) => ({
+  event_type: "subscription.updated",
+  occurred_at: "2026-10-01T00:00:00Z",
   ...over,
+  data: {
+    id: "sub_9", status: "active", custom_data: { reader_id: "7" },
+    items: [{ price: { id: "pri_pro" } }],
+    next_billed_at: "2026-11-01T00:00:00Z", scheduled_change: null,
+    ...data,
+  },
 });
 
-const applied = readEvent(lemonEvent() as never);
-assert.ok(applied.ok && applied.readerId === 7 && applied.update.plan === "pro", "вариант превращается в тариф");
-assert.ok(!readEvent(lemonEvent({ meta: { event_name: "order_created" } }) as never).ok, "не про подписку — мимо");
+const applied = readEvent(paddleEvent() as never);
+assert.ok(applied.ok && applied.readerId === 7 && applied.update.plan === "pro", "цена превращается в тариф");
+assert.ok(applied.ok && applied.update.renewsAt === "2026-11-01T00:00:00Z", "дата продления — next_billed_at");
+assert.ok(applied.ok && applied.update.occurredAt === "2026-10-01T00:00:00Z", "время события уходит в запись");
+assert.ok(!readEvent(paddleEvent({ event_type: "transaction.completed" }) as never).ok, "не про подписку — мимо");
+assert.ok(!readEvent(paddleEvent({}, { custom_data: null }) as never).ok, "без номера читателя платёж некому засчитать");
+assert.ok(!readEvent(paddleEvent({}, { items: [{ price: { id: "pri_other" } }] }) as never).ok, "чужая цена не выдаёт тариф");
+const cancelling = readEvent(paddleEvent({}, {
+  scheduled_change: { action: "cancel", effective_at: "2026-10-15T00:00:00Z" },
+}) as never);
 assert.ok(
-  !readEvent(lemonEvent({ meta: { event_name: "subscription_created", custom_data: {} } }) as never).ok,
-  "без номера читателя платёж некому засчитать",
+  cancelling.ok && cancelling.update.plan === "pro" && cancelling.update.endsAt === "2026-10-15T00:00:00Z"
+    && cancelling.update.renewsAt === null,
+  "отмена посреди периода: тариф работает до effective_at, продления не будет",
 );
-assert.ok(
-  !readEvent({ ...lemonEvent(), data: { id: "x", attributes: { variant_id: 999, status: "active" } } } as never).ok,
-  "чужой вариант не выдаёт тариф",
-);
-const expiredEvent = readEvent({
-  ...lemonEvent(),
-  data: { id: "sub_9", attributes: { variant_id: 222, status: "expired" } },
-} as never);
-assert.ok(expiredEvent.ok && expiredEvent.update.plan === "free", "истёкшая подписка сбрасывает тариф");
+const ended = readEvent(paddleEvent({ event_type: "subscription.canceled" }, { status: "canceled" }) as never);
+assert.ok(ended.ok && ended.update.plan === "free", "закончившаяся подписка сбрасывает тариф");
 
-assert.ok(checkoutUrl("pro", { id: 42, created_at: "2026-01-01" })?.includes("reader_id"), "номер читателя уходит в оплату");
-assert.equal(checkoutUrl("free" as never, { id: 42, created_at: "2026-01-01" }), null, "у бесплатного тарифа нет оплаты");
+assert.equal(checkoutUrl("pro"), "/checkout/pro", "«Выбрать» ведёт на свою страницу оплаты");
+assert.equal(checkoutUrl("free" as never), null, "у бесплатного тарифа нет оплаты");
+assert.equal(
+  checkoutFor("pro", { id: 42, created_at: "2026-01-01", email: null })?.customData.reader_id,
+  "42",
+  "номер читателя уходит в оплату",
+);
+{
+  const token = process.env.PADDLE_CLIENT_TOKEN;
+  delete process.env.PADDLE_CLIENT_TOKEN;
+  assert.equal(checkoutUrl("pro"), null, "без клиентского токена кнопка не ведёт на пустое окно");
+  process.env.PADDLE_CLIENT_TOKEN = token;
+}
 
 // --- бесплатный период и ранние ---------------------------------------------
 // Пока оплата не включена, Pro у всех; после — ранние дочитывают месяц Pro
@@ -2838,10 +2869,11 @@ assert.equal(checkoutUrl("free" as never, { id: 42, created_at: "2026-01-01" }),
   // Ссылка оплаты спрашивает дату включения у окружения проверки.
   const checksFrom = process.env.BILLING_FROM_FOR_CHECKS;
   process.env.BILLING_FROM_FOR_CHECKS = from;
-  process.env.LEMON_DISCOUNT_FOUNDER = "EARLY30";
-  assert.ok(checkoutUrl("pro", early)?.includes("discount_code%5D=EARLY30"), "скидка ранним подставляется в оплату");
-  delete process.env.LEMON_DISCOUNT_FOUNDER;
-  assert.ok(!checkoutUrl("pro", early)?.includes("discount_code"), "код не задан — ссылка без скидки");
+  process.env.PADDLE_DISCOUNT_FOUNDER = "EARLY30";
+  assert.equal(checkoutFor("pro", early)?.discountCode, "EARLY30", "скидка ранним подставляется в оплату");
+  assert.equal(checkoutFor("pro", late)?.discountCode, null, "пришедшему после включения скидки нет");
+  delete process.env.PADDLE_DISCOUNT_FOUNDER;
+  assert.equal(checkoutFor("pro", early)?.discountCode, null, "код не задан — оплата без скидки");
   process.env.BILLING_FROM_FOR_CHECKS = checksFrom;
   assert.ok(founderBotLine("started", at("2026-10-31"), 30).includes("−30%"), "строка ранним называет скидку");
   assert.ok(!founderBotLine("started", at("2026-10-31"), null).includes("%"), "и молчит о ней без кода");

@@ -3,7 +3,7 @@ import { dictOf } from "@/lib/i18n";
 import { sql } from "@/lib/db";
 import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 import { getReader } from "@/lib/readers";
-import { effectivePlan } from "@/lib/lemon";
+import { effectivePlan } from "@/lib/billing";
 import { cheapestFor } from "@/lib/plans";
 import { queueAudioSend, runPodcast } from "../../../../../pipeline/tts";
 

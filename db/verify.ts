@@ -2251,8 +2251,11 @@ async function main() {
     // дороже, чем не читается.
     // deleted_at читают сами запросы (`getReader`, `allReaders`): строка
     // с отметкой из них не выходит, и у выбранной она всегда пуста.
+    // subscription_event_at пишет и читает сам вебхук Paddle (условием
+    // в update): отсечка опоздавшего события, а не свойство читателя.
     const SKIP = new Set([
       "llm", "created_at", "updated_at", "reader_context_hash", "digest_size", "deleted_at",
+      "subscription_event_at",
     ]);
     const loaded = new Set(Object.keys((await readers.getReader(owner.id)) ?? {}));
     const missed = live.filter((column) => !SKIP.has(column) && !loaded.has(column));

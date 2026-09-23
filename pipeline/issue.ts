@@ -24,7 +24,7 @@ import {
 // Лог прогона владельческий и русский: «набран», «материалов», «пропуск».
 // Язык читателя сюда не подходит — строку читает тот, кто держит прогон.
 import { feed as ruFeed } from "../src/lib/i18n/ru/feed";
-import { effectivePlan, effectiveVoice, hasFounderDiscount } from "../src/lib/lemon";
+import { effectivePlan, effectiveVoice, hasFounderDiscount } from "../src/lib/billing";
 import { botMayUpsell, upgradeNote, upgradeReason } from "../src/lib/upgrade";
 import { getUpgradeFacts, weekIssues } from "../src/lib/queries";
 import { SEARCH_CONFIG, tsConfigFor } from "../src/lib/search";
