@@ -84,13 +84,23 @@ export function detectLanguage(texts: string[]): string | null {
  * в целом, по всем постам и вставленным руками образцам. Не набралось
  * текста — язык не пишется вовсе: черновик тогда пишется «как в статье»,
  * а не на угаданном языке.
+ *
+ * Порядок: язык постов этой сети → уже известный язык сети → язык автора
+ * в целом. Уже известный не затирается догадкой по чужой сети: 23 сентября
+ * 2026 X владельца не отдал ни одного поста, получил язык его Telegram-канала
+ * и потерял выбранный им английский.
  */
-export function languagesFor(networks: string[], posts: { text: string; where: string }[]): Record<string, string | null> {
+export function languagesFor(
+  networks: string[],
+  posts: { text: string; where: string }[],
+  known: Record<string, string | null | undefined> = {},
+): Record<string, string | null> {
   const overall = detectLanguage(posts.map((post) => post.text));
   return Object.fromEntries(
     networks.map((network) => [
       network,
-      detectLanguage(posts.filter((post) => post.where === network).map((post) => post.text)) ?? overall,
+      detectLanguage(posts.filter((post) => post.where === network).map((post) => post.text))
+        ?? known[network] ?? overall,
     ]),
   );
 }
