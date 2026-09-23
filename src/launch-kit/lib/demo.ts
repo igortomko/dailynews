@@ -83,6 +83,8 @@ export function makeDemoDataset(profile: ProductProfile = "saas", now: Date | st
     const date = new Date(midnight - day * DAY).toISOString().slice(0, 10);
     costRows.push({ date, stage: "classify", model: "demo-small", subjectId: null, calls: 300 + day % 40, tokensIn: 420_000, tokensOut: 30_000, usd: 0.08 + (day % 5) * 0.01 });
     for (let user = 1; user <= 6; user++)
+      if (user <= 2) costRows.push({ date, stage: "vision", model: "demo-vision", subjectId: `visitor-${String(user).padStart(4, "0")}`, calls: 3, tokensIn: null, tokensOut: null, usd: null });
+    for (let user = 1; user <= 6; user++)
       if ((day + user) % 3 !== 0) costRows.push({ date, stage: "answer", model: "demo-large", subjectId: `visitor-${String(user).padStart(4, "0")}`, calls: 2 + user, tokensIn: 9_000 * user, tokensOut: 1_500 * user, usd: 0.004 * user });
   }
   const created = new Date(midnight - 70 * DAY).toISOString();
@@ -90,7 +92,9 @@ export function makeDemoDataset(profile: ProductProfile = "saas", now: Date | st
     schemaVersion: 1, mode: "demo", product: { name: "Demo product", profile, firstValueLabel: labels[profile], currency },
     generatedAt: reference.toISOString(), capabilities: { sessions: true, payments: true, lifecycle: true, crawlers: true, geography: true, identity: true }, events,
     health: { lastEventAt: events.at(-1)?.occurredAt ?? null, errors: 0 },
-    modelCosts: { capturedAt: reference.toISOString(), granularity: "day", rows: costRows, stageLabels: { classify: "Classify feed", answer: "Answer" } },
+    modelCosts: { capturedAt: reference.toISOString(), granularity: "day", rows: costRows, stageLabels: { classify: "Classify feed", answer: "Answer", vision: "Photo" },
+      // The vision model records calls only; its default price is an estimate the owner can replace.
+      prices: { "demo-vision": { inputPerMillion: null, outputPerMillion: null, perCall: 0.0015, source: "demo list price" } } },
     placements: {
       entry: profile === "telegram" ? { kind: "telegram_start", bot: "demo_product_bot" } : { kind: "url_ref", url: "https://demo-product.example/" },
       items: [

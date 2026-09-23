@@ -170,7 +170,7 @@ export const plans = {
     privacyLink: "Privacy Policy",
     termsLink: "Terms of Service",
     deleteDescription:
-      "We'll erase everything tied to you: issues, topics, sources, rules, reading history, connected networks and drafts. This can't be undone. You can message the bot /start later to get a fresh, empty profile.",
+      "We'll erase everything tied to you: Telegram and Kindle, issues, topics, sources, rules, connected networks and drafts. Only anonymous counters stay — when you visited and what issues cost — with no link to you. This can't be undone; you can message the bot /start later to get a fresh, empty profile.",
     deleteButton: "Delete profile",
     deleteConfirmTitle: "Delete your profile for good?",
     deleteConfirm: "Yes, delete",

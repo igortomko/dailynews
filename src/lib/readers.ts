@@ -38,13 +38,13 @@ const COLUMNS = sql`
   subscription_id, subscription_status, plan_renews_at, plan_ends_at, portal_url,
   paused_at, sleep_asked_at, resume_at, upsell_at,
   bio, suggested_topics, channel_checked_at::text as channel_checked_at,
-  voice_card, voice_built_at, voice_sample,
+  voice_card, voice_built_at, voice_sample, voice_skill, voice_enabled,
   follow_rules, exclude_rules, source
 `;
 
 export async function getReader(id: number): Promise<Reader | undefined> {
   const [reader] = await sql<Reader[]>`
-    select ${COLUMNS} from dailynews.readers where id = ${id}
+    select ${COLUMNS} from dailynews.readers where id = ${id} and deleted_at is null
   `;
   return reader;
 }
@@ -52,7 +52,7 @@ export async function getReader(id: number): Promise<Reader | undefined> {
 /** Все читатели прогона. Порядок по id: у выпуска должен быть один и тот же
  *  хозяин от прогона к прогону, даже когда кто-то переименовался. */
 export async function allReaders(): Promise<Reader[]> {
-  return sql<Reader[]>`select ${COLUMNS} from dailynews.readers order by id`;
+  return sql<Reader[]>`select ${COLUMNS} from dailynews.readers where deleted_at is null order by id`;
 }
 
 export async function getReaderTopics(readerId: number): Promise<ReaderTopic[]> {
@@ -606,13 +606,45 @@ export async function disconnectAccount(network: string, accountId: string): Pro
 }
 
 /**
- * Удалить читателя целиком. Всё личное висит на `readers.id` с
- * `on delete cascade` (выпуски, чтения, темы, источники-связки, площадки,
- * черновики, расход, отправки), поэтому хватает одной строки. Общее —
- * каталог источников и материалы потока — остаётся: оно ничьё.
+ * Удалить профиль: личное стирается, безымянная строка остаётся.
+ *
+ * Строку не удаляем: на ней каскадом висят расход на модели и события
+ * чтения, а из них строятся расходы и воронка дашборда — удалённая строка
+ * переписала бы их задним числом (0063). Всё, что говорит о человеке или
+ * написано для него, уходит: связки, черновики, выпуски, поля профиля.
+ * Номер Telegram стирается тоже, поэтому следующий /start заводит новый
+ * пустой профиль, а `getReader` и прогон отметку видят и строку не берут.
+ * Тариф и статус подписки остаются — это счёт, а не личность; номер
+ * подписки уходит, он ведёт в кабинет Lemon к самому человеку.
  */
 export async function deleteReader(readerId: number): Promise<void> {
-  await sql`delete from dailynews.readers where id = ${readerId} and not owner`;
+  await sql.begin(async (tx) => {
+    const [reader] = await tx`
+      select id from dailynews.readers
+       where id = ${readerId} and not owner and deleted_at is null
+       for update
+    `;
+    if (!reader) return;
+    await tx`delete from dailynews.reader_channels where reader_id = ${readerId}`;
+    await tx`delete from dailynews.reader_posts where reader_id = ${readerId}`;
+    await tx`delete from dailynews.reader_summaries where reader_id = ${readerId}`;
+    await tx`delete from dailynews.reader_topics where reader_id = ${readerId}`;
+    await tx`delete from dailynews.reader_sources where reader_id = ${readerId}`;
+    await tx`delete from dailynews.digests where reader_id = ${readerId}`;
+    await tx`
+      update dailynews.readers
+         set deleted_at = now(), telegram_id = null, username = null,
+             reader_context = '', bio = null, suggested_topics = '{}',
+             kindle_address = null, kindle_sender = null, kindle_digest = false,
+             kindle_approved = false, podcast = false, llm = '{}'::jsonb,
+             voice_card = null, voice_built_at = null, voice_sample = '',
+             voice_skill = '', voice_enabled = false,
+             follow_rules = '[]'::jsonb, exclude_rules = '[]'::jsonb,
+             subscription_id = null, portal_url = null,
+             paused_at = coalesce(paused_at, now()), updated_at = now()
+       where id = ${readerId}
+    `;
+  });
 }
 
 /**
@@ -698,6 +730,15 @@ export async function saveRules(
        set follow_rules = ${sql.json(rules.follow)},
            exclude_rules = ${sql.json(rules.exclude)},
            updated_at = now()
+     where id = ${readerId}
+  `;
+}
+
+/** Свитчер и текст стиля — одной записью: включённый стиль без текста не бывает. */
+export async function saveVoiceStyle(readerId: number, enabled: boolean, text: string): Promise<void> {
+  await sql`
+    update dailynews.readers
+       set voice_enabled = ${enabled}, voice_skill = ${text}, updated_at = now()
      where id = ${readerId}
   `;
 }

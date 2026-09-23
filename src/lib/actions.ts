@@ -15,15 +15,16 @@ import { writeDigest, type Survivor } from "../../pipeline/digest";
 import { scoreSummaries } from "../../pipeline/summary-quality";
 import { enrichImages } from "../../pipeline/og";
 import {
-  addReaderSource, clearChannelAddress, deleteChannel, deleteReader, digestProgress, freezeKindleSender, getChannels,
+  addReaderSource, deleteReader, digestProgress, freezeKindleSender, getChannels,
   getReader, getReaderTopics, perCardOf, readerSources, recordCall, saveChannel, saveRules, setChannelPublishes,
-  saveVoiceCard, saveVoiceSample, spentToday, upsertTopic,
+  saveVoiceCard, saveVoiceStyle, spentToday, upsertTopic,
 } from "./readers";
 import { cleanRules, rulesOf, type Rules } from "./rules";
 import { postSourceFor, saveDrafts, takeDraft, type SavedDraft } from "./posts";
-import { asCard, buildVoiceCard, cardFromVoice, readOwnPosts } from "../../pipeline/voice-card";
+import { buildVoiceCard, cardText, cleanStyle, draftStyle, readOwnPosts } from "../../pipeline/voice-card";
+import { STYLE_LIMIT } from "./voice";
 import { writePost } from "../../pipeline/post";
-import { NETWORK_IDS, networkOf, publishedIn, tabsOf, type NetworkId } from "./networks";
+import { NETWORK_IDS, publishedIn, tabsOf, type NetworkId } from "./networks";
 import { llmCost, jevCost } from "../../pipeline/cost";
 import { KINDLE_PERIODS, type KindlePeriod, type Reader, type Source } from "./types";
 import { MIN_PER_TOPIC, normalize } from "./topic-budget";
@@ -1042,36 +1043,6 @@ const NETWORK_BY_KIND: Partial<Record<Source["kind"], NetworkId>> = {
 };
 
 /**
- * Добавить площадку ссылкой.
- *
- * Адрес разбирает тот же `discover`, что и источники: он же проверяет, что
- * канал публичный и хоть что-то отдаёт. Сохраняется только ответившее —
- * площадка, принятая пустой, выглядит настроенной, а голос по ней собрать
- * не из чего, и понять это можно будет только по пустой карточке.
- */
-export async function addChannel(input: string): Promise<{ ok: true; network: NetworkId; label: string } | { error: string }> {
-  const denied = await denyBySection("posts");
-  if (denied) return denied;
-  const readerId = await currentReaderId();
-
-  const found = await discover(input);
-  if (!found.ok) return { error: found.error };
-
-  const network = NETWORK_BY_KIND[found.found.kind];
-  if (!network) {
-    return { error: (await getDict()).errors.notANewsletter };
-  }
-
-  await saveChannel(readerId, network, {
-    handle: found.found.url,
-    input_url: found.found.input_url,
-    label: found.found.label,
-  });
-  revalidatePath("/settings/channels");
-  return { ok: true as const, network, label: found.found.label };
-}
-
-/**
  * Подключить Telegram — значит назвать канал, куда он пишет: профиль
  * здесь ничего не говорит, вход через бота уже сделан. Канал проверяется
  * тем же разбором, что и источники: сохраняется только тот, что ответил
@@ -1119,39 +1090,19 @@ export async function toggleChannel(network: string, on: boolean) {
 }
 
 /**
- * Перестать читать площадку.
- *
- * Своё действие, а не побочный эффект галочки: «не публикую в Telegram»
- * и «не читайте мой Telegram» — разные ответы, и кнопка стоит там же,
- * где показан адрес. У сетей без таба (блог) забытый адрес не оставляет
- * от строки ничего — её и удаляем, иначе в базе осталась бы площадка,
- * которой нет ни в одном списке.
+ * «Писать черновики в моём стиле»: свитчер и текст одной записью.
+ * Включить можно только с текстом — пустой стиль молча писал бы
+ * настройками подачи под видом «моего стиля».
  */
-export async function forgetChannel(network: string) {
+export async function saveStyle(enabled: boolean, text: string): Promise<{ ok: true } | { error: string }> {
   const denied = await denyBySection("posts");
   if (denied) return denied;
   const readerId = await currentReaderId();
-  const known = networkOf(network);
-  if (!known) return { error: (await getDict()).errors.unknownNetwork };
-
-  if (known.tab) await clearChannelAddress(readerId, network);
-  else await deleteChannel(readerId, network);
-  revalidatePath("/settings/channels");
-  return { ok: true as const };
-}
-
-/**
- * Вставленные руками посты.
- *
- * Не обходной путь, а единственный для LinkedIn и Threads: ленту они наружу
- * не отдают вовсе. Поэтому поле живёт рядом со списком площадок, а не
- * в «если ничего не получилось».
- */
-export async function saveSample(formData: FormData) {
-  const denied = await denyBySection("posts");
-  if (denied) return denied;
-  const readerId = await currentReaderId();
-  await saveVoiceSample(readerId, String(formData.get("sample") ?? "").slice(0, 20_000));
+  const t = (await getDict()).onboarding.channels;
+  const clean = cleanStyle(String(text ?? ""));
+  if (String(text ?? "").trim().length > STYLE_LIMIT) return { error: t.styleTooLong(STYLE_LIMIT) };
+  if (enabled && !clean) return { error: t.styleEmpty };
+  await saveVoiceStyle(readerId, Boolean(enabled), clean);
   revalidatePath("/settings/channels");
   return { ok: true as const };
 }
@@ -1163,7 +1114,7 @@ export async function saveSample(formData: FormData) {
  * платил бы за один и тот же ответ каждую ночь. Кнопка стоит рядом с числом
  * прочитанных постов — видно, на чём карточка собрана.
  */
-export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ranked: boolean; failed: string[] } | { error: string }> {
+export async function rebuildVoice(): Promise<{ ok: true; text: string; built_from: number; ranked: boolean; failed: string[] } | { error: string }> {
   const denied = await denyBySection("posts");
   if (denied) return denied;
   const reader = await currentReader();
@@ -1174,8 +1125,18 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
   }
 
   const channels = await getChannels(reader.id);
+  // Стиль изучается из подключённых соцсетей. X, подключённый входом,
+  // адреса не хранит, но его ник из входа и есть то, что читается
+  // (`from:ник`); LinkedIn и Threads наружу не отдают ничего.
   const { posts, failed } = await readOwnPosts(
-    channels.map((channel) => ({ network: channel.network as NetworkId, handle: channel.handle })),
+    channels
+      .filter((channel) => channel.publishes || channel.network === "blog")
+      .map((channel) => ({
+        network: channel.network as NetworkId,
+        handle:
+          channel.handle ??
+          (channel.network === "x" && channel.account?.startsWith("@") ? channel.account : null),
+      })),
     reader.voice_sample,
   );
   if (posts.length === 0) {
@@ -1192,8 +1153,12 @@ export async function rebuildVoice(): Promise<{ ok: true; built_from: number; ra
     const built = await buildVoiceCard(posts, reader.id);
     await saveVoiceCard(reader.id, built.card);
     revalidatePath("/settings/channels");
+    // Текст не сохраняется здесь: он ложится в поле, автор его читает
+    // и правит, и сохраняет уже своей кнопкой — разбор чужими глазами
+    // (модели по публичному каналу) не должен сам становиться инструкцией.
     return {
       ok: true as const,
+      text: cardText(built.card),
       built_from: built.card.built_from,
       ranked: built.card.ranked,
       failed: failed.map((entry) => `${entry.network}: ${entry.why}`),
@@ -1232,30 +1197,21 @@ export async function writeOpinion(itemId: number): Promise<
     return { error: (await getDict()).errors.noChannelsYet };
   }
 
-  // Карточка есть — пишем его голосом. Нет — настройками подачи, и мотатка
+  // Свитчер включён — пишем его стилем. Нет — настройками подачи, и мотатка
   // обязана сказать это вслух: иначе он прочтёт общий черновик и решит,
   // что возможность не работает.
-  //
-  // Через `asCard`, а не приведением: в базе лежит форма того дня, когда
-  // карточку собирали, и приведение уверяло, что поля новее её.
-  const card =
-    asCard(reader.voice_card) ??
-    cardFromVoice({
-      language: reader.language,
-      complexity: reader.complexity,
-      style: reader.style,
-    });
+  const style = draftStyle(reader);
 
   try {
-    const written = await writePost(item, card, networks.map((network) => network.id), reader.id);
+    const written = await writePost(item, style.block, networks.map((network) => network.id), reader.id);
     const saved = await saveDrafts(reader.id, item.id, written.drafts);
     return {
       ok: true as const,
       drafts: saved,
       hook: written.hook,
       added: written.added,
-      fallback: card.built_from === 0,
-      built_from: card.built_from,
+      fallback: style.fallback,
+      built_from: style.built_from,
     };
   } catch (error) {
     return { error: error instanceof Error ? error.message : (await getDict()).errors.postNotWritten };

@@ -58,7 +58,7 @@ export const errors: typeof En = {
   noMoreFreshNews: "Больше свежих новостей нет",
   noChannelAnswered: (reasons: string) => `Ни одна площадка не ответила: ${reasons}`,
   nothingToReadFromYou:
-    "Читать нечего: добавь канал ссылкой или вставь три своих поста",
+    "Читать нечего: подключи публичный канал Telegram или X — стиль изучается по постам оттуда. Или опиши стиль сам в поле",
   voiceNotBuilt: "Не собралось",
   postNotWritten: "Не написалось",
 
