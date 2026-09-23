@@ -2623,21 +2623,20 @@ async function main() {
     // польза — одна на читателя, а расход сходится с суммой model_calls.
     {
       const { buildDataset } = await import("../src/lib/analytics/dataset");
-      const { loadCosts } = await import("../src/lib/analytics/costs");
+      const { placementStats } = await import("../src/launch-kit/lib/placements");
       const dataset = await buildDataset();
       const firsts = dataset.events.filter((e) => e.name === "first_value").map((e) => e.subjectId);
       assert.equal(new Set(firsts).size, firsts.length, "first_value is counted once per reader");
       const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from dailynews.readers`;
       assert.equal(dataset.events.filter((e) => e.name === "product_entered").length, n, "every reader enters once");
-      const costs = await loadCosts();
-      const [{ total }] = await sql<{ total: number }[]>`select coalesce(sum(cost_usd), 0)::float as total from dailynews.model_calls`;
-      const split = costs.readers.reduce((sum: number, r: { all: number }) => sum + r.all, 0) + (costs.shared as { all: number }).all;
-      assert.ok(Math.abs(split - total) < 1e-6, "per-reader and shared costs add up to model_calls");
+      const [{ total }] = await sql<{ total: number }[]>`select coalesce(sum(cost_usd), 0)::float as total from dailynews.model_calls where at >= date_trunc('day', now()) - interval '90 days'`;
+      const snapshotted = dataset.modelCosts!.rows.reduce((sum, row) => sum + (row.usd ?? 0), 0);
+      assert.ok(Math.abs(snapshotted - total) < 1e-6, "spend in the snapshot adds up to model_calls");
       console.log(`  дашборд: ${dataset.events.length} событий, расход $${total.toFixed(4)} сходится`);
 
       // Ссылки на каналы: код пишется при заведении и больше не меняется,
       // незнакомый код источником не становится.
-      const { createPlacement, listPlacements } = await import("../src/lib/analytics/placements");
+      const { createPlacement } = await import("../src/lib/analytics/placements");
       const code = await createPlacement({ name: "Пост в @probe", channel: "telegram", cost: 5 });
       const came = await readers.ensureReader(BIG_TELEGRAM_ID + 200, "came_by_link", undefined, code);
       assert.equal(came.source, code, "первый /start по ссылке пишет код читателю");
@@ -2645,10 +2644,9 @@ async function main() {
       assert.equal(again.source, code, "повторный /start по другой ссылке первое касание не трогает");
       const stray = await readers.ensureReader(BIG_TELEGRAM_ID + 201, "stray", undefined, "nosuchcode");
       assert.equal(stray.source, null, "код не из реестра источником не становится");
-      const listed = (await listPlacements()).placements.find((p) => p.code === code);
-      assert.equal(listed?.starts, 1, "реестр считает пришедших по коду");
-      const entered = (await buildDataset()).events.find((e) => e.name === "product_entered" && e.subjectId === `r${came.id}`);
-      assert.equal(entered?.source, "telegram", "в снимке источник — канал размещения");
+      const fresh = await buildDataset();
+      assert.equal(placementStats(fresh).rows.find((row) => row.code === code)?.entered, 1, "кит сводит пришедшего с кодом размещения");
+      assert.equal(fresh.placements!.items.find((item) => item.code === code)?.costMinor, 500, "цена размещения доезжает в центах");
       console.log("  ссылки на каналы: код пишется при первом /start, чужой — нет");
     }
 

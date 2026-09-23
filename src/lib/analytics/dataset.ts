@@ -19,6 +19,14 @@ import type { AnalyticsDataset, AnalyticsEvent } from "@launch-kit/lib/types";
  */
 type Row = { reader_id: number; event: string; day: string; first_at: Date };
 
+// Имена этапов — как их знает владелец, а не как они записаны в check.
+const STAGE_LABELS: Record<string, string> = {
+  score: "Оценка потока (Jev)", dedup: "Дедуп (Jev)", digest: "Дайджест", summary: "Замер описаний",
+  translate: "Перевод", "translation-quality": "Качество перевода", video: "Конспект ролика",
+  voice: "Карточка голоса", post: "Посты", "post-quality": "Проверка поста", interests: "Подбор интересов",
+  "spoken-terms": "Произношение терминов", "reading-gate": "Привратник разбора", "reading-repeat": "Повтор разбора",
+};
+
 const ACTIVITY: Record<string, (row: Row) => Partial<AnalyticsEvent>> = {
   seen: () => ({ name: "goal_completed", goal: "seen" }),
   outbound: () => ({ name: "outbound_clicked" }),
@@ -27,14 +35,14 @@ const ACTIVITY: Record<string, (row: Row) => Partial<AnalyticsEvent>> = {
 
 export async function buildDataset(): Promise<AnalyticsDataset> {
   const generatedAt = new Date().toISOString();
-  const [readers, rows] = await sql.begin("read only", async (tx) => {
+  const [readers, rows, costs, pending, placements] = await sql.begin("read only", async (tx) => {
     await tx`set local statement_timeout = '10s'`;
     return Promise.all([
       // Источник — канал размещения, кампания — само размещение: так кит
       // раскладывает каналы и их качество без своей таблицы соответствий.
       tx<{ id: number; username: string | null; ui_language: string | null; created_at: Date; onboarded_at: Date | null; channel: string | null; campaign: string | null }[]>`
         select r.id::int, r.username, r.ui_language, r.created_at, r.onboarded_at,
-               p.channel, p.name as campaign
+               p.channel, p.code as campaign
           from dailynews.readers r
           left join dailynews.placements p on p.code = r.source
          order by r.id`,
@@ -48,15 +56,35 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
           from dailynews.reads
          where event in ('seen', 'opened', 'outbound', 'up', 'down')
          group by 1, 2, 3`,
+      // Расход — из model_calls, той же таблицы, по которой прогон сверяет
+      // дневной потолок: второй счётчик денег разошёлся бы с первым.
+      // Девяносто дней — самый длинный период кита.
+      tx<{ date: string; stage: string; model: string; reader_id: number | null; calls: number; tokens_in: number; tokens_out: number; usd: number }[]>`
+        select (at at time zone 'UTC')::date::text as date, stage, coalesce(nullif(model, ''), '—') as model,
+               reader_id::int, count(*)::int as calls, sum(tokens_in)::float as tokens_in,
+               sum(tokens_out)::float as tokens_out, sum(cost_usd)::float as usd
+          from dailynews.model_calls
+         where at >= date_trunc('day', now()) - interval '90 days'
+         group by 1, 2, 3, 4`,
+      // Незакрытые резервы разбора ещё не в model_calls: это обещание
+      // расхода, а не расход, и в суммы они не входят.
+      tx<{ usd: number }[]>`
+        select coalesce(sum(reserved_usd), 0)::float as usd
+          from dailynews.reading_calls where status in ('reserved', 'uncertain')`,
+      tx<{ code: string; name: string; channel: string; cost_usd: number; created_at: Date; retired_at: Date | null }[]>`
+        select code, name, channel, cost_usd::float as cost_usd, created_at, retired_at
+          from dailynews.placements order by created_at`,
     ]);
   });
 
   const subject = (id: number) => `r${id}`;
+  const bot = process.env.TELEGRAM_BOT_USERNAME?.trim().replace(/^@/, "") || null;
   const events: AnalyticsEvent[] = [];
   for (const r of readers) {
     events.push({
       id: `entered-${r.id}`, subjectId: subject(r.id), occurredAt: r.created_at.toISOString(), name: "product_entered", surface: "telegram",
-      ...(r.channel && r.campaign ? { source: r.channel, campaign: r.campaign.slice(0, 100) } : {}),
+      // Кампания — код размещения: по нему кит сводит людей с реестром ссылок.
+      ...(r.channel && r.campaign ? { source: r.channel, campaign: r.campaign } : {}),
     });
     if (r.onboarded_at) events.push({ id: `onboarded-${r.id}`, subjectId: subject(r.id), occurredAt: r.onboarded_at.toISOString(), name: "goal_completed", surface: "web", goal: "onboarded" });
   }
@@ -83,6 +111,23 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
     ...profile,
     capabilities: { sessions: false, payments: false, lifecycle: false, crawlers: false, geography: false, identity: true },
     events,
+    modelCosts: {
+      capturedAt: generatedAt,
+      granularity: "day",
+      rows: costs.map((c) => ({
+        date: c.date, stage: c.stage, model: c.model.slice(0, 120), subjectId: c.reader_id === null ? null : subject(c.reader_id),
+        calls: c.calls, tokensIn: Math.round(c.tokens_in), tokensOut: Math.round(c.tokens_out), usd: c.usd,
+      })),
+      pendingUsd: pending[0]?.usd ?? 0,
+      stageLabels: STAGE_LABELS,
+    },
+    placements: {
+      entry: bot ? { kind: "telegram_start", bot } : null,
+      items: placements.map((p) => ({
+        code: p.code, name: p.name, channel: p.channel, costMinor: Math.round(p.cost_usd * 100), currency: "USD",
+        createdAt: p.created_at.toISOString(), retiredAt: p.retired_at?.toISOString() ?? null,
+      })),
+    },
     health: { lastEventAt, errors: 0 },
     profiles: readers.map((r) => ({
       subjectId: subject(r.id),

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const destination = resolve(root, "src/launch-kit");
-const revision = "dbb52653f27c7fa6154790a4eab4c14a53b77165";
+const revision = "a75d51c86826a84fcc0d5f09ed2871a933e16a7f";
 const sourcePrefix = "launch-kit/components/analytics-dashboard/src/";
 const inputs = { "profile.json": "src/lib/analytics/profile.json", "selection.json": "src/lib/analytics/selection.json" };
 const args = process.argv.slice(2);

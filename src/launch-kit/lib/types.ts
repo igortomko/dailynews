@@ -117,6 +117,59 @@ export interface GrowthReport {
   daily: { date: string; newUsers: number | null; active: number; reviews: number }[];
 }
 
+/**
+ * Model spend, aggregated by the product per bucket. `usd` is null when the
+ * product records calls but not money: the costs view then says the price is
+ * not recorded instead of showing a zero. `subjectId` null means a shared stage
+ * that serves every user at once (scoring a common feed, for example).
+ */
+export interface ModelCostRow {
+  date: string;
+  stage: string;
+  model: string;
+  subjectId: string | null;
+  calls: number;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  usd: number | null;
+}
+
+export interface ModelCosts {
+  capturedAt: string;
+  granularity: "day" | "month";
+  rows: ModelCostRow[];
+  /** Reserved but not yet settled spend, shown beside the totals, never inside them. */
+  pendingUsd?: number | null;
+  /** Owner-facing names for stage keys; keys without a name are shown as they are. */
+  stageLabels?: Record<string, string>;
+}
+
+/**
+ * Where a link was posted. The code is the acquisition field itself: entry
+ * events carry it as `campaign`, so people join onto the registry without a
+ * mapping table. Placements are retired, never deleted.
+ */
+export interface PlacementRow {
+  code: string;
+  name: string;
+  channel: string;
+  costMinor: number;
+  currency: string;
+  createdAt: string;
+  retiredAt: string | null;
+  /** A host-built link (for example a signed deep link) overrides the entry template. */
+  link?: string | null;
+}
+
+export type PlacementEntry =
+  | { kind: "telegram_start"; bot: string }
+  | { kind: "url_ref"; url: string };
+
+export interface Placements {
+  entry: PlacementEntry | null;
+  items: PlacementRow[];
+}
+
 export interface AnalyticsDataset {
   schemaVersion: 1;
   mode: "demo" | "local";
@@ -135,6 +188,8 @@ export interface AnalyticsDataset {
   measurement?: ProductMeasurement;
   profiles?: AnalyticsUserProfile[];
   learning?: { capturedAt: string; learners: LearnerSnapshot[] };
+  modelCosts?: ModelCosts;
+  placements?: Placements;
 }
 
 export interface AnalyticsFilters {
