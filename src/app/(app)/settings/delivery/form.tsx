@@ -9,12 +9,14 @@ import {
   saveKindlePeriod,
   saveKindleAddress,
   savePodcast,
+  saveTimezone,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { PaywallCrown } from "@/components/paywall";
 import { FEATURES, type Plan } from "@/lib/plans";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { KINDLE_PERIODS, type KindlePeriod } from "@/lib/types";
 import { kindleSetupStep, type KindleStep } from "@/lib/kindle-setup";
@@ -76,6 +78,22 @@ function CopyAddress({ value, t }: { value: string; t: Dict }) {
   );
 }
 
+/**
+ * Пояса, которые знает браузер, с нынешним смещением: «Europe/Moscow»
+ * говорит меньше, чем «Moscow · GMT+3», а искать свой пояс по имени
+ * города привычнее, чем по континенту. Смещение считается только в
+ * раскрытом списке: он рисуется в браузере, и расхождению ICU сервера
+ * и браузера негде разойтись с гидрацией.
+ */
+function zoneLabel(zone: string, withOffset: boolean) {
+  const city = zone.split("/").pop()!.replaceAll("_", " ");
+  if (!withOffset) return city;
+  const offset = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "shortOffset" })
+    .formatToParts(new Date())
+    .find((part) => part.type === "timeZoneName")?.value;
+  return offset ? `${city} · ${offset}` : city;
+}
+
 /** Номер шага словами: «1 из 2» отвечает на вопрос «сколько ещё осталось». */
 function StepMark({ now, of, title, step }: { now: number; of: number; title: string; step: (now: number, of: number) => string }) {
   return (
@@ -96,6 +114,7 @@ export function DeliveryForm({
   kindlePeriod,
   kindleApproved,
   podcast,
+  timezone,
   sender,
   plan,
 }: {
@@ -110,6 +129,8 @@ export function DeliveryForm({
   kindleApproved: boolean;
   /** Присылать ли выпуск голосом вместе с сообщением. Только Pro. */
   podcast: boolean;
+  /** Пояс, в 02:00 по которому собирается выпуск. */
+  timezone: string;
   sender: string | null;
 }) {
   const t = useT();
@@ -130,6 +151,7 @@ export function DeliveryForm({
   // значение уже после того, как родился, — Base UI говорит об этом
   // в консоль, а стоит за этим настоящая возможность разойтись с базой.
   const [podcastOn, setPodcastOn] = useState(podcast);
+  const [zone, setZone] = useState(timezone);
   const [digestOn, setDigestOn] = useState(kindleDigest);
   // Управляемая, как и тумблер рядом: выбор перекидывается сразу, а при
   // отказе возвращается на прежний — иначе на экране стоит одно, в базе
@@ -186,6 +208,41 @@ export function DeliveryForm({
           {connected
             ? t.settings.delivery.telegram.connected(username)
             : t.settings.delivery.telegram.notConnected}
+
+          {/* Пояс, а не время: выпуск собирается в два ночи по нему и к утру
+              уже лежит в чате. Своё время доставки ничего не добавило бы —
+              просыпаются позже двух почти все. */}
+          <Field>
+            <FieldLabel htmlFor="timezone" className="text-foreground">
+              {t.settings.delivery.telegram.timezone}
+            </FieldLabel>
+            <Select
+              value={zone}
+              onValueChange={(next: string | null) => {
+                if (!next || next === zone) return;
+                const previous = zone;
+                setZone(next);
+                run(
+                  saveTimezone(next),
+                  t.settings.delivery.telegram.timezoneSaved,
+                  undefined,
+                  () => setZone(previous),
+                );
+              }}
+            >
+              <SelectTrigger id="timezone" className="w-full max-w-xs" disabled={pending}>
+                <SelectValue>{zoneLabel(zone, false)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false} className="max-h-72 w-auto min-w-(--anchor-width)">
+                {Intl.supportedValuesOf("timeZone").map((entry) => (
+                  <SelectItem key={entry} value={entry}>
+                    {zoneLabel(entry, true)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldDescription>{t.settings.delivery.telegram.timezoneHint}</FieldDescription>
+          </Field>
 
           {/* Выпуск голосом — тумблер, а не правило тарифа: это час звука
               каждую ночь, и такое включают сами. Корона стоит по той же

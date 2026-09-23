@@ -135,6 +135,9 @@ export const settings: typeof En = {
       podcast: "Отправлять аудио-подкаст",
       podcastHint: "Выпуск выжимки в виде аудиозаписи, приходит вместе с ссылкой.",
       podcastSaved: "Сохранил",
+      timezone: "Часовой пояс",
+      timezoneHint: "Выпуск собирается в 2 часа ночи по этому поясу, так что к утру он уже в Telegram.",
+      timezoneSaved: "Пояс сохранён",
     },
     kindle: {
       descriptionDone: "Выпуск уходит книгой на читалку.",

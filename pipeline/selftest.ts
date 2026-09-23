@@ -47,6 +47,8 @@ import { CHARS_PER_MINUTE } from "../src/lib/reading-time";
 import { en as EN_DICT } from "../src/lib/i18n/en/index";
 import { ru as RU_DICT } from "../src/lib/i18n/ru/index";
 import { isDay } from "../src/lib/day";
+import { DEFAULT_TIMEZONE, dueDay, isTimezone, localClock, timezoneOf } from "../src/lib/issue-time";
+import { pollNow } from "./fetch";
 import { dropStrayReady } from "../db/free-port";
 import { alsoLine, laterBy, otherSources, storyLines, storyTitle } from "../src/lib/story";
 import { createHmac } from "node:crypto";
@@ -5004,6 +5006,52 @@ assert.equal(
   for (const plan of [PLANS.free, PLANS.plus, PLANS.pro]) {
     assert.ok(plan.richCards <= plan.maxItems, `разборов не больше, чем карточек: ${plan.id}`);
   }
+}
+
+// Выпуск — в 02:00 по поясу читателя, один раз за его местные сутки.
+// Отметка `issue_day` — это и «уже брали», и замок между таймером веба
+// и прогоном в Actions.
+{
+  // 05:30 UTC 23 сентября: в Сан-Паулу 02:30 того же дня, в Токио уже 14:30,
+  // в Лос-Анджелесе ещё 22:30 двадцать второго.
+  const now = new Date("2026-09-23T05:30:00Z");
+  assert.deepEqual(localClock(now, "America/Sao_Paulo"), { day: "2026-09-23", hour: 2 });
+  assert.deepEqual(localClock(now, "Asia/Tokyo"), { day: "2026-09-23", hour: 14 });
+  assert.deepEqual(localClock(now, "America/Los_Angeles"), { day: "2026-09-22", hour: 22 });
+  // Полночь пишется нулём, а не 24: hourCycle h23, иначе «24 < 2» ложно
+  // и выпуск собирался бы в полночь.
+  assert.equal(localClock(new Date("2026-09-23T03:00:00Z"), "America/Sao_Paulo").hour, 0);
+
+  const sp = { timezone: "America/Sao_Paulo", issue_day: "2026-09-22" };
+  assert.equal(dueDay(sp, now), "2026-09-23", "в 02:30 выпуск за сегодня пора собирать");
+  assert.equal(dueDay({ ...sp, issue_day: "2026-09-23" }, now), null, "за сегодня уже брали");
+  assert.equal(dueDay(sp, new Date("2026-09-23T04:59:00Z")), null, "в 01:59 ещё рано");
+  // Контейнер лежал в два часа — выпуск приходит с его подъёмом, а не пропадает.
+  assert.equal(dueDay(sp, new Date("2026-09-23T15:00:00Z")), "2026-09-23");
+  // День выпуска — местный: у токийца 23-е, хотя в UTC ещё утро того же дня,
+  // а у Окленда (UTC+12) в 15:00 UTC 22-го — уже 23-е.
+  assert.equal(dueDay({ timezone: "Pacific/Auckland", issue_day: null }, new Date("2026-09-22T15:00:00Z")), "2026-09-23");
+  // Сменивший пояс на западный оказывается во вчерашнем дне: второй выпуск за него не уходит.
+  assert.equal(dueDay({ timezone: "America/Los_Angeles", issue_day: "2026-09-23" }, new Date("2026-09-23T12:00:00Z")), null);
+
+  // Пустой и сломанный пояс — Сан-Паулу, а не исключение посреди таймера.
+  assert.equal(timezoneOf(null), DEFAULT_TIMEZONE);
+  assert.equal(timezoneOf("Mars/Olympus"), DEFAULT_TIMEZONE);
+  assert.equal(dueDay({ timezone: "Mars/Olympus", issue_day: null }, now), "2026-09-23");
+  assert.ok(isTimezone("Europe/Moscow"));
+  assert.ok(!isTimezone("Mars/Olympus") && !isTimezone("") && !isTimezone(42));
+}
+
+// Сбор раз в час, X — раз в сутки: его окно неделя, и каждый опрос
+// оплачивает те же твиты заново.
+{
+  const now = Date.parse("2026-09-23T12:00:00Z");
+  assert.ok(pollNow({ kind: "rss", last_ok_at: "2026-09-23T11:30:00Z" }, now), "RSS — каждый час");
+  assert.ok(!pollNow({ kind: "x", last_ok_at: "2026-09-23T11:30:00Z" }, now), "X полчаса назад — не опрашиваем");
+  assert.ok(pollNow({ kind: "x", last_ok_at: "2026-09-22T15:00:00Z" }, now), "X двадцать один час назад — опрашиваем");
+  assert.ok(pollNow({ kind: "x", last_ok_at: null }, now), "новый X — опрашиваем сразу");
+  // Драйвер отдаёт timestamptz объектом Date, а не строкой.
+  assert.ok(!pollNow({ kind: "x", last_ok_at: new Date("2026-09-23T11:00:00Z") as unknown as string }, now));
 }
 
 console.log(`Самопроверка пройдена: ${checks} утверждений`);

@@ -2216,6 +2216,21 @@ async function main() {
       `колонки читателя есть в базе, но не выбираются кодом: ${missed.join(", ")}`,
     );
     console.log(`  читатель: выбираются все ${live.length - SKIP.size} нужных колонок`);
+    // Выпуск по поясу забирают двое — таймер веба и прогон в Actions.
+    // Достаться он должен одному, а вчерашний день после сегодняшнего
+    // (сменили пояс на западный) — никому.
+    {
+      const { claimIssue } = await import("../pipeline/issue");
+      const [first, second] = await Promise.all([
+        claimIssue(owner.id, "2026-09-23"), claimIssue(owner.id, "2026-09-23"),
+      ]);
+      assert.equal(Number(first) + Number(second), 1, "выпуск за день забирает ровно один");
+      assert.equal(await claimIssue(owner.id, "2026-09-22"), false, "вчерашний после сегодняшнего не забирается");
+      assert.equal(await claimIssue(owner.id, "2026-09-24"), true, "завтрашний забирается");
+      await sql`update dailynews.readers set issue_day = null where id = ${owner.id}`;
+      console.log("  выпуск по поясу: день забирается один раз");
+    }
+
     // Вопрос «дочитал?» спрашивал заголовок из items.title_ru — колонки,
     // которой нет с тех пор, как тексты дайджеста стали персональными.
     // Запрос падал каждую ночь строкой в логе, вопрос не уходил ни разу,

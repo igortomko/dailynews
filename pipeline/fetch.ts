@@ -487,6 +487,24 @@ export function tweetLink(tweet: XTweet): string | null {
   return null;
 }
 
+/**
+ * Опрашивать ли источник в этом прогоне.
+ *
+ * Сбор идёт раз в час, а X — раз в сутки. Его запрос берёт окно в неделю
+ * (`X_MAX_AGE_DAYS`), и платим мы за каждый вернувшийся твит: раз в час
+ * одни и те же посты оплачивались бы двадцать четыре раза, а новыми
+ * в базу ложились бы единицы. Сузить окно до «с прошлого опроса» нельзя —
+ * пустой час ставил бы `silent_since` живому автору, ровно то, от чего
+ * неделя и спасает. Двадцать часов, а не двадцать четыре: прогон
+ * по расписанию опаздывает по-разному, и сутки ровно пропускали бы
+ * опрос через раз.
+ */
+export function pollNow(source: Pick<Source, "kind" | "last_ok_at">, now = Date.now()): boolean {
+  if (source.kind !== "x" || !source.last_ok_at) return true;
+  // Драйвер отдаёт timestamptz объектом Date, а тип обещает строку: `new Date` понимает оба.
+  return now - new Date(source.last_ok_at).getTime() >= 20 * 3_600_000;
+}
+
 export async function fetchX(source: Source): Promise<RawItem[]> {
   const apiKey = process.env.X_API_KEY;
   if (!apiKey) throw new Error("нужен X_API_KEY (twitterapi.io)");

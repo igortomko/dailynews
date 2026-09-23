@@ -139,6 +139,9 @@ export const settings = {
       podcast: "Send an audio podcast",
       podcastHint: "The digest as an audio recording, arrives together with the link.",
       podcastSaved: "Saved",
+      timezone: "Time zone",
+      timezoneHint: "The digest is put together at 2 a.m. in this time zone, so it's in Telegram by morning.",
+      timezoneSaved: "Time zone saved",
     },
     kindle: {
       descriptionDone: "The digest arrives as a book on your e-reader.",
