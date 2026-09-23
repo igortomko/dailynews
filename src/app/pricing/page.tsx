@@ -73,10 +73,7 @@ export default async function PricingPage({
     yearly: t.plans.pricing.yearly,
     save: t.plans.pricing.save(save),
     perMonth: t.plans.table.perMonth,
-    perYear: t.plans.pricing.perYear,
-    perMonthApprox: Object.fromEntries(
-      paid.map((id) => [id, t.plans.pricing.perMonthApprox((PLANS[id].yearPrice / 12).toFixed(2))]),
-    ),
+    billedYearly: Object.fromEntries(paid.map((id) => [id, t.plans.pricing.billedYearly(PLANS[id].yearPrice)])),
     start: t.plans.pricing.start,
     tryFree: Object.fromEntries(paid.map((id) => [id, t.plans.table.tryFree(trialDaysFor(id))])),
     then: Object.fromEntries(

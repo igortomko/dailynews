@@ -133,8 +133,7 @@ export const plans = {
     monthly: "Monthly",
     yearly: "Yearly",
     save: (percent: number) => `−${percent}%`,
-    perYear: "per year",
-    perMonthApprox: (price: string) => `$${price} a month`,
+    billedYearly: (price: number) => `$${price} billed yearly`,
     thenPerYear: (price: number) => `then $${price} a year`,
     trialNote: (days: number) =>
       `${days} days free on any paid plan. Cancel before the trial ends and you won't be charged.`,
