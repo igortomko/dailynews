@@ -304,18 +304,37 @@ export async function attachTelegram(
   readerId: number,
   telegramId: number,
   username: string | null,
-): Promise<"ok" | "same" | "taken" | "busy"> {
+): Promise<"ok" | "same" | "taken" | "changed"> {
   const [owner] = await sql<{ id: number }[]>`
     select id::int as id from dailynews.readers where telegram_id = ${telegramId}
   `;
   if (owner) return owner.id === readerId ? "same" : "taken";
-  const updated = await sql`
-    update dailynews.readers
+  // Поверх прежнего Telegram пишем: ссылку привязки выдаёт только сессия
+  // этого читателя и живёт она десять минут, так что замена — его же
+  // «Сменить аккаунт». Прежний аккаунт освобождается, а не зависает
+  // между «отвязал» и «привязал».
+  const [row] = await sql<{ had: boolean }[]>`
+    update dailynews.readers r
        set telegram_id = ${telegramId}, username = ${username}, updated_at = now()
-     where id = ${readerId} and telegram_id is null and deleted_at is null
+      from (select telegram_id is not null as had from dailynews.readers where id = ${readerId}) prev
+     where r.id = ${readerId} and r.deleted_at is null
+    returning prev.had
   `;
-  // У строки уже другой Telegram: вторую привязку поверх первой не делаем.
-  return updated.count === 1 ? "ok" : "busy";
+  if (!row) return "taken";
+  return row.had ? "changed" : "ok";
+}
+
+/**
+ * Отвязать Telegram — только при почте: иначе у профиля не остаётся входа.
+ * Сменить аккаунт — это отвязать и привязать заново той же ссылкой бота:
+ * `attachTelegram` поверх занятого не пишет.
+ */
+export async function detachTelegram(readerId: number): Promise<boolean> {
+  const updated = await sql`
+    update dailynews.readers set telegram_id = null, username = null, updated_at = now()
+     where id = ${readerId} and email is not null
+  `;
+  return updated.count === 1;
 }
 
 /**

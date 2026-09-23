@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
         same: "Этот Telegram уже привязан к твоему профилю.",
         taken:
           "Этот Telegram уже привязан к другому профилю Reporta. Войди через /start — откроется он.",
-        busy: "К этому профилю уже привязан другой Telegram.",
+        changed: "Готово: теперь выпуск приходит сюда, прежний Telegram отвязан.",
         expired: "Ссылка устарела. Открой «Доставку» на сайте и нажми «Подключить Telegram» ещё раз.",
       }[result];
       await sendMessage(command.chatId, text);
