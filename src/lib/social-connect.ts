@@ -24,12 +24,22 @@ type Provider = {
   profile: (token: string) => Promise<string | null>;
 };
 
-const getJson = async (url: string, token: string) => {
-  const response = await fetch(url, {
-    headers: { authorization: `Bearer ${token}` },
+/**
+ * `query` — токен параметром адреса, а не заголовком. Так его ждёт Threads:
+ * с `Authorization: Bearer` graph.threads.net отвечает на /me голым 500,
+ * хотя сам токен верен (замер 23 сентября 2026).
+ */
+const getJson = async (url: string, token: string, query = false) => {
+  const target = new URL(url);
+  if (query) target.searchParams.set("access_token", token);
+  const response = await fetch(target, {
+    headers: query ? {} : { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error(`${new URL(url).host}: ${response.status}`);
+  // Тело ответа — в лог: голый «500» не говорит, что именно не понравилось.
+  if (!response.ok) {
+    throw new Error(`${target.host}: ${response.status} ${(await response.text()).slice(0, 200)}`);
+  }
   return response.json();
 };
 
@@ -64,7 +74,7 @@ export const PROVIDERS: Partial<Record<NetworkId, Provider>> = {
     pkce: false,
     basic: false,
     profile: async (token) => {
-      const body = await getJson("https://graph.threads.net/v1.0/me?fields=username", token);
+      const body = await getJson("https://graph.threads.net/v1.0/me?fields=id,username", token, true);
       return body?.username ? `@${body.username}` : null;
     },
   },
