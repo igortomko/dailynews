@@ -118,8 +118,14 @@ function Calendar({
           "relative isolate z-0 rounded-r-(--cell-radius) bg-muted after:absolute after:inset-y-0 after:left-0 after:w-4 after:bg-muted",
           defaultClassNames.range_end
         ),
+        // Ячейка «сегодня» и кнопка дня — два элемента одного размера
+        // с разным радиусом (10px у кнопки, --cell-radius у ячейки).
+        // Когда сегодня ещё и выбрано, снятие только скругления оставляло
+        // серый фон квадратным под круглым чёрным бейджем — по углам
+        // торчали его квадратные носики. Фон, а не скругление, — то,
+        // что видно из-под кнопки, поэтому убирать нужно его.
         today: cn(
-          "rounded-(--cell-radius) bg-muted text-foreground data-[selected=true]:rounded-none",
+          "rounded-(--cell-radius) bg-muted text-foreground data-[selected=true]:bg-transparent",
           defaultClassNames.today
         ),
         outside: cn(

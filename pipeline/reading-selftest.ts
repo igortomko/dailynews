@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, restates, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
+import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, restates, fillers, CRITICAL_PER_SECTION, CRITICAL_PER_DOCUMENT, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
 import { splitSource, composeDocument, analyzeSource, reasoningEffortFor, VERIFY_SOURCE_CHARS, type Ask } from "./reading";
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
@@ -97,6 +97,8 @@ const claimOf = (id: string, importance: 'critical' | 'major') => ({ id, text: i
 const sectionWith = (critical: number) => ({ subject: 'Test', genre: 'research' as const, excluded: [],
   claims: [...Array.from({ length: critical }, (_, i) => claimOf(`c${i}`, 'critical')), claimOf('m1', 'major')] });
 assert.deepEqual(validateSection(sectionWith(7), 'c0 c1 c2 c3 c4 c5 c6 m1'), [], 'семь обязательных утверждений — ещё норма');
+assert.ok(CRITICAL_PER_DOCUMENT < CRITICAL_PER_SECTION * 2,
+  'потолок на статью строже суммы секционных: иначе двухсекционная статья снова не собирается');
 assert.ok(validateSection(sectionWith(8), 'c0 c1 c2 c3 c4 c5 c6 c7 m1').some(e => e.includes('at most 7')), 'восьмое обязательное утверждение — дефект извлечения');
 assert.deepEqual(normalizeDocument({ ...valid, omitted: [{ claimId: 's1-a', reason: 'Accidental duplicate' }] }).omitted, []);
 
@@ -148,6 +150,17 @@ assert.ok(validateCoverage(planned('table', valid.blocks), analysis, '', []).som
   assert.ok(!restates(lead, next), 'новое содержание повтором не считается');
   assert.ok(!restates('46,3 балла', 'Балл сводного индекса вырос до 46,3 против прошлой версии'),
     'короткий акцент рядом с абзацем про то же число — не повтор, его судит промпт');
+  // Обороты, которые ничего не сообщают, ловятся счётчиком: запрет
+  // в промпте протекает так же, как протекал запрет повторов.
+  assert.deepEqual(fillers('Стоит отметить, что цена выросла'), ['Стоит отметить']);
+  assert.deepEqual(fillers('В статье говорится о росте'), ['В статье говорится']);
+  assert.deepEqual(fillers('Автор пишет, что рынок вырос'), ['Автор пишет, что']);
+  assert.deepEqual(fillers('Цена выросла вдвое за квартал'), [], 'обычный текст чист');
+  assert.deepEqual(fillers('The vendor reports a 20% gain'), [], 'английский текст судит промпт, а не список');
+  const padded: ReadingDocument = { ...twoLayer,
+    blocks: [{ kind: 'paragraph', content: { text: 'Стоит отметить, что точность не изменилась.', claimIds: ['s1-b'] } }] };
+  assert.ok(validateCoverage(padded, analysis, '', []).some(e => e.includes('throat-clearing')));
+
   const repeating: ReadingDocument = { ...twoLayer, answer: { text: lead, claimIds: ['s1-a'] },
     blocks: [{ kind: 'paragraph', content: { text: again, claimIds: ['s1-b'] } }] };
   assert.ok(validateCoverage(repeating, analysis, '', []).some(e => e.includes('restates the answer')));
