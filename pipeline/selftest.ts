@@ -41,7 +41,7 @@ const assert: typeof assertStrict = new Proxy(assertStrict, {
   },
 }) as typeof assertStrict;
 import {
-  effectivePlan, effectiveVoice, readEvent, readMoney, signatureValid, checkoutUrl, checkoutFor, endingAt, trialDaysFor,
+  effectivePlan, effectiveVoice, readEvent, readMoney, transitions, signatureValid, checkoutUrl, checkoutFor, endingAt, trialDaysFor,
 } from "../src/lib/billing";
 import {
   appOrigin, issueBindPayload, issueConfirmToken, issueEmailToken, unsubscribeToken,
@@ -2860,6 +2860,17 @@ assert.ok(ended.ok && ended.update.pricePlan === "pro", "а воронка от�
   const paidTxn = readMoney(txn("999") as never);
   assert.ok(paidTxn?.kind === "payment_succeeded" && paidTxn.amountMinor === 999 && paidTxn.readerId === 7 && paidTxn.plan === "pro" && paidTxn.cycle === "year", "платёж читается в центах, с тарифом и периодом");
   assert.equal(readMoney(txn("0") as never), null, "нулевая транзакция триала — не платёж");
+  {
+    const taxed = txn("1199") as { data: { details: { totals: Record<string, string> } } };
+    taxed.data.details.totals.grand_total_tax = "200";
+    assert.equal(readMoney(taxed as never)?.amountMinor, 999, "выручка — без налога: НДС не наши деньги");
+    const refundTaxed = readMoney({
+      event_id: "evt_5", event_type: "adjustment.updated", occurred_at: "2026-10-02T00:00:00Z",
+      data: { id: "adj_5", action: "refund", type: "full", status: "approved", transaction_id: "txn_1",
+        currency_code: "USD", totals: { subtotal: "999", total: "1199" } },
+    } as never);
+    assert.equal(refundTaxed?.amountMinor, 999, "возврат вычитается той же меркой — без налога");
+  }
   const refund = readMoney({
     event_id: "evt_2", event_type: "adjustment.updated", occurred_at: "2026-10-02T00:00:00Z",
     data: { id: "adj_1", action: "refund", status: "approved", transaction_id: "txn_1", subscription_id: "sub_9",
@@ -5532,4 +5543,22 @@ console.log(`Самопроверка пройдена: ${checks} утвержд
   const kept = languagesFor(["x", "threads"], posts.filter((post) => post.where !== "x"), { x: "английском" });
   assert.equal(kept.x, "английском", "сеть без постов не теряет известный язык ради чужой сети");
   assert.equal(kept.threads, "русском", "а неизвестный берёт язык автора");
+}
+
+// Переходы подписки для воронки — сравнением прежнего и нового состояния.
+{
+  const prev = { plan: "plus", subscription_id: "sub_1", subscription_status: "active", plan_ends_at: null };
+  const next = (over: Record<string, unknown> = {}) => ({
+    plan: "plus", status: "active", renewsAt: null, endsAt: null, subscriptionId: "sub_1",
+    occurredAt: "2026-10-01T00:00:00Z", cycle: "month", pricePlan: "plus", ...over,
+  }) as never;
+  assert.deepEqual(transitions(prev, next()), [], "ничего не поменялось — событий нет");
+  assert.deepEqual(transitions(prev, next({ endsAt: "2026-10-30T00:00:00Z" })), ["cancel_scheduled"], "назначил отмену");
+  assert.deepEqual(transitions({ ...prev, plan_ends_at: "2026-10-30T00:00:00Z" }, next()), ["resumed"], "передумал");
+  assert.deepEqual(transitions(prev, next({ plan: "pro", pricePlan: "pro" })), ["upgraded"], "повысил");
+  assert.deepEqual(transitions({ ...prev, plan: "pro" }, next()), ["downgraded"], "понизил");
+  assert.deepEqual(transitions(prev, next({ status: "past_due" })), ["payment_failed"], "платёж не прошёл");
+  assert.deepEqual(transitions({ ...prev, subscription_status: "past_due" }, next({ status: "past_due" })), [], "повтор past_due не пишется дважды");
+  assert.deepEqual(transitions(prev, next({ subscriptionId: "sub_2", plan: "pro", pricePlan: "pro" })), [], "другая подписка — не переход");
+  assert.deepEqual(transitions(undefined, next()), [], "читателя нет — событий нет");
 }

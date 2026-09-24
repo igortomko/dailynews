@@ -354,8 +354,8 @@ type MoneyPayload = {
     currency_code?: string;
     custom_data?: { reader_id?: string | number } | null;
     items?: { price?: { id?: string; custom_data?: { plan?: string; cycle?: string } | null } | null }[];
-    details?: { totals?: { grand_total?: string } } | null;
-    totals?: { total?: string } | null;
+    details?: { totals?: { grand_total?: string; grand_total_tax?: string; tax?: string } } | null;
+    totals?: { total?: string; subtotal?: string } | null;
   };
 };
 
@@ -383,7 +383,12 @@ export function readMoney(payload: MoneyPayload): MoneyEvent | null {
   if (!base.eventId || !/^[A-Z]{3}$/.test(base.currency)) return null;
 
   if (type === "transaction.completed") {
-    const amount = Number(data.details?.totals?.grand_total);
+    // Выручка — без налога: НДС уходит государству, а не нам, и с ним
+    // европейский платёж выглядел бы на пятую часть дороже американского.
+    // Берётся то, что списано (`grand_total` — за вычетом зачтённого
+    // баланса), минус налог в этом списании.
+    const totals = data.details?.totals;
+    const amount = Number(totals?.grand_total) - Number(totals?.grand_total_tax ?? totals?.tax ?? 0);
     if (!Number.isSafeInteger(amount) || amount <= 0 || !data.id) return null;
     const priced = planOfPrice(data.items?.[0]?.price);
     return {
@@ -396,7 +401,8 @@ export function readMoney(payload: MoneyPayload): MoneyEvent | null {
   // и доступ он закрывает так же, как полный возврат.
   const refundLike = data.action === "refund" || data.action === "chargeback";
   if (type.startsWith("adjustment.") && refundLike && data.status === "approved") {
-    const amount = Number(data.totals?.total);
+    // Тоже без налога — вычитается из выручки, посчитанной без него.
+    const amount = Number(data.totals?.subtotal ?? data.totals?.total);
     if (!Number.isSafeInteger(amount) || amount <= 0 || !data.id || !data.transaction_id) return null;
     return {
       ...base, kind: "payment_refunded", paymentId: data.transaction_id, refundId: data.id, amountMinor: amount,
@@ -405,4 +411,38 @@ export function readMoney(payload: MoneyPayload): MoneyEvent | null {
     };
   }
   return null;
+}
+
+/**
+ * Что случилось с подпиской между прежним и новым состоянием — для воронки.
+ *
+ * Отмена, вступившая в силу, и платежи пишутся своими событиями Paddle;
+ * здесь — то, что видно только сравнением: назначил отмену, передумал,
+ * повысил, понизил, платёж не прошёл. Без них между «заплатил» и «ушёл»
+ * пусто, и отток видно на месяц позже, чем решение о нём.
+ *
+ * Другая подписка — не переход: её начало пишут триал и платёж.
+ */
+export type Transition = "cancel_scheduled" | "resumed" | "upgraded" | "downgraded" | "payment_failed";
+
+const LIVE_STATUS = new Set(["active", "trialing", "past_due"]);
+
+export function transitions(
+  prev: { plan: string; subscription_id: string | null; subscription_status: string | null; plan_ends_at: string | Date | null } | undefined,
+  next: SubscriptionUpdate,
+): Transition[] {
+  if (!prev || !next.subscriptionId || prev.subscription_id !== next.subscriptionId) return [];
+  const wasLive = LIVE_STATUS.has(prev.subscription_status ?? "");
+  const isLive = LIVE_STATUS.has(next.status);
+  const found: Transition[] = [];
+  if (isLive && next.endsAt && !prev.plan_ends_at) found.push("cancel_scheduled");
+  if (isLive && !next.endsAt && prev.plan_ends_at) found.push("resumed");
+  if (wasLive && isLive) {
+    const before = planOf(prev.plan).price;
+    const after = PLANS[next.pricePlan].price;
+    if (after > before) found.push("upgraded");
+    if (after < before && before > 0) found.push("downgraded");
+  }
+  if (next.status === "past_due" && prev.subscription_status !== "past_due") found.push("payment_failed");
+  return found;
 }

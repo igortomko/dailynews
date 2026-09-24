@@ -117,9 +117,30 @@ export async function buildDataset(): Promise<AnalyticsDataset> {
     events.push({ ...base, id: `${row.event}-${row.reader_id}-${row.day}`, ...ACTIVITY[row.event](row) } as AnalyticsEvent);
   }
 
+  // Кит бросает исключение — и дашборд не открывается целиком, — если возврат
+  // не сходится со своим платежом: другой читатель, другая валюта, раньше
+  // платежа или больше него. Такой возврат пропускается с записью в лог:
+  // одна кривая строка не должна гасить всю аналитику. Возврат без платежа
+  // в снимке кит отбрасывает сам и говорит об этом предупреждением.
+  const charges = new Map<string, { reader: number; currency: string | null; at: number; left: number }>();
   for (const b of billing) {
     const base = { id: `billing-${b.id}`, subjectId: subject(b.reader_id), occurredAt: b.occurred_at.toISOString(), surface: "web" as const };
     const plan = b.plan ? { plan: b.plan } : {};
+    if (b.name === "payment_succeeded" && b.payment_id) {
+      charges.set(b.payment_id, { reader: b.reader_id, currency: b.currency, at: b.occurred_at.getTime(), left: b.amount_minor ?? 0 });
+    }
+    if (b.name === "payment_refunded" && b.payment_id) {
+      const charge = charges.get(b.payment_id);
+      if (charge) {
+        const fits = charge.reader === b.reader_id && charge.currency === b.currency
+          && charge.at <= b.occurred_at.getTime() && (b.amount_minor ?? 0) <= charge.left;
+        if (!fits) {
+          console.error(`дашборд: возврат ${b.refund_id} не сходится с платежом ${b.payment_id} — пропущен`);
+          continue;
+        }
+        charge.left -= b.amount_minor ?? 0;
+      }
+    }
     if (b.name === "payment_succeeded" || b.name === "payment_refunded") {
       events.push({
         ...base, ...plan, name: b.name, provider: "paddle", paymentId: b.payment_id!, amountMinor: b.amount_minor!,
