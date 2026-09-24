@@ -1,5 +1,6 @@
 import { sql } from "./db";
-import { cycleOf, paddleApi, readEvent, type Cycle, type SubscriptionUpdate } from "./billing";
+import { cycleOf, paddleApi, readEvent, transitions, type Cycle, type SubscriptionUpdate } from "./billing";
+import { recordBillingEvent } from "./analytics/billing-events";
 import { priceIdFor } from "./paddle-catalog";
 import { PLANS, type PlanId } from "./plans";
 import type { Reader } from "./types";
@@ -44,9 +45,20 @@ async function paddle<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body.data as T;
 }
 
-/** Записать состояние подписки читателю — одна запись на вебхук и на смену тарифа. */
+/**
+ * Записать состояние подписки читателю — одна запись на вебхук и на смену
+ * тарифа. Заодно — переходы для воронки (`transitions`): считать их можно
+ * только здесь, где видно прежнее состояние, и только один раз — смена
+ * из «Подписки» пишет ответ сразу, и пришедший следом вебхук разницы уже
+ * не увидит, так что событие не задвоится.
+ */
 export async function applySubscription(readerId: number, update: SubscriptionUpdate): Promise<boolean> {
-  const updated = await sql<{ id: number }[]>`
+  const moved = await sql.begin(async (tx) => {
+    const [prev] = await tx<{ plan: string; subscription_id: string | null; subscription_status: string | null; plan_ends_at: Date | null }[]>`
+      select plan, subscription_id, subscription_status, plan_ends_at
+        from dailynews.readers where id = ${readerId} for update
+    `;
+    const updated = await tx<{ id: number }[]>`
     update dailynews.readers
        set plan = ${update.plan},
            subscription_id = ${update.subscriptionId || null},
@@ -59,7 +71,19 @@ export async function applySubscription(readerId: number, update: SubscriptionUp
        and (subscription_event_at is null or subscription_event_at <= ${update.occurredAt}::timestamptz)
     returning id
   `;
-  return updated.length > 0;
+    return updated.length > 0 ? transitions(prev, update) : null;
+  });
+  if (moved === null) return false;
+  // После фиксации, а не внутри: строка читателя заперта `for update`,
+  // а вставка в billing_events проверяет на ней внешний ключ — внутри
+  // транзакции вторым соединением это была бы взаимная блокировка.
+  for (const name of moved) {
+    await recordBillingEvent({
+      id: `${name}-${update.subscriptionId}-${update.occurredAt}`, readerId, name, occurredAt: update.occurredAt,
+      plan: update.pricePlan, cycle: update.cycle,
+    });
+  }
+  return true;
 }
 
 export async function changePlan(

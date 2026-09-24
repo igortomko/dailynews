@@ -2710,6 +2710,33 @@ async function main() {
       const [{ orphans }] = await sql<{ orphans: number }[]>`select count(*)::int as orphans from dailynews.billing_events where reader_id is null`;
       assert.equal(orphans, 1, "платёж без читателя хранится, но в снимок не идёт");
       console.log("  воронка оплаты: тарифы → оплата → триал → платёж, повтор не удваивается");
+
+      // Кривой возврат — другой читатель или больше платежа — не роняет
+      // дашборд: кит бросил бы исключение на весь снимок.
+      for (const event of [
+        { id: "refund-adj_bad1", readerId: owner.id, name: "payment_refunded" as const, occurredAt: new Date().toISOString(),
+          amountMinor: 100, currency: "USD", paymentId: "txn_1", refundId: "adj_bad1" },
+        { id: "refund-adj_bad2", readerId: came.id, name: "payment_refunded" as const, occurredAt: new Date().toISOString(),
+          amountMinor: 5000, currency: "USD", paymentId: "txn_1", refundId: "adj_bad2" },
+      ]) await recordBillingEvent(event);
+      const survived = await buildDataset();
+      assert.ok(!survived.events.some((e) => e.refundId === "adj_bad1" || e.refundId === "adj_bad2"), "несходящиеся возвраты пропущены, снимок собран");
+
+      // Переходы подписки пишет та же запись, что и тариф.
+      const { applySubscription } = await import("../src/lib/plan-change");
+      const base = { plan: "plus" as const, status: "active", renewsAt: null, endsAt: null, subscriptionId: "sub_tr",
+        cycle: "month" as const, pricePlan: "plus" as const };
+      const step = (minute: number, over: Record<string, unknown> = {}) =>
+        applySubscription(came.id, { ...base, occurredAt: `2026-11-01T00:0${minute}:00Z`, ...over } as never);
+      await step(0);
+      await step(1, { plan: "pro", pricePlan: "pro" });
+      await step(2, { plan: "pro", pricePlan: "pro", endsAt: "2026-12-01T00:00:00Z" });
+      await step(3, { plan: "pro", pricePlan: "pro" });
+      await step(3, { plan: "pro", pricePlan: "pro" });
+      const moves = await sql<{ name: string }[]>`
+        select name from dailynews.billing_events where reader_id = ${came.id} and id like '%sub_tr%' order by occurred_at`;
+      assert.deepEqual(moves.map((m) => m.name), ["upgraded", "cancel_scheduled", "resumed"], "переходы пишутся по одному, повтор не задваивает");
+      console.log("  переходы подписки: повышение, отмена, возобновление; кривой возврат не роняет дашборд");
     }
 
     // Удаление профиля уносит всё личное каскадом и не трогает соседа;

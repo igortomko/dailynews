@@ -10,7 +10,8 @@ import { sql } from "@/lib/db";
  */
 export type BillingEventName =
   | "plans_viewed" | "checkout_started" | "trial_started"
-  | "payment_succeeded" | "payment_refunded" | "canceled";
+  | "payment_succeeded" | "payment_refunded" | "canceled"
+  | "cancel_scheduled" | "resumed" | "upgraded" | "downgraded" | "payment_failed";
 
 export type BillingEvent = {
   id: string;
