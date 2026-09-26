@@ -241,7 +241,7 @@ export const feed: typeof En = {
     cancelAction: "Отменить",
     cancelledToast: "Отменили. Сегодняшний выпуск остался прежним",
     workingTitle: "Обновляю сегодняшний выпуск…",
-    workingDescription: "Это 1–2 минуты, можно читать дальше",
+    workingDescription: "Это до 10 минут, можно читать дальше",
     added: (n: number) => `добавили ${n}`,
     rewrote: (n: number) => `переписали ${n}`,
     partiallyRewritten: (updated: number, retained: number) => `Обновили ${updated}; у ${retained} сохранили прежние выжимки — обработку завершить не удалось`,
