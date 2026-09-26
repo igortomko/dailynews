@@ -244,7 +244,7 @@ export const feed = {
     cancelAction: "Cancel",
     cancelledToast: "Cancelled. Today's digest is unchanged",
     workingTitle: "Updating today's digest…",
-    workingDescription: "Takes 1–2 minutes — keep reading meanwhile",
+    workingDescription: "Takes up to 10 minutes — keep reading meanwhile",
     added: (n: number) => `added ${n}`,
     rewrote: (n: number) => `rewrote ${n}`,
     partiallyRewritten: (updated: number, retained: number) => `Updated ${updated}; ${retained} kept their previous summaries because processing did not finish`,

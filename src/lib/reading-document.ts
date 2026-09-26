@@ -66,7 +66,14 @@ export const documentSchema = z.object({
   lead: supported.nullable(),
   blocks: z.array(block).min(1).max(8),
   evidence: supported.nullable(),
-  application: z.object({ text, condition: text, claimIds: ids, contextQuote: text }).strict().nullable(),
+  // Применение без цитаты из контекста читателя — это «применения нет»,
+  // а не сломанный документ: модель иногда отдаёт пустую `contextQuote`
+  // вместо null, и строгая схема роняла из-за этого карточку целиком
+  // (26 сентября 2026 — одна из девяти упавших на догрузке).
+  application: z.preprocess(
+    (value) => value && typeof value === "object" && !String((value as { contextQuote?: unknown }).contextQuote ?? "").trim() ? null : value,
+    z.object({ text, condition: text, claimIds: ids, contextQuote: text }).strict().nullable(),
+  ),
   omitted: z.array(z.object({ claimId: z.string(), reason: text }).strict()).max(160),
   baselineId: z.number().int().positive().nullable(),
 }).strict();
