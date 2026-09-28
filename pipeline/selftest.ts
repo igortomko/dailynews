@@ -73,7 +73,7 @@ import { matchWritten, parseDigest, textFor, type Survivor } from "./digest";
 import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
-import { articleHtml, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
+import { articleHtml, episodeVideoOf, parseTimedText, parseWriteup, pickTrack, videoIdOf } from "./youtube";
 import { MIN_PER_TOPIC, handleLeft, normalize, moveBoundary, nudgeTopic } from "../src/lib/topic-budget";
 import {
   botUpsellLine, channelHandle, founderBotLine, checkSecret, dayUrl, digestMessage, itemUrl, looksLikeSource, parseUpdate, podcastParts,
@@ -3641,6 +3641,25 @@ assert.ok(
   "адрес каждой записи опознаётся как ролик",
 );
 
+// Эпизод подкаста в рассылке — анонс со списком вопросов, а разговор
+// лежит роликом в посте. Статья с вставленным клипом эпизодом не становится.
+{
+  const episode = `<p>Listen on YouTube, Spotify, and Apple Podcasts</p><p>In our conversation, we discuss:</p>` +
+    `<div data-attrs="{&quot;videoId&quot;:&quot;x&quot;,&quot;url&quot;:&quot;https://youtu.be/5-96FyJFiCA&quot;}"></div>`;
+  assert.equal(episodeVideoOf(episode), "5-96FyJFiCA", "эпизод берёт ролик из поста");
+  assert.equal(
+    episodeVideoOf(`<p>Watch on <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5">YouTube</a>, Spotify or Apple Podcasts.</p>`),
+    "dQw4w9WgXcQ",
+    "адрес с параметрами после номера",
+  );
+  assert.equal(
+    episodeVideoOf(`<p>The launch demo:</p><iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe>`),
+    null,
+    "клип внутри статьи — не эпизод",
+  );
+  assert.equal(episodeVideoOf(`<p>Listen on Spotify and Apple Podcasts</p>`), null, "эпизод без ролика");
+}
+
 // Номер ролика приходит тремя формами, и короткий метраж — отдельная:
 // /shorts/<id> приезжает тем же фидом, что и обычные ролики.
 assert.equal(videoIdOf("https://www.youtube.com/watch?v=O3a99HNskNk"), "O3a99HNskNk", "watch?v=");
@@ -4183,6 +4202,18 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     textFor(survivor({ excerpt: "из фида", body: null })),
     "из фида",
     "без догруженного текста остаётся то, что дал фид",
+  );
+
+  // У ролика конспект стоит первым: пересказ идёт по ходу речи, и его начало —
+  // вступление. У 13184 в срез попали прошлый цикл и роды, а план — нет.
+  assert.equal(
+    textFor(survivor({
+      url: "https://www.youtube.com/watch?v=O3a99HNskNk",
+      excerpt: "Сигналов на покупку нет, лонг от 81 580.",
+      body: articleHtml("Вступление " + "очень длинное ".repeat(200)),
+    })).startsWith("Сигналов на покупку нет, лонг от 81 580.\n\nВступление"),
+    true,
+    "у ролика в промпт идёт конспект, а за ним пересказ",
   );
 
   // Разметка не должна уезжать в промпт: модель платит за неё как за текст.
