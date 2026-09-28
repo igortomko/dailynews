@@ -73,6 +73,28 @@ export function videoIdOf(url: string): string | null {
   return valid(parsed.searchParams.get("v") ?? undefined);
 }
 
+/**
+ * Ролик, которым пост является, а не который в нём упомянут.
+ *
+ * Эпизод подкаста в рассылке (Lenny's, How I AI) — это анонс: «в разговоре
+ * обсуждаем» и список вопросов, потом сотня ссылок, а выводы за пейволом.
+ * Конспект по такому тексту выходит трейлером — сказано, о чём говорят,
+ * и ни слова о том, что сказали. Сам разговор лежит роликом в том же посте.
+ *
+ * Признак — строка «Listen on YouTube, Spotify…»: её ставит каждый эпизод
+ * и не ставит статья с вставленным клипом. Замер 28 сентября 2026: из 103
+ * постов со ссылкой на YouTube за две недели признак нашёл 8, все эпизоды.
+ * Только английский — других эпизодов в потоке пока нет.
+ */
+export function episodeVideoOf(html: string): string | null {
+  if (!/\b(listen|watch)\b[^.]{0,40}\b(spotify|apple podcasts)\b/i.test(stripHtml(html))) return null;
+  for (const match of html.matchAll(/https?:\/\/(?:www\.)?(?:youtu\.be|youtube\.com)\/[^\s"'<>&]+/g)) {
+    const id = videoIdOf(match[0]);
+    if (id) return id;
+  }
+  return null;
+}
+
 type CaptionTrack = { baseUrl: string; languageCode?: string; kind?: string };
 
 export type Tracklist = {

@@ -7,7 +7,7 @@ import { askDuplicates, flattenDupChains, markDuplicates } from "./dedup";
 import { enrichArticles } from "./enrich";
 import { composite, scoreAll, type Scorable } from "./score";
 import { WINDOW_DAYS } from "./select";
-import { articleHtml, describeVideo, fetchTranscript, MAX_VIDEOS_PER_RUN, videoIdOf } from "./youtube";
+import { articleHtml, describeVideo, episodeVideoOf, fetchTranscript, MAX_VIDEOS_PER_RUN, videoIdOf } from "./youtube";
 import { jevCost, llmCost } from "./cost";
 import { sourcesForPlan } from "../src/lib/plans";
 import { effectivePlan } from "../src/lib/billing";
@@ -91,8 +91,12 @@ export async function transcribeVideos(): Promise<{ done: number; cost: number }
   // остался бы с описанием из фида навсегда, потому что новым он больше
   // никогда не будет. Отметка о попытке и есть то, что отличает
   // «уже ходили» от «ещё нет».
-  const rows = await sql<{ id: number; url: string; title: string; label: string }[]>`
-    select i.id, i.url, i.title, s.label
+  //
+  // Тело берётся только у постов со ссылкой на YouTube: эпизод подкаста
+  // в рассылке — анонс, а разговор лежит роликом внутри (`episodeVideoOf`).
+  const rows = await sql<{ id: number; url: string; title: string; label: string; body: string | null }[]>`
+    select i.id, i.url, i.title, s.label,
+           case when i.body ~* 'youtu\.?be' then i.body end as body
       from dailynews.items i
       join dailynews.sources s on s.id = i.source_id
      where i.dup_of is null
@@ -100,8 +104,8 @@ export async function transcribeVideos(): Promise<{ done: number; cost: number }
        and i.collected_at > now() - ${`${WINDOW_DAYS} days`}::interval
      order by i.id
   `;
-  const videos = rows.flatMap((row) => {
-    const videoId = videoIdOf(row.url);
+  const videos = rows.flatMap(({ body, ...row }) => {
+    const videoId = videoIdOf(row.url) ?? (body ? episodeVideoOf(body) : null);
     return videoId ? [{ ...row, videoId }] : [];
   });
   if (videos.length === 0) return { done: 0, cost: 0 };
