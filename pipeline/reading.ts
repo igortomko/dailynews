@@ -11,7 +11,7 @@ import { minutesOf, cardChars } from "../src/lib/reading-time";
 import { styleOf, type Voice } from "../src/lib/voice";
 import { asNames, compile, mentionText } from "../src/lib/rules";
 import {
-  documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection,
+  documentSchema, sectionSchema, claimSchema, auditSchema, auditDefects, validateCoverage, validateSection, hardDefects, trimToLimit, acceptSoft, WORD_LIMIT,
   documentText, readingText, parseStoredReading, normalizeDocument, validateQuotes, CRITICAL_PER_SECTION, CRITICAL_PER_DOCUMENT,
   type ArticleAnalysis, type StoredReading, type SourceAvailability, type ReadingDocument,
 } from "../src/lib/reading-document";
@@ -31,7 +31,11 @@ const emptyUsage = (): Usage => ({ input: 0, output: 0, cached: 0, reasoning: 0,
 const OUTPUT_TOKENS = 12_000;
 const DEFAULT_REASONING_PROFILE = "extract:none;edit+audit:low";
 
-const phaseBase = (phase: string) => phase.replace(/-(?:format-)?repair$/u, "");
+// Все суффиксы ремонта, а не последний: «extract-repair-format-repair»
+// со срезанным одним оставался «extract-repair», не находил своей
+// настройки и получал рассуждение, которое извлечению выключено, —
+// 150 секунд до таймаута и $0.014 за один вызов (замер 28 сентября 2026).
+const phaseBase = (phase: string) => phase.replace(/-(?:(?:format|length|final|compact)-)?repair/gu, "");
 const phaseSettings = () => new Map(
   (process.env.READING_REASONING_PHASES ?? "").split(";")
     .map((part) => part.trim().split(":", 2))
@@ -91,12 +95,33 @@ export function splitSource(text: string, limit = 12_000): { id: string; start: 
   return parts;
 }
 
+class TruncatedError extends Error {
+  constructor() { super("Reading response truncated"); }
+}
+
 function caller(sql: Sql, readerId: number, usage: Usage): Ask {
+  /**
+   * Оборванный ответ спрашивается ещё раз — без рассуждения и с полным
+   * потолком выхода. Рассуждение делит потолок с ответом, и обрыв почти
+   * всегда означает, что его съело рассуждение: 28 сентября 2026 так
+   * ушла карточка 12624, и вся статья пропала из выпуска из-за одного
+   * вызова. Таймаут — тот же случай: длинное рассуждение не успевает
+   * к сроку. Повтор один: второй обрыв — уже не случайность.
+   */
   const request = async <T>(phase: string, rules: string, data: unknown, schema: z.ZodType<T>): Promise<string> => {
+    try {
+      return await send(phase, rules, data, schema, reasoningEffortFor(phase), null);
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === "TimeoutError";
+      if (!(error instanceof TruncatedError) && !timedOut) throw error;
+      console.warn(`reading ${phase}: ${timedOut ? "не ответил за отведённое время" : "ответ оборван"}, спрашиваю ещё раз без рассуждения`);
+      return await send(phase, rules, data, schema, "none", 32000);
+    }
+  };
+  const send = async <T>(phase: string, rules: string, data: unknown, schema: z.ZodType<T>, reasoningEffort: string, tokens: number | null): Promise<string> => {
     const { apiKey, baseUrl, model } = resolve();
-    const reasoningEffort = reasoningEffortFor(phase);
     if (!apiKey) throw new Error("No model key");
-    const outputTokens = reasoningEffort && reasoningEffort !== "none" ? 32000 : OUTPUT_TOKENS;
+    const outputTokens = tokens ?? (reasoningEffort && reasoningEffort !== "none" ? 32000 : OUTPUT_TOKENS);
     const messages = [
       { role: "system", content: `${rules}\nJSON SCHEMA:\n${JSON.stringify(z.toJSONSchema(schema))}` },
       { role: "user", content: JSON.stringify(data) },
@@ -122,7 +147,7 @@ function caller(sql: Sql, readerId: number, usage: Usage): Ask {
           reasoning: u.completion_tokens_details?.reasoning_tokens ?? 0, requests: 1 };
         for (const key of Object.keys(usage) as (keyof Usage)[]) usage[key] += measured[key];
       }
-      if (payload.choices?.[0]?.finish_reason === "length") throw new Error("Reading response truncated");
+      if (payload.choices?.[0]?.finish_reason === "length") throw new TruncatedError();
       const content = payload.choices?.[0]?.message?.content;
       if (typeof content !== "string") throw new Error("Empty reading response");
       if (process.env.READING_TRACE_DIR) {
@@ -321,7 +346,9 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
   };
   const check = async (doc: ReadingDocument) => {
     const errors = [...validateCoverage(doc, analysis, readerContext, baselines.map((b) => b.id)), ...validateQuotes(doc, source)];
-    if (errors.length) return errors;
+    // Сверка с источником идёт и при дефектах оформления: карточку с ними
+    // можно принять (`hardDefects`), и принять её несверенной нельзя.
+    if (hardDefects(errors).length) return errors;
     // Дешёвый вопрос впереди дорогой сверки: у неё почти весь выход уходит
     // в рассуждение, а у Jev выход не тарифицируется. Уверенное «всё
     // подтверждается» отменяет дорогой вызов; всё остальное, включая отказ
@@ -333,30 +360,49 @@ export async function composeDocument(ask: Ask, source: string, analysis: Articl
     }
     return errors;
   };
-  let doc = normalizeDocument(await ask("compose", COMPOSE_RULES, input, documentSchema));
-  let errors = await check(doc);
-  if (errors.length) {
-    doc = normalizeDocument(await ask("compose-repair", `${COMPOSE_RULES}
-REPAIR: rewrite from scratch to 120–160 visible words (up to 260 for narratives). Do not just append missing content. Merge related facts and keep minor details omitted. Fix only real defects; do not reintroduce every previously omitted major/detail claim.`, { ...input, previous: doc, defects: errors }, documentSchema));
-    errors = await check(doc);
-    if (errors.length && errors.every((error) => /^Summary is \d+ words/u.test(error))) {
-      doc = normalizeDocument(await ask("compose-length-repair", `${COMPOSE_RULES}
-LENGTH REPAIR: the previous document exceeded the hard word limit. Rewrite it once more under the limit, counting the title, lead, evidence, application and every block. Preserve the central answer, mechanism, direction, evidence limit and all critical claims; remove repetition and minor setup. Do not add facts.`, { ...input, previous: doc, defects: errors }, documentSchema));
-      errors = await check(doc);
+  /**
+   * Каждая попытка оценивается, и выходит лучшая, а не последняя:
+   * переписывание целиком чинит одно и ломает другое, и последняя
+   * версия бывала хуже предыдущей. Лучшая — с меньшим числом фактических
+   * дефектов.
+   */
+  let best: { doc: ReadingDocument; errors: string[]; hard: number } | null = null;
+  const attempt = async (phase: string, rules: string, extra: object = {}) => {
+    const doc = trimToLimit(normalizeDocument(await ask(phase, rules, { ...input, ...extra }, documentSchema)), analysis);
+    const errors = await check(doc);
+    const hard = hardDefects(errors).length;
+    // При равенстве берётся новая: ей уже назвали дефекты прошлой,
+    // и дальнейший ремонт должен начинаться с неё.
+    if (!best || hard <= best.hard) best = { doc, errors, hard };
+    return best;
+  };
+  const current = () => best!;
+  const repairFrom = () => ({ previous: current().doc, defects: current().errors });
+  await attempt("compose", COMPOSE_RULES);
+  if (current().errors.length) {
+    await attempt("compose-repair", `${COMPOSE_RULES}
+REPAIR: rewrite from scratch within the target length and under the hard maximum of ${WORD_LIMIT} words. Do not just append missing content. Merge related facts and keep minor details omitted. Fix only real defects; do not reintroduce every previously omitted major/detail claim.`, repairFrom());
+    // Остались одни дефекты оформления — дальше не переписываем: факты
+    // сверены, а третий и четвёртый вызов стоят больше, чем дают.
+    if (current().hard && hardDefects(current().errors).every((error) => /^Summary is \d+ words/u.test(error))) {
+      await attempt("compose-length-repair", `${COMPOSE_RULES}
+LENGTH REPAIR: the previous document exceeded the hard word limit. Rewrite it once more under the limit, counting the title, lead, evidence, application and every block. Preserve the central answer, mechanism, direction, evidence limit and all critical claims; remove repetition and minor setup. Do not add facts.`, repairFrom());
     }
-    if (errors.length) {
-      doc = normalizeDocument(await ask("compose-final-repair", `${COMPOSE_RULES}
-FINAL REPAIR: the previous rewrite still has the listed material defects. Rewrite the whole document once. Keep it under the hard word limit, counting the title, lead, evidence, application and every block. Restore every missing critical conclusion, mechanism, scope or limit; remove secondary setup before removing an essential claim. Fix unsupported or contradictory claims instead of repeating them. Do not add facts.`, { ...input, previous: doc, defects: errors }, documentSchema));
-      errors = await check(doc);
-      if (errors.some((error) => /^Summary is \d+ words/u.test(error))) {
-        doc = normalizeDocument(await ask("compose-compact-repair", `${COMPOSE_RULES}
-COMPACT REPAIR: the document is still over the hard word limit. Keep the lead's answer and every critical conclusion, mechanism, direction, evidence limit and application that changes a decision. Remove secondary examples, setup and repeated wording until the title, lead and all blocks fit the limit. Do not add facts.`, { ...input, previous: doc, defects: errors }, documentSchema));
-        errors = await check(doc);
+    if (current().hard) {
+      await attempt("compose-final-repair", `${COMPOSE_RULES}
+FINAL REPAIR: the previous rewrite still has the listed material defects. Rewrite the whole document once. Keep it under the hard word limit, counting the title, lead, evidence, application and every block. Restore every missing critical conclusion, mechanism, scope or limit; remove secondary setup before removing an essential claim. Fix unsupported or contradictory claims instead of repeating them. Do not add facts.`, repairFrom());
+      if (current().hard && hardDefects(current().errors).some((error) => /^Summary is \d+ words/u.test(error))) {
+        await attempt("compose-compact-repair", `${COMPOSE_RULES}
+COMPACT REPAIR: the document is still over the hard word limit. Keep the lead's answer and every critical conclusion, mechanism, direction, evidence limit and application that changes a decision. Remove secondary examples, setup and repeated wording until the title, lead and all blocks fit the limit. Do not add facts.`, repairFrom());
       }
     }
-    if (errors.length) throw new Error(`Summary failed verification: ${errors[0]}`);
   }
-  return doc;
+  const { doc, errors, hard } = current();
+  if (hard) throw new Error(`Summary failed verification: ${hardDefects(errors)[0]}`);
+  // Причина называется: иначе принятая с оговоркой карточка неотличима
+  // от чистой, и промпт никто не поправит.
+  if (errors.length) console.warn(`reading: принята с дефектами оформления (${errors.length}) — ${errors[0].slice(0, 140)}`);
+  return acceptSoft(doc, errors);
 }
 
 async function sourceFor(sql: Sql, item: Survivor): Promise<{ text: string; availability: SourceAvailability }> {
@@ -455,12 +501,11 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
         return { id: item.id, title_ru: retained.document.title.text,
           summary: readingText(retained), reading: retained };
       }
-      // Карточки не будет вовсе. Заглушка «выжимку подготовить не удалось»
-      // занимала место новости в ленте, в сообщении, в книге и в подкасте:
-      // читатель видел отказ там, где ждал новость, и открыть её мог только
-      // по ссылке — то есть ровно то, от чего лента и избавляет. Материал
-      // при этом не уходит из кандидатов: в выпуске его нет, и следующий
-      // прогон попробует написать его снова.
+      // Разбора не будет, а карточка будет: `writeDigest` пишет такой
+      // материал обычной карточкой вместе с хвостом выпуска. Заглушка
+      // «выжимку подготовить не удалось» занимала место новости в ленте,
+      // в сообщении, в книге и в подкасте, а молчаливый пропуск уносил
+      // из выпуска лучшие материалы дня — разбор достаётся им.
       unavailableIds.push(item.id);
       console.warn(`reading ${item.id}: ${error instanceof ReadingBudgetError ? 'дневной лимит обработки исчерпан' : ''}${error instanceof Error ? error.message.slice(0,180) : 'failed'}`);
       return null;

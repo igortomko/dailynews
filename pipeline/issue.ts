@@ -234,7 +234,7 @@ async function runForReader(
   `;
   const readingCost = readingAccounting?.cost ?? 0;
   if (!published.length) { log(`  ${name}: писать нечего — всё снято правилами или не прошло проверку; пустой выпуск не создаётся`); return digestCost + readingCost; }
-  if (digest.unavailableIds?.length) log(`  ${name}: без проверенной выжимки — ${digest.unavailableIds.length}, в выпуск они не попали`);
+  if (digest.unavailableIds?.length) log(`  ${name}: без проверенной выжимки — ${digest.unavailableIds.length}, написаны обычной карточкой`);
 
   // Доли форм в выпуске. Это мерка, а не принуждение: переписать карточку
   // ради разнообразия значит заплатить за неё второй раз, а форма берётся
