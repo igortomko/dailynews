@@ -245,6 +245,8 @@ export const feed = {
     cancelledToast: "Cancelled. Today's digest is unchanged",
     workingTitle: "Updating today's digest…",
     workingDescription: "Takes up to 10 minutes — keep reading meanwhile",
+    progress: (done: number, total: number, minutes: number) =>
+      `${done} of ${total} done${minutes > 0 ? ` · ${minutes} min so far` : ""} — keep reading meanwhile`,
     added: (n: number) => `added ${n}`,
     rewrote: (n: number) => `rewrote ${n}`,
     partiallyRewritten: (updated: number, retained: number) => `Updated ${updated}; ${retained} kept their previous summaries because processing did not finish`,

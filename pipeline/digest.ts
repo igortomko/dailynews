@@ -215,6 +215,9 @@ export async function writeDigest(
   readerContext: string,
   voice: Voice = DEFAULT_VOICE,
   options?: ReadingOptions,
+  // Отдельно от `options`: хвост после разбора зовётся без них (иначе снова
+  // ушёл бы в разбор), а считать его в тосте всё равно надо.
+  onWritten = options?.onWritten,
 ): Promise<DigestResult> {
   reading: if (options) {
     const { sql } = await import("../src/lib/db");
@@ -254,7 +257,7 @@ export async function writeDigest(
       if (!plain.length) return read;
       // Хвост идёт обычным путём — тем же вызовом, но уже без разбора:
       // `options` не передаётся, иначе он снова ушёл бы в ветку выше.
-      const rest = await writeDigest(plain, readerContext, voice);
+      const rest = await writeDigest(plain, readerContext, voice, undefined, onWritten);
       const written = new Map([...read.items, ...rest.items].map((item) => [String(item.id), item]));
       return {
         ...read,
@@ -480,6 +483,7 @@ ${blockOf(list)}
   for (let at = 0; at < survivors.length; at += CHUNK) {
     const chunk = survivors.slice(at, at + CHUNK);
     const answer = await ask(chunk, at === 0);
+    onWritten?.(chunk.length);
     fromModel.push(...(answer.parsed.items ?? []));
     if (at === 0) intro = answer.parsed.intro ?? "";
     finish = answer.finish;
