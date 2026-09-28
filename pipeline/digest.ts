@@ -83,7 +83,7 @@ export type DigestResult = {
   items: Written[];
   excludedIds?: number[];
   retainedIds?: number[];
-  /** Материалы, для которых проверенной выжимки не вышло: карточки не будет. */
+  /** Материалы, для которых проверенной выжимки не вышло: они написаны обычной карточкой. */
   unavailableIds?: number[];
   flagged?: number;
   usage: Usage;
@@ -260,10 +260,16 @@ export async function writeDigest(
       const { deep, plain } = readingPicks(survivors, quota);
       if (!deep.length) break reading;
       const read = await writeReadingDigest(sql, deep, readerContext, voice, options);
-      if (!plain.length) return read;
+      // Не прошедшие сверку пишутся обычной карточкой, а не выпадают:
+      // разбор достаётся лучшим материалам дня, и 27–28 сентября 2026
+      // из выпуска так пропадали две-три самые важные новости каждый день.
+      // Обычная карточка стоит $0.0003 и ничего не обещает про сверку.
+      const failed = new Set(read.unavailableIds ?? []);
+      const tail = survivors.filter((one) => failed.has(one.id) || plain.includes(one));
+      if (!tail.length) return read;
       // Хвост идёт обычным путём — тем же вызовом, но уже без разбора:
       // `options` не передаётся, иначе он снова ушёл бы в ветку выше.
-      const rest = await writeDigest(plain, readerContext, voice, undefined, onWritten);
+      const rest = await writeDigest(tail, readerContext, voice, undefined, onWritten);
       const written = new Map([...read.items, ...rest.items].map((item) => [String(item.id), item]));
       return {
         ...read,

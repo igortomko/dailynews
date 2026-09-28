@@ -171,17 +171,13 @@ export const fillers = (text: string): string[] =>
 
 export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis, context: string, baselineIds: number[]): string[] {
   const issues: string[] = [];
-  const words = `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
-  // Замер 22 сентября 2026 на тридцати карточках: при цели 80–140 и пределе
-  // 220 медиана вышла 182 слова, треть карточек перевалила за 200. Модель
-  // пишет по верхней границе, а не по цели, поэтому двигать надо границу.
-  const limit = ["narrative", "argument", "investigation"].includes(doc.genre) ? 240 : 170;
-  // Цель называется точной, а отказ наступает на десятую часть позже.
-  // Лимит — редакционная мерка, а не обещание читателю: время выпуска
-  // считается по написанному тексту. Сверенная карточка, выброшенная
-  // за десять лишних слов, стоит читателю новости целиком — 21 сентября
-  // так ушёл «AMD briefly joins the $1T club» (230 слов при 220).
-  if (words > Math.round(limit * 1.1)) issues.push(`Summary is ${words} words; maximum ${limit}. Merge related facts, remove repeated claims and omit minor setup, biography, names and examples. Keep the main mechanism, result and evidence limits.`);
+  const words = wordsOf(doc);
+  // Предел один на все жанры: 170 слов у обычной карточки при цели
+  // 80–140 сверенные выжимки выбрасывал — 27–28 сентября 2026 три отказа
+  // из пяти были «192 слова при 170», и новость уходила из выпуска целиком.
+  // Цель в промпте осталась прежней, а предел стал страховкой от разбега,
+  // а не редакционной меркой. Отказ по-прежнему на десятую часть позже.
+  if (words > Math.round(WORD_LIMIT * 1.1)) issues.push(`Summary is ${words} words; maximum ${WORD_LIMIT}. Merge related facts, remove repeated claims and omit minor setup, biography, names and examples. Keep the main mechanism, result and evidence limits.`);
   // Первый слой карточки: у новых документов это answer, у написанных
   // до двухслойного чтения — лид. Требование к нему одно и то же, иначе
   // старые выпуски стали бы дефектными задним числом.
@@ -251,6 +247,72 @@ export function validateCoverage(doc: ReadingDocument, analysis: ArticleAnalysis
 }
 export const normalize = (s: string) => s.replace(/\s+/gu, " ").trim();
 
+/** Предел длины карточки в словах, считая заголовок и всё, что видит читатель. */
+export const WORD_LIMIT = 600;
+export const wordsOf = (doc: ReadingDocument): number =>
+  `${doc.title.text} ${documentText(doc)}`.split(/\s+/u).filter(Boolean).length;
+
+/**
+ * Лишняя длина срезается кодом, а не ещё одним вызовом модели.
+ *
+ * С конца выбрасываются блоки, после которых не пропадает ни одно
+ * critical-утверждение, а их утверждения уходят в omitted. Фактов при этом
+ * не прибавляется, и сверка остаётся честной: удалить подтверждённое
+ * значит только сказать меньше. Модель на просьбу «сократи» переписывала
+ * карточку целиком и приносила новые дефекты вместо старого.
+ */
+export function trimToLimit(doc: ReadingDocument, analysis: ArticleAnalysis, limit = WORD_LIMIT): ReadingDocument {
+  const critical = new Set(analysis.sections.flatMap((s) => s.claims).filter((c) => c.importance === "critical").map((c) => c.id));
+  const visibleIn = (d: ReadingDocument) => new Set(supportedFields(d).flatMap((f) => f.claimIds));
+  let out = doc;
+  for (let at = out.blocks.length - 1; at >= 0 && out.blocks.length > 1 && wordsOf(out) > limit; at--) {
+    const blocks = out.blocks.filter((_, i) => i !== at);
+    const before = visibleIn(out);
+    const after = visibleIn({ ...out, blocks });
+    const lost = [...before].filter((id) => !after.has(id));
+    if (lost.some((id) => critical.has(id))) continue;
+    const already = new Set(out.omitted.map((o) => o.claimId));
+    out = { ...out, blocks, omitted: [...out.omitted, ...lost.filter((id) => !already.has(id))
+      .map((claimId) => ({ claimId, reason: "Secondary detail cut to fit the card length." }))] };
+  }
+  return out;
+}
+
+/**
+ * Дефекты оформления, с которыми карточку можно показать: факты в ней
+ * сверены, а не так — длина, ответ не в 35–60 слов, повтор слоёв, вводные
+ * слова, учёт утверждений. Всё остальное — неподтверждённое, противоречие,
+ * пропущенное обязательное, цитата, которой нет в источнике, — фактическое,
+ * и с ним карточка не выходит. «Проверенная» значит «верная», а не
+ * «аккуратно оформленная»: отказ за оформление стоил читателю новости.
+ */
+const SOFT_DEFECTS = [
+  /^The answer is \d+ words/u, /^The lead repeats the answer/u, /restates the|carry the same figures/u,
+  /^Use at most one visual accent/u, /^Format \S+ requires/u, /^Remove throat-clearing/u,
+  /^Account for claim/u, /^Claim \S+ is both visible and omitted/u,
+  /^Application must cite/u, /^Unknown previous article/u,
+];
+export function hardDefects(errors: string[]): string[] {
+  return errors.filter((error) => {
+    const length = /^Summary is (\d+) words/u.exec(error);
+    // Перебор до четверти сверх предела — оформление, дальше — разбег.
+    if (length) return Number(length[1]) > Math.round(WORD_LIMIT * 1.25);
+    return !SOFT_DEFECTS.some((pattern) => pattern.test(error));
+  });
+}
+
+/**
+ * Что снять с документа, принятого с дефектами оформления: применение без
+ * точной цитаты читателя и ссылку на неизвестный прошлый материал нельзя
+ * показать как есть, а убрать их — значит сказать меньше, но не соврать.
+ */
+export function acceptSoft(doc: ReadingDocument, errors: string[]): ReadingDocument {
+  let out = doc;
+  if (errors.some((e) => /^Application must cite/u.test(e))) out = { ...out, application: null };
+  if (errors.some((e) => /^Unknown previous article/u.test(e))) out = { ...out, baselineId: null };
+  return out;
+}
+
 /**
  * Говорят ли два куска одно и то же.
  *
@@ -307,8 +369,13 @@ export const CRITICAL_PER_SECTION = 7;
  * а карточке на сто семьдесят слов их не вместить — 22 сентября 2026 так
  * перестала собираться RoboHarm, хотя каждая секция потолок соблюдала.
  * «То, что читатель обязан помнить», не бывает четырнадцатью пунктами.
+ *
+ * Пять, а не восемь: ответ занимает 35–60 слов, и восемь обязательных
+ * утверждений не помещались рядом с ним — 28 сентября 2026 карточка
+ * 13221 ушла из выпуска с «Missing critical claim» после четырёх
+ * переписываний. Лишние становятся major по порядку текста.
  */
-export const CRITICAL_PER_DOCUMENT = 8;
+export const CRITICAL_PER_DOCUMENT = 5;
 export function validateSection(section: z.infer<typeof sectionSchema>, source: string): string[] {
   const errors: string[] = [];
   const critical = section.claims.filter((c) => c.importance === "critical").length;

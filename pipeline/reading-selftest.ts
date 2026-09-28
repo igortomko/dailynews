@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, restates, fillers, CRITICAL_PER_SECTION, CRITICAL_PER_DOCUMENT, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { documentSchema, validateCoverage, validateSection, validateQuotes, documentText, parseStoredReading, blockText, normalizeDocument, restates, fillers, CRITICAL_PER_SECTION, CRITICAL_PER_DOCUMENT, trimToLimit, hardDefects, acceptSoft, wordsOf, WORD_LIMIT, type ArticleAnalysis, type ReadingDocument } from "../src/lib/reading-document";
 import { splitSource, composeDocument, analyzeSource, reasoningEffortFor, VERIFY_SOURCE_CHARS, type Ask } from "./reading";
 import { typography, summaryTime } from "../src/lib/typography";
 import { digestHtml } from "./kindle";
@@ -54,6 +56,9 @@ assert.equal(typography('Qwen2.5-32B и 2026-09-21'), 'Qwen2.5-32B и\u00a02026-
 assert.equal(typography('2023–2024 годы'), '2023\u2060–\u20602024 годы');
 assert.equal(reasoningEffortFor('extract'), 'none');
 assert.equal(reasoningEffortFor('extract-repair'), 'none');
+assert.equal(reasoningEffortFor('extract-repair-format-repair'), 'none', 'вложенный ремонт извлечения тоже без рассуждения');
+assert.equal(reasoningEffortFor('compose-repair-format-repair'), 'low');
+assert.equal(reasoningEffortFor('compose-length-repair'), 'low');
 assert.equal(reasoningEffortFor('compose'), 'low');
 assert.equal(reasoningEffortFor('verify'), 'low');
 // Короткое слово не висит в конце строки ни в одной письменности: мера —
@@ -86,10 +91,55 @@ assert.ok(kindle.includes('<p>First</p>') && kindle.includes('<p>Second</p>'));
 assert.ok(kindle.includes('&quot;'));
 
 assert.ok(blockText({ kind: 'steps', sequence: 'timeline', items: [{ label: 'Launch', content: evidence('Release', 's1-a'), state: 'planned' }, { label: 'Pilot', content: evidence('Trial', 's1-a'), state: 'current' }] }).includes('(предстоит)'));
-// Цель — 220 слов, отказ — на десятую часть позже: сверенная карточка,
-// выброшенная за десять лишних слов, стоит читателю новости целиком.
-assert.deepEqual(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(120), 's1-b') }] }, analysis, '', []), [], 'перебор в пределах десятой части не отказ (170 + 10%)');
-assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(200), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum')));
+// Предел — 600 слов, отказ — на десятую часть позже: сверенная карточка,
+// выброшенная за лишние слова, стоит читателю новости целиком.
+assert.deepEqual(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(580), 's1-b') }] }, analysis, '', []), [], 'перебор в пределах десятой части не отказ (600 + 10%)');
+assert.ok(validateCoverage({ ...valid, blocks: [{ kind: 'paragraph', content: evidence('word '.repeat(700), 's1-b') }] }, analysis, '', []).some(e => e.includes('maximum 600')));
+// Длина режется кодом: с конца уходят блоки без уникальных critical,
+// их утверждения — в omitted; блок с единственным critical остаётся.
+const padded: ReadingDocument = { ...valid, blocks: [
+  { kind: 'paragraph', content: evidence('No effect on accuracy.', 's1-b') },
+  { kind: 'paragraph', content: evidence('word '.repeat(700), 's1-c') },
+] };
+const trimmed = trimToLimit(padded, analysis);
+assert.equal(trimmed.blocks.length, 1, 'лишний блок срезан кодом');
+assert.ok(wordsOf(trimmed) <= WORD_LIMIT);
+assert.deepEqual(validateCoverage(trimmed, analysis, '', []), [], 'срезанное не оставляет дефектов учёта');
+const criticalTail: ReadingDocument = { ...valid, blocks: [
+  { kind: 'paragraph', content: evidence('Speed improved.', 's1-a') },
+  { kind: 'paragraph', content: evidence(`No effect on accuracy. ${'word '.repeat(700)}`, 's1-b') },
+] };
+assert.ok(trimToLimit(criticalTail, analysis).blocks.some((b) => b.kind === 'paragraph' && b.content.claimIds.includes('s1-b')), 'блок с единственным critical не срезается');
+const orphan: ReadingDocument = { ...valid, title: evidence('Speed improved', 's1-a'), lead: evidence(valid.lead!.text, 's1-a'), blocks: [
+  { kind: 'paragraph', content: evidence('No effect on accuracy.', 's1-b') },
+  { kind: 'paragraph', content: evidence('word '.repeat(700), 's1-c') },
+] };
+assert.deepEqual(trimToLimit(orphan, analysis).omitted.map((o) => o.claimId), ['s1-c'], 'срезанное утверждение уходит в omitted');
+// Фактические дефекты не пускают карточку, оформительские — пускают.
+assert.deepEqual(hardDefects([
+  'Summary is 700 words; maximum 600.', 'The answer is 2 words; it must close', 'Remove throat-clearing that carries no fact: x.',
+  'The block 2 (paragraph) restates the answer: same facts', 'Account for claim s1-c in text or omitted with a reason.',
+]), [], 'длина до четверти сверх предела и форма — не отказ');
+assert.equal(hardDefects(['Summary is 800 words; maximum 600.']).length, 1, 'разбег длины — отказ');
+assert.equal(hardDefects(['Missing critical claim s1-b: No effect']).length, 1);
+assert.equal(hardDefects(['contradiction: wrong Source: x Required correction: y']).length, 1);
+assert.equal(hardDefects(['A quotation must be at most 25 words.']).length, 1, 'цитата — фактический дефект');
+assert.equal(acceptSoft({ ...valid, baselineId: 9 }, ['Unknown previous article.']).baselineId, null);
+// Маркеры неразрешённого слияния не уезжают в код: 28 сентября 2026 такой
+// лежал в промпте выжимки, и модель получала два предела длины сразу —
+// 170 и 220, а код резал по первому.
+{
+  const conflicted: string[] = [];
+  const walk = (dir: string) => { for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) { if (name !== 'node_modules' && !name.startsWith('.')) walk(path); continue; }
+    if (!/\.(ts|tsx|mjs|js|sql|css|json|md)$/u.test(name)) continue;
+    if (/^(<{7}|>{7}) /mu.test(readFileSync(path, 'utf8'))) conflicted.push(path);
+  } };
+  for (const dir of ['pipeline', 'src', 'db', 'scripts', 'deploy']) walk(dir);
+  for (const file of ['AGENTS.md', 'package.json']) if (/^(<{7}|>{7}) /mu.test(readFileSync(file, 'utf8'))) conflicted.push(file);
+  assert.deepEqual(conflicted, [], 'маркеры неразрешённого слияния в файлах');
+}
 // Обязательных утверждений не больше семи на секцию: при восьми и больше
 // «все critical видимы» и «не длиннее 220 слов» перестают быть совместимы,
 // и карточка не собирается вовсе (замер на выпуске 22 сентября 2026).
@@ -229,7 +279,11 @@ async function main() {
   ], "a remaining missing critical claim receives one bounded semantic repair");
   const overlong: ReadingDocument = {
     ...valid,
-    blocks: [{ kind: "paragraph", content: evidence(`No effect on accuracy. ${"Detail ".repeat(220)}`, "s1-b") }],
+    // Разбег сверх четверти предела, который коду нечем срезать: блок один,
+    // а поле схемы не длиннее 2400 знаков, поэтому длина набрана полями.
+    lead: evidence("Detail ".repeat(330), "s1-a", "s1-c"),
+    blocks: [{ kind: "paragraph", content: evidence(`No effect on accuracy. ${"Detail ".repeat(330)}`, "s1-b") }],
+    evidence: evidence("Detail ".repeat(150), "s1-c"),
   };
   const compactPhases: string[] = [];
   const compactRepair: Ask = async (phase, _rules, _data, schema) => {
@@ -261,6 +315,25 @@ async function main() {
   assert.deepEqual(lengthPhases, [
     "compose", "compose-repair", "compose-length-repair", "compose-final-repair", "verify",
   ], "a length repair that loses a critical conclusion receives one bounded semantic repair");
+  // Остались одни дефекты оформления — карточка выходит после одного
+  // ремонта, а не уходит из выпуска; факты при этом сверены.
+  const softPhases: string[] = [];
+  const shortAnswer = { ...valid, lead: evidence("Speed improved without losing accuracy in 24 people.", "s1-a", "s1-c") };
+  const softOnly: Ask = async (phase, _rules, _data, schema) => {
+    softPhases.push(phase);
+    return schema.parse(phase.startsWith("compose") ? shortAnswer : { defects: [] });
+  };
+  const accepted = await composeDocument(softOnly, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", []);
+  assert.equal(accepted.lead?.text, shortAnswer.lead.text, "карточка с дефектом оформления принята");
+  assert.deepEqual(softPhases, ["compose", "verify", "compose-repair", "verify"], "оформление чинится один раз и сверяется");
+  // Выходит лучшая попытка, а не последняя.
+  const worse: Ask = async (phase, _rules, _data, schema) => {
+    if (phase === "compose") return schema.parse(shortAnswer);
+    if (phase.startsWith("compose")) return schema.parse(missing);
+    return schema.parse({ defects: [] });
+  };
+  assert.equal((await composeDocument(worse, "Speed improved. No effect on accuracy. 24 participants.", analysis, "", DEFAULT_VOICE, "Research", [])).lead?.text,
+    shortAnswer.lead.text, "ремонт, потерявший critical, не заменяет лучшую версию");
   const rejecting: Ask = async (phase, _rules, _data, schema) => schema.parse(phase.startsWith("compose") ? valid : { defects: [{ kind: "contradiction", issue: "The limitation is misstated", sourceEvidence: "No effect on accuracy", correction: "Keep the null result" }] });
   await assert.rejects(() => composeDocument(rejecting, "Source", analysis, "", DEFAULT_VOICE, "Research", []), /failed verification/);
   console.log("  reading: full-source coverage, semantic repair/failure, unsafe block rejection, reader context, typography and text delivery passed");
