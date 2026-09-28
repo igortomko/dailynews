@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 import { iconHref, publicHost } from "@/lib/favicon";
+import { requestPublic } from "../../../../pipeline/fetch";
 
 /**
  * Значок чужого сайта — нашими руками, а не браузером читателя.
@@ -41,36 +42,19 @@ const CACHE = "public, max-age=86400, s-maxage=604800, stale-while-revalidate=60
 const isImage = (type: string | null, size: number) =>
   size > 0 && size <= MAX_BYTES && Boolean(type) && type!.startsWith("image/");
 
-/**
- * Сколько переходов готовы пройти. Значок за четвёртым редиректом — это
- * уже не значок, а цепочка, в которой легко спрятать последний адрес.
- */
-const MAX_HOPS = 3;
-
 async function grab(url: string): Promise<Response | null> {
   try {
-    let at = url;
-    for (let hop = 0; hop <= MAX_HOPS; hop++) {
-      // Хост проверяется на каждом переходе, а не только на первом: с
-      // `redirect: "follow"` публичный сайт одним `302` уводил бы наш
-      // сервер внутрь нашей же сети, и проверка входа ничего бы не значила.
-      if (!publicHost(new URL(at).host)) return null;
-      const res = await fetch(at, {
-        // Браузерный заголовок, но без `Referer`: бот-защита у половины
-        // проблемных хостов срабатывает именно на кросс-сайтовую ссылку.
-        headers: {
-          "user-agent": "Mozilla/5.0 (compatible; Reporta/1.0; +https://news.reporta.club)",
-          accept: "image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8",
-        },
-        redirect: "manual",
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      const next = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-      if (!next) return res.ok ? res : null;
-      at = new URL(next, at).toString();
-      if (!at.startsWith("https://")) return null;
-    }
-    return null;
+    // Тот же путь, что у сбора: адрес проверяется на резолве, сокет идёт
+    // к проверенному, каждый редирект — заново. Текстовая `publicHost`
+    // проверяет имя, но не то, куда оно ведёт: `localtest.me` — это 127.0.0.1.
+    const res = await requestPublic(url, {
+      timeoutMs: TIMEOUT_MS,
+      accept: "image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8",
+      // Браузерный заголовок, но без `Referer`: бот-защита у половины
+      // проблемных хостов срабатывает именно на кросс-сайтовую ссылку.
+      headers: { "user-agent": "Mozilla/5.0 (compatible; Reporta/1.0; +https://news.reporta.club)" },
+    });
+    return res.ok ? res : null;
   } catch {
     return null;
   }

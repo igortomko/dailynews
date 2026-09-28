@@ -1179,7 +1179,7 @@ delete process.env.LLM_CACHE_INPUT_PRICE;
 // Машина общая: рядом в той же сети чужие контейнеры. Без этой проверки форма
 // добавления источника — сканер внутренней сети, где «HTTP 401» на внутреннем
 // адресе уже ответ.
-import { isInternal } from "./fetch";
+import { isInternal, pinnedLookup, publicAddresses, requestPublic } from "./fetch";
 for (const inside of [
   "127.0.0.1", "10.1.2.3", "192.168.0.1", "172.16.0.1", "172.31.255.255",
   "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "ff02::1",
@@ -1206,6 +1206,47 @@ assert.ok(
   !/redirect: "follow"/.test(outbound),
   "ни один внешний запрос не должен следовать перенаправлениям без проверки адреса",
 );
+
+// Имя проверяется по тому, куда оно ведёт, а не по тексту: `localtest.me`
+// выглядит публичным и резолвится в 127.0.0.1. И сокет идёт к тому же
+// адресу, что проверен, — иначе второй ответ DNS уводит его после проверки.
+// Асинхронно, без top-level await (сборка cjs): провал роняет процесс сам.
+void (async () => {
+  const dns: Record<string, string[]> = {
+    "localtest.me": ["127.0.0.1"],
+    "v6.test": ["::1"],
+    "mapped.test": ["::ffff:127.0.0.1"],
+    "ula.test": ["fd12::1"],
+    "link.test": ["fe80::1"],
+    "mixed.test": ["93.184.216.34", "10.0.0.1"],
+    "public.test": ["93.184.216.34"],
+  };
+  const resolve = async (host: string) => dns[host] ?? [];
+  for (const host of ["localtest.me", "v6.test", "mapped.test", "ula.test", "link.test", "mixed.test", "nxdomain.test"]) {
+    await assert.rejects(publicAddresses(host, resolve), `${host} ведёт внутрь — отказ`);
+  }
+  assert.deepEqual(await publicAddresses("public.test", resolve), ["93.184.216.34"]);
+  // Десятичная запись: URL сам приводит 2130706433 к 127.0.0.1.
+  assert.equal(new URL("http://2130706433/").hostname, "127.0.0.1");
+  await assert.rejects(publicAddresses(new URL("http://2130706433/").hostname, resolve));
+
+  // lookup сокета отдаёт ровно проверенное — в обеих формах, которые спрашивает Node.
+  const look = pinnedLookup(resolve);
+  const ask = (host: string, options: { all?: boolean }) =>
+    new Promise<unknown>((ok, fail) => look(host, options, (err, address) => (err ? fail(err) : ok(address))));
+  assert.equal(await ask("public.test", {}), "93.184.216.34");
+  assert.deepEqual(await ask("public.test", { all: true }), [{ address: "93.184.216.34", family: 4 }]);
+  await assert.rejects(ask("localtest.me", { all: true }));
+
+  // Публичный сайт уводит редиректом внутрь — второй запрос не уходит вовсе.
+  const sent: string[] = [];
+  const fake = async (url: URL) => {
+    sent.push(url.href);
+    return new Response(null, { status: 302, headers: { location: "http://localtest.me/admin" } });
+  };
+  await assert.rejects(requestPublic("https://public.test/", {}, { resolve, fetch: fake }), /внутреннюю сеть/);
+  assert.deepEqual(sent, ["https://public.test/"], "запрос по внутреннему адресу не должен уйти");
+})();
 
 
 // --- выборка для петли качества ----------------------------------------------

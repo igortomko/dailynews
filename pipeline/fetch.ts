@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 import { XMLParser } from "fast-xml-parser";
+import { Agent, fetch as undiciFetch } from "undici";
 import type { RawItem, Source } from "../src/lib/types";
 import { fetchLetters } from "./mail";
 
@@ -35,48 +36,87 @@ export function isInternal(ip: string): boolean {
   return INTERNAL.check(plain, type === 6 ? "ipv6" : "ipv4");
 }
 
-async function assertPublic(url: URL): Promise<void> {
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  const addresses = isIP(host)
-    ? [host]
-    : (await lookup(host, { all: true })).map((entry) => entry.address);
+type Resolve = (host: string) => Promise<string[]>;
+const systemResolve: Resolve = async (host) =>
+  (await lookup(host, { all: true })).map((entry) => entry.address);
+
+/** Все адреса имени, если ни один не ведёт внутрь. Иначе — отказ. */
+export async function publicAddresses(host: string, resolve: Resolve = systemResolve): Promise<string[]> {
+  const plain = host.replace(/^\[|\]$/g, "");
+  const addresses = isIP(plain) ? [plain] : await resolve(plain);
   if (addresses.length === 0) throw new Error("имя не разрешается в адрес");
   const internal = addresses.find(isInternal);
   if (internal) throw new Error(`адрес ведёт во внутреннюю сеть (${internal})`);
+  return addresses;
 }
+
+/**
+ * `lookup` для сокета: проверка и соединение — один и тот же ответ DNS.
+ * Проверь отдельно, а соединяйся по имени — и второй ответ DNS
+ * (TTL в ноль секунд) уведёт сокет на 127.0.0.1 уже после проверки.
+ * Node зовёт его то с `all: true` (autoSelectFamily), то без — отвечаем
+ * в той форме, которую спросили.
+ */
+export function pinnedLookup(resolve: Resolve = systemResolve) {
+  return (
+    hostname: string,
+    options: { all?: boolean } | number | undefined,
+    callback: (err: Error | null, address: string | { address: string; family: number }[], family?: number) => void,
+  ) => {
+    publicAddresses(hostname, resolve).then(
+      (addresses) => {
+        const all = addresses.map((address) => ({ address, family: isIP(address) }));
+        if (typeof options === "object" && options?.all) callback(null, all);
+        else callback(null, all[0].address, all[0].family);
+      },
+      (error: Error) => callback(error, ""),
+    );
+  };
+}
+
+/** Один на процесс: агент держит пул соединений, и новый на запрос его бы терял. */
+const pinned = new Agent({ connect: { lookup: pinnedLookup() } });
 
 /** Сколько перенаправлений готовы пройти, проверяя каждое. */
 const MAX_REDIRECTS = 5;
+
+type Fetch = (url: URL, init: RequestInit) => Promise<Response>;
+const pinnedFetch: Fetch = (url, init) =>
+  undiciFetch(url, { ...(init as object), dispatcher: pinned }) as unknown as Promise<Response>;
 
 /**
  * Запрос по внешнему адресу.
  *
  * Адрес источника вводит человек, а машина общая: рядом в той же сети живут
  * чужие контейнеры. Без проверки адреса форма добавления — готовый сканер
- * внутренней сети, где «HTTP 401» на внутреннем адресе уже ответ. Поэтому имя
- * разрешается в адрес до запроса, а каждое перенаправление проверяется заново:
- * публичный хост умеет увести на 127.0.0.1, и на этом смысл проверки кончился
- * бы. От подмены DNS между проверкой и соединением это не защищает —
- * закрепление адреса потребовало бы своего диспетчера, и это отдельное
- * решение, а не заодно.
+ * внутренней сети, где «HTTP 401» на внутреннем адресе уже ответ. Поэтому
+ * имя разрешается в адрес, адрес проверяется, и сокет открывается ровно
+ * к проверенному (`pinnedLookup`), а каждое перенаправление проходит тот же
+ * путь: публичный хост умеет увести на 127.0.0.1.
  *
  * Потолок на размер стоит у вызывающего: страницу og-картинки читают
  * по кускам и бросают на середине.
+ *
+ * `deps` — только для `npm test`: подменить DNS и сеть, не выходя в сеть.
  */
 export async function requestPublic(
   url: string,
   options: { timeoutMs?: number; accept?: string; headers?: Record<string, string> } = {},
+  deps: { resolve?: Resolve; fetch?: Fetch } = {},
 ): Promise<Response> {
   const deadline = Date.now() + (options.timeoutMs ?? 20_000);
+  const send = deps.fetch ?? pinnedFetch;
   let current = new URL(url);
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (current.protocol !== "http:" && current.protocol !== "https:") {
       throw new Error(`протокол не поддерживается: ${current.protocol}`);
     }
-    await assertPublic(current);
+    // Заранее, хотя сокет проверит сам: голый IP в адресе lookup не зовёт
+    // вовсе, а у имени так отказ приходит своими словами, а не «fetch failed».
+    await publicAddresses(current.hostname, deps.resolve);
 
-    const res = await fetch(current, {
+    const res = await send(current, {
       headers: { "user-agent": UA, accept: options.accept ?? "*/*", ...options.headers },
       signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       // Не "follow": перенаправление — это новый адрес, и его нужно
