@@ -234,7 +234,7 @@ export const onboarding = {
     },
     "mental-health": {
       label: "Therapy",
-      hint: "evidence-based therapy, clinical research, psychiatry, tools for therapists, burnout",
+      hint: "evidence-based therapy, clinical research, psychiatry, mental disorders and their treatment, tools for therapists; not workplace fatigue or burnout, not careers or management",
     },
     health: {
       label: "Health",
