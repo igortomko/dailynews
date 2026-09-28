@@ -79,30 +79,24 @@ export function TopicBudgetBar({
       {/* Полоса сплошная и скруглена только по торцам: зазор между цветными
           кусками читается как ещё одна граница, и рядом с настоящей ручкой
           их становится две. */}
-      <div
-        ref={bar}
-        className="relative flex h-5 w-full touch-none select-none"
-      >
-        {counts.map((count, index) => (
-          <div
-            // Ключ по индексу, а не по названию: во время переименования
-            // название пустое и неуникальное, и React путает сегменты.
-            key={index}
-            // Кусок — картинка: нажимать на нём нечего, имя и число читаются
-            // подписью под ним, а тянется граница. Кнопка без действия
-            // ловила бы и фокус, и палец, ничего при этом не делая.
-            aria-hidden
-            // Скругление по номеру, а не через `last:`: ручки лежат в том же
-            // флексе и стоят в разметке после кусков, поэтому последним
-            // ребёнком оказывалась ручка, а правый торец полосы — прямым.
-            className={cn(
-              "h-full",
-              index === 0 && "rounded-l-full",
-              index === counts.length - 1 && "rounded-r-full",
-            )}
-            style={{ flexGrow: count, flexBasis: 0, backgroundColor: colorAt(index) }}
-          />
-        ))}
+      {/* Ручки круглые и выходят за полосу, поэтому куски обрезаются
+          отдельной обёрткой, а ручки лежат поверх неё. */}
+      <div ref={bar} className="relative h-6 w-full touch-none select-none">
+        <div className="absolute inset-x-0 top-1/2 flex h-4 -translate-y-1/2 overflow-hidden rounded-full bg-muted ring-1 ring-black/5 ring-inset">
+          {counts.map((count, index) => (
+            <div
+              // Ключ по индексу, а не по названию: во время переименования
+              // название пустое и неуникальное, и React путает сегменты.
+              key={index}
+              // Кусок — картинка: нажимать на нём нечего, имя и число читаются
+              // подписью под ним, а тянется граница. Кнопка без действия
+              // ловила бы и фокус, и палец, ничего при этом не делая.
+              aria-hidden
+              className="h-full"
+              style={{ flexGrow: count, flexBasis: 0, backgroundColor: colorAt(index) }}
+            />
+          ))}
+        </div>
 
         {counts.slice(0, -1).map((_, boundary) => (
           <div
@@ -123,8 +117,10 @@ export function TopicBudgetBar({
             // Белая всегда, а не цвета фона: в тёмной теме фон почти чёрный,
             // и ручка на цветной полосе читалась не как ручка, а как дырка
             // между кусками — то есть ровно как то, чего на полосе нет.
-            className="absolute top-1/2 h-7 w-3 -translate-x-1/2 -translate-y-1/2 cursor-col-resize rounded-full border border-black/15 bg-white shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-          />
+            className="absolute top-1/2 flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-grab items-center justify-center rounded-full border border-black/10 bg-white shadow-md active:cursor-grabbing focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <span aria-hidden className="size-1.5 rounded-full bg-black/20" />
+          </div>
         ))}
       </div>
 
