@@ -44,6 +44,7 @@ import { toSlug } from "./slug";
 import { isTimezone } from "./issue-time";
 import { clampTopicText, formChipOf, starterBySlug, TOPIC_LIMITS } from "./starter-topics";
 import { addByLink } from "./sources";
+import { endProgress, startProgress, tickProgress } from "./rebuild-progress";
 import { resolveSuggestions } from "./onboarding";
 
 /**
@@ -848,6 +849,7 @@ async function rewriteFor(reader: Reader) {
   // Переписанный выпуск ищется словарём нового языка: описание теперь
   // написано им, и вектор (0050) пересчитается вместе с текстом.
   const voice = effectiveVoice(reader);
+  startProgress(reader.id, survivors.length);
   const written = await writeDigest(
     survivors.map((survivor) => ({
       ...survivor,
@@ -855,8 +857,8 @@ async function rewriteFor(reader: Reader) {
     })),
     reader.reader_context,
     voice,
-    { readerId: reader.id },
-  );
+    { readerId: reader.id, onWritten: (count) => tickProgress(reader.id, count) },
+  ).finally(() => endProgress(reader.id));
   if (!written.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,
     tokensIn: written.usage.input, tokensOut: written.usage.output,
@@ -964,7 +966,10 @@ async function fillDigest(reader: Reader) {
     await sql`update dailynews.items set image_url = ${image} where id = ${id}`;
   });
 
-  const written = await writeDigest(survivors, reader.reader_context, voice, { readerId: reader.id });
+  startProgress(reader.id, survivors.length);
+  const written = await writeDigest(survivors, reader.reader_context, voice, {
+    readerId: reader.id, onWritten: (count) => tickProgress(reader.id, count),
+  }).finally(() => endProgress(reader.id));
   if (survivors.every(item => written.excludedIds?.includes(item.id))) return { ok: true as const, added: 0 };
   if (!written.accounted) await recordCall({
     readerId: reader.id, stage: "digest", model: written.model,

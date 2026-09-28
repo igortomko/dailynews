@@ -19,7 +19,12 @@ import { READING_VERSION, SOURCE_RULES, EXTRACT_RULES, COMPOSE_RULES, VERIFY_RUL
 import { auditNeeded, sectionAuditNeeded } from "./reading-gate";
 import { acquireAnalysis, finishAnalysis, getDocument, saveDocument, reserveCall, settleCall, recentBaselines, ReadingBudgetError, ReadingBusyError, type Baseline } from "./reading-store";
 
-export type ReadingOptions = { readerId: number; force?: boolean };
+export type ReadingOptions = {
+  readerId: number;
+  force?: boolean;
+  /** Сколько карточек дописано — ради счёта в тосте догрузки. */
+  onWritten?: (count: number) => void;
+};
 export type Ask = <T>(phase: string, rules: string, data: unknown, schema: z.ZodType<T>) => Promise<T>;
 export const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const emptyUsage = (): Usage => ({ input: 0, output: 0, cached: 0, reasoning: 0, requests: 0 });
@@ -465,6 +470,7 @@ export async function writeReadingDigest(sql: Sql, survivors: Survivor[], reader
   const outcomes = await pooled(survivors, 2, async item => {
     try { return { item: await writeOne(item) }; }
     catch (error) { return { error }; }
+    finally { options.onWritten?.(1); }
   });
   const failed = outcomes.find(outcome => "error" in outcome);
   if (failed) throw failed.error;

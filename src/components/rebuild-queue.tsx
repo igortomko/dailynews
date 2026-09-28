@@ -139,6 +139,10 @@ async function run(kinds: Kind[], refresh: () => void, t: RebuildText): Promise<
   // закрывается нажатием по нему, и продолжение с тем же id после этого
   // не показывалось вовсе — работа шла молча.
   let workId: string | number | undefined;
+  // Опрос хода работы (`/api/rebuild/progress`): одно действие идёт минутами,
+  // и неподвижный тост читался как зависший.
+  let poll: ReturnType<typeof setInterval> | undefined;
+  let polling = true;
 
   try {
     await held;
@@ -154,6 +158,23 @@ async function run(kinds: Kind[], refresh: () => void, t: RebuildText): Promise<
       description: t.workingDescription,
       duration: Infinity,
     });
+    const startedAt = Date.now();
+    poll = setInterval(async () => {
+      try {
+        const response = await fetch("/api/rebuild/progress", { cache: "no-store" });
+        const progress = response.ok ? (await response.json()) as { done: number; total: number } | null : null;
+        // Ответ мог прийти после конца работы: тост тогда уже закрыт,
+        // и запись в него по id открыла бы его снова.
+        if (!progress || !polling) return;
+        toast.loading(t.workingTitle, {
+          id: workId,
+          description: t.progress(progress.done, progress.total, Math.floor((Date.now() - startedAt) / 60_000)),
+          duration: Infinity,
+        });
+      } catch {
+        // Счёт — подсказка, а не работа: пропущенный опрос ничего не ломает.
+      }
+    }, 3000);
 
     const done: string[] = [];
 
@@ -202,6 +223,8 @@ async function run(kinds: Kind[], refresh: () => void, t: RebuildText): Promise<
     for (const kind of left) queued.add(kind);
     return "failed";
   } finally {
+    polling = false;
+    clearInterval(poll);
     clearTimeout(holdTimer);
     running = false;
   }
