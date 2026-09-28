@@ -69,7 +69,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { canonUrl, normalizeTitle } from "./normalize";
 import { dupVerdict, sameStoryQuestion } from "./dedup";
 import { composite } from "./score";
-import { matchWritten, parseDigest, textFor, type Survivor } from "./digest";
+import { matchWritten, parseDigest, skim, textFor, type Survivor } from "./digest";
 import { clipText, excerptFrom, refusedForGood, SHORT_EXCERPT } from "./enrich";
 import { checkLexicon, repeatsHeadline, readability } from "./lexicon";
 import { parseFeed, stripHtml } from "./fetch";
@@ -4215,6 +4215,19 @@ assert.deepEqual(apologyHits, [], `извинения вместо выхода:
     true,
     "у ролика в промпт идёт конспект, а за ним пересказ",
   );
+
+  // У эссе начало — вступление и оглавление: описание пересказывало
+  // «вторая часть — предложения», не видя ни одного. Длинный текст идёт
+  // началом и выдержками из всего материала, в том же бюджете.
+  {
+    const essay = "Вступление. ".repeat(300) + "Главный тезис в середине. " + "Середина. ".repeat(300) + "Вывод в конце.";
+    const got = skim(essay);
+    assert.equal(got.startsWith("Вступление."), true, "длинный текст начинается с начала");
+    assert.equal(got.split(" […] ").length, 4, "к началу добавлены выдержки из всего текста");
+    assert.equal(got.length < 1500, true, "бюджет на материал не растёт");
+    const note = "Лид заметки. ".repeat(200);
+    assert.equal(skim(note), note.slice(0, 1400), "заметка короче трёх бюджетов режется началом, как раньше");
+  }
 
   // Разметка не должна уезжать в промпт: модель платит за неё как за текст.
   assert.equal(
